@@ -138,4 +138,53 @@ class WipeRouteGatePolicyTest {
             assertNull(route.toString(), routeToResumeAfterUnlock(route))
         }
     }
+
+    // ── 4.1.2 row 35: a Digi-ID link that meets the lock is kept through the unlock ───────────────
+
+    @Test fun `a Digi-ID login interrupted by the lock is kept`() {
+        val uri = "digiid://example.com/callback?x=abc123"
+        org.junit.Assert.assertEquals(uri, digiIdLinkToKeep(DIGIID_CONFIRM_ROUTE, uri))
+    }
+
+    @Test fun `nothing is kept from any other screen or for anything but a digiid link`() {
+        org.junit.Assert.assertNull(digiIdLinkToKeep("send", "digiid://example.com/callback?x=1"))
+        org.junit.Assert.assertNull(digiIdLinkToKeep(null, "digiid://example.com/callback?x=1"))
+        org.junit.Assert.assertNull(digiIdLinkToKeep(DIGIID_CONFIRM_ROUTE, "https://example.com/callback?x=1"))
+        org.junit.Assert.assertNull(digiIdLinkToKeep(DIGIID_CONFIRM_ROUTE, null))
+    }
+
+    @Test fun `the confirm screen itself is never reopened as a pattern`() {
+        // Kept as the pending link instead: the route needs its argument.
+        org.junit.Assert.assertNull(routeToResumeAfterUnlock(DIGIID_CONFIRM_ROUTE))
+    }
+
+    // ── 4.1.2 row 23: a PIN store that cannot be read is never "no PIN" ─────────────────────────
+
+    @Test fun `a locked wallet whose PIN store did not open starts on the unavailable screen`() {
+        org.junit.Assert.assertEquals(PIN_STORE_UNAVAILABLE_ROUTE,
+            startDestinationFor(WalletState.Locked, storeAvailable = false) { error("must not be asked") }.route)
+    }
+
+    @Test fun `a PIN store that throws when asked is not read as no PIN`() {
+        // Before: hasPin() throwing counted as false and sent a locked wallet to pin_setup, where
+        // anyone holding the phone could set a new PIN.
+        val d = startDestinationFor(WalletState.Locked, storeAvailable = true) { throw IllegalStateException("keyset") }
+        org.junit.Assert.assertEquals(PIN_STORE_UNAVAILABLE_ROUTE, d.route)
+        org.junit.Assert.assertFalse(d.restoreForLostPin)
+    }
+
+    @Test fun `the ordinary starts are unchanged`() {
+        org.junit.Assert.assertEquals("unlock", startDestinationFor(WalletState.Locked, true) { true }.route)
+        org.junit.Assert.assertEquals(StartDecision("pin_setup", true), startDestinationFor(WalletState.Locked, true) { false })
+        org.junit.Assert.assertEquals("onboarding", startDestinationFor(WalletState.NoWallet, false) { error("no") }.route)
+    }
+
+    /** Review of the repairs: with the store unreadable the lock counts a PIN as set (R10), so the store-unavailable
+     *  screen must not count as a wallet screen -- routed to unlock, whose PIN reads throw, it crashed every launch. */
+    @Test fun `the store-unavailable screen is never routed to unlock`() {
+        assertFalse(
+            "a Locked wallet on the store-unavailable screen was routed to unlock",
+            shouldRouteToUnlock(WalletState.Locked, hasPin = true, currentRoute = PIN_STORE_UNAVAILABLE_ROUTE),
+        )
+    }
 }

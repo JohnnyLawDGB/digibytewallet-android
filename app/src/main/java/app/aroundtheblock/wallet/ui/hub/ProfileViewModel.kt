@@ -21,7 +21,9 @@ sealed class ProfileState {
 
 @HiltViewModel
 class ProfileViewModel @Inject constructor(
-    private val digiScopeClient: DigiScopeClient
+    private val digiScopeClient: DigiScopeClient,
+    private val hubWebSocket: app.aroundtheblock.wallet.core.hub.HubWebSocket,
+    private val cachedMessageDao: app.aroundtheblock.wallet.core.db.dao.CachedMessageDao,
 ) : ViewModel() {
 
     private val _profileState = MutableStateFlow<ProfileState>(ProfileState.Loading)
@@ -155,8 +157,18 @@ class ProfileViewModel @Inject constructor(
 
     // ── Logout / unlink ───────────────────────────────────────────────────
 
+    /**
+     * Ends the Hub session on this phone (4.1.2 row 8, N4): the chat socket is closed first, so nothing
+     * more is sent or received on it, then the session is forgotten and revoked, and the cached chat
+     * messages are deleted. The same order as the wallet wipe (IdentitySessionEraser).
+     */
     fun logout() {
+        hubWebSocket.disconnect()
         digiScopeClient.logout()
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { cachedMessageDao.deleteAll() }
+                .onFailure { android.util.Log.w("ProfileViewModel", "chat cache not cleared: ${it.javaClass.simpleName}") }
+        }
         _profileState.value = ProfileState.NotLoggedIn
         _handleInput.value = ""
         _handleAvailable.value = null

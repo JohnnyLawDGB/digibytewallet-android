@@ -21,6 +21,7 @@
  */
 jbyteArray JNICALL
 NativeBridge_getSerializedTransactions(JNIEnv *env, jobject thiz) {
+    WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
     (void)thiz;
 
     if (!g_wallet) return NULL;

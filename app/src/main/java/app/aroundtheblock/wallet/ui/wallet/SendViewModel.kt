@@ -248,8 +248,8 @@ class SendViewModel @Inject constructor(
                 is PrepareResult.Ready -> {
                     val prepared = result.send
                     lastQuotedFeeSats = prepared.quote.feeSats
-                    android.util.Log.i(TAG, "review: ${prepared.amountSats} sats, fee ${prepared.quote.feeSats} sats " +
-                        "over ${prepared.quote.vsize} vB at ${prepared.feePerKb}/kB" + if (prepared.quote.raised) " (raised)" else "")
+                    // No amount, fee or size: with a timestamp they pick the transaction out on chain (row 30, R7).
+                    android.util.Log.i(TAG, "review: quoted at ${prepared.feePerKb}/kB" + if (prepared.quote.raised) " (raised)" else "")
                     _sendState.value = SendState.Confirming(typed.withQuote(prepared.feePerKb, prepared.quote.feeSats), prepared)
                 }
                 is PrepareResult.BelowDust -> _belowDustSats.value = result.thresholdSats
@@ -298,8 +298,9 @@ class SendViewModel @Inject constructor(
             // nothing behind otherwise — no transaction, no store entry, nothing in the activity
             // list — so when someone reports "it just didn't register anywhere" there is nothing
             // to look at. This is the only durable trace a failed attempt produces.
-            android.util.Log.i(TAG, "send attempt: ${approved.sats} sats to ${approved.address.take(12)}… " +
-                "at ${approved.feePerKb}/kB, fee ${approved.feeEstimateSats} sats")
+            // The amount, recipient and fee stay out of it: with a timestamp they pick the transaction out on
+            // chain (4.1.2 row 7/30, K1). The rate is what a failed attempt's diagnosis needs.
+            android.util.Log.i(TAG, "send attempt at ${approved.feePerKb}/kB")
             try {
                 val result = transactionBuilder.sendPrepared(prepared)
                 _sendState.value = when (result) {
@@ -428,8 +429,8 @@ class SendViewModel @Inject constructor(
             val approved = typed.withFee(prepared.feeSats)
             if (!ddConfirmation.open(approved)) return null
             ddReviewed = approved to prepared
-            android.util.Log.i(TAG, "DigiDollar review: ${prepared.cents} cents, fee ${prepared.feeSats} sats, " +
-                "${prepared.inputCount} inputs, change ${prepared.ddChangeCents} cents + ${prepared.dgbChangeSats} sats")
+            // No amount, fee or change (row 30, R7).
+            android.util.Log.i(TAG, "DigiDollar review: ${prepared.inputCount} inputs")
             return approved
         } finally {
             _ddReviewing.value = false
@@ -465,8 +466,7 @@ class SendViewModel @Inject constructor(
                         android.util.Log.e(TAG, "DigiDollar send refused: no transfer was reviewed for the approval on screen")
                         DigiDollarSendState.NotSent(SpendPreflight.NOT_SENT)
                     } else {
-                        android.util.Log.i(TAG, "DigiDollar send attempt: ${prepared.cents} cents to " +
-                            "${prepared.address.take(12)}…, fee ${prepared.feeSats} sats")
+                        android.util.Log.i(TAG, "DigiDollar send attempt")   // no amount, recipient or fee (K1)
                         sendDd(prepared)
                     }
                 } catch (e: kotlinx.coroutines.CancellationException) {

@@ -110,6 +110,7 @@ NativeBridge_buildAndSignAssetTransferTx(
     jlongArray outputAmounts,
     jobjectArray outputScriptsHex)
 {
+    WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
     (void)thiz;
 
     if (!g_wallet) {
@@ -282,6 +283,7 @@ NativeBridge_buildAndSignAssetTransferTx(
 jstring JNICALL
 NativeBridge_getSpendableDigiByteUtxos(JNIEnv *env, jobject thiz)
 {
+    WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
     (void)thiz;
     if (!g_wallet) return (*env)->NewStringUTF(env, "");
 

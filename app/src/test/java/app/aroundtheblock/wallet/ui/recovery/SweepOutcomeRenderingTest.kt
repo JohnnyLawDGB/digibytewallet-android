@@ -110,9 +110,10 @@ class SweepOutcomeRenderingTest {
         unlocatable: Long = 0L,
         txid: String? = "dd-txid",
         reachable: Boolean = true,
+        relayed: Boolean = txid != null,
     ) = DigiDollarTransferService.Result(
         cents = found, txid = txid, failureReason = null,
-        unlocatableCents = unlocatable, reachable = reachable, movedCents = moved,
+        unlocatableCents = unlocatable, reachable = reachable, movedCents = moved, relayed = relayed,
     )
 
     private fun line(kind: DigiDollarOutcomeLine.Kind, cents: Long = 0L) =
@@ -129,6 +130,14 @@ class SweepOutcomeRenderingTest {
                 line(DigiDollarOutcomeLine.Kind.LEFT_BEHIND, 100L),
             ),
             digiDollarOutcomeLines(ddResult(found = 200L, moved = 100L, unlocatable = 100L)),
+        )
+    }
+
+    /** 4.1.2 row 20: a transfer no peer took is never shown as moved. */
+    @Test fun `a DigiDollar transfer not yet relayed shows the sent line, not moved`() {
+        assertEquals(
+            listOf(line(DigiDollarOutcomeLine.Kind.SENT_UNRELAYED, 100L)),
+            digiDollarOutcomeLines(ddResult(found = 100L, moved = 100L, relayed = false)),
         )
     }
 

@@ -95,18 +95,30 @@ object DigiDollarScan {
 
             // The outpoint has to be found inside one of the listed transactions by matching the
             // P2TR script against this address's key.
-            var located = false
+            val found = mutableListOf<Holding>()
+            var unreadable = false
             for (txid in holding.txids) {
-                val outputs = outputsFor(txid) ?: continue
-                val outpoint = DigiDollarHolding.locate(outputs, address.taprootOutputKeyHex)
-                    ?: continue
-                if (DigiDollarHolding.PrevOut(txid, outpoint.vout) in spent) continue
-                holdings += Holding(address, txid, outpoint.vout, outpoint.scriptPubKeyHex)
-                located = true
+                val outputs = outputsFor(txid)
+                if (outputs == null) { unreadable = true; continue }
+                for (outpoint in DigiDollarHolding.locateAll(outputs, address.taprootOutputKeyHex)) {
+                    if (DigiDollarHolding.PrevOut(txid, outpoint.vout) in spent) continue
+                    found += Holding(address, txid, outpoint.vout, outpoint.scriptPubKeyHex)
+                }
             }
+            // Movable only when every listed transaction was read (4.1.2 row 11, N6). The cents an
+            // outpoint carries are in its transaction's OP_RETURN, not here: with one transaction
+            // unread, the outpoints found carry some unknown part of the balance, and counting the
+            // whole balance as movable would plan a transfer of dollars it cannot spend. So the
+            // address is then unlocatable as a whole -- reported, not moved.
+            //
             // Real money we can see and cannot spend. Carried separately so the UI can say so
             // rather than quietly reporting a smaller balance.
-            if (!located) unlocatable += holding.cents
+            // And only when what was found is what the endpoint counts as unspent, where it says (an
+            // absent count reads 0): one outpoint more or fewer means the cents found are not the
+            // balance, and a transfer of the balance would spend what is not there (4.1.2 row 20).
+            val countDisagrees = holding.unspentCount > 0 && found.size != holding.unspentCount
+            if (found.isEmpty() || unreadable || countDisagrees) unlocatable += holding.cents
+            else holdings += found
         }
 
         return Result(cents, holdings, reachable, unlocatable)

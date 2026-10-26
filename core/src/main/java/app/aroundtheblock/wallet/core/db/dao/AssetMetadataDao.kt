@@ -16,8 +16,11 @@ interface AssetMetadataDao {
      *  without disturbing IPFS-sourced fields (name, description, imageUrl).
      *  Creates the row if missing via the separate INSERT-OR-IGNORE path;
      *  existing IPFS cache hits keep their human-facing data intact. */
-    @Query("UPDATE asset_metadata SET totalSupply = :totalSupply, decimals = :decimals WHERE assetId = :assetId")
-    suspend fun updateChainFacts(assetId: String, totalSupply: Long, decimals: Int)
+    /** The issuance's facts, over whatever row is there. The metadata CID is one of them (4.1.2 row 29, R6): a row a
+     *  rules lookup seeded first made the chain-facts insert a no-op, and the issuance's CID was never recorded --
+     *  so the asset read as having none and a provider's document could take its place. */
+    @Query("UPDATE asset_metadata SET totalSupply = :totalSupply, decimals = :decimals, metadataCid = :metadataCid WHERE assetId = :assetId")
+    suspend fun updateChainFacts(assetId: String, totalSupply: Long, decimals: Int, metadataCid: String?)
 
     /** Insert a chain-facts-only row for assets without IPFS metadata yet.
      *  IGNORE conflict so we don't overwrite a richer existing entry. */

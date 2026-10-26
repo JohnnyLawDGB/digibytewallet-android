@@ -78,10 +78,16 @@ CONFIRM="$(fn_body "$BRIDGE_DIR/jni_transaction.c" '^NativeBridge_confirmTransac
 for needle in "BRTransaction *existing = BRWalletCopyTransactionForHash(g_wallet, h);" \
               "int pending = existing && existing->blockHeight == TX_UNCONFIRMED;" \
               "if (pending) {" \
-              "BRWalletUpdateTransactionsUnproven(g_wallet, &h, 1, (uint32_t)blockHeight, (uint32_t)blockTimestamp);"; do
+              "_applyServerHeight(h, blockHeight, blockTimestamp, \"confirmTransaction\")"; do
     <<<"$CONFIRM" grep -qF "$needle" ||
         gate_fail "confirmTransaction no longer contains: $needle"
 done
+#    Since 4.1.2 row 1 a server height is a P2P re-check hint; it is taken only on the checkpoint-pinned path,
+#    whose wallet update is the one confirmLikeBridge() makes.
+APPLY="$(fn_body "$CORE_DIR/BRPeerManager.c" '^BRServerHeightResult BRPeerManagerApplyServerHeight')"
+[ -n "$APPLY" ] || gate_fail "BRPeerManagerApplyServerHeight was not found in BRPeerManager.c. Re-anchor the gate."
+<<<"$APPLY" grep -qF "BRWalletUpdateTransactionsUnproven(manager->wallet, &txHash, 1, height, timestamp);" ||
+    gate_fail "BRPeerManagerApplyServerHeight no longer takes a height with the unproven update"
 
 # $1 out, rest: extra flags. KAT_BITS=32 builds -m32 (needs gcc-multilib).
 build() {

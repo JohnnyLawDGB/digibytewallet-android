@@ -19,6 +19,7 @@ import app.aroundtheblock.wallet.R
 import app.aroundtheblock.wallet.ui.components.SecureWindow
 import app.aroundtheblock.wallet.ui.theme.DigiByteAccent
 import app.aroundtheblock.wallet.ui.theme.DigiByteNavy
+import app.aroundtheblock.wallet.ui.components.keyboardPadding
 
 /**
  * The optional BIP39 passphrase, on a screen of its own.
@@ -78,7 +79,7 @@ fun PassphraseScreen(
                 // under the keyboard and cannot be reached: measured at [66,2176][1014,2220] on
                 // a 2220px screen, clipped to 44px tall, when this section lived on the seed
                 // screen.
-                .imePadding()
+                .keyboardPadding()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 24.dp, vertical = 32.dp),
         ) {

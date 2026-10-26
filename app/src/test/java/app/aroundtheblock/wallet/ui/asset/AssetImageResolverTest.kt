@@ -54,18 +54,30 @@ class AssetImageResolverTest {
         assertNull(AssetImageResolver.resolve("   "))
     }
 
+    /** 4.1.2 row 28: an issuer-chosen host is never contacted (it would learn who views the asset). */
     @Test
-    fun `https url passes through as string`() {
-        val input = "https://example.com/logo.png"
-        val result = AssetImageResolver.resolve(input)
-        assertTrue("expected String, got ${result?.javaClass?.simpleName}", result is String)
-        assertEquals(input, result)
+    fun `an https url on an issuer host is not loaded`() {
+        assertNull(AssetImageResolver.resolve("https://example.com/logo.png"))
     }
 
     @Test
-    fun `http url passes through as string`() {
-        val input = "http://example.com/logo.png"
-        assertEquals(input, AssetImageResolver.resolve(input))
+    fun `an http url is not loaded`() {
+        assertNull(AssetImageResolver.resolve("http://example.com/logo.png"))
+    }
+
+    @Test
+    fun `an ipfs gateway url is fetched by its cid through the wallet's gateways`() {
+        val cid = "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG"
+        val path = AssetImageResolver.resolve("https://ipfs.issuer.example/ipfs/$cid/logo.png")
+        assertTrue(path is Uri)
+        assertEquals("ipfs://$cid/logo.png", path.toString())
+        val sub = AssetImageResolver.resolve("https://bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi.ipfs.issuer.example/logo.png")
+        assertEquals("ipfs://bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi/logo.png", sub.toString())
+    }
+
+    @Test
+    fun `a gateway-shaped url with no cid is not loaded`() {
+        assertNull(AssetImageResolver.resolve("https://ipfs.issuer.example/ipfs/not-a-cid/logo.png"))
     }
 
     @Test
