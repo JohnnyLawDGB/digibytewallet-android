@@ -45,7 +45,7 @@ BRMerkleBlock *BRMerkleBlockParse(const uint8_t *buf, size_t bufLen)
 }
 void BRMerkleBlockFree(BRMerkleBlock *block) { free(block); }
 
-// ---- Line-for-line model of CfRestorePreflight.kt (Android 4.1.0) ---------------------------
+// ---- Line-for-line model of CfRestorePreflight.kt (Android 4.1.2) ---------------------------
 //
 // Kotlin's types: Long for every u32le read and the arithmetic on it, Int for offsets and sizes.
 // A null ByteArray is has == 0. Returns the header's enum for the Kotlin reason (null = RESUME).
@@ -484,7 +484,12 @@ static void edge_cases(void)
         blob_free(&w);
     }
     {   uint32_t one = 0, h = 1200;
-        Blob zero = make_window(0, 0, NULL, NULL), over = make_window(100001, 1, &one, &h);
+        uint32_t *ol = calloc(100001, sizeof(uint32_t)), *oh = malloc(100001 * sizeof(uint32_t));
+        for (int i = 0; i < 100001; i++) oh[i] = 3000000u + (uint32_t)i;
+        // One entry past the cap, every entry present (about 800 KB): only the count cap refuses it.
+        // A short one (declared 100001, one entry written) is refused by the truncation check too.
+        Blob zero = make_window(0, 0, NULL, NULL), over = make_window(100001, 100001, ol, oh);
+        Blob overShort = make_window(100001, 1, &one, &h);
         Blob big = make_window(1, 1, &one, &h), trailing = SAVED(1300, 1250);
         putU32(big.b, 4, 0x80000000u);
         Blob t2 = blob_resized(trailing, trailing.len + 5, 0x33);
@@ -492,13 +497,16 @@ static void edge_cases(void)
         for (int i = 0; i < 100000; i++) hs[i] = 2000000u + (uint32_t)(i * 7 % 100000);
         Blob cap = make_window(100000, 100000, zl, hs);
         uint32_t fc = 0, ft = 0;
+        int64_t ktFloor = 0;
         result("edge_window_bounds",
                ! BRCFRestoreSavedBlocksFloor(zero.b, zero.len, &f) && ! BRCFRestoreSavedBlocksFloor(over.b, over.len, &f) &&
+               over.len == 4 + (size_t)100001 * 8 && ! kt_model_parseSavedBlocksFloorHeight(over.b, (int32_t)over.len, &ktFloor) &&
+               ! BRCFRestoreSavedBlocksFloor(overShort.b, overShort.len, &f) &&
                ! BRCFRestoreSavedBlocksFloor(big.b, big.len, &f) &&
                BRCFRestoreSavedBlocksFloor(cap.b, cap.len, &fc) && fc == 2000000u &&
                BRCFRestoreSavedBlocksFloor(t2.b, t2.len, &ft) && ft == 1250);
-        free(zl); free(hs);
-        blob_free(&zero); blob_free(&over); blob_free(&big); blob_free(&trailing); blob_free(&t2); blob_free(&cap);
+        free(zl); free(hs); free(ol); free(oh);
+        blob_free(&zero); blob_free(&over); blob_free(&overShort); blob_free(&big); blob_free(&trailing); blob_free(&t2); blob_free(&cap);
     }
     {   // An empty stored copy is present: unreadable, never "absent". Its pointer may be NULL.
         Blob empty = { NULL, 0 }, l = kt_ledger(1000, 1200, 0, 900), s = SAVED(1200, 1000);
@@ -517,10 +525,17 @@ static void edge_cases(void)
                preflight(&abandonedBelow, &s, 1, 1) == BR_CF_RESTORE_HEADER_WINDOW_MISSING);
         blob_free(&at); blob_free(&below); blob_free(&s); blob_free(&abandonedAt); blob_free(&abandonedBelow);
     }
-    {   // scanned + 1 is 2^32 here, in Kotlin's Long; a 32-bit sum would wrap to 0 and rebuild.
+    {   // scanned + 1 is 2^32 here, in Kotlin's Long. Two sums would wrap in 32 bits: the frontier
+        // check's (scanned + 1 < start; start 1 makes a wrapped 0 fall below it, so the ledger reads
+        // unreadable) and the decision's lowestNeeded (start 0 isolates it: a wrapped 0 rebuilds).
         Blob l = kt_ledger(0xffffffffu, 0xffffffffu, 0, 0), s = SAVED(0xfffffff0u);
-        result("edge_frontier_does_not_wrap", preflight(&l, &s, 1, 1) == BR_CF_RESTORE_RESUME);
-        blob_free(&l); blob_free(&s);
+        Blob l1 = kt_ledger(0xffffffffu, 0xffffffffu, 0, 1);
+        uint32_t s1 = 0, a1 = 7;
+        result("edge_frontier_does_not_wrap", preflight(&l, &s, 1, 1) == BR_CF_RESTORE_RESUME &&
+               BRCFRestoreLedgerFrontier(l1.b, l1.len, &s1, &a1) && s1 == 0xffffffffu && a1 == 0 &&
+               preflight(&l1, &s, 1, 1) == BR_CF_RESTORE_RESUME &&
+               kt_preflight(&l1, &s, 1, 1) == BR_CF_RESTORE_RESUME);
+        blob_free(&l); blob_free(&l1); blob_free(&s);
     }
     result("edge_arm_heights",
            BRCFRestoreArmHeight(0, 0, 22650000, 0, 0) == 22650000 &&          // fresh: the birth checkpoint
@@ -678,7 +693,12 @@ static void vector_cases(const char *path)
         } else if (sscanf(line, "blob W%d %65535s", &id, hex) == 2 && id >= 0 && id < 8192) {
             if (! parse_hex(hex, &windows[id])) bad++;
         } else if (sscanf(line, "reset %15s %15s %d %d %63s", a, b, &synced, &checkpoint, want) == 5) {
-            Blob *l = a[0] == 'L' ? &ledgers[atoi(a + 1)] : NULL, *w = b[0] == 'W' ? &windows[atoi(b + 1)] : NULL;
+            int li = a[0] == 'L' ? atoi(a + 1) : -1, wi = b[0] == 'W' ? atoi(b + 1) : -1;
+            if ((a[0] == 'L' && (li < 0 || li >= 8192)) || (b[0] == 'W' && (wi < 0 || wi >= 8192))) {
+                if (bad++ < 5) printf("  vectors line %zu: blob ID out of range\n", n);
+                continue;
+            }
+            Blob *l = li >= 0 ? &ledgers[li] : NULL, *w = wi >= 0 ? &windows[wi] : NULL;
             const char *got = reason_name(kt_preflight(l, w, synced, checkpoint));
             resets++;
             if (strcmp(got, want)) { if (bad++ < 5) printf("  vectors line %zu: the model says %s, the file %s\n", n, got, want); }
