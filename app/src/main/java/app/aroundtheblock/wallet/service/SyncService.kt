@@ -3701,7 +3701,7 @@ class SyncService : Service() {
         val raw = runCatching { NativeBridge.getSerializedTransactionForHash(txid) }.getOrNull() ?: return false
         val asset = runCatching { NativeBridge.isAssetTransaction(raw) }.getOrDefault(true)
         val digiDollar = runCatching { NativeBridge.digiDollarTxType(txid) }.getOrDefault(-1)
-        return !asset && digiDollar == 0
+        return app.aroundtheblock.wallet.core.sync.PublishOutcome.isPlainDgb(held = true, asset = asset, digiDollarType = digiDollar)
     }
 
     /**

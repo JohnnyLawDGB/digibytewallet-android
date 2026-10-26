@@ -163,4 +163,12 @@ class PublishOutcomeTest {
         assertEquals(PublishOutcome.Kind.UNCONFIRMED_DELIVERY, o?.kind)
         assertEquals("the wait went on after the verdict", 0L, currentTime)
     }
+
+    /** Only a readable, asset-free, non-DigiDollar copy is plain DGB; an unread reading is not. */
+    @Test fun only_a_held_copy_with_no_asset_and_no_digidollar_is_plain_dgb() {
+        assertTrue(PublishOutcome.isPlainDgb(held = true, asset = false, digiDollarType = 0))
+        assertFalse(PublishOutcome.isPlainDgb(held = false, asset = false, digiDollarType = 0))
+        assertFalse(PublishOutcome.isPlainDgb(held = true, asset = true, digiDollarType = 0))
+        for (dd in listOf(1, 2, 3, -1)) assertFalse(PublishOutcome.isPlainDgb(held = true, asset = false, digiDollarType = dd))
+    }
 }
