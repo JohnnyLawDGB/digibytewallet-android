@@ -27,7 +27,9 @@ hold:
    conflict and still be stale (two PRs that each add natives). Before merging a PR that touches
    it, merge current `develop` into the branch, run `python3 scripts/gen-jni-registry.py`, push,
    and wait for its CI. One registry PR at a time.
-7. **A pin conflict is resolved to core `develop`, never to a PR's older pin**: an older pin can
+7. **An Android pin moves only to a core commit whose `develop` CI run is green.** Core CI tests
+   a PR's head; the merge commit is tested by the run on `develop` that follows it.
+8. **A pin conflict is resolved to core `develop`, never to a PR's older pin**: an older pin can
    silently roll back core fixes (check `git merge-base --is-ancestor <last release's core> <pin>`).
 
 ### Still Mark's, always
