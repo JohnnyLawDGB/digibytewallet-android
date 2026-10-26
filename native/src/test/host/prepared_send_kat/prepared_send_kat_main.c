@@ -380,6 +380,88 @@ static void change_without_payment_refused(void)
     release(&p);
 }
 
+// The payment output pays MORE than approved and the change is lowered by the same amount: the fee
+// is unchanged, and the approved recipient is still paid, but not the approved amount. Refused: the
+// amount must match exactly (BRPreparedSendPaysAsApproved's `o->amount == payAmount`, never `>=`;
+// the former bridge prepared_send.h and TransactionBuilder compare the amount for equality too).
+static void payment_raised_change_lowered_refused(void)
+{
+    Prepared p;
+    ck(prepare(&p, 3000000), "review prepares a send");
+    const BRTxOutput *change = p.bytes ? changeOf(&p) : NULL;
+    ck(change != NULL && change->amount > 100000, "the built send has a change output over 100,000 sat");
+    if (!change || change->amount <= 100000) { release(&p); return; }
+    BRTxOutput outs[2] = { { "", p.payAmount + 100000, p.payScript, p.payScriptLen },
+                           { "", change->amount - 100000, change->script, change->scriptLen } };
+    BRPreparedSendVerdict v = checkShape(&p, outs, 2, p.payAmount,
+                                         "100,000 sat more to the approved recipient, 100,000 sat less change");
+    ck(v == BRPreparedSendNotApproved, "paying the recipient more than approved is refused (%s)", verdictName(v));
+    release(&p);
+}
+
+// A confirmed parent pays the wallet two outputs. Output 1 is then spent by a registered send;
+// output 0 is still unspent. Bytes spending output 1 again are refused: the coin is looked up by
+// hash AND output index (BRPreparedSendHasCoin's `utxos[i].n == n`), not by its parent alone.
+static void sibling_of_unspent_coin_refused(void)
+{
+    BRWallet *w = BRWalletNew(NULL, 0, g_mpk84);
+    BRAddress a = BRWalletReceiveAddress(w, 1);
+    uint8_t spk[64], pay[22], changeS[64];
+    size_t spkLen = BRAddressScriptPubKey(spk, sizeof(spk), a.s), payLen = foreignScript(pay, 0x7c), changeLen;
+    BRTransaction *parent = BRTransactionNew(), *spend, *t;
+    UInt256 ph, parentHash;
+    memset(ph.u8, 0xB7, sizeof(ph.u8));
+    parent->version = 1;
+    BRTransactionAddInput(parent, ph, 0, 0, spk, spkLen, kPlaceholder, 0, kPlaceholder, 0, 0xffffffff);
+    BRTransactionAddOutput(parent, 2000000, spk, spkLen);
+    BRTransactionAddOutput(parent, 3000000, spk, spkLen);
+    parent->blockHeight = 23700000;
+    parent->timestamp = 1700000000;
+    finalizeTxHash(parent);
+    parentHash = parent->txHash;
+    ck(BRWalletRegisterTransaction(w, parent), "the parent is registered");
+    BRAddress ca = BRWalletReceiveAddress(w, 1);
+    changeLen = BRAddressScriptPubKey(changeS, sizeof(changeS), ca.s);
+
+    // Output 1 is spent by a signed, registered send to someone else.
+    spend = BRTransactionNew();
+    spend->version = 1;
+    BRTransactionAddInput(spend, parentHash, 1, 3000000, spk, spkLen, NULL, 0, NULL, 0, 0xffffffff);
+    BRTransactionAddOutput(spend, 2980000, pay, payLen);
+    int registered = BRWalletSignTransaction(w, spend, 0, g_seed, sizeof(g_seed)) && BRWalletRegisterTransaction(w, spend);
+    ck(registered, "a send of output 1 is signed and registered");
+    if (!registered) BRTransactionFree(spend);
+
+    size_t n = BRWalletUTXOs(w, NULL, 0);
+    BRUTXO u[8];
+    n = BRWalletUTXOs(w, u, n < 8 ? n : 8);
+    ck(n == 1 && UInt256Eq(u[0].hash, parentHash) && u[0].n == 0, "the wallet's one coin is output 0 of the parent");
+    ck(! BRPreparedSendHasCoin(u, n, parentHash, 1) && BRPreparedSendHasCoin(u, n, parentHash, 0),
+       "output 1 of the parent is not a coin of the wallet; output 0 is");
+
+    // Bytes spending output 1 again, paying 1,000,000 sat with change to the wallet.
+    t = BRTransactionNew();
+    t->version = 1;
+    BRTransactionAddInput(t, parentHash, 1, 3000000, spk, spkLen, NULL, 0, NULL, 0, 0xffffffff);
+    BRTransactionAddOutput(t, 1000000, pay, payLen);
+    BRTransactionAddOutput(t, 1980000, changeS, changeLen);
+    uint64_t fee = BRWalletFeeForTx(w, t);
+    ck(fee == 20000, "the bytes' fee is told from the parent: %llu sat", (unsigned long long)fee);
+    BRPreparedSendVerdict v = BRPreparedSendCheck(w, t, pay, payLen, 1000000, fee);
+    ck(v == BRPreparedSendCoinUnavailable,
+       "spending an output already spent, beside its unspent sibling, is refused (%s)", verdictName(v));
+    // The same bytes from output 0, the coin still held, pass.
+    t->inputs[0].index = 0;
+    t->inputs[0].amount = 2000000;
+    t->outputs[1].amount = 980000;
+    fee = BRWalletFeeForTx(w, t);
+    v = BRPreparedSendCheck(w, t, pay, payLen, 1000000, fee);
+    ck(v == BRPreparedSendOK, "the same send from output 0 passes (%s, fee %llu sat)", verdictName(v),
+       (unsigned long long)fee);
+    BRTransactionFree(t);
+    BRWalletFree(w);
+}
+
 // A wallet holding one confirmed DigiDollar coin and the DGB coin `sats` (fee_quote_kat's shape);
 // *ddHash is the DigiDollar coin's transaction, *dgbHash the DGB coin's.
 static BRWallet *ddWallet(uint64_t sats, UInt256 *ddHash, UInt256 *dgbHash)
@@ -651,6 +733,8 @@ static const Case kCases[] = {
     { "payment_twice_refused", payment_twice_refused },
     { "zero_value_change_refused", zero_value_change_refused },
     { "change_without_payment_refused", change_without_payment_refused },
+    { "payment_raised_change_lowered_refused", payment_raised_change_lowered_refused },
+    { "sibling_of_unspent_coin_refused", sibling_of_unspent_coin_refused },
     { "digidollar_coin_refused", digidollar_coin_refused },
     { "refused_after_signing", refused_after_signing },
     { "verdict_values_fixed", verdict_values_fixed },
