@@ -211,6 +211,7 @@ static jstring sign_with_key(JNIEnv *env, BRKey *key, const char *msgChars,
 jstring JNICALL
 NativeBridge_signMessage(JNIEnv *env, jobject thiz,
                                                        jstring message, jint addressFormat) {
+    WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
     (void)thiz;
 
     if (!g_wallet) {
@@ -255,6 +256,7 @@ jstring JNICALL
 NativeBridge_signIdentityMessage(JNIEnv *env, jobject thiz,
                                                               jstring message, jstring siteUri,
                                                               jint index) {
+    WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
     (void)thiz;
 
     if (!g_wallet) {
@@ -293,4 +295,47 @@ NativeBridge_signIdentityMessage(JNIEnv *env, jobject thiz,
                                 "signIdentityMessage");
     release_message(env, message, msgChars);
     return out;
+}
+
+/* ---- identityAddress JNI (4.1.2 row 16) ----
+ *
+ * The P2PKH address a Digi-ID login would sign with, without signing anything: the per-site
+ * SLIP-0013 identity for siteUri, or the shared m/0'/0/0 identity when siteUri is null. The
+ * confirm screen shows both so a restored wallet can pick the identity a site already knows.
+ * Same derivation and address format as signIdentityMessage / signMessage(…, 0).
+ */
+jstring JNICALL
+NativeBridge_identityAddress(JNIEnv *env, jobject thiz, jstring siteUri, jint index) {
+    WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
+    (void)thiz;
+
+    if (!g_wallet || !seed_is_valid() || index < 0) {
+        LOGW("identityAddress: wallet not ready or bad arguments");
+        return NULL;
+    }
+
+    BRKey key;
+    memset(&key, 0, sizeof(key));
+    int derived;
+    if (siteUri) {
+        const char *uriChars = (*env)->GetStringUTFChars(env, siteUri, NULL);
+        if (!uriChars) return NULL;
+        derived = seed_derive_identity_key(&key, uriChars, (uint32_t)index);
+        (*env)->ReleaseStringUTFChars(env, siteUri, uriChars);
+    } else {
+        derived = index == 0 && seed_derive_key(&key, 0, 0);
+    }
+    if (!derived) {
+        BRKeyClean(&key);
+        LOGW("identityAddress: derivation failed");
+        return NULL;
+    }
+
+    key.compressed = 1;
+    char addr[75];
+    memset(addr, 0, sizeof(addr));
+    BRKeyAddress(&key, addr, sizeof(addr));
+    BRKeyClean(&key);
+    if (addr[0] == '\0') return NULL;
+    return (*env)->NewStringUTF(env, addr);
 }

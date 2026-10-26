@@ -850,7 +850,7 @@ private fun DigiDollarFoundCard(
 
 /** One line of the DigiDollar result card. [cents] is unused for [Kind.UNREACHABLE]. */
 internal data class DigiDollarOutcomeLine(val kind: Kind, val cents: Long = 0L) {
-    enum class Kind { MOVED, LEFT_BEHIND, UNREACHABLE }
+    enum class Kind { MOVED, SENT_UNRELAYED, LEFT_BEHIND, UNREACHABLE }
 }
 
 /**
@@ -865,6 +865,8 @@ internal fun digiDollarOutcomeLines(
     dd: app.aroundtheblock.wallet.core.recovery.DigiDollarTransferService.Result,
 ): List<DigiDollarOutcomeLine> = buildList {
     if (dd.moved) add(DigiDollarOutcomeLine(DigiDollarOutcomeLine.Kind.MOVED, dd.movedCents))
+    // Broadcast, no peer took it yet: never "moved" (4.1.2 row 20) -- the user keeps the old phrase.
+    if (dd.sentUnrelayed) add(DigiDollarOutcomeLine(DigiDollarOutcomeLine.Kind.SENT_UNRELAYED, dd.movedCents))
     if (dd.leftBehindCents > 0L) {
         add(DigiDollarOutcomeLine(DigiDollarOutcomeLine.Kind.LEFT_BEHIND, dd.leftBehindCents))
     }
@@ -898,6 +900,12 @@ private fun DigiDollarSection(
                     DigiDollarOutcomeLine.Kind.MOVED -> Text(
                         text = stringResource(R.string.rf_dd_moved, amount),
                         color = SUCCESS_GREEN,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    DigiDollarOutcomeLine.Kind.SENT_UNRELAYED -> Text(
+                        text = stringResource(R.string.rf_dd_sent_unrelayed, amount),
+                        color = AMBER,
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
                     )

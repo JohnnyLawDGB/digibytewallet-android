@@ -49,7 +49,7 @@ class AssetSendSelection(
         feePerKb: Long,
     ): Outcome {
         val source = stackSource ?: return Outcome.Unverified
-        val total = assetUtxos.sumOf { it.assetQuantity }
+        val total = app.aroundtheblock.wallet.core.asset.AssetSums.saturating(assetUtxos.map { it.assetQuantity })
         if (total < quantity) return Outcome.NotPlanned("Not enough asset: need $quantity, have $total")
 
         // Each round either plans and confirms, stops, or sets at least one more coin aside; the
@@ -61,7 +61,7 @@ class AssetSendSelection(
             val candidates = assetUtxos.filter { outpoint(it) !in setAside && outpoint(it) !in notYet }
             val groups = AssetTransferPlanner.sourceGroups(candidates, quantity)
             if (groups.isEmpty()) {
-                return if (candidates.sumOf { it.assetQuantity } >= quantity) {
+                return if (app.aroundtheblock.wallet.core.asset.AssetSums.saturating(candidates.map { it.assetQuantity }) >= quantity) {
                     Outcome.SpansAddresses(AssetTransferPlanner.largestSingleSource(candidates))
                 } else {
                     Outcome.Unconfirmed

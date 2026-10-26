@@ -34,7 +34,9 @@ RED_CASES=(unjudged_receive_not_confirmed held_receive_confirmed_at_checkpoint u
 # arm 2 (-DJUDGED_CONFIRMATION_HOLD_UNFIXED): the rule holds receives, but a held one is stored as scanned and its
 # block may be pruned before the checkpoint pins it
 RED2_CASES=(held_receive_survives_restart held_block_stays_resident)
-GUARD_CASES=(judged_receive_confirmed network_without_contexts_unchanged)
+GUARD_CASES=(judged_receive_confirmed network_without_contexts_unchanged server_height_bounds_refused
+             server_height_pinned_confirmable server_height_judged_confirmable)
+RED3_CASES=(server_height_above_tip_refused server_height_unjudged_refused)
 
 # the one level the app build sets for a header check macro
 shipped_level() {
@@ -111,7 +113,7 @@ if [ "${1:-}" = "gen" ]; then
 fi
 
 # ---- verify the seam is real ---------------------------------------------------
-for seam in JUDGED_CONFIRMATION_UNFIXED JUDGED_CONFIRMATION_HOLD_UNFIXED; do
+for seam in JUDGED_CONFIRMATION_UNFIXED JUDGED_CONFIRMATION_HOLD_UNFIXED SERVER_HEIGHT_UNFIXED; do
     if [ "$(grep -c "$seam" "$CORE_DIR/BRPeerManager.c")" -lt 1 ]; then
         echo "GATE FAILURE: BRPeerManager.c has no $seam seam; -D would be inert."
         exit 1
@@ -133,7 +135,8 @@ run_bits() {
     echo "======================================================================"
 
     if ! build "$BUILD_DIR/red${bits}" "$bits" -DJUDGED_CONFIRMATION_UNFIXED ||
-       ! build "$BUILD_DIR/redb${bits}" "$bits" -DJUDGED_CONFIRMATION_HOLD_UNFIXED; then
+       ! build "$BUILD_DIR/redb${bits}" "$bits" -DJUDGED_CONFIRMATION_HOLD_UNFIXED ||
+       ! build "$BUILD_DIR/redc${bits}" "$bits" -DSERVER_HEIGHT_UNFIXED; then
         echo "GATE FAILURE: ${bits}-bit comparison arm did not compile (a build error is not evidence)."
         FAIL=1; return
     fi
@@ -144,7 +147,7 @@ run_bits() {
 
     local known listed
     known="$("$BUILD_DIR/green${bits}" list | sort | tr '\n' ' ')"
-    listed="$(printf '%s\n' "${RED_CASES[@]}" "${RED2_CASES[@]}" "${GUARD_CASES[@]}" | sort | tr '\n' ' ')"
+    listed="$(printf '%s\n' "${RED_CASES[@]}" "${RED2_CASES[@]}" "${RED3_CASES[@]}" "${GUARD_CASES[@]}" | sort | tr '\n' ' ')"
     if [ "$known" != "$listed" ]; then
         echo "GATE FAILURE: case lists disagree"; echo "  binary: $known"; echo "  run.sh: $listed"
         FAIL=1; return
@@ -184,9 +187,12 @@ run_bits() {
     comparison_arm red "$BUILD_DIR/red${bits}" -DJUDGED_CONFIRMATION_UNFIXED "${RED_CASES[@]}" -- "${GUARD_CASES[@]}"
     comparison_arm red2 "$BUILD_DIR/redb${bits}" -DJUDGED_CONFIRMATION_HOLD_UNFIXED "${RED2_CASES[@]}" -- \
         "${RED_CASES[@]}" "${GUARD_CASES[@]}"
+    # arm 3 changes only the server-height rule: every other case behaves as shipped
+    comparison_arm red3 "$BUILD_DIR/redc${bits}" -DSERVER_HEIGHT_UNFIXED "${RED3_CASES[@]}" -- \
+        "${RED_CASES[@]}" "${RED2_CASES[@]}" "${GUARD_CASES[@]}"
 
     echo "--- GREEN ARM (shipped): every case MUST pass, no sanitizer report ---"
-    for c in "${RED_CASES[@]}" "${RED2_CASES[@]}" "${GUARD_CASES[@]}"; do
+    for c in "${RED_CASES[@]}" "${RED2_CASES[@]}" "${RED3_CASES[@]}" "${GUARD_CASES[@]}"; do
         run_case "$BUILD_DIR/green${bits}" "$c"
         if ! <<<"$OUT" grep -Eq "$SAN_RE" && <<<"$OUT" grep -q "RESULT $c pass"; then
             echo "  [$bits green $c] passed: $(<<<"$OUT" grep -m1 '^NOTE:' | cut -c1-150)"
@@ -208,7 +214,7 @@ run_bits 32
 
 echo
 if [ "$FAIL" -eq 0 ]; then
-    echo "PASS: judged_confirmation_kat ($(( ${#RED_CASES[@]} + ${#RED2_CASES[@]} )) red-then-green, ${#GUARD_CASES[@]} guards; levels $POW_LEVEL/$DIFF_LEVEL; 64-bit and 32-bit, ASan)"
+    echo "PASS: judged_confirmation_kat ($(( ${#RED_CASES[@]} + ${#RED2_CASES[@]} + ${#RED3_CASES[@]} )) red-then-green, ${#GUARD_CASES[@]} guards; levels $POW_LEVEL/$DIFF_LEVEL; 64-bit and 32-bit, ASan)"
     exit 0
 else
     echo "FAIL: judged_confirmation_kat"

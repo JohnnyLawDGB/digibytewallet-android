@@ -27,19 +27,26 @@ import app.aroundtheblock.wallet.core.db.entity.WalletConfigEntity
  *  - `nowMs < lastInteractionMs` is treated as no elapsed time: the caller stamps
  *    `SystemClock.elapsedRealtime()`, which is monotonic, but a reset of the stamp that
  *    races a tick must never read as a huge positive gap and lock instantly.
+ *  - idle runs from the LATER of the last touch and the last unlock (`unlockedAtMs`). A
+ *    fingerprint unlock touches nothing in the activity, so onUserInteraction never stamps;
+ *    measured from the touch alone, every tick after a biometric unlock read the process
+ *    age as idle time, locked, and the unlock screen re-prompted — an endless sign-on loop
+ *    (Moto, 4.1.2 Wave 10, 2026-10-25).
  */
 fun shouldAutoLock(
     state: WalletState,
     hasPin: Boolean,
     lastInteractionMs: Long,
+    unlockedAtMs: Long,
     nowMs: Long,
     timeoutMs: Long,
 ): Boolean {
     if (state !is WalletState.Unlocked) return false
     if (!hasPin) return false
     if (timeoutMs <= 0L) return false
-    if (nowMs < lastInteractionMs) return false
-    return nowMs - lastInteractionMs >= timeoutMs
+    val idleSinceMs = maxOf(lastInteractionMs, unlockedAtMs)
+    if (nowMs < idleSinceMs) return false
+    return nowMs - idleSinceMs >= timeoutMs
 }
 
 /**

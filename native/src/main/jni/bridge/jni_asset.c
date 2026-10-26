@@ -10,8 +10,9 @@
  *   getRawTransactionOutputs    - same, but from raw bytes (foreign/unregistered tx)
  *
  * All JNI function names match app.aroundtheblock.wallet.core.bridge.NativeBridge.
- * Raw transaction bytes are deserialized via BRTransactionParse() and freed
- * after use; no ownership is retained.
+ * Raw transaction bytes are deserialized via BRTransactionParseSigned() (network format only) and freed
+ * after use; no ownership is retained. The wallet's own unsigned draft is read in jni_transaction.c
+ * (getBuiltTransactionOutputs), never here.
  *
  * OP_RETURN opcode: 0x6A
  *   A standard OP_RETURN output script has the form:
@@ -62,7 +63,7 @@ NativeBridge_isAssetTransaction(JNIEnv *env, jobject thiz,
         return JNI_FALSE;
     }
 
-    BRTransaction *tx = BRTransactionParse((const uint8_t *)txBytes, (size_t)txLen);
+    BRTransaction *tx = BRTransactionParseSigned((const uint8_t *)txBytes, (size_t)txLen);
     (*env)->ReleaseByteArrayElements(env, rawTx, txBytes, JNI_ABORT);
 
     if (!tx) {
@@ -112,7 +113,7 @@ NativeBridge_getOpReturnData(JNIEnv *env, jobject thiz,
         return NULL;
     }
 
-    BRTransaction *tx = BRTransactionParse((const uint8_t *)txBytes, (size_t)txLen);
+    BRTransaction *tx = BRTransactionParseSigned((const uint8_t *)txBytes, (size_t)txLen);
     (*env)->ReleaseByteArrayElements(env, rawTx, txBytes, JNI_ABORT);
 
     if (!tx) {
@@ -167,7 +168,7 @@ NativeBridge_getOpReturnData(JNIEnv *env, jobject thiz,
  * Kotlin parsing serves both.
  *
  * These bytes come from a remote lookup and are attacker-influenced, so they
- * go through BRTransactionParse — the same hardened parser every other raw-tx
+ * go through BRTransactionParseSigned — the same hardened parser every other raw-tx
  * entry point uses — rather than a second parser written in Kotlin. Returns
  * NULL on a null/empty array or a parse failure; never partially-valid data.
  */
@@ -193,7 +194,7 @@ NativeBridge_getRawTransactionOutputs(JNIEnv *env, jobject thiz,
         return NULL;
     }
 
-    BRTransaction *tx = BRTransactionParse((const uint8_t *)txBytes, (size_t)txLen);
+    BRTransaction *tx = BRTransactionParseSigned((const uint8_t *)txBytes, (size_t)txLen);
     (*env)->ReleaseByteArrayElements(env, rawTx, txBytes, JNI_ABORT);
 
     if (!tx) {
@@ -201,11 +202,18 @@ NativeBridge_getRawTransactionOutputs(JNIEnv *env, jobject thiz,
         return NULL;
     }
 
+    jobjectArray result = bridge_transaction_outputs(env, tx, "getRawTransactionOutputs");
+    BRTransactionFree(tx);
+    return result;
+}
+
+jobjectArray
+bridge_transaction_outputs(JNIEnv *env, const BRTransaction *tx, const char *who) {
     jclass stringClass = (*env)->FindClass(env, "java/lang/String");
-    if (!stringClass) { BRTransactionFree(tx); return NULL; }
+    if (!stringClass) return NULL;
 
     jobjectArray result = (*env)->NewObjectArray(env, (jsize)tx->outCount, stringClass, NULL);
-    if (!result) { BRTransactionFree(tx); return NULL; }
+    if (!result) return NULL;
 
     for (size_t i = 0; i < tx->outCount; i++) {
         const BRTxOutput *out = &tx->outputs[i];
@@ -231,8 +239,7 @@ NativeBridge_getRawTransactionOutputs(JNIEnv *env, jobject thiz,
         }
     }
 
-    LOGD("getRawTransactionOutputs: returned %zu outputs", tx->outCount);
-    BRTransactionFree(tx);
+    LOGD("%s: returned %zu outputs", who, tx->outCount);
     return result;
 }
 
@@ -282,7 +289,7 @@ NativeBridge_getRawTransactionInputs(JNIEnv *env, jobject thiz,
         return NULL;
     }
 
-    BRTransaction *tx = BRTransactionParse((const uint8_t *)txBytes, (size_t)txLen);
+    BRTransaction *tx = BRTransactionParseSigned((const uint8_t *)txBytes, (size_t)txLen);
     (*env)->ReleaseByteArrayElements(env, rawTx, txBytes, JNI_ABORT);
 
     if (!tx) {
@@ -336,6 +343,7 @@ NativeBridge_getRawTransactionInputs(JNIEnv *env, jobject thiz,
 jobjectArray JNICALL
 NativeBridge_getTransactionOutputsForHash(JNIEnv *env, jobject thiz,
                                                                          jstring txHashHex) {
+    WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
     (void)thiz;
 
     if (!g_wallet) {
@@ -419,6 +427,7 @@ NativeBridge_getTransactionOutputsForHash(JNIEnv *env, jobject thiz,
 jbyteArray JNICALL
 NativeBridge_getSerializedTransactionForHash(JNIEnv *env, jobject thiz,
                                                                             jstring txHashHex) {
+    WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
     (void)thiz;
     if (!g_wallet || !txHashHex) return NULL;
 
@@ -462,6 +471,7 @@ NativeBridge_getSerializedTransactionForHash(JNIEnv *env, jobject thiz,
 jobjectArray JNICALL
 NativeBridge_getTransactionInputsForHash(JNIEnv *env, jobject thiz,
                                                                         jstring txHashHex) {
+    WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
     (void)thiz;
     if (!g_wallet || !txHashHex) return NULL;
 

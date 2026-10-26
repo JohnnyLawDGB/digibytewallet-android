@@ -121,7 +121,7 @@ class FreshStartWiringGateTest {
         val handOver = backstopCall()
         assertEquals("the backstop does not pass its launch intent", "intent", handOver.named["launch"])
         assertEquals("the backstop does not say whether the activity was recreated", "savedInstanceState != null", handOver.named["recreated"])
-        assertEquals("the backstop does not say whether a wipe is owed", "pinManager.isWipePending()", handOver.named["wipeOwed"])
+        assertEquals("the backstop does not say whether a wipe is owed", "pinManager.wipeOwedAtLaunch()", handOver.named["wipeOwed"])
         assertEquals("the backstop does not say whether a wallet is stored", "walletManager.hasSavedWallet()", handOver.named["walletStored"])
         // Asked at EVERY launch: an erasure a fresh start left owed is not an owed wipe-after-N, so a
         // backstop that runs only while that flag is set would never finish it.

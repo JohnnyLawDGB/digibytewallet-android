@@ -26,7 +26,7 @@
     <string name="onb_create">Neue Wallet erstellen</string>
     <string name="onb_recover">Bestehende Wallet wiederherstellen</string>
     <string name="onb_footer">Unabhängige Wallet für das DigiByte-Netzwerk (DGB)</string>
-    <string name="app_name_display">ATB Wallet for DigiByte (DGB)</string>
+    <string name="app_name_display">HoldFast Wallet</string>
 
     <string name="seed_screenshot_blocked">Screenshots sind blockiert. Schreiben Sie diese Wörter auf: sie können nicht wiederhergestellt werden.</string>
     <string name="seed_title">Ihre Wiederherstellungsphrase</string>
@@ -80,7 +80,7 @@
     <string name="unlock_attempts_left">Falsche PIN. Verbleibende Versuche: %1$d</string>
     <string name="battery_title">Synchronisierung im Hintergrund fortsetzen</string>
     <string name="battery_body">Android kann diese Wallet in den Ruhezustand versetzen, wenn der Bildschirm aus ist. Dabei bricht die Verbindung zum DigiByte-Netzwerk ab und die Wallet bleibt möglicherweise bei 0 Peers stehen, bis Sie sie erneut öffnen.\n\nErlauben Sie die uneingeschränkte Ausführung, damit die Synchronisierung weiterläuft.</string>
-    <string name="battery_body_samsung">\n\nÖffnen Sie auf Samsung-Geräten zusätzlich Gerätewartung → Akku → \"Nie deaktivierte Apps\" und fügen Sie ATB Wallet hinzu.</string>
+    <string name="battery_body_samsung">\n\nÖffnen Sie auf Samsung-Geräten zusätzlich Gerätewartung → Akku → \"Nie deaktivierte Apps\" und fügen Sie HoldFast Wallet hinzu.</string>
     <string name="battery_open_settings">Einstellungen öffnen</string>
     <string name="tor_title">Neue Datenschutzfunktion</string>
     <string name="tor_body">Tor-Routing ist jetzt verfügbar. Wenn es aktiviert ist, verbindet sich Ihre Wallet über Tor mit dem DigiByte-Netzwerk und verbirgt Ihre IP-Adresse vor Peers.\n\nTor-Routing aktivieren?</string>
@@ -418,7 +418,7 @@
     <string name="ni_save">Speichern</string>
     <string name="ni_exclusive">Nur mein Knoten (exklusiv)</string>
     <string name="ni_exclusive_sub">Ausschließlich über Ihren Knoten synchronisieren. Geht er offline, hat die Wallet keine anderen Peers, bis Sie öffentliche Peers wieder aktivieren.</string>
-    <string name="ab_powered_by">Powered by DigiByte Core 9.26</string>
+    <string name="ab_powered_by">Kompatibel mit DigiByte-Core-9.26-Nodes</string>
     <string name="ab_wallet_info">Wallet-Info</string>
     <string name="ab_wallet_type">Wallet-Typ</string>
     <string name="ab_hd_path">HD-Pfad</string>
@@ -498,6 +498,12 @@
     <string name="did_insecure">Unsichere Verbindung</string>
     <string name="did_insecure_body">Diese Website verwendet HTTP, nicht HTTPS. Ihre Authentifizierung kann abgefangen werden.</string>
     <string name="did_callback_url">Callback-URL</string>
+    <string name="did_identity_title">Welche Anmeldung kennt diese Website?</string>
+    <string name="did_identity_hint">Wallet wiederhergestellt? Wähle die Identität, die du hier zuvor genutzt hast. Nach einer erfolgreichen Anmeldung merkt sich die Wallet die Wahl.</string>
+    <string name="did_identity_per_site">Eigener Schlüssel für diese Website (ursprüngliche DigiByte-App)</string>
+    <string name="did_identity_shared">Gemeinsamer Schlüssel für alle Websites (DigiByte Wallet 3.x–4.0.76)</string>
+    <string name="did_identity_shared_note">Auf jeder Website gleich, daher können Websites deine Anmeldungen verknüpfen. Wähle ihn nur, wenn diese Website dich darüber kannte.</string>
+    <string name="did_identity_address">Adresse: %1$s</string>
     <string name="did_approve">Genehmigen</string>
     <string name="did_deny">Ablehnen</string>
     <string name="did_success">Authentifizierung erfolgreich</string>
@@ -547,9 +553,8 @@
     <string name="ab_core_value">9.26 (SPV node)</string>
     <string name="ab_mit">Diese Software wird unter der MIT-Lizenz bereitgestellt.</string>
     <string name="ab_tagline">DigiByte ist eine dezentrale Blockchain und digitale Währung.</string>
-    <!-- Publisher disclaimer on the About screen. Around The Block LLC, DigiByte Foundation, DigiByte Alliance and DigiByte-Core are names: keep them in Latin script, untranslated. -->
-    <string name="ab_disclaimer">Unabhängige Wallet von Around The Block LLC; nicht verbunden mit oder unterstützt von der DigiByte Foundation, der DigiByte Alliance oder DigiByte-Core.</string>
-    <string name="ab_website">Website von Around The Block</string>
+    <!-- Publisher disclaimer on the About screen. Around The Block LLC and DigiByte are names: keep them in Latin script, untranslated. -->
+    <string name="ab_disclaimer">Unabhängige Wallet von Around The Block LLC. Keine offizielle DigiByte-App.</string>
 
     <string name="tx_conf_short">%1$d Best.</string>
     <string name="tx_confirmed">Bestätigt</string>
@@ -602,6 +607,7 @@
     <string name="rf_dd_fee_floor">Benötigt %1$s Netzwerkgebühr: diese Wallet hat %2$s.</string>
     <string name="rf_dd_found">%1$s in DigiDollar gefunden</string>
     <string name="rf_dd_moved">%1$s in DigiDollar in diese Wallet verschoben</string>
+    <string name="rf_dd_sent_unrelayed">%1$s in DigiDollar wurde gesendet, aber das Netzwerk hat es noch nicht bestätigt. Bewahre deine alte Wiederherstellungsphrase auf, bis es in dieser Wallet erscheint.</string>
     <string name="rf_dd_left_behind">%1$s in DigiDollar blieb zurück: es konnte nicht verschoben werden</string>
     <string name="rf_dd_unreachable">DigiDollar konnte nicht geprüft werden; diese Wallet hält möglicherweise welche</string>
     <string name="as_rules_checking">Übertragungsregeln dieses Assets werden geprüft…</string>
@@ -663,7 +669,7 @@
     <string name="restore_scan_title">Privat wiederherstellen</string>
     <string name="restore_scan_body">Sobald Sie fortfahren, findet dieses Telefon die Transaktionen Ihrer Wallet selbst: native (dgb1q…), Legacy- (D…), Taproot- und DigiDollar-Adressen, ohne Ihre Adressen an irgendjemanden zu senden.</string>
     <string name="restore_other_title">Phrase aus einer anderen Wallet-App?</string>
-    <string name="restore_other_body">Coinomi, Ledger, Trezor und einige ältere Wallets verwahren Coins auf Adressformaten, die diese Wallet nicht verwendet, daher kann die Synchronisierung sie nicht sehen. Eine Prüfung kann sie finden, sendet dabei aber die aus Ihrer Phrase abgeleiteten Adressen an DigiScope (api.digiscope.me), das etwaiges Guthaben darauf meldet. Für eine Phrase aus ATB Wallet oder der älteren DigiByte-App nicht nötig. Sie können die Prüfung auch später unter Einstellungen → Guthaben aus einer anderen Wallet wiederherstellen ausführen.</string>
+    <string name="restore_other_body">Coinomi, Ledger, Trezor und einige ältere Wallets verwahren Coins auf Adressformaten, die diese Wallet nicht verwendet, daher kann die Synchronisierung sie nicht sehen. Eine Prüfung kann sie finden, sendet dabei aber die aus Ihrer Phrase abgeleiteten Adressen an DigiScope (api.digiscope.me), das etwaiges Guthaben darauf meldet. Für eine Phrase aus HoldFast Wallet oder der älteren DigiByte-App nicht nötig. Sie können die Prüfung auch später unter Einstellungen → Guthaben aus einer anderen Wallet wiederherstellen ausführen.</string>
     <string name="restore_other_check">Andere Formate prüfen</string>
     <string name="restore_scan_deriving">Adressen werden abgeleitet…</string>
     <string name="restore_scan_duration">Dies kann je nach Node 30–90 Sekunden dauern.</string>
@@ -707,4 +713,7 @@
     <string name="seedview_pass_unreadable_body">Die Passphrase dieser Wallet konnte gerade nicht gelesen werden. Ihre Wiederherstellungswörter allein stellen diese Wallet möglicherweise nicht wieder her. Deshalb werden sie erst angezeigt, wenn die Passphrase zusammen mit ihnen angezeigt werden kann. Versuchen Sie es erneut.</string>
     <string name="seedview_pass_retry">Erneut versuchen</string>
     <!-- /pkg E2-keys -->
+    <string name="pinstore_title">Deine PIN kann gerade nicht geprüft werden</string>
+    <string name="pinstore_body">Der sichere Schlüsselspeicher des Telefons ließ sich nicht öffnen, daher bleibt die Wallet gesperrt. Es wurde nichts gelöscht. Schließe die App und öffne sie erneut. Wenn das wieder passiert, starte das Telefon neu; deine Wiederherstellungsphrase stellt die Wallet weiterhin auf jedem Gerät wieder her.</string>
+    <string name="pinstore_close">App schließen</string>
 </resources>

@@ -27,6 +27,7 @@ class DigiByteApp : Application(), Configuration.Provider, ImageLoaderFactory {
     // the hash-verifying IpfsClient.
     @Inject lateinit var okHttpClient: OkHttpClient
     @Inject lateinit var ipfsClient: IpfsClient
+    @Inject lateinit var torManager: app.aroundtheblock.wallet.core.tor.TorManager
 
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder()
@@ -49,6 +50,9 @@ class DigiByteApp : Application(), Configuration.Provider, ImageLoaderFactory {
         BootGuard.recoverFromCrashedRestoreIfNeeded(this)
         super.onCreate()
         applyNetworkSelection()
+        // Before any service or worker can dial a peer: with Tor on, the core reaches peers
+        // through Tor or not at all (4.1.2 row 2). The library is loaded by the selection above.
+        torManager.bindPeersRequireTor { NativeBridge.setTorRequired(it) }
         // Rebuild transaction history once after an update, for the selected network: a
         // transaction cache written by an earlier build is discarded before anything can load
         // it, and the history is re-derived from the chain by the normal scan. Here, after the

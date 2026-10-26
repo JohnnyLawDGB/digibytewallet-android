@@ -37,6 +37,7 @@ import app.aroundtheblock.wallet.ui.theme.DigiByteRed
 import kotlinx.coroutines.launch
 import androidx.compose.ui.res.stringResource
 import app.aroundtheblock.wallet.R
+import app.aroundtheblock.wallet.ui.components.keyboardPadding
 
 @Composable
 fun SendScreen(
@@ -232,7 +233,7 @@ fun SendScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .imePadding()
+            .keyboardPadding()
             .verticalScroll(rememberScrollState())
             .padding(16.dp)
     ) {

@@ -35,6 +35,7 @@ import app.aroundtheblock.wallet.ui.theme.DigiByteAccent
 import app.aroundtheblock.wallet.ui.theme.DigiByteGreen
 import androidx.compose.ui.res.stringResource
 import app.aroundtheblock.wallet.R
+import app.aroundtheblock.wallet.ui.components.keyboardPadding
 
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
@@ -111,7 +112,7 @@ fun ReceiveScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .imePadding()
+            .keyboardPadding()
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally

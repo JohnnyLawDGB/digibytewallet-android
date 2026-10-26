@@ -175,16 +175,32 @@ class HubWebSocket(
         _connectionState.value = ConnectionState.DISCONNECTED
     }
 
+    /**
+     * Every frame goes out only while the Hub session it was opened for is still held (4.1.2 row 8, N4).
+     * A socket outlives a logout unless something closes it, and the server knows it by the token it
+     * was opened with: with no token now, nothing is sent and the socket is closed instead.
+     */
+    private fun sendAuthorized(frame: String) {
+        if (digiScopeClient.getToken() == null) {
+            if (webSocket != null) {
+                android.util.Log.i("HubWS", "no Hub session: closing the socket instead of sending")
+                disconnect()
+            }
+            return
+        }
+        webSocket?.send(frame)
+    }
+
     fun joinChannel(channelId: Int) {
-        webSocket?.send(JSONObject().put("type", "join").put("channelId", channelId).toString())
+        sendAuthorized(JSONObject().put("type", "join").put("channelId", channelId).toString())
     }
 
     fun leaveChannel(channelId: Int) {
-        webSocket?.send(JSONObject().put("type", "leave").put("channelId", channelId).toString())
+        sendAuthorized(JSONObject().put("type", "leave").put("channelId", channelId).toString())
     }
 
     fun sendMessage(channelId: Int, content: String, signature: String) {
-        webSocket?.send(
+        sendAuthorized(
             JSONObject()
                 .put("type", "message")
                 .put("channelId", channelId)
@@ -195,7 +211,7 @@ class HubWebSocket(
     }
 
     fun sendTyping(channelId: Int) {
-        webSocket?.send(JSONObject().put("type", "typing").put("channelId", channelId).toString())
+        sendAuthorized(JSONObject().put("type", "typing").put("channelId", channelId).toString())
     }
 
     private fun parseEvent(json: JSONObject): WebSocketEvent? {

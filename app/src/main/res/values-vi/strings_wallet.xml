@@ -18,7 +18,7 @@
     <string name="onb_create">Tạo ví mới</string>
     <string name="onb_recover">Khôi phục ví hiện có</string>
     <string name="onb_footer">Ví độc lập cho mạng DigiByte (DGB)</string>
-    <string name="app_name_display">ATB Wallet for DigiByte (DGB)</string>
+    <string name="app_name_display">HoldFast Wallet</string>
     <!-- WARNING -->
     <string name="seed_screenshot_blocked">Ảnh chụp màn hình đã bị chặn. Hãy ghi lại những từ này: chúng không thể khôi phục được.</string>
     <string name="seed_title">Cụm từ khôi phục của bạn</string>
@@ -72,7 +72,7 @@
     <string name="unlock_attempts_left">Mã PIN không đúng. Số lần thử còn lại: %1$d</string>
     <string name="battery_title">Giữ đồng bộ chạy ở nền</string>
     <string name="battery_body">Android có thể đưa ví này vào chế độ ngủ khi tắt màn hình, làm mất kết nối với mạng DigiByte và có thể khiến ví dừng ở 0 peer cho đến khi bạn mở lại.\n\nHãy cho phép ví chạy không giới hạn để tiếp tục đồng bộ.</string>
-    <string name="battery_body_samsung">\n\nTrên Samsung, hãy mở thêm Chăm sóc thiết bị → Pin → \"Ứng dụng không bao giờ ngủ\" và thêm ATB Wallet.</string>
+    <string name="battery_body_samsung">\n\nTrên Samsung, hãy mở thêm Chăm sóc thiết bị → Pin → \"Ứng dụng không bao giờ ngủ\" và thêm HoldFast Wallet.</string>
     <string name="battery_open_settings">Mở cài đặt</string>
     <string name="tor_title">Tính năng riêng tư mới</string>
     <string name="tor_body">Đã có định tuyến Tor. Khi bật, ví của bạn kết nối tới mạng DigiByte qua Tor, ẩn địa chỉ IP của bạn khỏi các peer.\n\nBật định tuyến Tor?</string>
@@ -407,7 +407,7 @@
     <string name="ni_save">Lưu</string>
     <string name="ni_exclusive">Chỉ nút của tôi (độc quyền)</string>
     <string name="ni_exclusive_sub">Chỉ đồng bộ qua nút của bạn. Nếu nút ngoại tuyến, ví sẽ không có peer nào khác cho đến khi bạn bật lại peer công khai.</string>
-    <string name="ab_powered_by">Powered by DigiByte Core 9.26</string>
+    <string name="ab_powered_by">Tương thích với nút DigiByte Core 9.26</string>
     <string name="ab_wallet_info">Thông tin ví</string>
     <string name="ab_wallet_type">Loại ví</string>
     <string name="ab_hd_path">Đường dẫn HD</string>
@@ -487,6 +487,12 @@
     <string name="did_insecure">Kết nối không an toàn</string>
     <string name="did_insecure_body">Trang này dùng HTTP, không phải HTTPS. Thông tin xác thực của bạn có thể bị chặn bắt.</string>
     <string name="did_callback_url">URL callback</string>
+    <string name="did_identity_title">Trang web này nhận ra danh tính đăng nhập nào?</string>
+    <string name="did_identity_hint">Bạn đã khôi phục ví này? Hãy chọn danh tính bạn từng dùng trên trang này. Sau khi đăng nhập thành công, ví sẽ ghi nhớ lựa chọn.</string>
+    <string name="did_identity_per_site">Khóa riêng cho trang này (ứng dụng DigiByte gốc)</string>
+    <string name="did_identity_shared">Khóa dùng chung cho mọi trang (DigiByte wallet 3.x–4.0.76)</string>
+    <string name="did_identity_shared_note">Giống nhau trên mọi trang, nên các trang có thể liên kết các lần đăng nhập của bạn. Chỉ chọn nếu trang này từng nhận ra bạn bằng khóa này.</string>
+    <string name="did_identity_address">Địa chỉ: %1$s</string>
     <string name="did_approve">Chấp thuận</string>
     <string name="did_deny">Từ chối</string>
     <string name="did_success">Xác thực thành công</string>
@@ -536,9 +542,8 @@
     <string name="ab_core_value">9.26 (SPV node)</string>
     <string name="ab_mit">Phần mềm này được cung cấp theo Giấy phép MIT.</string>
     <string name="ab_tagline">DigiByte là một blockchain phi tập trung và một loại tiền kỹ thuật số.</string>
-    <!-- Publisher disclaimer on the About screen. Around The Block LLC, DigiByte Foundation, DigiByte Alliance and DigiByte-Core are names: keep them in Latin script, untranslated. -->
-    <string name="ab_disclaimer">Ví độc lập của Around The Block LLC; không liên kết với hoặc được chứng thực bởi DigiByte Foundation, DigiByte Alliance hay DigiByte-Core.</string>
-    <string name="ab_website">Trang web Around The Block</string>
+    <!-- Publisher disclaimer on the About screen. Around The Block LLC and DigiByte are names: keep them in Latin script, untranslated. -->
+    <string name="ab_disclaimer">Ví độc lập của Around The Block LLC. Không phải ứng dụng DigiByte chính thức.</string>
 
     <string name="tx_conf_short">%1$d xác nhận</string>
     <string name="tx_confirmed">Đã xác nhận</string>
@@ -591,6 +596,7 @@
     <string name="rf_dd_fee_floor">Cần %1$s phí mạng: ví này có %2$s.</string>
     <string name="rf_dd_found">Đã tìm thấy %1$s DigiDollar</string>
     <string name="rf_dd_moved">Đã chuyển %1$s DigiDollar về ví này</string>
+    <string name="rf_dd_sent_unrelayed">Đã gửi %1$s DigiDollar, nhưng mạng chưa xác nhận. Hãy giữ cụm từ khôi phục cũ cho đến khi khoản này hiện trong ví này.</string>
     <string name="rf_dd_left_behind">Còn lại %1$s DigiDollar: không thể chuyển</string>
     <string name="rf_dd_unreachable">Không thể kiểm tra DigiDollar; ví này có thể đang giữ một ít</string>
     <string name="as_rules_checking">Đang kiểm tra quy tắc chuyển của tài sản này…</string>
@@ -652,7 +658,7 @@
     <string name="restore_scan_title">Khôi phục riêng tư</string>
     <string name="restore_scan_body">Sau khi bạn tiếp tục, điện thoại này tự tìm các giao dịch của ví: địa chỉ native (dgb1q…), legacy (D…), Taproot và DigiDollar, mà không gửi địa chỉ của bạn cho bất kỳ ai.</string>
     <string name="restore_other_title">Cụm từ từ một ứng dụng ví khác?</string>
-    <string name="restore_other_body">Coinomi, Ledger, Trezor và một số ví cũ giữ coin trên các định dạng địa chỉ mà ví này không dùng, nên đồng bộ không thấy được. Một lần kiểm tra có thể tìm ra chúng, nhưng nó gửi các địa chỉ được dẫn xuất từ cụm từ của bạn đến DigiScope (api.digiscope.me), nơi sẽ báo cáo số tiền trên các địa chỉ đó. Không cần thiết cho cụm từ từ ATB Wallet hoặc ứng dụng DigiByte cũ. Bạn cũng có thể chạy sau trong Cài đặt → Khôi phục tiền từ ví khác.</string>
+    <string name="restore_other_body">Coinomi, Ledger, Trezor và một số ví cũ giữ coin trên các định dạng địa chỉ mà ví này không dùng, nên đồng bộ không thấy được. Một lần kiểm tra có thể tìm ra chúng, nhưng nó gửi các địa chỉ được dẫn xuất từ cụm từ của bạn đến DigiScope (api.digiscope.me), nơi sẽ báo cáo số tiền trên các địa chỉ đó. Không cần thiết cho cụm từ từ HoldFast Wallet hoặc ứng dụng DigiByte cũ. Bạn cũng có thể chạy sau trong Cài đặt → Khôi phục tiền từ ví khác.</string>
     <string name="restore_other_check">Kiểm tra các định dạng khác</string>
     <string name="restore_scan_deriving">Đang dẫn xuất địa chỉ…</string>
     <string name="restore_scan_duration">Việc này có thể mất 30-90 giây tùy vào node.</string>
@@ -694,4 +700,7 @@
     <string name="seedview_pass_unreadable_body">Hiện không thể đọc cụm mật khẩu của ví này. Chỉ riêng các từ khôi phục có thể không khôi phục được ví này, vì vậy chúng sẽ không được hiển thị cho đến khi cụm mật khẩu có thể được hiển thị cùng với chúng. Hãy thử lại.</string>
     <string name="seedview_pass_retry">Thử lại</string>
     <!-- /pkg E2-keys -->
+    <string name="pinstore_title">Hiện không thể kiểm tra mã PIN của bạn</string>
+    <string name="pinstore_body">Kho khóa an toàn của điện thoại không mở được, nên ví vẫn bị khóa. Không có gì bị xóa. Hãy đóng ứng dụng rồi mở lại. Nếu vẫn xảy ra, hãy khởi động lại điện thoại; cụm từ khôi phục vẫn khôi phục được ví trên mọi thiết bị.</string>
+    <string name="pinstore_close">Đóng ứng dụng</string>
 </resources>

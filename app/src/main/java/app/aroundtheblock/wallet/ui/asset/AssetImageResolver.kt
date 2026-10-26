@@ -7,8 +7,12 @@ import android.net.Uri
  * metadata may express in any of four shapes — into a single value Coil can
  * dispatch on:
  *
- *  - `https://foo.com/bar.png` → returned as String; Coil's default OkHttp
- *    fetcher handles it through the injected (Tor-aware) OkHttpClient.
+ *  - a web URL is never fetched from the host it names (4.1.2 row 28): metadata is the issuer's, and
+ *    an image URL on a host the issuer runs told that host the IP of every wallet that showed the
+ *    asset -- send an asset to an address, learn who opens it. An IPFS gateway URL
+ *    (`https://<any host>/ipfs/<cid>[/path]`, or the subdomain form `https://<cid>.ipfs.<host>/path`)
+ *    is read for its CID and fetched as `ipfs://<cid>[/path]` through the wallet's own gateways; any
+ *    other `https://` or `http://` URL is not loaded (the placeholder is shown).
  *  - `ipfs://<cid>[/path]` → returned as Android Uri with scheme `ipfs`.
  *    [IpfsFetcher] recognises the scheme and routes through our
  *    hash-verifying `IpfsClient`.
@@ -37,7 +41,8 @@ object AssetImageResolver {
         if (raw.isNullOrBlank()) return null
         val trimmed = raw.trim()
         return when {
-            trimmed.startsWith("https://") || trimmed.startsWith("http://") -> trimmed
+            trimmed.startsWith("https://", ignoreCase = true) || trimmed.startsWith("http://", ignoreCase = true) ->
+                gatewayCid(trimmed)?.let { Uri.parse("ipfs://$it") }
             // Inline data: URIs are not loaded (see the class doc): no fetcher reads them.
             trimmed.startsWith("data:", ignoreCase = true) -> null
             trimmed.startsWith("ipfs://") -> Uri.parse(trimmed)
@@ -48,6 +53,21 @@ object AssetImageResolver {
                 null
             }
         }
+    }
+
+    /** The `<cid>[/path]` an IPFS gateway URL names, or null when the URL is not one. */
+    private fun gatewayCid(url: String): String? {
+        val afterScheme = url.substringAfter("://")
+        val host = afterScheme.substringBefore('/').substringBefore('?').lowercase()
+        val path = afterScheme.substringAfter('/', missingDelimiterValue = "").substringBefore('?').substringBefore('#')
+        // https://<cid>.ipfs.<gateway>/<path>
+        val sub = host.substringBefore(".ipfs.", missingDelimiterValue = "")
+        if (sub.isNotEmpty() && isCid(sub)) return if (path.isEmpty()) sub else "$sub/$path"
+        // https://<gateway>/ipfs/<cid>/<path>
+        if (!path.startsWith("ipfs/")) return null
+        val rest = path.removePrefix("ipfs/")
+        val cid = rest.substringBefore('/')
+        return if (isCid(cid)) rest else null
     }
 
     private fun isCid(s: String): Boolean =

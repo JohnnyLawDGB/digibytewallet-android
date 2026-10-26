@@ -840,11 +840,7 @@ class AssetManager(
         return result
     }
 
-    private fun saturatingAdd(a: Long, b: Long): Long {
-        val r = a + b
-        // The sum left the Long range iff both operands have the sign the result lacks.
-        return if (((a xor r) and (b xor r)) < 0) (if (a < 0) Long.MIN_VALUE else Long.MAX_VALUE) else r
-    }
+    private fun saturatingAdd(a: Long, b: Long): Long = AssetSums.add(a, b)
 
     /**
      * Does this asset row count toward the DISPLAYED balance? Native is the authority:
@@ -960,6 +956,26 @@ class AssetManager(
             .toSet()
     }.getOrDefault(emptySet())
 
+    /**
+     * The DigiAsset header a transaction's outputs carry, chosen as native code chooses it
+     * (BRDigiAsset.c: the LAST output whose OP_RETURN is a DigiAsset carrier), never simply the first
+     * OP_RETURN (4.1.2 row 13, K5 / DA-014). With a plain OP_RETURN placed before the carrier, the
+     * first-OP_RETURN rule decoded nothing here while native held the outputs the carrier names --
+     * the two sides disagreed about which outputs carry the asset.
+     */
+    private fun assetCarrier(scripts: List<ByteArray>): Pair<ByteArray, DecodedAssetHeader>? {
+        val carriers = scripts
+            .filter { it.isNotEmpty() && it[0] == 0x6A.toByte() }
+            .mapNotNull { script -> decoder.decode(script)?.let { script to it } }
+        // A tagged carrier that cannot be classified ANYWHERE in the transaction decides it, as in
+        // native code (any DA_CARRIER_UNCLASSIFIED output -> every output held): a readable carrier
+        // beside it must not narrow the hold to the outputs that one names.
+        return carriers.firstOrNull { it.second.operation == app.aroundtheblock.wallet.core.model.AssetOperation.UNCLASSIFIABLE }
+            ?: carriers.lastOrNull()
+    }
+
+    private fun assetCarrierHeader(scripts: List<ByteArray>): DecodedAssetHeader? = assetCarrier(scripts)?.second
+
     suspend fun processIncomingAssetTx(
         txHashHex: String,
         blockHeight: Long,
@@ -981,10 +997,8 @@ class AssetManager(
         }
         if (outputs.isEmpty()) return null
 
-        // Locate the OP_RETURN output (0x6A) and decode it.
-        val opReturn = outputs.firstOrNull { it.script.isNotEmpty() && it.script[0] == 0x6A.toByte() }
-            ?: return null
-        val header = decoder.decode(opReturn.script) ?: return null
+        // Locate the DigiAsset carrier among the OP_RETURN outputs (0x6A) and decode it.
+        val (carrierScript, header) = assetCarrier(outputs.map { it.script }) ?: return null
 
         // Asset-ID resolution:
         //  - ISSUANCE + locked: derive deterministically from first input outpoint.
@@ -1125,7 +1139,7 @@ class AssetManager(
         // Either needs the OP_RETURN read exactly as Core reads it. Anything undecided is Unknown
         // and waits for the indexer below. See AssetCredit.
         val isIssuance = header.operation == app.aroundtheblock.wallet.core.model.AssetOperation.ISSUANCE
-        val payloadExact = AssetPayloadCheck.readsExactly(opReturn.script, header)
+        val payloadExact = AssetPayloadCheck.readsExactly(carrierScript, header)
         // Rows already settled are final (an unspent output's contents do not change), so a
         // transaction whose owned rows are all settled is not allocated again on every sweep.
         val allSettled = ownedOutputs.isNotEmpty() && ownedOutputs.all { out ->
@@ -1267,6 +1281,7 @@ class AssetManager(
             assetId = resolved.assetId,
             totalSupply = resolved.totalSupply,
             decimals = resolved.divisibility,
+            metadataCid = resolved.metadataCid,
         )
 
         // Issuance-side metadata fetch — uses the CID we just
@@ -1951,11 +1966,10 @@ class AssetManager(
                 val outputLines = outputsOf(txHash)
                     ?: throw IllegalStateException("a listed transaction could not be read")
                 val outputs = outputLines.map { parsePreSpendOutput(it) }
-                val header = outputs.firstOrNull { it.isOpReturn }?.let { opReturn ->
-                    val script = opReturn.scriptHex.hexToByteArray()
+                val header = outputs.filter { it.isOpReturn }.map { opReturn ->
+                    opReturn.scriptHex.hexToByteArray()
                         ?: throw IllegalStateException("an output script is not hex")
-                    decoder.decode(script)
-                }
+                }.let { assetCarrierHeader(it) }
                 if (header == null) {
                     plainTxs.add(txHash)
                     continue
@@ -2085,8 +2099,9 @@ class AssetManager(
         }
 
         for (assetId in missing) {
-            // cid = null: we have no CID for these (that is usually WHY they are unnamed), so
-            // resolution goes through the provider fallback rather than IPFS.
+            // cid = null: the service takes the issuance's CID from the chain facts the parent walk
+            // recorded, and asks a provider only when those facts show the issuance carried none; an
+            // asset the walk has not reached yet waits for it (4.1.2 row 29, R6).
             runCatching { metadataService.getMetadata(assetId, null) }
                 .onFailure { android.util.Log.d("AssetManager", "metadata retry failed for $assetId", it) }
         }
@@ -2535,9 +2550,7 @@ class AssetManager(
             val s = p.getOrNull(2)?.hexToByteArray() ?: return@mapNotNull null
             v to s
         }
-        val opReturn = scripts.firstOrNull { it.second.isNotEmpty() && it.second[0] == 0x6A.toByte() }?.second
-            ?: return null
-        val header = decoder.decode(opReturn) ?: return null
+        val header = assetCarrierHeader(scripts.map { it.second }) ?: return null
         val firstNonOpReturn = scripts.firstOrNull { it.second.isEmpty() || it.second[0] != 0x6A.toByte() }?.first
         // try/catch rather than runCatching: this is a suspend call, and a cancellation raised
         // inside it has to reach the replay loop, which rethrows it.
@@ -2618,9 +2631,7 @@ class AssetManager(
             val script = parts[2].hexToByteArray() ?: return@mapNotNull null
             ParsedOut(vout, script)
         }
-        val opReturn = outputs.firstOrNull { it.script.isNotEmpty() && it.script[0] == 0x6A.toByte() }
-            ?: return null
-        val header = decoder.decode(opReturn.script) ?: return null
+        val header = assetCarrierHeader(outputs.map { it.script }) ?: return null
         val firstNonOpReturn = outputs.firstOrNull {
             it.script.isEmpty() || it.script[0] != 0x6A.toByte()
         }?.vout
@@ -2631,14 +2642,14 @@ class AssetManager(
             if (out.script.isNotEmpty() && out.script[0] == 0x6A.toByte()) continue
             val isOwned = owned.isNotEmpty() && out.script.toHex() in owned
             val wanted = if (isSend) !isOwned else isOwned
-            if (wanted) total += AssetTxQuantity.forOutput(header, out.vout, firstNonOpReturn)
+            if (wanted) total = AssetSums.add(total, AssetTxQuantity.forOutput(header, out.vout, firstNonOpReturn))
         }
         return if (total > 0L) total else null
     }
 
     /** The units a receive delivered, as its backed rows record them; null when none are. */
     internal fun receivedBackedUnits(rows: List<UtxoEntity>): Long? {
-        val total = rows.filter { AssetCredit.counts(it.assetCredit) }.sumOf { it.assetQuantity }
+        val total = AssetSums.saturating(rows.filter { AssetCredit.counts(it.assetCredit) }.map { it.assetQuantity })
         return if (total > 0L) total else null
     }
 

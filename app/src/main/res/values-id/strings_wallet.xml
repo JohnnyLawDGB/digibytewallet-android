@@ -18,7 +18,7 @@
     <string name="onb_create">Buat Dompet Baru</string>
     <string name="onb_recover">Pulihkan Dompet yang Ada</string>
     <string name="onb_footer">Dompet independen untuk jaringan DigiByte (DGB)</string>
-    <string name="app_name_display">ATB Wallet for DigiByte (DGB)</string>
+    <string name="app_name_display">HoldFast Wallet</string>
     <!-- WARNING -->
     <string name="seed_screenshot_blocked">Tangkapan layar diblokir. Tulis kata-kata ini: kata-kata ini tidak dapat dipulihkan.</string>
     <string name="seed_title">Frasa Pemulihan Anda</string>
@@ -72,7 +72,7 @@
     <string name="unlock_attempts_left">PIN salah. Sisa percobaan: %1$d</string>
     <string name="battery_title">Jaga sinkronisasi tetap berjalan di latar belakang</string>
     <string name="battery_body">Android dapat menidurkan dompet ini saat layar mati, sehingga koneksinya ke jaringan DigiByte terputus dan bisa tertahan di 0 peer sampai Anda membukanya kembali.\n\nIzinkan berjalan tanpa batasan agar sinkronisasi terus berlanjut.</string>
-    <string name="battery_body_samsung">\n\nDi Samsung, buka juga Device Care → Baterai → \"Aplikasi yang tidak pernah tidur\" lalu tambahkan ATB Wallet.</string>
+    <string name="battery_body_samsung">\n\nDi Samsung, buka juga Device Care → Baterai → \"Aplikasi yang tidak pernah tidur\" lalu tambahkan HoldFast Wallet.</string>
     <string name="battery_open_settings">Buka pengaturan</string>
     <string name="tor_title">Fitur Privasi Baru</string>
     <string name="tor_body">Perutean Tor kini tersedia. Saat diaktifkan, dompet Anda terhubung ke jaringan DigiByte melalui Tor sehingga alamat IP Anda tersembunyi dari peer.\n\nAktifkan perutean Tor?</string>
@@ -407,7 +407,7 @@
     <string name="ni_save">Simpan</string>
     <string name="ni_exclusive">Hanya node saya (eksklusif)</string>
     <string name="ni_exclusive_sub">Sinkron hanya lewat node Anda. Jika node offline, dompet tidak punya peer lain sampai Anda mengaktifkan kembali peer publik.</string>
-    <string name="ab_powered_by">Powered by DigiByte Core 9.26</string>
+    <string name="ab_powered_by">Kompatibel dengan node DigiByte Core 9.26</string>
     <string name="ab_wallet_info">Info Dompet</string>
     <string name="ab_wallet_type">Jenis Dompet</string>
     <string name="ab_hd_path">Jalur HD</string>
@@ -487,6 +487,12 @@
     <string name="did_insecure">Koneksi Tidak Aman</string>
     <string name="did_insecure_body">Situs ini memakai HTTP, bukan HTTPS. Autentikasi Anda bisa disadap.</string>
     <string name="did_callback_url">URL Callback</string>
+    <string name="did_identity_title">Masuk mana yang dikenal situs ini?</string>
+    <string name="did_identity_hint">Memulihkan dompet ini? Pilih identitas yang dulu Anda pakai di situs ini. Setelah masuk berhasil, dompet akan mengingatnya.</string>
+    <string name="did_identity_per_site">Kunci terpisah untuk situs ini (aplikasi DigiByte asli)</string>
+    <string name="did_identity_shared">Kunci bersama untuk semua situs (DigiByte wallet 3.x–4.0.76)</string>
+    <string name="did_identity_shared_note">Sama di setiap situs, sehingga situs dapat menautkan proses masuk Anda. Pilih hanya jika situs ini mengenal Anda dengannya.</string>
+    <string name="did_identity_address">Alamat: %1$s</string>
     <string name="did_approve">Setujui</string>
     <string name="did_deny">Tolak</string>
     <string name="did_success">Autentikasi Berhasil</string>
@@ -536,9 +542,8 @@
     <string name="ab_core_value">9.26 (SPV node)</string>
     <string name="ab_mit">Perangkat lunak ini disediakan di bawah Lisensi MIT.</string>
     <string name="ab_tagline">DigiByte adalah blockchain terdesentralisasi dan mata uang digital.</string>
-    <!-- Publisher disclaimer on the About screen. Around The Block LLC, DigiByte Foundation, DigiByte Alliance and DigiByte-Core are names: keep them in Latin script, untranslated. -->
-    <string name="ab_disclaimer">Dompet independen dari Around The Block LLC; tidak berafiliasi dengan atau didukung oleh DigiByte Foundation, DigiByte Alliance, atau DigiByte-Core.</string>
-    <string name="ab_website">Situs web Around The Block</string>
+    <!-- Publisher disclaimer on the About screen. Around The Block LLC and DigiByte are names: keep them in Latin script, untranslated. -->
+    <string name="ab_disclaimer">Dompet independen dari Around The Block LLC. Bukan aplikasi resmi DigiByte.</string>
 
     <string name="tx_conf_short">%1$d konf.</string>
     <string name="tx_confirmed">Terkonfirmasi</string>
@@ -591,6 +596,7 @@
     <string name="rf_dd_fee_floor">Perlu %1$s untuk biaya jaringan: dompet ini punya %2$s.</string>
     <string name="rf_dd_found">%1$s DigiDollar ditemukan</string>
     <string name="rf_dd_moved">%1$s DigiDollar dipindahkan ke dompet ini</string>
+    <string name="rf_dd_sent_unrelayed">%1$s dalam DigiDollar telah dikirim, tetapi jaringan belum mengonfirmasinya. Simpan frasa pemulihan lama Anda sampai muncul di dompet ini.</string>
     <string name="rf_dd_left_behind">%1$s DigiDollar tertinggal: tidak dapat dipindahkan</string>
     <string name="rf_dd_unreachable">DigiDollar tidak dapat diperiksa; dompet ini mungkin memilikinya</string>
     <string name="as_rules_checking">Memeriksa aturan transfer aset ini…</string>
@@ -652,7 +658,7 @@
     <string name="restore_scan_title">Pulihkan secara privat</string>
     <string name="restore_scan_body">Setelah Anda melanjutkan, ponsel ini menemukan sendiri transaksi dompet Anda: alamat native (dgb1q…), legacy (D…), Taproot, dan DigiDollar, tanpa mengirim alamat Anda ke siapa pun.</string>
     <string name="restore_other_title">Frasa dari aplikasi dompet lain?</string>
-    <string name="restore_other_body">Coinomi, Ledger, Trezor, dan beberapa dompet lama menyimpan koin di format alamat yang tidak dipakai dompet ini, sehingga sinkronisasi tidak bisa melihatnya. Pemeriksaan dapat menemukannya, tetapi pemeriksaan itu mengirim alamat yang diturunkan dari frasa Anda ke DigiScope (api.digiscope.me), yang melaporkan dana apa pun di alamat tersebut. Tidak diperlukan untuk frasa dari ATB Wallet atau aplikasi lama DigiByte. Anda juga bisa menjalankannya nanti dari Pengaturan → Pulihkan dana dari dompet lain.</string>
+    <string name="restore_other_body">Coinomi, Ledger, Trezor, dan beberapa dompet lama menyimpan koin di format alamat yang tidak dipakai dompet ini, sehingga sinkronisasi tidak bisa melihatnya. Pemeriksaan dapat menemukannya, tetapi pemeriksaan itu mengirim alamat yang diturunkan dari frasa Anda ke DigiScope (api.digiscope.me), yang melaporkan dana apa pun di alamat tersebut. Tidak diperlukan untuk frasa dari HoldFast Wallet atau aplikasi lama DigiByte. Anda juga bisa menjalankannya nanti dari Pengaturan → Pulihkan dana dari dompet lain.</string>
     <string name="restore_other_check">Periksa format lain</string>
     <string name="restore_scan_deriving">Menurunkan alamat…</string>
     <string name="restore_scan_duration">Ini bisa memakan waktu 30-90 detik, tergantung node.</string>
@@ -694,4 +700,7 @@
     <string name="seedview_pass_unreadable_body">Frasa sandi dompet ini tidak dapat dibaca saat ini. Kata-kata pemulihan Anda saja mungkin tidak dapat memulihkan dompet ini, jadi kata-kata itu tidak ditampilkan sampai frasa sandi dapat ditampilkan bersamanya. Coba lagi.</string>
     <string name="seedview_pass_retry">Coba lagi</string>
     <!-- /pkg E2-keys -->
+    <string name="pinstore_title">PIN Anda tidak bisa diperiksa saat ini</string>
+    <string name="pinstore_body">Penyimpanan kunci aman ponsel tidak terbuka, jadi dompet tetap terkunci. Tidak ada yang dihapus. Tutup aplikasi lalu buka lagi. Jika terus terjadi, mulai ulang ponsel; frasa pemulihan Anda tetap bisa memulihkan dompet di perangkat mana pun.</string>
+    <string name="pinstore_close">Tutup aplikasi</string>
 </resources>

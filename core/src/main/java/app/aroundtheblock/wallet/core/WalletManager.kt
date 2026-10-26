@@ -67,6 +67,11 @@ private const val KEY_RECORD_VERSION = "seed_record_version"
 private const val KEY_HAS_PASSPHRASE = "seed_has_passphrase"
 private const val KEY_FINGERPRINT_V1 = "seed_fingerprint"
 private const val KEY_FINGERPRINT_V2 = "seed_fingerprint_v2"
+/** How the wallet came to be on this device: [ORIGIN_CREATED] or [ORIGIN_RESTORED]; absent on a
+ *  record written before 4.1.2, which may be either. */
+private const val KEY_ORIGIN = "wallet_origin"
+private const val ORIGIN_CREATED = "created"
+private const val ORIGIN_RESTORED = "restored"
 
 /** The version this release writes the seed record at: written whole, in one commit, saying whether it has a passphrase. */
 private const val SEED_RECORD_VERSION = 1
@@ -77,7 +82,7 @@ private val LEGACY_ENVELOPE_FIELDS = listOf("encrypted_seed", "encrypted_seed_iv
 
 /** Every field of the seed record. */
 private val SEED_RECORD_FIELDS = V2_ENVELOPE_FIELDS + LEGACY_ENVELOPE_FIELDS +
-    listOf(KEY_CREATION_TIME, KEY_RECORD_VERSION, KEY_HAS_PASSPHRASE, KEY_FINGERPRINT_V1, KEY_FINGERPRINT_V2)
+    listOf(KEY_CREATION_TIME, KEY_RECORD_VERSION, KEY_HAS_PASSPHRASE, KEY_FINGERPRINT_V1, KEY_FINGERPRINT_V2, KEY_ORIGIN)
 
 /**
  * The creation time handed to native on a restore. Native picks the header anchor (and
@@ -117,6 +122,13 @@ class WalletManager @Suppress("LongParameterList") constructor(
     // cannot see those, so the app module supplies it (AppModule). Defaulted so pure-JVM
     // constructions keep compiling; the default has nothing to end and says so truthfully.
     private val identitySessions: IdentitySessionWipe = IdentitySessionWipe { true },
+    /**
+     * Marks the erasure owed, durably, BEFORE a wipe erases anything (4.1.2 row 24): a process death in
+     * the seconds the wipe runs used to leave the Hub token, the DB key and the database with no retry
+     * once the seed was gone. The app's launch backstop finishes an owed erasure and clears the mark
+     * when a wipe verifies (FreshStartAfterWipe).
+     */
+    private val markErasureOwed: () -> Unit = {},
     // Native wallet creation and the native calls around storing a wallet's record, injectable so
     // a pure-JVM test can drive createWallet/recoverWallet and the seed record they write
     // (NativeBridge's init loads the native library, which a JVM cannot). Each default touches
@@ -167,6 +179,13 @@ class WalletManager @Suppress("LongParameterList") constructor(
     }
 
     /** Check if an encrypted seed exists on disk. */
+    /**
+     * False only for a wallet made on this device by "create": its seed has never signed a Digi-ID
+     * login anywhere, so it has no shared-key (m/0'/0/0) identity to recover and is never offered
+     * one (4.1.2 row 16). A restored wallet, or one whose record predates the origin field, may.
+     */
+    fun mayHaveDigiIdHistoryElsewhere(): Boolean = prefs.getString(KEY_ORIGIN, null) != ORIGIN_CREATED
+
     fun hasSavedWallet(): Boolean = prefs.contains("encrypted_seed") || prefs.contains("encrypted_seed_v2")
 
     /**
@@ -203,12 +222,12 @@ class WalletManager @Suppress("LongParameterList") constructor(
      */
     fun createWallet(mnemonic: String, passphrase: ByteArray? = null): Boolean {
         // Default null keeps every existing caller — and every existing wallet — unchanged.
-        if (passphrase != null && passphrase.size > Bip39Passphrase.MAX_BYTES) return false
+        if (passphrase != null && (passphrase.size > Bip39Passphrase.MAX_BYTES || Bip39Passphrase.hasNul(passphrase))) return false
         val mnemonicBytes = mnemonic.toByteArray(Charsets.UTF_8)
         try {
             // Persist creation time so restoreFromDisk uses the right sync checkpoint — in the record.
             val created = createNative(mnemonicBytes, passphrase) &&
-                writeSeedRecord(mnemonicBytes, passphrase, System.currentTimeMillis() / 1000)
+                writeSeedRecord(mnemonicBytes, passphrase, System.currentTimeMillis() / 1000, ORIGIN_CREATED)
             if (created) {
                 _walletState.value = WalletState.Unlocked
                 clearSyncData()
@@ -230,7 +249,7 @@ class WalletManager @Suppress("LongParameterList") constructor(
         /** NFKD UTF-8 bytes, or null. Caller owns and zeroes them; see [createWallet]. */
         passphrase: ByteArray? = null,
     ): Boolean {
-        if (passphrase != null && passphrase.size > Bip39Passphrase.MAX_BYTES) return false
+        if (passphrase != null && (passphrase.size > Bip39Passphrase.MAX_BYTES || Bip39Passphrase.hasNul(passphrase))) return false
         val mnemonicBytes = mnemonic.toByteArray(Charsets.UTF_8)
         try {
             // The creation time is part of the record. Without it restoreFromDisk feeds native the
@@ -242,7 +261,7 @@ class WalletManager @Suppress("LongParameterList") constructor(
             val creationTimeSecs =
                 if (creationTimestamp > 0L) creationTimestamp else System.currentTimeMillis() / 1000
             val recovered = recoverNative(mnemonicBytes, creationTimestamp, passphrase) &&
-                writeSeedRecord(mnemonicBytes, passphrase, creationTimeSecs)
+                writeSeedRecord(mnemonicBytes, passphrase, creationTimeSecs, ORIGIN_RESTORED)
             if (recovered) {
                 _walletState.value = WalletState.Unlocked
                 clearSyncData()
@@ -844,6 +863,9 @@ class WalletManager @Suppress("LongParameterList") constructor(
      */
     suspend fun wipeThenReleasePin(pinManager: app.aroundtheblock.wallet.core.security.PinManager): WipeReport =
         kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+            runCatching { markErasureOwed() }.onFailure {
+                android.util.Log.e("WalletManager", "erasure not marked owed before the wipe (${it.javaClass.simpleName})")
+            }
             val report = try {
                 wipeWallet()
             } catch (t: Throwable) {
@@ -902,6 +924,11 @@ class WalletManager @Suppress("LongParameterList") constructor(
             false // unknown is "still here": the screen stands down and the PIN decides
         }
         if (!recordGone) return@withContext false
+        // The flag goes, but the secrets the unverified wipes left (Hub token, DB key) are still owed
+        // their erasure: the next launch finishes it (4.1.2 row 33).
+        runCatching { markErasureOwed() }.onFailure {
+            android.util.Log.e("WalletManager", "erasure not marked owed (${it.javaClass.simpleName})")
+        }
         runCatching { pinManager.clearWipePending() }.onFailure {
             android.util.Log.e("WalletManager", "owed-wipe flag not released (${it.javaClass.simpleName})")
         }
@@ -951,7 +978,7 @@ class WalletManager @Suppress("LongParameterList") constructor(
      * or empty passphrase is "no passphrase" — BIP39 treats absent and empty identically (salt =
      * "mnemonic"), so the two must remain the same wallet.
      */
-    private fun writeSeedRecord(mnemonicBytes: ByteArray, passphrase: ByteArray?, creationTimeSecs: Long): Boolean {
+    private fun writeSeedRecord(mnemonicBytes: ByteArray, passphrase: ByteArray?, creationTimeSecs: Long, origin: String): Boolean {
         val pass = passphrase?.takeIf { it.isNotEmpty() }
         val sealed = try {
             sealRecord(mnemonicBytes, pass)
@@ -974,6 +1001,7 @@ class WalletManager @Suppress("LongParameterList") constructor(
         edit.putLong(KEY_CREATION_TIME, creationTimeSecs)
             .putBoolean(KEY_HAS_PASSPHRASE, sealed.passphrase != null)
             .putInt(KEY_RECORD_VERSION, SEED_RECORD_VERSION)
+            .putString(KEY_ORIGIN, origin)
         val landed = edit.commit()
         val readsBack = landed &&
             prefs.getInt(KEY_RECORD_VERSION, 0) == SEED_RECORD_VERSION &&

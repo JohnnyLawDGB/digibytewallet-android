@@ -117,7 +117,10 @@ object AppModule {
         am: AssetManager,
         identitySessions: app.aroundtheblock.wallet.IdentitySessionEraser,
     ): WalletManager =
-        WalletManager(context, ksm, um, assetManager = am, identitySessions = identitySessions)
+        WalletManager(
+            context, ksm, um, assetManager = am, identitySessions = identitySessions,
+            markErasureOwed = { app.aroundtheblock.wallet.FreshStartAfterWipe.markErasureOwed(context) },
+        )
 
     /**
      * The app-side half of a wallet wipe (Hub login held in memory, DigiStamp web session),
@@ -190,8 +193,13 @@ object AppModule {
         )
 
     @Provides @Singleton
-    fun provideDigiIdManager(client: OkHttpClient, historyDao: DigiIdHistoryDao, digiScopeClient: DigiScopeClient): DigiIdManager =
-        DigiIdManager(client, historyDao, digiScopeClient)
+    fun provideDigiIdManager(
+        client: OkHttpClient,
+        historyDao: DigiIdHistoryDao,
+        digiScopeClient: DigiScopeClient,
+        walletManager: WalletManager,
+    ): DigiIdManager =
+        DigiIdManager(client, historyDao, digiScopeClient, walletMayHaveHistoryElsewhere = walletManager::mayHaveDigiIdHistoryElsewhere)
 
     @Provides @Singleton
     fun provideDigiScopeClient(
