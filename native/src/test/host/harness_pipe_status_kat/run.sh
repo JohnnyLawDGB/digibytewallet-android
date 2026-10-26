@@ -82,11 +82,11 @@ while IFS= read -r f; do
 done < <(ls "$REPO_ROOT"/native/src/test/host/*/*.sh "$REPO_ROOT"/scripts/*.sh 2>/dev/null)
 if [ "${#files[@]}" -lt 100 ]; then
     echo "  [green tree] GATE FAILURE: found ${#files[@]} scripts to scan (expected 100 or more)"; FAIL=1
-    files=(/dev/null)
-fi
+else
 breaches="$(scan "${files[@]}")"
 if [ -z "$breaches" ]; then echo "  [green tree] ${#files[@]} scripts: no early-exit reader on a pipe under pipefail"
 else echo "  [green tree] GATE FAILURE: an early-exit reader reads a pipe under pipefail:"; echo "$breaches" | sed "s|$REPO_ROOT/||; s/^/      /"; FAIL=1; fi
+fi
 
 [ $FAIL -eq 0 ] && echo "harness_pipe_status_kat: GATE HELD"
 exit $FAIL
