@@ -10,6 +10,7 @@
  */
 
 #include <errno.h>
+#include "coin_reservation.h"
 #include "jni_bridge.h"
 #include "BRDigiDollar.h"
 #include "BRNetwork.h"   /* BRNetworkIsTestnet() — runtime network for DD decode */
@@ -101,17 +102,17 @@ static void _publishResult(void *info, int error)
         /* This publish duplicated one still pending. The ring stays keyed by txid with the first
          * publish's slot, whose callback carries the verdict; recording here would overwrite a
          * pending or delivered verdict with a non-verdict. Consume the context and nothing else. */
-        LOGD("publishTransaction: already pending txid=%s (earlier publish carries the verdict)", ctx->txid);
+        LOGD("publishTransaction: already pending txid=%.12s (earlier publish carries the verdict)", ctx->txid);
         free(ctx);
         return;
     }
     _publishResultRecord(ctx->txid, error);
     if (error) {
-        LOGE("publishTransaction: REJECTED txid=%s error=%d (%s) — the network did not "
+        LOGE("publishTransaction: REJECTED txid=%.12s error=%d (%s) — the network did not "
              "accept this transaction; the wallet still holds it locally",
              ctx->txid, error, strerror(error));
     } else {
-        LOGI("publishTransaction: accepted txid=%s (relayed back by a peer)", ctx->txid);
+        LOGI("publishTransaction: accepted txid=%.12s (relayed back by a peer)", ctx->txid);
     }
     free(ctx);
 }
@@ -172,6 +173,7 @@ NativeBridge_createTransaction(JNIEnv *env, jobject thiz,
                                                              jstring toAddress,
                                                              jlong amountSatoshis,
                                                              jlong feePerKb) {
+    WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
     (void)thiz;
 
     if (!g_wallet) {
@@ -235,6 +237,7 @@ NativeBridge_createTransaction(JNIEnv *env, jobject thiz,
 jbyteArray JNICALL
 NativeBridge_signTransaction(JNIEnv *env, jobject thiz,
                                                            jbyteArray unsignedTx) {
+    WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
     (void)thiz;
 
     if (!g_wallet) {
@@ -320,6 +323,7 @@ NativeBridge_signTransaction(JNIEnv *env, jobject thiz,
 jlongArray JNICALL
 NativeBridge_quoteTransaction(JNIEnv *env, jobject thiz, jbyteArray unsignedTx)
 {
+    WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
     (void)thiz;
     if (!g_wallet || !unsignedTx) return NULL;
 
@@ -350,6 +354,33 @@ NativeBridge_quoteTransaction(JNIEnv *env, jobject thiz, jbyteArray unsignedTx)
     return result;
 }
 
+/* The "<vout>|<satoshis>|<scriptHex>" outputs of unsigned bytes the wallet built, for the review's
+ * check of the payment and change it will ask the owner to approve. The draft carries each input's
+ * scriptPubKey and amount where its signature will go, a form only BRTransactionParse reads: the
+ * review once used getRawTransactionOutputs, which row 9 made network-format only, and every DGB send
+ * stopped at "Transaction not sent" (4.1.2 Wave 10). Never outside bytes. Changes nothing. */
+jobjectArray JNICALL
+NativeBridge_getBuiltTransactionOutputs(JNIEnv *env, jobject thiz, jbyteArray unsignedTx)
+{
+    (void)thiz;
+    if (!unsignedTx) return NULL;
+
+    jsize txLen = (*env)->GetArrayLength(env, unsignedTx);
+    if (txLen <= 0) return NULL;
+    jbyte *txBytes = (*env)->GetByteArrayElements(env, unsignedTx, NULL);
+    if (!txBytes) return NULL;
+    BRTransaction *tx = BRTransactionParse((const uint8_t *)txBytes, (size_t)txLen);
+    (*env)->ReleaseByteArrayElements(env, unsignedTx, txBytes, JNI_ABORT);
+    if (!tx) {
+        LOGE("getBuiltTransactionOutputs: failed to parse transaction");
+        return NULL;
+    }
+
+    jobjectArray result = bridge_transaction_outputs(env, tx, "getBuiltTransactionOutputs");
+    BRTransactionFree(tx);
+    return result;
+}
+
 /* Sign prepared unsigned bytes, or NULL: only the send that was approved -- amountSats to toAddress
  * at approvedFeeSats. Before signing, the bytes' outputs must be exactly that payment plus at most one
  * change output to an address of this wallet, they must pay exactly approvedFeeSats, and they must
@@ -361,6 +392,7 @@ jbyteArray JNICALL
 NativeBridge_signPreparedTransaction(JNIEnv *env, jobject thiz, jbyteArray unsignedTx, jstring toAddress,
                                      jlong amountSats, jlong approvedFeeSats)
 {
+    WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
     (void)thiz;
     if (!g_wallet) {
         LOGW("signPreparedTransaction: wallet not initialized");
@@ -440,7 +472,7 @@ NativeBridge_signPreparedTransaction(JNIEnv *env, jobject thiz, jbyteArray unsig
     jbyteArray result = signedLen ? (*env)->NewByteArray(env, (jsize)signedLen) : NULL;
     if (result) (*env)->SetByteArrayRegion(env, result, 0, (jsize)signedLen, (jbyte *)signedBuf);
     free(signedBuf);
-    LOGD("signPreparedTransaction: signed tx, %zu bytes, fee %lld", signedLen, (long long)approvedFeeSats);
+    LOGD("signPreparedTransaction: signed tx");   /* no size or fee: they identify it on chain (row 30, R7) */
     return result;
 }
 
@@ -467,7 +499,7 @@ NativeBridge_publishTransaction(JNIEnv *env, jobject thiz,
     jbyte *txBytes = (*env)->GetByteArrayElements(env, signedTx, NULL);
     if (!txBytes) return NULL;
 
-    BRTransaction *tx = BRTransactionParse((const uint8_t *)txBytes, (size_t)txLen);
+    BRTransaction *tx = BRTransactionParseSigned((const uint8_t *)txBytes, (size_t)txLen);
     (*env)->ReleaseByteArrayElements(env, signedTx, txBytes, JNI_ABORT);
 
     if (!tx) {
@@ -489,6 +521,7 @@ NativeBridge_publishTransaction(JNIEnv *env, jobject thiz,
      * independent copy, made only when it holds no record of the hash yet; the peer manager is
      * handed the ORIGINAL below and owns it from then on (see _registerWalletCopy). */
     _registerWalletCopy(tx);
+    coin_reservation_release(tx->txHash);   /* the wallet now holds its coins as spent */
 
     /* Publish — BRPeerManagerPublishTx takes ownership of tx, do NOT free it. The context is
        heap-allocated: the callback fires asynchronously on a peer thread AFTER this JNI frame
@@ -499,7 +532,7 @@ NativeBridge_publishTransaction(JNIEnv *env, jobject thiz,
     if (ctx) memcpy(ctx->txid, txidHex, sizeof(ctx->txid));
     BRPeerManagerPublishTx(g_peerManager, tx, ctx, ctx ? _publishResult : NULL);
 
-    LOGD("publishTransaction: submitted txid=%s", txidHex);
+    LOGD("publishTransaction: submitted txid=%.12s", txidHex);
     return (*env)->NewStringUTF(env, txidHex);
 }
 
@@ -530,7 +563,7 @@ NativeBridge_publishTransactionStem(JNIEnv *env, jobject thiz,
     if (txLen <= 0) return NULL;
     jbyte *txBytes = (*env)->GetByteArrayElements(env, signedTx, NULL);
     if (!txBytes) return NULL;
-    BRTransaction *tx = BRTransactionParse((const uint8_t *)txBytes, (size_t)txLen);
+    BRTransaction *tx = BRTransactionParseSigned((const uint8_t *)txBytes, (size_t)txLen);
     (*env)->ReleaseByteArrayElements(env, signedTx, txBytes, JNI_ABORT);
     if (!tx) { LOGE("publishTransactionStem: parse failed"); return NULL; }
 
@@ -542,6 +575,7 @@ NativeBridge_publishTransactionStem(JNIEnv *env, jobject thiz,
     /* The wallet's record before the broadcast (same coherence rule as publishTransaction);
      * the peer manager gets the ORIGINAL — see _registerWalletCopy. */
     _registerWalletCopy(tx);
+    coin_reservation_release(tx->txHash);   /* the wallet now holds its coins as spent */
 
     /* Heap ctx, not stack — the callback is async and fires long after this frame returns.
        A NULL callback would also make the publish invisible to the cancellation path that
@@ -558,9 +592,9 @@ NativeBridge_publishTransactionStem(JNIEnv *env, jobject thiz,
         PublishCtx *floodCtx = calloc(1, sizeof(*floodCtx));
         if (floodCtx) memcpy(floodCtx->txid, txidHex, sizeof(floodCtx->txid));
         BRPeerManagerPublishTx(g_peerManager, tx, floodCtx, floodCtx ? _publishResult : NULL);
-        LOGW("publishTransactionStem: no stem peer at submit — flooded instead (txid=%s)", txidHex);
+        LOGW("publishTransactionStem: no stem peer at submit — flooded instead (txid=%.12s)", txidHex);
     } else {
-        LOGD("publishTransactionStem: stemmed txid=%s", txidHex);
+        LOGD("publishTransactionStem: stemmed txid=%.12s", txidHex);
     }
     return (*env)->NewStringUTF(env, txidHex);
 }
@@ -650,8 +684,8 @@ NativeBridge_removeTransaction(JNIEnv *env, jobject thiz, jstring jtxid) {
             }
             /* Report on what g_wallet holds now, not on which path ran. */
             removed = BRWalletTransactionForHash(g_wallet, h) ? JNI_FALSE : JNI_TRUE;
-            if (removed) LOGI("removeTransaction: dropped %s", txid);
-            else LOGW("removeTransaction: %s is still held by the wallet — reporting not dropped", txid);
+            if (removed) LOGI("removeTransaction: dropped %.12s", txid);
+            else LOGW("removeTransaction: %.12s is still held by the wallet — reporting not dropped", txid);
         }
     }
     (*env)->ReleaseStringUTFChars(env, jtxid, txid);
@@ -664,6 +698,7 @@ NativeBridge_removeTransaction(JNIEnv *env, jobject thiz, jstring jtxid) {
  * hashes (don't act on a tx the wallet doesn't hold). */
 jboolean JNICALL
 NativeBridge_isTransactionValid(JNIEnv *env, jobject thiz, jstring jtxid) {
+    WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
     (void)thiz;
     if (!g_wallet || !jtxid) return JNI_TRUE;
     const char *txid = (*env)->GetStringUTFChars(env, jtxid, NULL);
@@ -677,6 +712,22 @@ NativeBridge_isTransactionValid(JNIEnv *env, jobject thiz, jstring jtxid) {
     }
     (*env)->ReleaseStringUTFChars(env, jtxid, txid);
     return valid;
+}
+
+/* A confirmation height a server reported never confirms by itself (N1/K4): BRPeerManagerApplyServerHeight
+ * refuses a height the wallet's chain does not vouch for, re-checks a block it holds over the peer-to-peer
+ * path (the tx stays pending until a peer's block confirms it), and takes only a checkpoint-pinned height
+ * below everything it holds. Returns 1 only when the tx was confirmed here. Caller holds PEER_GUARD. */
+static int _applyServerHeight(UInt256 txHash, jlong blockHeight, jlong blockTimestamp, const char *who)
+{
+    if (!g_peerManager || blockHeight <= 0 || blockHeight >= (jlong)TX_UNCONFIRMED) return 0;
+    BRServerHeightResult r = BRPeerManagerApplyServerHeight(g_peerManager, txHash, (uint32_t)blockHeight,
+                                                            (uint32_t)blockTimestamp);
+    LOGI("%s: server height %ld -> %s", who, (long)blockHeight,
+         r == BR_SERVER_HEIGHT_TAKEN ? "taken (checkpoint-pinned, below the headers held)" :
+         r == BR_SERVER_HEIGHT_RECHECKING ? "re-checking the block over P2P; stays pending" :
+         "refused: the wallet's chain does not vouch for it; stays pending");
+    return r == BR_SERVER_HEIGHT_TAKEN;
 }
 
 /* ---------- registerRawTransaction ----------
@@ -700,13 +751,14 @@ NativeBridge_registerRawTransaction(JNIEnv *env, jobject thiz,
                                                                   jlong blockHeight,
                                                                   jlong blockTimestamp) {
     (void)thiz;
+    PEER_GUARD();   /* reads g_wallet and g_peerManager, which a restore or startSync can free */
     if (!g_wallet || !rawTx) return JNI_FALSE;
 
     jsize txLen = (*env)->GetArrayLength(env, rawTx);
     jbyte *txBytes = (*env)->GetByteArrayElements(env, rawTx, NULL);
     if (!txBytes || txLen <= 0) return JNI_FALSE;
 
-    BRTransaction *tx = BRTransactionParse((const uint8_t *)txBytes, (size_t)txLen);
+    BRTransaction *tx = BRTransactionParseSigned((const uint8_t *)txBytes, (size_t)txLen);
     (*env)->ReleaseByteArrayElements(env, rawTx, txBytes, JNI_ABORT);
 
     if (!tx) {
@@ -724,36 +776,26 @@ NativeBridge_registerRawTransaction(JNIEnv *env, jobject thiz,
     /* The wallet's record is read from a copy taken under its lock (tx_read_snapshot_kat). */
     BRTransaction *existing = BRWalletCopyTransactionForHash(g_wallet, tx->txHash);
     if (existing) {
-        /* Already registered. If it's stuck UNCONFIRMED and the caller now has
-         * its real confirming height, PROMOTE it rather than skip. This is the
-         * confirmation-reconcile path: a tx first detected while pending (CF
-         * match / mempool relay) can strand at TX_UNCONFIRMED because, in
-         * CF-only mode, the confirming block's cfilter is never re-requested
-         * once the scan window passes it. BRWalletUpdateTransactions sets the
-         * height and re-runs _BRWalletUpdateBalance, which also RELEASES a
-         * withheld DigiDollar/asset credit (a 0-value DD token output is
-         * otherwise held back by the dust-pending gate). No-op when it's already
-         * confirmed or the incoming height is itself unconfirmed. */
+        /* Already registered. A tx first detected while pending can strand at TX_UNCONFIRMED in CF-only
+         * mode, because the confirming block's cfilter is not re-requested once the scan has passed it;
+         * this path is how it gets confirmed. The server's height is not the proof (N1/K4): a block the
+         * wallet holds is re-checked over P2P and confirms through the normal solicited delivery (which
+         * also releases a withheld DigiDollar/asset credit); see _applyServerHeight. */
         int promoted = JNI_FALSE;
-        if (existing->blockHeight == TX_UNCONFIRMED &&
-            (uint32_t)blockHeight != TX_UNCONFIRMED && blockHeight > 0) {
-            UInt256 h = existing->txHash;
-            /* A server's height, not one this wallet proved: the record stays signature-checked. */
-            BRWalletUpdateTransactionsUnproven(g_wallet, &h, 1,
-                                               (uint32_t)blockHeight, (uint32_t)blockTimestamp);
-            LOGI("registerRawTransaction: promoted stuck-pending tx to height=%ld ts=%ld",
-                 (long)blockHeight, (long)blockTimestamp);
-            promoted = JNI_TRUE;
+        if (existing->blockHeight == TX_UNCONFIRMED) {
+            promoted = _applyServerHeight(existing->txHash, blockHeight, blockTimestamp, "registerRawTransaction")
+                       ? JNI_TRUE : JNI_FALSE;
         } else {
-            LOGD("registerRawTransaction: duplicate (already confirmed / incoming unconfirmed), skipping");
+            LOGD("registerRawTransaction: duplicate (already confirmed), skipping");
         }
         BRTransactionFree(existing);
         BRTransactionFree(tx);
         return promoted;
     }
 
-    tx->blockHeight = (uint32_t)blockHeight;
-    tx->timestamp = (uint32_t)blockTimestamp;
+    /* Registered unconfirmed; the server's height is applied after, through the same rule (N1/K4). */
+    tx->blockHeight = TX_UNCONFIRMED;
+    tx->timestamp = 0;
 
     UInt256 txHash = tx->txHash;
     /* The height is the server's, not proven by this wallet: the tx's signatures on wallet coins are
@@ -768,8 +810,8 @@ NativeBridge_registerRawTransaction(JNIEnv *env, jobject thiz,
         LOGW("registerRawTransaction: tx not associated with wallet");
         return JNI_FALSE;
     }
-    LOGI("registerRawTransaction: registered tx at height=%ld ts=%ld",
-         (long)blockHeight, (long)blockTimestamp);
+    LOGI("registerRawTransaction: registered tx (server height %ld)", (long)blockHeight);
+    _applyServerHeight(txHash, blockHeight, blockTimestamp, "registerRawTransaction");
     return JNI_TRUE;
 }
 
@@ -790,8 +832,9 @@ NativeBridge_confirmTransaction(JNIEnv *env, jobject thiz,
                                                              jlong blockHeight,
                                                              jlong blockTimestamp) {
     (void)thiz;
+    PEER_GUARD();   /* reads g_wallet and g_peerManager, which a restore or startSync can free */
     if (!g_wallet || !txHashHex) return JNI_FALSE;
-    if ((uint32_t)blockHeight == TX_UNCONFIRMED || blockHeight <= 0) return JNI_FALSE;
+    if (blockHeight <= 0 || blockHeight >= (jlong)TX_UNCONFIRMED) return JNI_FALSE;
 
     const char *hashStr = (*env)->GetStringUTFChars(env, txHashHex, NULL);
     if (!hashStr) return JNI_FALSE;
@@ -804,12 +847,7 @@ NativeBridge_confirmTransaction(JNIEnv *env, jobject thiz,
         int pending = existing && existing->blockHeight == TX_UNCONFIRMED;
         if (existing) BRTransactionFree(existing);
         if (pending) {
-            /* A server's height, not one this wallet proved: the record stays signature-checked. */
-            BRWalletUpdateTransactionsUnproven(g_wallet, &h, 1,
-                                               (uint32_t)blockHeight, (uint32_t)blockTimestamp);
-            LOGI("confirmTransaction: promoted %s to height=%ld ts=%ld",
-                 hashStr, (long)blockHeight, (long)blockTimestamp);
-            promoted = JNI_TRUE;
+            promoted = _applyServerHeight(h, blockHeight, blockTimestamp, "confirmTransaction") ? JNI_TRUE : JNI_FALSE;
         }
     }
     (*env)->ReleaseStringUTFChars(env, txHashHex, hashStr);
@@ -858,6 +896,7 @@ NativeBridge_isValidDigiDollarAddress(JNIEnv *env, jobject thiz, jstring addr) {
  * classifier (DD version-marker + OP_RETURN type push). */
 jint JNICALL
 NativeBridge_digiDollarTxType(JNIEnv *env, jobject thiz, jstring txHashHex) {
+    WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
     (void)thiz;
     if (! g_wallet || ! txHashHex) return 0;
     const char *hashStr = (*env)->GetStringUTFChars(env, txHashHex, NULL);
@@ -911,6 +950,7 @@ static int _ddEventSpendsWallet(void *ctx, const BRTxInput *input, int64_t *ddCe
  * not hold the transaction. */
 jlongArray JNICALL
 NativeBridge_digiDollarEvent(JNIEnv *env, jobject thiz, jstring txHashHex) {
+    WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
     (void)thiz;
     if (! g_wallet || ! txHashHex) return NULL;
     const char *hashStr = (*env)->GetStringUTFChars(env, txHashHex, NULL);
@@ -968,6 +1008,7 @@ static int _ddRecipientKey(JNIEnv *env, jstring tdAddress, uint8_t key[32])
 jlongArray JNICALL
 NativeBridge_previewDigiDollar(JNIEnv *env, jobject thiz, jstring tdAddress, jlong cents)
 {
+    WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
     (void)thiz;
     if (! g_wallet) { LOGW("previewDigiDollar: wallet not initialized"); return NULL; }
     if (! tdAddress || cents <= 0) return NULL;
@@ -1046,6 +1087,7 @@ NativeBridge_sendApprovedDigiDollar(JNIEnv *env, jobject thiz, jstring tdAddress
      * publishTransactionStem) use: the wallet keeps its own record, the publisher is handed the
      * ORIGINAL. See _registerWalletCopy. */
     _registerWalletCopy(tx);
+    coin_reservation_release(tx->txHash);   /* the wallet now holds its coins as spent */
 
     /* Non-NULL callback: see _publishResult -- NULL makes the publish invisible to the
        cancellation path and it never leaves publishedTx. */
@@ -1053,6 +1095,6 @@ NativeBridge_sendApprovedDigiDollar(JNIEnv *env, jobject thiz, jstring tdAddress
     if (ctx) memcpy(ctx->txid, txidHex, sizeof(ctx->txid));
     BRPeerManagerPublishTx(g_peerManager, tx, ctx, ctx ? _publishResult : NULL);   /* owns the original; do NOT free tx */
 
-    LOGD("sendApprovedDigiDollar: submitted txid=%s, fee %lld", txidHex, (long long)approvedFeeSats);
+    LOGD("sendApprovedDigiDollar: submitted");   /* no txid or fee (row 30, R7) */
     return (*env)->NewStringUTF(env, txidHex);
 }

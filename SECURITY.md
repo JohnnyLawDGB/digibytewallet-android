@@ -22,8 +22,9 @@ verdict within 7 business days.
 
 ## Bug Bounty Program
 
-Verifiable security vulnerabilities in the latest release are eligible
-for cash rewards in DGB, up to **100,000 DGB** for critical findings.
+Verifiable security vulnerabilities in the bounty target release, and in
+the DigiScope services the app uses, are eligible for rewards in DGB, up to
+**100,000 DGB** for critical findings.
 
 See [BUG-BOUNTY.md](./BUG-BOUNTY.md) for:
 
@@ -35,13 +36,14 @@ See [BUG-BOUNTY.md](./BUG-BOUNTY.md) for:
 
 ## Supported Versions
 
-| Version | Status |
-|---------|--------|
-| latest released tag | ✅ supported, in scope |
-| any earlier tag | ❌ not supported, please upgrade and re-test |
+The bounty covers **one named release, the bounty target**, stated at the top of
+[BUG-BOUNTY.md](./BUG-BOUNTY.md). It holds still while you work, and the previous
+target stays in scope for 14 days after it moves. BUG-BOUNTY.md is the only
+statement of that rule; this file does not restate it.
 
-The latest tag is always linked at
-<https://github.com/JohnnyLawDGB/aroundtheblock-wallet-releases/releases/latest> (DigiByte Mobile; the `digibytewallet-android` releases page is the retired io.digibyte app's).
+Releases are published at
+<https://github.com/JohnnyLawDGB/aroundtheblock-wallet-releases/releases> (the
+`digibytewallet-android` releases page belongs to the retired io.digibyte app).
 
 ## Scope Quick Reference
 
@@ -52,7 +54,10 @@ The latest tag is always linked at
 - Android application code (Kotlin + native)
 - Key management and storage (Android Keystore, BIP39 seed handling)
 - Transaction building and signing
-- Network communication (SPV peers, IPFS, digiscope.me API)
+- Network communication (SPV peers, IPFS, and the app's own calls to `api.digiscope.me`)
+- The DigiScope services the app uses (`api.digiscope.me`) on the server side:
+  sign-in and sessions, account takeover, access to another user's data, and
+  anything that moves value the service holds (see BUG-BOUNTY.md)
 - Address validation and derivation
 - DigiAsset decoder, M3 parent-walk, asset send flow
 - Tor integration

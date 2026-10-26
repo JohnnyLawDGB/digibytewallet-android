@@ -23,7 +23,7 @@
     <string name="onb_create">Create New Wallet</string>
     <string name="onb_recover">Recover Existing Wallet</string>
     <string name="onb_footer">Independent wallet for the DigiByte (DGB) network</string>
-    <string name="app_name_display">ATB Wallet for DigiByte (DGB)</string>
+    <string name="app_name_display">HoldFast Wallet</string>
 
     <!-- ── Seed display ─────────────────────────────────────────────────────────── -->
     <!-- WARNING: "cannot be recovered" is the whole point. Do not soften it. -->
@@ -99,7 +99,7 @@
     <!-- Appended to battery_body on Samsung devices only. Device Care, Battery and the quoted
          setting name are Samsung\'s own UI labels - match the wording Samsung ships in that
          language, or the user cannot find the screen being described. -->
-    <string name="battery_body_samsung">\n\nOn Samsung, also open Device Care → Battery → \"Never sleeping apps\" and add ATB Wallet.</string>
+    <string name="battery_body_samsung">\n\nOn Samsung, also open Device Care → Battery → \"Never sleeping apps\" and add HoldFast Wallet.</string>
     <string name="battery_open_settings">Open settings</string>
 
     <!-- ── Tor prompt ───────────────────────────────────────────────────────────── -->
@@ -502,7 +502,7 @@
     <string name="ni_exclusive_sub">Sync solely through your node. If it goes offline the wallet has no other peers until you re-enable public peers.</string>
 
     <!-- ── About ────────────────────────────────────────────────────────────────── -->
-    <string name="ab_powered_by">Powered by DigiByte Core 9.26</string>
+    <string name="ab_powered_by">Works with DigiByte Core 9.26 nodes</string>
     <string name="ab_wallet_info">Wallet Info</string>
     <string name="ab_wallet_type">Wallet Type</string>
     <string name="ab_hd_path">HD Path</string>
@@ -593,6 +593,12 @@
     <!-- WARNING: the only signal that credentials may be intercepted. -->
     <string name="did_insecure_body">This site uses HTTP, not HTTPS. Your authentication may be intercepted.</string>
     <string name="did_callback_url">Callback URL</string>
+    <string name="did_identity_title">Which sign-in does this site know?</string>
+    <string name="did_identity_hint">Restored this wallet? Pick the identity you used on this site before. Once a sign-in works, the wallet remembers it.</string>
+    <string name="did_identity_per_site">Separate key for this site (original DigiByte app)</string>
+    <string name="did_identity_shared">Shared key for all sites (DigiByte wallet 3.x–4.0.76)</string>
+    <string name="did_identity_shared_note">The same on every site, so sites can link your sign-ins. Choose it only if this site knew you by it.</string>
+    <string name="did_identity_address">Address: %1$s</string>
     <string name="did_approve">Approve</string>
     <string name="did_deny">Deny</string>
     <string name="did_success">Authentication Successful</string>
@@ -655,9 +661,8 @@
     <string name="ab_core_value">9.26 (SPV node)</string>
     <string name="ab_mit">This software is provided under the MIT License.</string>
     <string name="ab_tagline">DigiByte is a decentralized blockchain and digital currency.</string>
-    <!-- Publisher disclaimer on the About screen. Around The Block LLC, DigiByte Foundation, DigiByte Alliance and DigiByte-Core are names: keep them in Latin script, untranslated. -->
-    <string name="ab_disclaimer">Independent wallet by Around The Block LLC; not affiliated with or endorsed by the DigiByte Foundation, DigiByte Alliance or DigiByte-Core.</string>
-    <string name="ab_website">Around The Block website</string>
+    <!-- Publisher disclaimer on the About screen. Around The Block LLC and DigiByte are names: keep them in Latin script, untranslated. -->
+    <string name="ab_disclaimer">Independent wallet by Around The Block LLC. Not an official DigiByte app.</string>
 
     <!-- ── Activity list row ────────────────────────────────────────────────────────
          The most-read component in the app: every transaction on the home screen. -->
@@ -727,6 +732,7 @@
     <string name="rf_dd_fee_floor">Needs %1$s for the network fee: this wallet has %2$s.</string>
     <string name="rf_dd_found">%1$s in DigiDollar found</string>
     <string name="rf_dd_moved">%1$s in DigiDollar moved into this wallet</string>
+    <string name="rf_dd_sent_unrelayed">%1$s in DigiDollar was sent, but the network has not confirmed it yet. Keep your old recovery phrase until it shows in this wallet.</string>
     <string name="rf_dd_left_behind">%1$s in DigiDollar was left behind: it could not be moved</string>
     <string name="rf_dd_unreachable">DigiDollar could not be checked, so this wallet may hold some</string>
     <!-- Transfer-rule gate: assets issued with rules (royalty, deflation, …) must not be sent by
@@ -792,7 +798,7 @@
     <string name="restore_scan_title">Restore privately</string>
     <string name="restore_scan_body">After you continue, this phone finds your wallet\'s transactions itself: native (dgb1q…), legacy (D…), Taproot and DigiDollar addresses, without sending your addresses to anyone.</string>
     <string name="restore_other_title">Phrase from a different wallet app?</string>
-    <string name="restore_other_body">Coinomi, Ledger, Trezor and some older wallets keep coins on address formats this wallet does not use, so sync cannot see them. A check can find them, but it sends the addresses your phrase derives to DigiScope (api.digiscope.me), which reports any funds on them. Not needed for a phrase from ATB Wallet or the older DigiByte app. You can also run it later from Settings → Recover funds.</string>
+    <string name="restore_other_body">Coinomi, Ledger, Trezor and some older wallets keep coins on address formats this wallet does not use, so sync cannot see them. A check can find them, but it sends the addresses your phrase derives to DigiScope (api.digiscope.me), which reports any funds on them. Not needed for a phrase from HoldFast Wallet or the older DigiByte app. You can also run it later from Settings → Recover funds.</string>
     <string name="restore_other_check">Check other formats</string>
     <string name="restore_scan_deriving">Deriving addresses…</string>
     <string name="restore_scan_duration">This can take 30-90 seconds depending on the node.</string>
@@ -836,4 +842,7 @@
     <string name="seedview_pass_unreadable_body">The passphrase of this wallet could not be read just now. Your recovery words alone may not restore this wallet, so they are not shown until the passphrase can be shown with them. Try again.</string>
     <string name="seedview_pass_retry">Try again</string>
     <!-- /pkg E2-keys -->
+    <string name="pinstore_title">Your PIN can\'t be checked right now</string>
+    <string name="pinstore_body">The phone\'s secure key store did not open, so the wallet stays locked. Nothing has been deleted. Close the app and open it again. If this keeps happening, restart the phone; your recovery phrase still restores the wallet on any device.</string>
+    <string name="pinstore_close">Close the app</string>
 </resources>

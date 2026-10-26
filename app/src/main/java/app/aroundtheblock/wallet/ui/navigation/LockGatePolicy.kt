@@ -11,6 +11,9 @@ import app.aroundtheblock.wallet.core.WalletState
 private val PRE_WALLET_ROUTES = setOf(
     "onboarding", "seed_display", "seed_verify", "seed_passphrase", "mnemonic_input",
     "recovery_scan", "recovery_date", "pin_setup", "unlock",
+    // Shows no wallet, and with the store unreadable the lock counts a PIN as set (pinAssumedForLock): re-gated
+    // to unlock, whose PIN reads throw on that store, it crashed every launch (4.1.2 row 23).
+    PIN_STORE_UNAVAILABLE_ROUTE,
 )
 
 /**
@@ -80,3 +83,53 @@ fun routeToResumeAfterUnlock(interrupted: String?): String? = when (interrupted)
     "settings_view_seed" -> "settings_security"
     else -> interrupted?.takeIf { it in RESUMABLE_AFTER_UNLOCK }
 }
+
+/** The Digi-ID confirm route; its one argument is the login URI. */
+const val DIGIID_CONFIRM_ROUTE = "digiid_confirm/{uri}"
+
+/**
+ * The Digi-ID login to keep through an unlock, or null (4.1.2 row 35). A digiid:// link opened from a
+ * website or another app while the wallet is locked lands on the confirm screen, which the lock then
+ * replaced with the unlock screen: the login was dropped and the user had to open the link again.
+ * Kept, it is handed back as the pending link and opens once the unlock reaches the wallet. Nothing
+ * is signed on the way: the confirm screen still needs Approve and the spend check.
+ */
+fun digiIdLinkToKeep(interrupted: String?, loginUri: String?): String? =
+    loginUri?.takeIf { interrupted == DIGIID_CONFIRM_ROUTE && it.startsWith("digiid://") }
+
+/**
+ * The pending Digi-ID link to open now, or null (4.1.2 row 36). A link opens on the wallet screen
+ * only. It used to be looked at only when the route changed to the wallet, so a link that arrived
+ * while the wallet screen was already showing -- a login QR scanned with the camera while the app
+ * sat on its home screen -- waited, unopened, until the user left the screen and came back. The
+ * caller therefore keys on the pending link as well as the route. Only an unlocked wallet opens it
+ * (review R11): on a warm resume the link and the lock arrive together, and the confirm screen was
+ * pushed over the unlock screen for a frame before the lock pulled it back.
+ */
+fun digiIdLinkToOpen(route: String?, pending: String?, unlocked: Boolean): String? =
+    pending?.takeIf { unlocked && route == WALLET_ROUTE && it.startsWith("digiid://") }
+
+/** The wallet's home route ([Screen.Wallet]). */
+const val WALLET_ROUTE = "wallet"
+
+/** The route shown when the PIN store cannot be opened (4.1.2 row 23). */
+const val PIN_STORE_UNAVAILABLE_ROUTE = "pin_store_unavailable"
+
+/**
+ * Where the app starts. A wallet whose PIN store cannot be read -- the store could not be opened, or
+ * asking it whether a PIN is set throws -- starts on [PIN_STORE_UNAVAILABLE_ROUTE]: it is never read as
+ * "no PIN", which routed a locked wallet to pin_setup, where anyone holding the phone could set a new one.
+ * [hasPin] is asked only when the store is available; a throw counts as unreadable.
+ */
+fun startDestinationFor(walletState: WalletState, storeAvailable: Boolean, hasPin: () -> Boolean): StartDecision {
+    if (walletState is WalletState.NoWallet) return StartDecision("onboarding", restoreForLostPin = false)
+    val pinSet: Boolean? = if (!storeAvailable) null else try { hasPin() } catch (_: Exception) { null }
+    return when {
+        pinSet == null -> StartDecision(PIN_STORE_UNAVAILABLE_ROUTE, restoreForLostPin = false)
+        walletState is WalletState.Locked -> if (pinSet) StartDecision("unlock", false) else StartDecision("pin_setup", true)
+        else -> if (pinSet) StartDecision(Screen.Wallet.route, false) else StartDecision("pin_setup", false)
+    }
+}
+
+/** [route] to start on, and whether pin_setup must first restore the wallet from disk (the lost-PIN branch). */
+data class StartDecision(val route: String, val restoreForLostPin: Boolean)

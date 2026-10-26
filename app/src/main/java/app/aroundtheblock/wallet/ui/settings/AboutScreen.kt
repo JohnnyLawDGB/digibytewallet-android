@@ -83,7 +83,7 @@ fun AboutScreen(navController: NavController) {
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Image(
-                            painter = painterResource(id = R.drawable.atb_logo),
+                            painter = painterResource(id = R.drawable.holdfast_logo),
                             contentDescription = stringResource(R.string.app_name),
                             modifier = Modifier.size(64.dp)
                         )
@@ -202,12 +202,22 @@ fun AboutScreen(navController: NavController) {
                         onClick = { openUrl("https://github.com/JohnnyLawDGB/digibytewallet-android/blob/phase1-modernization/LICENSE") }
                     )
                     SettingsRowDivider()
+                    // The DigiScope site (Hub, explorer), then the publisher's. Both labels are names,
+                    // shown untranslated like DigiByte and DGB.
                     AboutLinkRow(
                         icon = Icons.Default.Language,
+                        iconTint = Color(0xFF5B8CFF),
+                        label = "DigiScope",
+                        subtitle = "digiscope.me",
+                        onClick = { openUrl("https://digiscope.me") }
+                    )
+                    SettingsRowDivider()
+                    AboutLinkRow(
+                        icon = Icons.Default.Business,
                         iconTint = Color(0xFFF06A1D),
-                        label = stringResource(R.string.ab_website),
+                        label = "Around The Block",
                         subtitle = "aroundtheblock.us",
-                        onClick = { openUrl("https://www.aroundtheblock.us/") }
+                        onClick = { openUrl("https://www.aroundtheblock.us") }
                     )
                     SettingsRowDivider()
                     AboutLinkRow(

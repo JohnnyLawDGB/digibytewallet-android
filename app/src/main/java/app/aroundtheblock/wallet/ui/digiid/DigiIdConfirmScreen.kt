@@ -8,6 +8,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -19,12 +20,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.aroundtheblock.wallet.core.digiid.DigiIdManager
+import app.aroundtheblock.wallet.core.digiid.IdentityKeyKind
 import app.aroundtheblock.wallet.core.model.DigiIdRequest
 import app.aroundtheblock.wallet.core.model.DigiIdResult
 import app.aroundtheblock.wallet.ui.components.rememberSpendAuth
@@ -63,6 +67,9 @@ fun DigiIdConfirmScreen(
 
     val authResult by viewModel.authResult.collectAsStateWithLifecycle()
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
+    val identityChoice by viewModel.identityChoice.collectAsStateWithLifecycle()
+    val selectedIdentity by viewModel.selectedIdentity.collectAsStateWithLifecycle()
+    LaunchedEffect(request.rawUri) { viewModel.loadIdentityChoice(request) }
 
     // When we get a result, hand off to the result sub-screen
     val result = authResult
@@ -107,6 +114,9 @@ fun DigiIdConfirmScreen(
                         ConfirmContent(
                             request = request,
                             isLoading = isLoading,
+                            identityChoice = identityChoice,
+                            selectedIdentity = selectedIdentity,
+                            onSelectIdentity = viewModel::selectIdentity,
                             onApprove = {
                                 coroutineScope.launch {
                                     val fragmentActivity = context as? androidx.fragment.app.FragmentActivity
@@ -155,6 +165,9 @@ fun DigiIdConfirmScreen(
 private fun ConfirmContent(
     request: DigiIdRequest,
     isLoading: Boolean,
+    identityChoice: DigiIdManager.IdentityChoice?,
+    selectedIdentity: IdentityKeyKind,
+    onSelectIdentity: (IdentityKeyKind) -> Unit,
     onApprove: () -> Unit,
     onDeny: () -> Unit
 ) {
@@ -261,6 +274,11 @@ private fun ConfirmContent(
             }
         }
 
+        if (identityChoice != null) {
+            Spacer(modifier = Modifier.height(16.dp))
+            IdentityChoiceCard(identityChoice, selectedIdentity, onSelectIdentity, enabled = !isLoading)
+        }
+
         Spacer(modifier = Modifier.height(32.dp))
 
         // Action buttons
@@ -307,6 +325,92 @@ private fun ConfirmContent(
         Spacer(modifier = Modifier.height(24.dp))
     }
 }
+
+/**
+ * Which identity to sign in with, offered only for a site with no successful login on record
+ * (4.1.2 row 16): a restored wallet cannot know which one the site bound. Each option shows the
+ * address the site would see, so a user can match it against their account there.
+ */
+@Composable
+private fun IdentityChoiceCard(
+    choice: DigiIdManager.IdentityChoice,
+    selected: IdentityKeyKind,
+    onSelect: (IdentityKeyKind) -> Unit,
+    enabled: Boolean,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(10.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Text(
+                text = stringResource(R.string.did_identity_title),
+                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = stringResource(R.string.did_identity_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            IdentityOption(
+                label = stringResource(R.string.did_identity_per_site),
+                address = choice.perSiteAddress,
+                isSelected = selected == IdentityKeyKind.PER_SITE,
+                enabled = enabled,
+                onClick = { onSelect(IdentityKeyKind.PER_SITE) }
+            )
+            IdentityOption(
+                label = stringResource(R.string.did_identity_shared),
+                address = choice.sharedAddress,
+                isSelected = selected == IdentityKeyKind.LEGACY,
+                enabled = enabled,
+                onClick = { onSelect(IdentityKeyKind.LEGACY) }
+            )
+            Text(
+                text = stringResource(R.string.did_identity_shared_note),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 48.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun IdentityOption(
+    label: String,
+    address: String,
+    isSelected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .selectable(selected = isSelected, enabled = enabled, role = Role.RadioButton, onClick = onClick)
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        RadioButton(selected = isSelected, onClick = null, enabled = enabled)
+        Spacer(modifier = Modifier.width(8.dp))
+        Column {
+            Text(text = label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
+            Text(
+                text = stringResource(R.string.did_identity_address, shortAddress(address)),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+/** First 8 and last 6 characters: enough to match the address a site shows for an account. */
+private fun shortAddress(address: String): String =
+    if (address.length <= 16) address else address.take(8) + '\u2026' + address.takeLast(6)
 
 @Composable
 private fun ResultContent(

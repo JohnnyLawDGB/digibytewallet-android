@@ -56,7 +56,7 @@ static inline size_t deserialize_saved_transactions_guarded(const uint8_t *buf, 
         if (txSize > len - pos) break;   /* pos <= len holds here (loop condition) */
 #endif
 
-        BRTransaction *tx = BRTransactionParse(&buf[pos], txSize);
+        BRTransaction *tx = BRTransactionParseSigned(&buf[pos], txSize);
         pos += txSize;
 
         if (tx) {

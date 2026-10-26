@@ -118,18 +118,44 @@ class RecoveryScanService(
      * than part of a batch.
      */
     private suspend fun scanDigiDollar(seedBytes: ByteArray): DigiDollarScan.Result? {
-        val lines = app.aroundtheblock.wallet.core.bridge.NativeBridge.deriveDigiDollarAddresses(
-            seedBytes, ddGapExternal, ddGapInternal,
-        ) ?: return null
-        val addresses = DigiDollarAddress.parseAll(lines)
-        if (addresses.isEmpty()) return null
+        // Each chain's window widens while its far end is in use (DigiDollarGapWindow): DigiDollar
+        // change walks the internal chain one index per send, past any fixed window (4.1.2 row 19).
+        // Lookups are asked once per address, however many times the window grows.
+        val asked = HashMap<String, app.aroundtheblock.wallet.core.reconcile.DigiDollarHoldingResult?>()
+        var external = ddGapExternal
+        var internal = ddGapInternal
+        while (true) {
+            val lines = app.aroundtheblock.wallet.core.bridge.NativeBridge.deriveDigiDollarAddresses(
+                seedBytes, external, internal,
+            ) ?: return null
+            val addresses = DigiDollarAddress.parseAll(lines)
+            if (addresses.isEmpty()) return null
 
-        return DigiDollarScan.assemble(
-            addresses = addresses,
-            holdingFor = { utxoSource.fetchDigiDollar(it.ddAddress) },
-            outputsFor = { utxoSource.fetchOutputs(it) },
-            inputsFor = { utxoSource.fetchInputs(it) },
-        )
+            val used = HashSet<DigiDollarAddress>()
+            val result = DigiDollarScan.assemble(
+                addresses = addresses,
+                holdingFor = { a ->
+                    val h = if (a.ddAddress in asked) asked[a.ddAddress]
+                        else utxoSource.fetchDigiDollar(a.ddAddress).also { asked[a.ddAddress] = it }
+                    if (h != null && h.txids.isNotEmpty()) used += a
+                    h
+                },
+                outputsFor = { utxoSource.fetchOutputs(it) },
+                inputsFor = { utxoSource.fetchInputs(it) },
+            )
+            val usedExternal = used.filter { it.chain == 0 }.maxOfOrNull { it.index }
+            val usedInternal = used.filter { it.chain == 1 }.maxOfOrNull { it.index }
+            val nextExternal = DigiDollarGapWindow.next(external, usedExternal, ddGapExternal)
+            val nextInternal = DigiDollarGapWindow.next(internal, usedInternal, ddGapInternal)
+            if (nextExternal == external && nextInternal == internal) {
+                // Stopped by the cap rather than by a gap past the last use: not a finished answer.
+                val capped = DigiDollarGapWindow.capped(usedExternal, ddGapExternal) ||
+                    DigiDollarGapWindow.capped(usedInternal, ddGapInternal)
+                return if (capped) result.copy(reachable = false) else result
+            }
+            external = nextExternal
+            internal = nextInternal
+        }
     }
 
     private val _state = MutableStateFlow<State>(State.Idle)
@@ -195,7 +221,11 @@ class RecoveryScanService(
                     // worse, makes the sweep spend the same input twice — invalid by consensus,
                     // so the whole transaction is rejected for a reason that points nowhere near
                     // a duplicated JSON row.
-                    utxos = UtxoDedup.byOutpoint(fetched?.utxos ?: emptyList()),
+                    // On the taproot chain a zero-value output is a DigiDollar token output, which the
+                    // DigiDollar path recovers (DigiDollarScan); as a plain coin it would only make the
+                    // sweep refuse the whole profile ("non-positive amount"). 4.1.2 row 34.
+                    utxos = UtxoDedup.byOutpoint(fetched?.utxos ?: emptyList())
+                        .filter { profile.addressFormat != DerivationProfile.P2TR || it.amountSatoshi > 0L },
                     rawTxs = fetched?.rawTxs ?: emptyMap(),
                     reachableBackend = fetched != null,
                 )

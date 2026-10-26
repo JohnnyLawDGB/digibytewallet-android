@@ -30,6 +30,7 @@ import app.aroundtheblock.wallet.ui.theme.DigiByteAccent
 import app.aroundtheblock.wallet.ui.theme.DigiByteBlue
 import app.aroundtheblock.wallet.ui.theme.DigiByteGreen
 import app.aroundtheblock.wallet.ui.util.openExternalUrl
+import app.aroundtheblock.wallet.ui.components.keyboardPadding
 
 @Composable
 fun ProfileScreen(
@@ -245,7 +246,7 @@ private fun RegisterHandleContent(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .imePadding()
+            .keyboardPadding()
             .verticalScroll(rememberScrollState())
             .padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)

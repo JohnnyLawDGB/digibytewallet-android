@@ -177,6 +177,14 @@ NativeBridge_mnemonicToSeed(
         }
         if (passLen > 0) (*env)->GetByteArrayRegion(env, passphrase, 0, passLen, (jbyte *)passCopy);
         passCopy[passLen] = '\0';
+#ifndef BIP39_NUL_UNFIXED
+        /* As in jni_wallet.c's passphrase_copy: an embedded NUL is refused, never truncated (4.1.2 row 25). */
+        if (passLen > 0 && memchr(passCopy, 0, (size_t)passLen) != NULL) {
+            secure_zero(phraseCopy, sizeof(phraseCopy));
+            secure_zero(passCopy, sizeof(passCopy));
+            return NULL;
+        }
+#endif
     }
 
     uint8_t seed[64];
@@ -204,7 +212,7 @@ NativeBridge_mnemonicToSeed(
  *       prefixPath: IntArray,        // [44|HARD, 20|HARD, 0|HARD] for BIP44 DGB
  *       gapExternal: Int,            // count of 0/i addresses to return
  *       gapInternal: Int,            // count of 1/i addresses to return
- *       addressFormat: Int           // 0=P2PKH, 1=P2WPKH, 2=P2SH-P2WPKH
+ *       addressFormat: Int           // 0=P2PKH, 1=P2WPKH, 2=P2SH-P2WPKH, 3=P2TR (BIP86)
  *   ): Array<String>
  *
  * Returns external[0..gapExternal-1] followed by internal[0..gapInternal-1].
@@ -224,7 +232,9 @@ NativeBridge_deriveAddresses(
     (void)thiz;
     if (!seedBytes || !hmacKey || !prefixPath) return NULL;
     if (gapExternal < 0 || gapInternal < 0) return NULL;
-    if (addressFormat < 0 || addressFormat > 2) return NULL;
+    /* 3 (P2TR) since 4.1.2 row 34: Recover funds scans m/86'/20'/0', the taproot addresses Receive hands
+     * out; pubkey_to_address writes the BIP86 key-path address from the public key alone. */
+    if (addressFormat < 0 || addressFormat > 3) return NULL;
 
     const jsize seedLen = (*env)->GetArrayLength(env, seedBytes);
     jbyte *seedRaw = (*env)->GetByteArrayElements(env, seedBytes, NULL);

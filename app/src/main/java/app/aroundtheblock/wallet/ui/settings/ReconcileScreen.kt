@@ -36,6 +36,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.NumberFormat
 import java.util.Locale
+import app.aroundtheblock.wallet.ui.components.keyboardPadding
 
 @EntryPoint
 @InstallIn(SingletonComponent::class)
@@ -102,7 +103,7 @@ fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .imePadding()
+                .keyboardPadding()
                 .verticalScroll(rememberScrollState())
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)

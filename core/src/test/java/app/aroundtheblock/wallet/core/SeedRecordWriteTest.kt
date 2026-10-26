@@ -56,6 +56,7 @@ class SeedRecordWriteTest {
         "encrypted_seed", "encrypted_seed_iv", "encrypted_seed_v2", "encrypted_seed_iv_v2",
         "encrypted_pass", "encrypted_pass_iv", "encrypted_pass_v2", "encrypted_pass_iv_v2",
         "wallet_creation_time", "seed_fingerprint_v2", "seed_record_version", "seed_has_passphrase",
+        "wallet_origin",
     )
 
     private inner class Harness(authBound: Boolean = true) {
@@ -144,6 +145,42 @@ class SeedRecordWriteTest {
         assertTrue("the recovered record carries no version marker", held.containsKey("seed_record_version"))
         assertEquals("the recovered record does not say the wallet has no passphrase", false, held["seed_has_passphrase"])
         assertEquals(1_600_000_000L, held["wallet_creation_time"])
+    }
+
+    // 4.1.2 row 16: the record says how the wallet came to be here, in the same one write, so a
+    // wallet created on this device is never offered the shared Digi-ID identity.
+    @Test fun `a created wallet's record says it was created here and offers no shared identity`() {
+        val h = Harness()
+        val wm = h.walletManager()
+        assertTrue(wm.createWallet(phrase, null))
+        assertEquals("created", h.seedStore.inner.durable["wallet_origin"])
+        assertTrue("the origin is not part of the one record write", "wallet_origin" in h.recordWrites.single().keys)
+        assertFalse(wm.mayHaveDigiIdHistoryElsewhere())
+        assertFalse("the next process forgets the origin", h.walletManager(reopened(h.seedStore.inner)).mayHaveDigiIdHistoryElsewhere())
+    }
+
+    @Test fun `a recovered wallet's record says it was restored`() {
+        val h = Harness()
+        val wm = h.walletManager()
+        assertTrue(wm.recoverWallet(phrase, 1_600_000_000L, null))
+        assertEquals("restored", h.seedStore.inner.durable["wallet_origin"])
+        assertTrue(wm.mayHaveDigiIdHistoryElsewhere())
+    }
+
+    @Test fun `a record from before the origin field may have history elsewhere`() {
+        val h = Harness()
+        h.unversionedSeedOnly()
+        assertTrue(h.walletManager().mayHaveDigiIdHistoryElsewhere())
+    }
+
+    // 4.1.2 row 25: a NUL never reaches the native derivation, whichever caller passes it.
+    @Test fun `a passphrase with an embedded NUL creates and recovers nothing`() {
+        val h = Harness()
+        val nul = "abc\u0000evil".toByteArray(Charsets.UTF_8)
+        assertFalse(h.walletManager().createWallet(phrase, nul))
+        assertFalse(h.walletManager().recoverWallet(phrase, 1_600_000_000L, nul))
+        assertTrue("the seed was derived with a truncated passphrase", h.derivedWith.isEmpty())
+        assertFalse(h.walletManager().hasSavedWallet())
     }
 
     /** A record written before this change by a write that did not finish: the seed, nothing after it. */

@@ -34,50 +34,50 @@ class AutoLockPolicyTest {
 
     @Test
     fun `unlocked and idle past the timeout locks`() {
-        assertTrue(shouldAutoLock(WalletState.Unlocked, hasPin = true, lastInteractionMs = 1_000L, nowMs = 61_000L, timeoutMs = timeout))
+        assertTrue(shouldAutoLock(WalletState.Unlocked, hasPin = true, lastInteractionMs = 1_000L, unlockedAtMs = 0L, nowMs = 61_000L, timeoutMs = timeout))
     }
 
     @Test
     fun `unlocked and idle exactly at the timeout locks`() {
-        assertTrue(shouldAutoLock(WalletState.Unlocked, hasPin = true, lastInteractionMs = 0L, nowMs = timeout, timeoutMs = timeout))
+        assertTrue(shouldAutoLock(WalletState.Unlocked, hasPin = true, lastInteractionMs = 0L, unlockedAtMs = 0L, nowMs = timeout, timeoutMs = timeout))
     }
 
     @Test
     fun `unlocked but still within the timeout does not lock`() {
-        assertFalse(shouldAutoLock(WalletState.Unlocked, hasPin = true, lastInteractionMs = 1_000L, nowMs = 60_999L, timeoutMs = timeout))
+        assertFalse(shouldAutoLock(WalletState.Unlocked, hasPin = true, lastInteractionMs = 1_000L, unlockedAtMs = 0L, nowMs = 60_999L, timeoutMs = timeout))
     }
 
     @Test
     fun `locked wallet never re-locks`() {
-        assertFalse(shouldAutoLock(WalletState.Locked, hasPin = true, lastInteractionMs = 0L, nowMs = 10 * timeout, timeoutMs = timeout))
+        assertFalse(shouldAutoLock(WalletState.Locked, hasPin = true, lastInteractionMs = 0L, unlockedAtMs = 0L, nowMs = 10 * timeout, timeoutMs = timeout))
     }
 
     @Test
     fun `no wallet never locks`() {
-        assertFalse(shouldAutoLock(WalletState.NoWallet, hasPin = true, lastInteractionMs = 0L, nowMs = 10 * timeout, timeoutMs = timeout))
+        assertFalse(shouldAutoLock(WalletState.NoWallet, hasPin = true, lastInteractionMs = 0L, unlockedAtMs = 0L, nowMs = 10 * timeout, timeoutMs = timeout))
     }
 
     @Test
     fun `zero timeout means the inactivity lock is disabled`() {
-        assertFalse(shouldAutoLock(WalletState.Unlocked, hasPin = true, lastInteractionMs = 0L, nowMs = Long.MAX_VALUE / 2, timeoutMs = 0L))
+        assertFalse(shouldAutoLock(WalletState.Unlocked, hasPin = true, lastInteractionMs = 0L, unlockedAtMs = 0L, nowMs = Long.MAX_VALUE / 2, timeoutMs = 0L))
     }
 
     @Test
     fun `negative timeout means the inactivity lock is disabled`() {
-        assertFalse(shouldAutoLock(WalletState.Unlocked, hasPin = true, lastInteractionMs = 0L, nowMs = Long.MAX_VALUE / 2, timeoutMs = -1L))
+        assertFalse(shouldAutoLock(WalletState.Unlocked, hasPin = true, lastInteractionMs = 0L, unlockedAtMs = 0L, nowMs = Long.MAX_VALUE / 2, timeoutMs = -1L))
     }
 
     @Test
     fun `backwards clock counts as no elapsed time`() {
         // now < last must not wrap into a huge positive elapsed and lock instantly.
-        assertFalse(shouldAutoLock(WalletState.Unlocked, hasPin = true, lastInteractionMs = 500_000L, nowMs = 1_000L, timeoutMs = timeout))
-        assertFalse(shouldAutoLock(WalletState.Unlocked, hasPin = true, lastInteractionMs = Long.MAX_VALUE, nowMs = Long.MIN_VALUE + 1, timeoutMs = timeout))
+        assertFalse(shouldAutoLock(WalletState.Unlocked, hasPin = true, lastInteractionMs = 500_000L, unlockedAtMs = 0L, nowMs = 1_000L, timeoutMs = timeout))
+        assertFalse(shouldAutoLock(WalletState.Unlocked, hasPin = true, lastInteractionMs = Long.MAX_VALUE, unlockedAtMs = 0L, nowMs = Long.MIN_VALUE + 1, timeoutMs = timeout))
     }
 
     @Test
     fun `unlocked with no PIN never locks — there is nothing to unlock with`() {
         // pin_setup after a restore, or the lost-PIN restore-from-disk: Unlocked, hasPin=false.
-        assertFalse(shouldAutoLock(WalletState.Unlocked, hasPin = false, lastInteractionMs = 0L, nowMs = 10 * timeout, timeoutMs = timeout))
+        assertFalse(shouldAutoLock(WalletState.Unlocked, hasPin = false, lastInteractionMs = 0L, unlockedAtMs = 0L, nowMs = 10 * timeout, timeoutMs = timeout))
     }
 
     @Test
@@ -86,13 +86,50 @@ class AutoLockPolicyTest {
         // default, so the lock must enforce that same default.
         val default = WalletConfigEntity().autoLockTimeoutMs
         assertEquals(default, autoLockTimeoutOrDefault(null))
-        assertTrue(shouldAutoLock(WalletState.Unlocked, hasPin = true, lastInteractionMs = 0L, nowMs = default, timeoutMs = autoLockTimeoutOrDefault(null)))
-        assertFalse(shouldAutoLock(WalletState.Unlocked, hasPin = true, lastInteractionMs = 0L, nowMs = default - 1, timeoutMs = autoLockTimeoutOrDefault(null)))
+        assertTrue(shouldAutoLock(WalletState.Unlocked, hasPin = true, lastInteractionMs = 0L, unlockedAtMs = 0L, nowMs = default, timeoutMs = autoLockTimeoutOrDefault(null)))
+        assertFalse(shouldAutoLock(WalletState.Unlocked, hasPin = true, lastInteractionMs = 0L, unlockedAtMs = 0L, nowMs = default - 1, timeoutMs = autoLockTimeoutOrDefault(null)))
     }
 
     @Test
     fun `present wallet_config row wins over the default`() {
         assertEquals(300_000L, autoLockTimeoutOrDefault(300_000L))
         assertEquals(0L, autoLockTimeoutOrDefault(0L))
+    }
+
+    /*
+     * 4.1.2 Wave-10 (Moto, 2026-10-25): a fingerprint unlock touches nothing in the activity, so
+     * onUserInteraction never stamped and the idle clock still ran from process start. Every tick
+     * after the unlock read "idle 205s >= 60s", locked, and the unlock screen re-prompted: an
+     * endless sign-on loop. Becoming Unlocked is itself activity.
+     */
+    @Test
+    fun `an unlock with no touch restarts the idle clock`() {
+        assertFalse(shouldAutoLock(WalletState.Unlocked, hasPin = true, lastInteractionMs = 0L, unlockedAtMs = 200_000L, nowMs = 205_000L, timeoutMs = timeout))
+    }
+
+    @Test
+    fun `idle past the timeout since the unlock still locks`() {
+        assertTrue(shouldAutoLock(WalletState.Unlocked, hasPin = true, lastInteractionMs = 0L, unlockedAtMs = 200_000L, nowMs = 260_000L, timeoutMs = timeout))
+    }
+
+    @Test
+    fun `a touch after the unlock is the later activity`() {
+        assertFalse(shouldAutoLock(WalletState.Unlocked, hasPin = true, lastInteractionMs = 250_000L, unlockedAtMs = 200_000L, nowMs = 300_000L, timeoutMs = timeout))
+        assertTrue(shouldAutoLock(WalletState.Unlocked, hasPin = true, lastInteractionMs = 250_000L, unlockedAtMs = 200_000L, nowMs = 310_000L, timeoutMs = timeout))
+    }
+
+    @Test
+    fun `an unlock stamp ahead of the clock is no elapsed time`() {
+        assertFalse(shouldAutoLock(WalletState.Unlocked, hasPin = true, lastInteractionMs = 0L, unlockedAtMs = 500_000L, nowMs = 400_000L, timeoutMs = timeout))
+    }
+
+    /** The policy can only see the unlock if MainActivity records it, from the state itself (any unlock path). */
+    @Test
+    fun `MainActivity stamps the unlock from walletState and passes it to the policy`() {
+        val src = java.io.File(java.io.File("..").canonicalFile, "app/src/main/java/app/aroundtheblock/wallet/MainActivity.kt").readText()
+        assertTrue("an unlock stamp is recorded when walletState becomes Unlocked",
+            Regex("""walletState\s*\.collect\s*\{[^}]*is\s+WalletState\.Unlocked[^}]*unlockedAtMs\s*=\s*android\.os\.SystemClock\.elapsedRealtime\(\)""").containsMatchIn(src))
+        assertTrue("the tick passes the unlock stamp to shouldAutoLock",
+            Regex("""shouldAutoLock\([^)]*unlockedAtMs""").containsMatchIn(src))
     }
 }
