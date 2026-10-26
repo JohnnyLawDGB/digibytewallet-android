@@ -134,6 +134,31 @@ int main(void)
         result("poll_failed_reads_are_not_evidence", p == 0 && U(r) && ! r.sawFrontierInBand);
     }
 
+    // ---- mutation guards (each fails one plausible slip; values from CfAbandonmentStore and
+    //      WalletViewModel's poll) ----
+    {   // a pending poll whose frontier read failed (0) keeps the hint it had
+        FRESH(r); uint32_t hint = 0;
+        BRCFAbandonmentPoll(&r, &hint, 1, 900, 0, 0, 0, 0);
+        int a = BRCFAbandonmentPoll(&r, &hint, 1, 0, 0, 0, 0, 0), kept = (hint == 900);
+        int b = BRCFAbandonmentPoll(&r, &hint, 0, 0, 1000, 0, 0, 0);
+        result("poll_failed_frontier_read_keeps_the_hint", a == 0 && kept &&
+               b == (BR_CF_ABANDON_CHANGED | BR_CF_ABANDON_RECORDED) && r.band.low == 900 && r.band.lowKnown == 1);
+    }
+    {   // a floor still inside the band (partial retirement): no witness, no recovery, even with
+        // the witness already held from a fully retired moment
+        FRESH(r); FRESH(w); BRCFAbandonmentNote(&r, 1000, 900); BRCFAbandonmentNote(&w, 1000, 900);
+        int a = COV(r, 950, 920), sawA = r.sawFrontierInBand;
+        COV(w, 0, 950);
+        int b = COV(w, 950, 1000);
+        result("partial_retirement_is_neither_witness_nor_recovery", a == 0 && sawA == 0 && U(r) &&
+               w.sawFrontierInBand == 1 && b == 0 && U(w) && ! w.recovered);
+    }
+    {   // marking an already-recovered band again changes nothing and says so
+        FRESH(r); BRCFAbandonmentNote(&r, 1000, 900);
+        int first = BRCFAbandonmentMarkRecovered(&r), second = BRCFAbandonmentMarkRecovered(&r);
+        result("mark_recovered_twice_reports_no_change", first == 1 && second == 0 && r.recovered && ! U(r));
+    }
+
     if (! g_failed) printf("ALL PASS\n");
     return g_failed;
 }

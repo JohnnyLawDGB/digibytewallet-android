@@ -33,7 +33,8 @@ GUARD_CASES=(no_band_nothing_to_surface surfaces_until_recovered abandonment_aft
              clear_forgets_the_band poll_captures_the_low_hint_while_pending poll_without_a_hint_marks_low_unknown
              poll_rereading_a_standing_watermark_changes_nothing poll_two_phase_heal poll_ledger_proves_coverage
              poll_unknown_low_uses_the_ledger_start poll_a_ledger_with_a_hole_is_not_proof
-             poll_failed_reads_are_not_evidence)
+             poll_failed_reads_are_not_evidence poll_failed_frontier_read_keeps_the_hint
+             partial_retirement_is_neither_witness_nor_recovery mark_recovered_twice_reports_no_change)
 
 build() {
     local out="$1"; shift
