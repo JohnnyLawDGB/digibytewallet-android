@@ -24,7 +24,8 @@ SAN_RE='ERROR: AddressSanitizer|runtime error:'
 
 RED_CASES=(a_lower_tip_is_rejected)
 GUARD_CASES=(a_higher_tip_is_persisted an_equal_tip_is_persisted the_first_save_is_persisted an_unreadable_top_fails_open
-             the_top_height_is_read_from_the_buffer a_top_above_two_to_the_31_stays_positive)
+             an_eleven_byte_buffer_is_unreadable the_top_height_is_read_from_the_buffer
+             a_top_above_two_to_the_31_stays_positive)
 
 build() {
     local out="$1"; shift

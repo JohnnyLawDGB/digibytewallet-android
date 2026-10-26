@@ -31,6 +31,12 @@ int main(void)
         result("an_unreadable_top_fails_open", BRSavedBlocksTopHeight(four, sizeof(four)) == -1 &&
                BRSavedBlocksShouldPersist(-1, 23176000) == 1 && BRSavedBlocksTopHeight(NULL, 12) == -1);
     }
+    {   // One byte short of the height (count 4 + len 4 + height 4 = 12): unreadable, as Kotlin's
+        // data.size < 12. A "len < 11" guard would read one byte past the buffer (ASan reports it).
+        uint8_t eleven[11];
+        le(eleven, 0, 300); le(eleven, 4, 119); eleven[8] = 0x13; eleven[9] = 0x20; eleven[10] = 0x69;
+        result("an_eleven_byte_buffer_is_unreadable", BRSavedBlocksTopHeight(eleven, sizeof(eleven)) == -1);
+    }
     {   uint8_t buf[12];
         le(buf, 0, 300); le(buf, 4, 119); le(buf, 8, 23666195);
         result("the_top_height_is_read_from_the_buffer", BRSavedBlocksTopHeight(buf, sizeof(buf)) == 23666195);
