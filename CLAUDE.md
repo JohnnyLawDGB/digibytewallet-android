@@ -11,7 +11,7 @@ Full Kotlin rewrite of the DigiByte Android SPV wallet. Jetpack Compose UI, C na
 > built in CI: `scripts/build-release.sh` builds and signs them on the owner's machine, because the
 > release key is also Play's app-signing key. Until 2026-10-11 `develop` still built io.digibyte
 > while the shipping app lived only on release branches; `RELEASING.md` §0 says how not to repeat it.
-**Version:** v4.1.1 (versionCode 40101)  _(source of truth: `app/build.gradle.kts` `versionName`/`versionCode` — bump there on release and mirror here)_
+**Version:** v4.1.2 (versionCode 40102)  _(source of truth: `app/build.gradle.kts` `versionName`/`versionCode` — bump there on release and mirror here)_
 **Test devices:** Samsung SM-N950U (Galaxy Note 8, Android 9, API 28); Galaxy S25 Ultra (Android 15, API 35) for 16 KB page-size / modern-API coverage
 
 ## Module Structure
