@@ -146,6 +146,38 @@ int main(void)
                f.stage == BRSyncStageSyncing && f.progressFraction == 1.0f);
     }
 
+    // ---- mutation guards (each fails one plausible slip; values from deriveSyncFrontier) ----
+    // The header may trail the target by exactly BR_SYNC_BEHIND_THRESHOLD and still be Synced.
+    f = d(C, 0, 8, TIP - BR_SYNC_BEHIND_THRESHOLD, TIP, TIP, 0);
+    g = d(C, 0, 8, TIP - BR_SYNC_BEHIND_THRESHOLD - 1, TIP, TIP, 0);
+    result("header_behind_threshold_strict", f.stage == BRSyncStageSynced && f.progressFraction == 1.0f &&
+           f.currentBlock == TIP - BR_SYNC_BEHIND_THRESHOLD &&
+           g.stage == BRSyncStageSyncing && g.currentBlock == TIP - BR_SYNC_BEHIND_THRESHOLD - 1);
+
+    // The scan is the displayed block only while the scan is what lags: a scan within the
+    // threshold shows the header height.
+    f = d(C, 0, 8, TIP, TIP, TIP, TIP - 50);
+    g = BRSyncFrontierDerive(C, 0, 8, TIP, TIP, TIP, TIP, TIP - 50, 0, 0);
+    result("frontier_is_scan_only_when_scan_lags", f.stage == BRSyncStageSynced && f.currentBlock == TIP &&
+           g.stage == BRSyncStageSynced && g.currentBlock == TIP);
+
+    // With no peers the band does not "hold": the wallet is Connecting, not done-but-for-a-band.
+    f = BRSyncFrontierDerive(C, 0, 0, TIP, TIP, TIP, TIP, TIP, 1, 0);
+    g = BRSyncFrontierDerive(C, 0, 8, TIP, TIP, TIP, TIP, TIP, 1, 0);
+    result("band_hold_needs_peers", f.stage == BRSyncStageConnecting && f.abandonedBandHolding == 0 &&
+           g.stage == BRSyncStageSyncing && g.abandonedBandHolding == 1 &&
+           g.progressFraction == 1.0f);
+
+    {   // The band hold latches the session as Synced does (WalletViewModel's hasReachedSyncedOnce):
+        // the next poll then treats a week-plus target lead as unproven.
+        BRSyncFrontierSession s = {0, 0};
+        BRSyncFrontier a = BRSyncFrontierStep(&s, C, 0, 8, TIP, TIP, TIP, TIP, 1);
+        int latched = s.reachedSynced;
+        BRSyncFrontier b = BRSyncFrontierStep(&s, C, 0, 8, TIP, TIP + 10000000, TIP, TIP, 1);
+        result("band_hold_latches_session", a.stage == BRSyncStageSyncing && a.abandonedBandHolding == 1 &&
+               latched == 1 && b.targetBlock == TIP && b.abandonedBandHolding == 1);
+    }
+
     if (! g_failed) printf("ALL PASS\n");
     return g_failed;
 }

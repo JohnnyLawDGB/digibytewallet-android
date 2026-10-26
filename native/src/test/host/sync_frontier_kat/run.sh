@@ -29,7 +29,8 @@ GUARD_CASES=(no_peers_is_connecting failed_is_failed_even_with_peers header_behi
              huge_target_after_synced_is_synced huge_target_not_synced_this_session plausible_lead_after_synced
              lead_bound_strict huge_target_requires_complete huge_target_abandoned_band_holds host_states
              session_latches_after session_header_max_never_drops estimate_zero_uses_header blocks_remaining
-             extremes_wrap_like_kotlin)
+             extremes_wrap_like_kotlin header_behind_threshold_strict frontier_is_scan_only_when_scan_lags
+             band_hold_needs_peers band_hold_latches_session)
 
 build() {
     local out="$1"; shift
