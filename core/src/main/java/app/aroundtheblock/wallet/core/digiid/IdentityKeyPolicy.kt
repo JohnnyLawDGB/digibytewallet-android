@@ -34,4 +34,27 @@ object IdentityKeyPolicy {
     fun choose(domain: String, hasSuccessfulLegacyHistory: Boolean): IdentityKeyKind =
         if (isDigiScopeDomain(domain) || hasSuccessfulLegacyHistory) IdentityKeyKind.LEGACY
         else IdentityKeyKind.PER_SITE
+
+    /**
+     * Whether the user picks the identity for this login (4.1.2 row 16). A restored wallet has no
+     * local history, so it cannot know which identity a site bound: the original DigiByte app
+     * used the per-site key, io.digibyte 3.x–4.0.76 the shared m/0'/0/0 key. With no successful
+     * login to this domain on record, either kind, the user is offered both; once one succeeds
+     * the history decides, as before. DigiScope never offers a choice, and neither does a wallet
+     * created on this device ([walletMayHaveHistoryElsewhere] false): it has no earlier identity to
+     * recover, and the shared key would only link its logins across sites.
+     */
+    fun offersChoice(domain: String, hasAnySuccessfulHistory: Boolean, walletMayHaveHistoryElsewhere: Boolean): Boolean =
+        walletMayHaveHistoryElsewhere && !isDigiScopeDomain(domain) && !hasAnySuccessfulHistory
+
+    /** [choose], with the user's pick honoured only where [offersChoice] allows one. */
+    fun choose(
+        domain: String,
+        hasSuccessfulLegacyHistory: Boolean,
+        hasAnySuccessfulHistory: Boolean,
+        walletMayHaveHistoryElsewhere: Boolean,
+        requested: IdentityKeyKind?,
+    ): IdentityKeyKind =
+        if (requested != null && offersChoice(domain, hasAnySuccessfulHistory, walletMayHaveHistoryElsewhere)) requested
+        else choose(domain, hasSuccessfulLegacyHistory)
 }

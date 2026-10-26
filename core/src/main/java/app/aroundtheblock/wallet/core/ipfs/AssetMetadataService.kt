@@ -198,12 +198,21 @@ class AssetMetadataService(
         // forever. Refetch when we have a CID to actually fetch from.
         val cached = assetMetadataDao.getMetadata(assetId)
         if (cached != null && cached.name != null) return cached.toModel()
-        if (cached != null && metadataCid == null) return cached.toModel()
+
+        // The CID is the issuance's: the caller's, or the one the parent walk recorded with the chain facts.
+        val cid = metadataCid ?: cached?.metadataCid
+        // The provider answers only for an issuance the chain shows carried no metadata hash (4.1.2 row 29):
+        // a chain-facts row with no CID. Supply is the marker: only AssetManager.applyChainFacts writes it (an
+        // issued asset never has 0), and the same write records the issuance's CID (updateChainFacts). Without that row it is not
+        // yet known whether the issuance names a CID, and a provider's document stored now, with a name,
+        // would shadow that CID for good once the walk brings it (review R6). That waits for the walk.
+        val providerAllowed = cid == null && cached != null && cached.totalSupply > 0
+        if (cid == null && !providerAllowed) return cached?.toModel()
 
         // Negative-cache short-circuit: if we tried this CID recently and every
         // gateway failed, don't hammer them again for NEGATIVE_CACHE_TTL_MS.
         val now = System.currentTimeMillis()
-        val negativeKey = metadataCid ?: assetId
+        val negativeKey = cid ?: assetId
         val lastFail = recentlyFailed[negativeKey]
         if (lastFail != null && (now - lastFail) < NEGATIVE_CACHE_TTL_MS) {
             return null
@@ -211,8 +220,8 @@ class AssetMetadataService(
 
         return withContext(Dispatchers.IO) {
             // Pass 1: IPFS via CID (if we have one)
-            if (metadataCid != null) {
-                val bytes = ipfsClient.fetchVerified(metadataCid)
+            if (cid != null) {
+                val bytes = ipfsClient.fetchVerified(cid)
                 if (bytes != null) {
                     val json = runCatching { JSONObject(String(bytes, Charsets.UTF_8)) }.getOrNull()
                     if (json != null) {
@@ -220,13 +229,17 @@ class AssetMetadataService(
                         // Path 1 resolves the document straight from the issuance's metadata hash and
                         // never consults a provider, so there is no chain-proven issuer to record.
                         // null is the correct answer here, and the row simply will not render.
-                        return@withContext storeFromJson(assetId, metadataCid, json, provenIssuer = null)
+                        return@withContext storeFromJson(assetId, cid, json, provenIssuer = null)
                     }
                 }
             }
 
-            // Pass 2: provider fallback, for assets whose issuance carried no metadata hash.
-            val netClient = assetNetworkClient
+            // Pass 2: provider fallback, for assets whose issuance carried no metadata hash -- ONLY those
+            // (4.1.2 row 29). When the issuance names a CID, the document at that CID is the asset's
+            // metadata and nothing else is: a provider's inline document or CID stored in its place was
+            // never checked against the issuance, and once cached with a name it shadowed the CID for
+            // good. With IPFS unreachable the row waits for the next attempt instead.
+            val netClient = assetNetworkClient.takeIf { providerAllowed }
             if (netClient != null) {
                 val remote = runCatching { netClient.getAssetData(assetId) }.getOrNull()
 
@@ -235,7 +248,8 @@ class AssetMetadataService(
                 if (remote != null && ipfsMap != null) {
                     recentlyFailed.remove(negativeKey)
                     val json = JSONObject(ipfsMap)
-                    return@withContext storeFromJson(assetId, metadataCid ?: remote.cid, json, remote.issuer)
+                    // The provider's issuer is its claim, not chain proof: never recorded as proven.
+                    return@withContext storeFromJson(assetId, remote.cid, json, provenIssuer = null)
                 }
 
                 // 2b: most return a CID INSTEAD of the document — which is the thing we were
@@ -250,7 +264,7 @@ class AssetMetadataService(
                     }
                     if (json != null) {
                         recentlyFailed.remove(negativeKey)
-                        return@withContext storeFromJson(assetId, remoteCid, json, remote?.issuer)
+                        return@withContext storeFromJson(assetId, remoteCid, json, provenIssuer = null)
                     }
                 }
             }

@@ -18,7 +18,7 @@
     <string name="onb_create">创建新钱包</string>
     <string name="onb_recover">恢复现有钱包</string>
     <string name="onb_footer">适用于 DigiByte (DGB) 网络的独立钱包</string>
-    <string name="app_name_display">ATB Wallet for DigiByte (DGB)</string>
+    <string name="app_name_display">HoldFast Wallet</string>
     <!-- WARNING -->
     <string name="seed_screenshot_blocked">截图已被禁用。请把这些词抄写下来，它们无法找回。</string>
     <string name="seed_title">您的助记词</string>
@@ -72,7 +72,7 @@
     <string name="unlock_attempts_left">PIN 码错误。剩余尝试次数：%1$d</string>
     <string name="battery_title">保持后台同步</string>
     <string name="battery_body">息屏时 Android 可能会让此钱包休眠，从而中断它与 DigiByte 网络的连接，并可能使其停留在 0 个节点，直到您重新打开应用。\n\n请允许其无限制运行，以便持续同步。</string>
-    <string name="battery_body_samsung">\n\n在三星设备上，还请打开设备维护 → 电池 → \"永不休眠的应用\"，并添加 ATB Wallet。</string>
+    <string name="battery_body_samsung">\n\n在三星设备上，还请打开设备维护 → 电池 → \"永不休眠的应用\"，并添加 HoldFast Wallet。</string>
     <string name="battery_open_settings">打开设置</string>
     <string name="tor_title">新的隐私功能</string>
     <string name="tor_body">现已支持 Tor 路由。启用后，您的钱包将通过 Tor 连接到 DigiByte 网络，向节点隐藏您的 IP 地址。\n\n是否启用 Tor 路由？</string>
@@ -407,7 +407,7 @@
     <string name="ni_save">保存</string>
     <string name="ni_exclusive">仅使用我的节点（独占）</string>
     <string name="ni_exclusive_sub">仅通过您的节点同步。若它离线，在您重新启用公共节点前，钱包将没有其他节点可用。</string>
-    <string name="ab_powered_by">Powered by DigiByte Core 9.26</string>
+    <string name="ab_powered_by">兼容 DigiByte Core 9.26 节点</string>
     <string name="ab_wallet_info">钱包信息</string>
     <string name="ab_wallet_type">钱包类型</string>
     <string name="ab_hd_path">HD 路径</string>
@@ -487,6 +487,12 @@
     <string name="did_insecure">连接不安全</string>
     <string name="did_insecure_body">此站点使用 HTTP 而非 HTTPS。您的认证可能被拦截。</string>
     <string name="did_callback_url">回调 URL</string>
+    <string name="did_identity_title">此网站认识哪个登录身份？</string>
+    <string name="did_identity_hint">恢复了此钱包？请选择您以前在此网站使用的身份。登录成功后，钱包会记住它。</string>
+    <string name="did_identity_per_site">此网站专用密钥（原版 DigiByte 应用）</string>
+    <string name="did_identity_shared">所有网站共用密钥（DigiByte wallet 3.x–4.0.76）</string>
+    <string name="did_identity_shared_note">所有网站都相同，因此网站可以关联您的登录。仅当此网站以前通过它识别您时才选择。</string>
+    <string name="did_identity_address">地址：%1$s</string>
     <string name="did_approve">批准</string>
     <string name="did_deny">拒绝</string>
     <string name="did_success">认证成功</string>
@@ -536,9 +542,8 @@
     <string name="ab_core_value">9.26 (SPV node)</string>
     <string name="ab_mit">本软件依据 MIT 许可证提供。</string>
     <string name="ab_tagline">DigiByte 是一条去中心化区块链和数字货币。</string>
-    <!-- Publisher disclaimer on the About screen. Around The Block LLC, DigiByte Foundation, DigiByte Alliance and DigiByte-Core are names: keep them in Latin script, untranslated. -->
-    <string name="ab_disclaimer">Around The Block LLC 出品的独立钱包；与 DigiByte Foundation、DigiByte Alliance 或 DigiByte-Core 无关联，也未获其认可。</string>
-    <string name="ab_website">Around The Block 网站</string>
+    <!-- Publisher disclaimer on the About screen. Around The Block LLC and DigiByte are names: keep them in Latin script, untranslated. -->
+    <string name="ab_disclaimer">Around The Block LLC 出品的独立钱包。并非 DigiByte 官方应用。</string>
 
     <string name="tx_conf_short">%1$d 次确认</string>
     <string name="tx_confirmed">已确认</string>
@@ -591,6 +596,7 @@
     <string name="rf_dd_fee_floor">需要 %1$s 网络手续费：此钱包只有 %2$s。</string>
     <string name="rf_dd_found">找到 %1$s DigiDollar</string>
     <string name="rf_dd_moved">%1$s DigiDollar 已转入此钱包</string>
+    <string name="rf_dd_sent_unrelayed">已发送 %1$s DigiDollar，但网络尚未确认。在它出现在此钱包之前，请保留您的旧恢复短语。</string>
     <string name="rf_dd_left_behind">%1$s DigiDollar 被留下，无法转移</string>
     <string name="rf_dd_unreachable">无法检查 DigiDollar，此钱包可能持有一些</string>
     <string name="as_rules_checking">正在检查此资产的转账规则…</string>
@@ -652,7 +658,7 @@
     <string name="restore_scan_title">私密恢复</string>
     <string name="restore_scan_body">继续后，这部手机会自行查找您钱包的交易（原生 (dgb1q…)、Legacy (D…)、Taproot 和 DigiDollar 地址）不会将您的地址发送给任何人。</string>
     <string name="restore_other_title">助记词来自其他钱包应用？</string>
-    <string name="restore_other_body">Coinomi、Ledger、Trezor 及一些较旧的钱包会把币存放在本钱包不使用的地址格式上，因此同步无法看到它们。检查可以找到这些币，但它会把由您的助记词派生的地址发送给 DigiScope (api.digiscope.me)，由其报告这些地址上的资金。若助记词来自 ATB Wallet 或旧版 DigiByte 应用，则无需检查。您也可以稍后在“设置 → 从其他钱包恢复资金”中运行。</string>
+    <string name="restore_other_body">Coinomi、Ledger、Trezor 及一些较旧的钱包会把币存放在本钱包不使用的地址格式上，因此同步无法看到它们。检查可以找到这些币，但它会把由您的助记词派生的地址发送给 DigiScope (api.digiscope.me)，由其报告这些地址上的资金。若助记词来自 HoldFast Wallet 或旧版 DigiByte 应用，则无需检查。您也可以稍后在“设置 → 从其他钱包恢复资金”中运行。</string>
     <string name="restore_other_check">检查其他格式</string>
     <string name="restore_scan_deriving">正在派生地址…</string>
     <string name="restore_scan_duration">根据节点不同，这可能需要 30-90 秒。</string>
@@ -694,4 +700,7 @@
     <string name="seedview_pass_unreadable_body">暂时无法读取此钱包的密码短语。仅凭您的助记词可能无法恢复此钱包，因此在密码短语能够与它们一起显示之前，不会显示这些助记词。请重试。</string>
     <string name="seedview_pass_retry">重试</string>
     <!-- /pkg E2-keys -->
+    <string name="pinstore_title">暂时无法验证您的 PIN</string>
+    <string name="pinstore_body">手机的安全密钥存储未能打开，因此钱包保持锁定。没有删除任何内容。请关闭应用后重新打开。如果仍然出现，请重启手机；您的恢复短语仍可在任何设备上恢复钱包。</string>
+    <string name="pinstore_close">关闭应用</string>
 </resources>

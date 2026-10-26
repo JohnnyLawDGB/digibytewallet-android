@@ -35,6 +35,16 @@ class DigiDollarTransferService(
     private val sign: (DigiDollarTransferPlan.Plan, ByteArray, Map<String, DerivationProfile>) -> String? =
         ::nativeSign,
     private val broadcast: (ByteArray) -> String? = { Broadcaster.broadcast(it) },
+    /**
+     * Whether a peer took the broadcast transfer (4.1.2 row 20): the publish's own verdict, as a plain
+     * send waits for it (TransactionBuilder.awaitDelivery). Only a relayed transfer is reported MOVED;
+     * a local txid alone is not -- the user may discard the old seed on the strength of that word.
+     */
+    private val awaitRelay: suspend (String) -> Boolean = { txid ->
+        app.aroundtheblock.wallet.core.sync.PublishOutcome.await(
+            read = { app.aroundtheblock.wallet.core.bridge.NativeBridge.getPublishResult(txid) },
+        )?.userVisiblySent == true
+    },
     private val log: (level: Char, message: String) -> Unit = { level, message ->
         if (level == 'w') android.util.Log.w(TAG, message) else android.util.Log.i(TAG, message)
     },
@@ -62,8 +72,11 @@ class DigiDollarTransferService(
         val cents: Long,
         val txid: String?,
         val failureReason: String?,
-        /** Outpoints the transfer spent, for excluding from the sweep. */
+        /** Outpoints the transfer spent -- or, when it failed after planning, the ones it was planned to
+         *  spend -- for excluding from the sweep, so a retry still has its fee coins (4.1.2 row 20). */
         val spentInputs: List<String> = emptyList(),
+        /** A peer took the broadcast transfer. */
+        val relayed: Boolean = false,
         /** Cents we can see and cannot spend — the outpoint could not be located. */
         val unlocatableCents: Long = 0L,
         /** False when a lookup could not be made. Not the same as holding nothing. */
@@ -80,7 +93,10 @@ class DigiDollarTransferService(
          *  [txid] is set. */
         val movedCents: Long = 0L,
     ) {
-        val moved: Boolean get() = txid != null
+        /** True only once a peer took the transfer; a broadcast no peer took yet is [sentUnrelayed]. */
+        val moved: Boolean get() = txid != null && relayed
+        /** Broadcast, but no peer has taken it yet: not reported as moved. */
+        val sentUnrelayed: Boolean get() = txid != null && !relayed
         val hasDollars: Boolean get() = cents > 0
         /** Found and still where it was: everything in [cents] the transfer did not carry. */
         val leftBehindCents: Long get() = (cents - movedCents).coerceAtLeast(0L)
@@ -110,8 +126,9 @@ class DigiDollarTransferService(
             return@withContext Result(0L, null, null, reachable = scan.reachable)
         }
 
-        log('i', "found ${DigiDollarHolding.formatCents(scan.cents)} in DigiDollar across " +
-            "${scan.holdings.size} outpoint(s); ${scan.unlocatableCents} cents unlocatable")
+        // No amounts and no addresses in these lines (row 30, R7): with a timestamp they identify the move on chain.
+        log('i', "found DigiDollar across ${scan.holdings.size} outpoint(s)" +
+            if (scan.unlocatableCents > 0) "; some unlocatable" else "")
 
         val planned = planFor(scan, feeInputs, recipientKeyHex, changeAddress, feePerKb)
 
@@ -131,9 +148,7 @@ class DigiDollarTransferService(
             is DigiDollarTransferPlan.Result.Ok -> planned.plan
         }
 
-        log('i', "planned: ${plan.cents} cents, ${plan.ddInputs.size} DD input(s), " +
-            "${plan.feeInputs.size} fee input(s), fee ${plan.feeSat} sats, " +
-            "change ${plan.changeAmountSat} -> ${plan.changeAddress}")
+        log('i', "planned: ${plan.ddInputs.size} DD input(s), ${plan.feeInputs.size} fee input(s)")
 
         // Each fee input's own derivation, by outpoint: the plan carries the inputs it was given, and
         // an input with no derivation of its own is never signed with another's.
@@ -143,21 +158,25 @@ class DigiDollarTransferService(
                 unlocatableCents = scan.unlocatableCents, reachable = scan.reachable)
         }
         val profileOf = feeInputs.indices.associate { "${feeInputs[it].txid}:${feeInputs[it].vout}" to feeProfiles[it] }
+        // From here a failure still names the plan's inputs: the sweep leaves them, so the fee DGB stays
+        // on the seed for a retry instead of being swept into this wallet (4.1.2 row 20).
+        val planInputs = plan.ddInputs.map { "${it.txid}:${it.vout}" } + plan.feeInputs.map { "${it.txid}:${it.vout}" }
         val signed = sign(plan, seedBytes, profileOf)
         if (signed == null) {
             log('w', "native refused to sign the DigiDollar transfer")
             return@withContext Result(scan.cents, null,
-                "native refused to sign — see log for the reason",
+                "native refused to sign — see log for the reason", spentInputs = planInputs,
                 unlocatableCents = scan.unlocatableCents, reachable = scan.reachable)
         }
         val bytes = runCatching { hexToBytes(signed) }.getOrNull()
-            ?: return@withContext Result(scan.cents, null, "signed hex malformed",
+            ?: return@withContext Result(scan.cents, null, "signed hex malformed", spentInputs = planInputs,
                 unlocatableCents = scan.unlocatableCents, reachable = scan.reachable)
 
         val txid = broadcast(bytes)
             ?: return@withContext Result(scan.cents, null,
-                "broadcast failed — check peer connection",
+                "broadcast failed — check peer connection", spentInputs = planInputs,
                 unlocatableCents = scan.unlocatableCents, reachable = scan.reachable)
+        val relayed = awaitRelay(txid)
 
         // Same durability path the sweep and the asset move use. Recorded as a SELF transfer: the
         // destination is this wallet's own DigiDollar address, so the C core categorizes it as a
@@ -166,13 +185,13 @@ class DigiDollarTransferService(
             recordOutgoing(txid, 0L, plan.feeSat, plan.changeAddress, true)
         }
 
-        log('i', "DigiDollar MOVED in $txid: ${plan.cents} of ${scan.cents} cents")
+        log('i', "DigiDollar ${if (relayed) "MOVED" else "sent, not yet relayed,"} in ${txid.take(12)}")
         Result(
             cents = scan.cents,
             txid = txid,
             failureReason = null,
-            spentInputs = plan.ddInputs.map { "${it.txid}:${it.vout}" } +
-                plan.feeInputs.map { "${it.txid}:${it.vout}" },
+            spentInputs = planInputs,
+            relayed = relayed,
             unlocatableCents = scan.unlocatableCents,
             reachable = scan.reachable,
             // The signed figure, not the found one: what the scan could not locate is not in

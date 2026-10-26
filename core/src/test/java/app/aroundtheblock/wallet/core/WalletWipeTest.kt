@@ -91,6 +91,7 @@ class WalletWipeTest {
         um: UtxoManager = mockk(relaxed = true),
         quiesce: () -> Unit = { /* no-op: keep the native lib out of this JVM test */ },
         identitySessions: IdentitySessionWipe = IdentitySessionWipe { true },
+        markErasureOwed: () -> Unit = {},
     ) = WalletManager(
         context = ctx,
         keyStoreManager = ksm,
@@ -98,6 +99,7 @@ class WalletWipeTest {
         dataEraser = eraser,
         quiesceNative = quiesce,
         identitySessions = identitySessions,
+        markErasureOwed = markErasureOwed,
     )
 
     /** A PIN store as it stands after the tenth wrong PIN with wipe-after-N on. */
@@ -518,5 +520,26 @@ class WalletWipeTest {
         assertTrue("CF scan ledger survived the wipe", !scanLedger.exists())
         assertTrue("saved-blocks window survived the wipe", !savedBlocks.exists())
         assertTrue("the abandoned-band record survived the wipe", CfAbandonmentStore.band(ctx) == null)
+    }
+
+    // ── 4.1.2 rows 24 / 33: the erasure is owed before anything is erased ─────────────────────────
+
+    /** A process death in the seconds a wipe runs left the Hub token, DB key and database with no retry
+     *  once the seed was gone: the mark was written only after the wipe reported. It now comes first. */
+    @Test fun `a wipe marks its erasure owed before the first store is erased`() = kotlinx.coroutines.runBlocking {
+        val order = mutableListOf<String>()
+        val eraser = RecordingEraser()
+        val wm = walletManager(eraser = eraser, markErasureOwed = { order += "marked:${eraser.calls.size}" })
+        wm.wipeThenReleasePin(PinManager(trippedPinStore()))
+        assertEquals("the mark was not written before the eraser's first step", listOf("marked:0"), order)
+    }
+
+    /** Releasing an owed wipe that will not verify leaves secrets behind: their erasure stays owed. */
+    @Test fun `releasing an owed wipe with no wallet left keeps the erasure owed`() = kotlinx.coroutines.runBlocking {
+        var marked = 0
+        val wm = walletManager(eraser = RecordingEraser(), markErasureOwed = { marked++ })
+        val released = wm.releaseOwedWipeIfNoWalletIsLeft(PinManager(trippedPinStore()))
+        assertTrue(released)
+        assertEquals(1, marked)
     }
 }

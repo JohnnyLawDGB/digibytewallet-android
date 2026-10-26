@@ -1,5 +1,6 @@
 package app.aroundtheblock.wallet.core.recovery
 
+import app.aroundtheblock.wallet.core.reconcile.RawTxEntry
 import app.aroundtheblock.wallet.core.reconcile.UtxoEntry
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -28,8 +29,28 @@ class DigiDollarFeeSelectionTest {
         addresses = derived.map { it.address },
         derivedAddresses = derived,
         utxos = utxos,
-        rawTxs = emptyMap(),
+        // A parent for every coin, standing in for the node's raw transactions: [proving] reads them.
+        rawTxs = utxos.associate { it.txid to RawTxEntry(hex = it.txid, blockHeight = 1L, blockTime = 1L) },
     )
+
+    /** What each parent states; by default exactly what the lookup reported for each coin. */
+    private val stated = HashMap<String, MutableList<RawTxBinding.Output>>()
+
+    /** A binding over [stated]: a parent's id is its own bytes, its outputs are [stated]'s. */
+    private val proving = RawTxBinding(
+        txidOf = { bytes -> bytes.joinToString("") { "%02x".format(it) } },
+        outputsOf = { bytes -> stated[bytes.joinToString("") { "%02x".format(it) }] },
+        inputsOf = { emptyList() },
+    )
+
+    private fun statedAsReported(findings: List<RecoveryScanService.ProfileResult>) {
+        for (u in findings.flatMap { it.utxos }) {
+            val script = u.scriptPubKeyHex ?: continue   // nothing to state: the coin stays unproven, as it is unsignable
+            if (stated[u.txid]?.any { it.vout == u.vout } == true) continue
+            stated.getOrPut(u.txid) { mutableListOf() } +=
+                RawTxBinding.Output(u.vout, u.amountSatoshi, script)
+        }
+    }
 
     private fun derived(addr: String, chain: Int, index: Int) =
         DerivedAddress(address = addr, chain = chain, index = index)
@@ -83,7 +104,9 @@ class DigiDollarFeeSelectionTest {
         verdicts: Map<UtxoEntry, ForeignUtxoAssetClassifier.Verdict> = allPlain(findings),
         excluded: Set<String> = emptySet(),
         scan: DigiDollarScan.Result = dollarsOn(1),
-    ) = DigiDollarFeeSelection.from(findings, verdicts, excluded, sizedFor(scan))
+    ) = statedAsReported(findings).let {
+        DigiDollarFeeSelection.from(findings, verdicts, excluded, sizedFor(scan), proving)
+    }
 
     private fun outpoints(choice: DigiDollarFeeSelection.Choice) =
         choice.inputs.map { "${it.txid}:${it.vout}" }
@@ -415,5 +438,38 @@ class DigiDollarFeeSelectionTest {
         // states the true shortfall: 0.1 DGB less the 0.06 DGB the wallet holds, not less 0.05.
         assertEquals(6_000_000L, choice.inputs.sumOf { it.amountSat })
         assertEquals(listOf(profileB, profileB, profileA), choice.profiles)
+    }
+
+    // ── 4.1.2 row 17: a fee coin is signed at the amount its parent states ──────────────────────
+
+    /**
+     * The lookup reports 50 DGB for a coin whose parent states 5. A legacy signature does not commit to
+     * the amount, so signing the reported figure would hand the difference to miners with no error.
+     * The parent disagrees: nothing on that profile is used.
+     */
+    @Test
+    fun `a fee coin whose parent states another amount is never chosen`() {
+        val coin = utxo("DaddrA", sats = 5_000_000_000L, txid = "c".repeat(64))
+        val findings = listOf(result(profileA, listOf(coin), listOf(derived("DaddrA", 0, 0))))
+        stated["c".repeat(64)] = mutableListOf(RawTxBinding.Output(0, 500_000_000L, "0014deadbeef"))
+        val choice = select(findings)
+        assertTrue("a coin was chosen at an amount its parent does not state: ${outpoints(choice)}", choice.inputs.isEmpty())
+    }
+
+    /** A coin whose parent could not be read is not used; a proven coin is, at its parent's amount. */
+    @Test
+    fun `only coins proven by their parent pay the fee`() {
+        val proven = utxo("DaddrA", sats = 5_000_000_000L, txid = "d".repeat(64))
+        val unread = utxo("DaddrA", sats = 9_000_000_000L, txid = "e".repeat(64))
+        val findings = listOf(result(profileA, listOf(proven, unread), listOf(derived("DaddrA", 0, 0))))
+        val choice = DigiDollarFeeSelection.from(findings, allPlain(findings), emptySet(), sizedFor(dollarsOn(1)),
+            RawTxBinding(
+                txidOf = { b -> b.joinToString("") { "%02x".format(it) } },
+                outputsOf = { b -> val id = b.joinToString("") { "%02x".format(it) }
+                    if (id == "d".repeat(64)) listOf(RawTxBinding.Output(0, 5_000_000_000L, "0014deadbeef")) else null },
+                inputsOf = { emptyList() },
+            ))
+        assertEquals(listOf("${"d".repeat(64)}:0"), outpoints(choice))
+        assertEquals(5_000_000_000L, choice.inputs.single().amountSat)
     }
 }

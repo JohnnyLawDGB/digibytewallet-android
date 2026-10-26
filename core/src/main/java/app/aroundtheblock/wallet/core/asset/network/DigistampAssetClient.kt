@@ -36,6 +36,9 @@ class DigistampAssetClient(
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(45, TimeUnit.SECONDS)
         .certificatePinner(app.aroundtheblock.wallet.core.network.DigistampPins.certificatePinner())
+        // A pinned host's 3xx is never followed to a host the pins do not cover (4.1.2 row 30, C18).
+        .followRedirects(false)
+        .followSslRedirects(false)
         .build()
 
     override suspend fun getAssetData(assetId: String): AssetDataResponse? =

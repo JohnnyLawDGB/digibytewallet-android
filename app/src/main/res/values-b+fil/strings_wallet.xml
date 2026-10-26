@@ -18,7 +18,7 @@
     <string name="onb_create">Gumawa ng Bagong Wallet</string>
     <string name="onb_recover">I-recover ang Umiiral na Wallet</string>
     <string name="onb_footer">Independiyenteng wallet para sa DigiByte (DGB) network</string>
-    <string name="app_name_display">ATB Wallet for DigiByte (DGB)</string>
+    <string name="app_name_display">HoldFast Wallet</string>
     <!-- WARNING -->
     <string name="seed_screenshot_blocked">Naka-block ang screenshot. Isulat ang mga salitang ito: hindi na ito mababawi.</string>
     <string name="seed_title">Ang Iyong Recovery Phrase</string>
@@ -72,7 +72,7 @@
     <string name="unlock_attempts_left">Maling PIN. Natitirang subok: %1$d</string>
     <string name="battery_title">Panatilihing tumatakbo ang sync sa background</string>
     <string name="battery_body">Maaaring patulugin ng Android ang wallet na ito kapag naka-off ang screen, kaya nawawala ang koneksyon nito sa DigiByte network at maaaring maiwan sa 0 peers hanggang buksan mo ulit.\n\nPayagan itong tumakbo nang walang restriksyon para magpatuloy ang sync.</string>
-    <string name="battery_body_samsung">\n\nSa Samsung, buksan din ang Device Care → Battery → \"Never sleeping apps\" at idagdag ang ATB Wallet.</string>
+    <string name="battery_body_samsung">\n\nSa Samsung, buksan din ang Device Care → Battery → \"Never sleeping apps\" at idagdag ang HoldFast Wallet.</string>
     <string name="battery_open_settings">Buksan ang mga setting</string>
     <string name="tor_title">Bagong Feature sa Privacy</string>
     <string name="tor_body">Available na ang Tor routing. Kapag naka-enable, kumokonekta ang iyong wallet sa DigiByte network sa pamamagitan ng Tor, na itinatago ang iyong IP address sa mga peer.\n\nI-enable ang Tor routing?</string>
@@ -410,7 +410,7 @@
     <string name="ni_save">I-save</string>
     <string name="ni_exclusive">Ang node ko lang (eksklusibo)</string>
     <string name="ni_exclusive_sub">Mag-sync lamang sa pamamagitan ng node mo. Kapag na-offline ito, walang ibang peer ang wallet hanggang muli mong i-enable ang pampublikong peers.</string>
-    <string name="ab_powered_by">Powered by DigiByte Core 9.26</string>
+    <string name="ab_powered_by">Gumagana sa mga DigiByte Core 9.26 node</string>
     <string name="ab_wallet_info">Impormasyon ng Wallet</string>
     <string name="ab_wallet_type">Uri ng Wallet</string>
     <string name="ab_hd_path">HD Path</string>
@@ -490,6 +490,12 @@
     <string name="did_insecure">Hindi Ligtas na Koneksyon</string>
     <string name="did_insecure_body">HTTP ang gamit ng site na ito, hindi HTTPS. Maaaring ma-intercept ang authentication mo.</string>
     <string name="did_callback_url">Callback URL</string>
+    <string name="did_identity_title">Aling sign-in ang kilala ng site na ito?</string>
+    <string name="did_identity_hint">Ni-restore mo ba ang wallet na ito? Piliin ang identity na ginamit mo dati sa site na ito. Kapag gumana ang sign-in, tatandaan ito ng wallet.</string>
+    <string name="did_identity_per_site">Hiwalay na key para sa site na ito (orihinal na DigiByte app)</string>
+    <string name="did_identity_shared">Iisang key para sa lahat ng site (DigiByte wallet 3.x–4.0.76)</string>
+    <string name="did_identity_shared_note">Pareho ito sa bawat site, kaya maiuugnay ng mga site ang iyong mga sign-in. Piliin lang kung kilala ka ng site na ito rito.</string>
+    <string name="did_identity_address">Address: %1$s</string>
     <string name="did_approve">Aprubahan</string>
     <string name="did_deny">Tanggihan</string>
     <string name="did_success">Matagumpay ang Authentication</string>
@@ -539,9 +545,8 @@
     <string name="ab_core_value">9.26 (SPV node)</string>
     <string name="ab_mit">Ang software na ito ay ibinibigay sa ilalim ng MIT License.</string>
     <string name="ab_tagline">Ang DigiByte ay isang desentralisadong blockchain at digital na pera.</string>
-    <!-- Publisher disclaimer on the About screen. Around The Block LLC, DigiByte Foundation, DigiByte Alliance and DigiByte-Core are names: keep them in Latin script, untranslated. -->
-    <string name="ab_disclaimer">Independiyenteng wallet ng Around The Block LLC; hindi kaanib o inendorso ng DigiByte Foundation, DigiByte Alliance o DigiByte-Core.</string>
-    <string name="ab_website">Website ng Around The Block</string>
+    <!-- Publisher disclaimer on the About screen. Around The Block LLC and DigiByte are names: keep them in Latin script, untranslated. -->
+    <string name="ab_disclaimer">Independiyenteng wallet ng Around The Block LLC. Hindi ito opisyal na DigiByte app.</string>
 
     <string name="tx_conf_short">%1$d na kump.</string>
     <string name="tx_confirmed">Nakumpirma</string>
@@ -594,6 +599,7 @@
     <string name="rf_dd_fee_floor">Kailangan ng %1$s na bayad sa network: ang wallet na ito ay may %2$s.</string>
     <string name="rf_dd_found">Nakita ang %1$s na DigiDollar</string>
     <string name="rf_dd_moved">%1$s na DigiDollar ang nailipat sa wallet na ito</string>
+    <string name="rf_dd_sent_unrelayed">Naipadala ang %1$s sa DigiDollar, pero hindi pa ito kinukumpirma ng network. Itago ang luma mong recovery phrase hanggang lumabas ito sa wallet na ito.</string>
     <string name="rf_dd_left_behind">%1$s na DigiDollar ang naiwan: hindi ito nailipat</string>
     <string name="rf_dd_unreachable">Hindi masuri ang DigiDollar; maaaring may hawak ang wallet na ito</string>
     <string name="as_rules_checking">Sinusuri ang mga panuntunan sa paglilipat ng asset na ito…</string>
@@ -655,7 +661,7 @@
     <string name="restore_scan_title">I-restore nang pribado</string>
     <string name="restore_scan_body">Pagkatapos mong magpatuloy, ang phone na ito mismo ang maghahanap ng mga transaksyon ng iyong wallet: native (dgb1q…), legacy (D…), Taproot at DigiDollar na address, nang hindi ipinapadala ang iyong mga address kaninuman.</string>
     <string name="restore_other_title">Phrase mula sa ibang wallet app?</string>
-    <string name="restore_other_body">Ang Coinomi, Ledger, Trezor at ilang lumang wallet ay naglalagay ng coin sa mga address format na hindi ginagamit ng wallet na ito, kaya hindi ito nakikita ng sync. Mahahanap ito ng isang pagsusuri, pero ipinapadala nito ang mga address na nagmumula sa iyong phrase sa DigiScope (api.digiscope.me), na mag-uulat ng anumang pondo sa mga ito. Hindi kailangan para sa phrase mula sa ATB Wallet o sa lumang DigiByte app. Maaari mo rin itong patakbuhin mamaya mula sa Mga Setting → Bawiin ang pondo mula sa ibang wallet.</string>
+    <string name="restore_other_body">Ang Coinomi, Ledger, Trezor at ilang lumang wallet ay naglalagay ng coin sa mga address format na hindi ginagamit ng wallet na ito, kaya hindi ito nakikita ng sync. Mahahanap ito ng isang pagsusuri, pero ipinapadala nito ang mga address na nagmumula sa iyong phrase sa DigiScope (api.digiscope.me), na mag-uulat ng anumang pondo sa mga ito. Hindi kailangan para sa phrase mula sa HoldFast Wallet o sa lumang DigiByte app. Maaari mo rin itong patakbuhin mamaya mula sa Mga Setting → Bawiin ang pondo mula sa ibang wallet.</string>
     <string name="restore_other_check">Suriin ang ibang format</string>
     <string name="restore_scan_deriving">Dine-derive ang mga address…</string>
     <string name="restore_scan_duration">Maaaring tumagal ito nang 30-90 segundo depende sa node.</string>
@@ -699,4 +705,7 @@
     <string name="seedview_pass_unreadable_body">Hindi mabasa ngayon ang passphrase ng wallet na ito. Maaaring hindi maibalik ng iyong mga recovery word lamang ang wallet na ito, kaya hindi ipapakita ang mga ito hangga\'t hindi maipapakita ang passphrase kasama nila. Subukan ulit.</string>
     <string name="seedview_pass_retry">Subukan ulit</string>
     <!-- /pkg E2-keys -->
+    <string name="pinstore_title">Hindi masuri ang iyong PIN ngayon</string>
+    <string name="pinstore_body">Hindi nagbukas ang ligtas na key store ng telepono, kaya nananatiling naka-lock ang wallet. Walang binura. Isara ang app at buksan muli. Kung paulit-ulit ito, i-restart ang telepono; maibabalik pa rin ng iyong recovery phrase ang wallet sa anumang device.</string>
+    <string name="pinstore_close">Isara ang app</string>
 </resources>

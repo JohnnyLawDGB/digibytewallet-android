@@ -55,21 +55,32 @@ object DigiDollarFeeSelection {
      *                         each coin; selection stops at the first yes. The fee depends on the
      *                         transfer's own size, so the caller hands over that sizing's answer
      *                         ([DigiDollarTransferService.feeInputsSuffice]) rather than a figure.
+     * @param parents          binds each coin to the transaction that created it (4.1.2 row 17): a fee
+     *                         coin is signed at the amount and script its parent states, never at the
+     *                         lookup's figure alone -- a legacy P2PKH signature does not commit to the
+     *                         amount, so a wrong figure burned the difference to miners. A profile whose
+     *                         parent disagrees with the lookup gives no coin; a coin with no readable
+     *                         parent is not used. Production: [RawTxBinding.native].
      */
     fun from(
         findings: List<RecoveryScanService.ProfileResult>,
         verdicts: Map<UtxoEntry, ForeignUtxoAssetClassifier.Verdict>,
         excludeOutpoints: Set<String>,
         covers: (List<ForeignAssetTransferPlan.Spend>) -> Boolean,
+        parents: RawTxBinding,
     ): Choice {
         val usable = ArrayList<Pair<ForeignAssetTransferPlan.Spend, DerivationProfile>>()
         for (found in findings) {
+            val checked = when (val v = parents.check(found)) {
+                is RawTxBinding.Verdict.Contradicted -> continue   // nothing on this profile is signed
+                is RawTxBinding.Verdict.Checked -> v
+            }
             val byAddress = found.derivedAddresses.associateBy { it.address }
             val plain = SweepPartition.split(
                 utxos = found.utxos,
                 carriesAsset = { verdicts[it]?.carriesAsset ?: false },
                 classified = { verdicts[it]?.classified ?: false },
-            ).sweepable
+            ).sweepable.mapNotNull { checked.proven(it) }   // the parent's amount and script
 
             plain.mapNotNullTo(usable) { u ->
                 if (u.amountSatoshi <= 0L) return@mapNotNullTo null

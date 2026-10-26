@@ -173,6 +173,29 @@ internal class DeviceClock(private val resolver: ContentResolver?) : PinClock {
     override fun wallMs(): Long = System.currentTimeMillis()
 }
 
+/**
+ * The PIN store when `dgb_pin_store` cannot be opened (4.1.2 row 23): a Keystore or keyset fault made
+ * EncryptedSharedPreferences.create throw inside the Hilt-built [PinManager], so the activity died at
+ * injection on every launch. Every operation refuses -- it is never read as "no PIN", which would let
+ * anyone holding the phone set a new one -- and the store on disk is left exactly as it is (deleting
+ * it would clear `pin_wipe_pending` and turn the fault into a PIN reset).
+ */
+internal object UnavailablePinStore : PinStore {
+    private fun refuse(): Nothing = throw IllegalStateException("the PIN store could not be opened")
+    override fun getInt(key: String, def: Int): Int = refuse()
+    override fun getLong(key: String, def: Long): Long = refuse()
+    override fun getString(key: String): String? = refuse()
+    override fun getBoolean(key: String, def: Boolean): Boolean = refuse()
+    override fun contains(key: String): Boolean = refuse()
+    override fun putInt(key: String, value: Int) = refuse()
+    override fun putLong(key: String, value: Long) = refuse()
+    override fun putString(key: String, value: String) = refuse()
+    override fun putBoolean(key: String, value: Boolean) = refuse()
+    override fun remove(key: String) = refuse()
+    override fun clear() = refuse()
+    override fun commit(edit: PinStoreEdit) = refuse()
+}
+
 /** Production [PinStore] backed by the hardware-keyed `dgb_pin_store`
  *  EncryptedSharedPreferences. Writes use `commit()` (synchronous) so the
  *  rate-limit counters are durable against a force-stop between attempts —
@@ -245,10 +268,23 @@ class PinManager internal constructor(
     private val clock: PinClock = DeviceClock(resolver = null),
 ) {
 
-    /** Production constructor used by Hilt — backs the store with EncryptedSharedPreferences. */
-    constructor(context: Context) : this(EncryptedPrefsPinStore(context), clock = DeviceClock(context.contentResolver))
+    /** Production constructor used by Hilt — backs the store with EncryptedSharedPreferences. A store
+     *  that cannot be opened becomes [UnavailablePinStore] rather than a crash at injection. */
+    constructor(context: Context) : this(openStore { EncryptedPrefsPinStore(context) }, clock = DeviceClock(context.contentResolver))
+
+    /** False when the PIN store could not be opened: nothing can be checked, so nothing is unlocked
+     *  and no new PIN can be set. The app shows the PIN-store-unavailable screen instead. */
+    val storeAvailable: Boolean get() = store !== UnavailablePinStore
 
     companion object {
+        /** [open] the store, or [UnavailablePinStore] when it throws (a Keystore or keyset fault). */
+        internal fun openStore(open: () -> PinStore): PinStore = try {
+            open()
+        } catch (t: Throwable) {
+            android.util.Log.e("PinManager", "the PIN store could not be opened: ${t.javaClass.simpleName}")
+            UnavailablePinStore
+        }
+
         // Persisted state keys (all in dgb_pin_store).
         private const val KEY_HASH = "pin_hash"
         private const val KEY_SALT = "pin_salt"
@@ -468,6 +504,33 @@ class PinManager internal constructor(
     /** True if [verifyPin] returned [PinVerifyResult.ShouldWipe] but the caller's
      *  wipe has not yet completed (set atomically, honored at startup). */
     fun isWipePending(): Boolean = store.getBoolean(KEY_WIPE_PENDING, false)
+
+    /**
+     * Whether a wipe is owed, as launch asks it before any screen exists (4.1.2 row 23). A store
+     * that cannot be read owes none: nothing is erased on a guess, and the start route then shows
+     * the store-unavailable screen. [isWipePending] threw there, before that screen could show.
+     */
+    fun wipeOwedAtLaunch(): Boolean = storeAvailable && readOr(false, "wipe-owed") { isWipePending() }
+
+    /**
+     * Whether a PIN is known to exist, for prompts that wait for one (the notification and battery
+     * prompts). Never throws; false when the store cannot be read, so they keep waiting. Not for a
+     * lock decision -- that is [pinAssumedForLock].
+     */
+    fun pinKnownToExist(): Boolean = storeAvailable && readOr(false, "has-pin") { hasPin() }
+
+    /**
+     * Whether the lock must treat the wallet as PIN-protected. A store that cannot be read counts
+     * as "a PIN is set": the wallet is routed to the PIN screen rather than left open (review R10).
+     */
+    fun pinAssumedForLock(): Boolean = !storeAvailable || readOr(true, "lock has-pin") { hasPin() }
+
+    private inline fun readOr(fallback: Boolean, what: String, read: () -> Boolean): Boolean = try {
+        read()
+    } catch (e: Exception) {
+        android.util.Log.e("PinManager", "$what: the PIN store could not be read (${e.javaClass.simpleName}); taking $fallback")
+        fallback
+    }
 
     /** Clear the wipe-pending backstop after a successful wallet wipe. (A full
      *  [clearPin] also clears it — this is for the startup path that wipes the

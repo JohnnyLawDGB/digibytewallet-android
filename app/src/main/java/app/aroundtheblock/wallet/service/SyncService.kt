@@ -552,7 +552,19 @@ class SyncService : Service() {
         // banner from the period it was on comes down. The degradation paths above leave
         // the setting on, so they never lower it.
         serviceScope.launch {
+            var wasOn: Boolean? = null
             torManager.enabled.collect { on ->
+                // Turned on while peers are connected directly: the core already refuses to send
+                // on those connections (peersRequireTor), so drop them now. The keepalive defers
+                // the re-dial until the proxy is wired, and the Tor-state observer reconnects.
+                // Not on the first value: at service start nothing has dialled yet.
+                val turnedOn = on && wasOn == false
+                wasOn = on
+                if (turnedOn && !torProxyActive && torManager.peersRequireTor) {
+                    try { NativeBridge.stopSync() } catch (t: Throwable) {
+                        android.util.Log.w("SyncService", "Tor-on disconnect threw", t)
+                    }
+                }
                 if (!on && _torFailureActive.value) {
                     _torFailureActive.value = false
                     android.util.Log.i("SyncService", "Tor turned off — cleared degradation banner")
@@ -3599,18 +3611,23 @@ class SyncService : Service() {
                 }
                 continue
             }
-            // Definitive double-spend: the C core marks a tx invalid when its
-            // inputs were already spent by another (confirmed) tx. Such a tx can
-            // never confirm — drop the phantom and forget the record rather than
-            // re-fluffing forever. (Only acts on this authoritative signal, never
-            // on the relay guess, so a valid-but-slow send is never dropped.)
-            if (!runCatching { NativeBridge.isTransactionValid(txid) }.getOrDefault(true)) {
+            // Double-spend: the C core marks a tx invalid when another wallet tx spends its inputs --
+            // a confirmed one, or an unconfirmed one ordered before it, which this send can still beat
+            // to a block. So the verdict has to HOLD (the service's one hold, under its own key; 4.1.2
+            // row 30) before the send is
+            // dropped; a send that reads valid again starts over. Never acts on the relay guess.
+            val invalidNow = !runCatching { NativeBridge.isTransactionValid(txid) }.getOrDefault(true)
+            // Asked every sweep: a valid reading drops the send's sighting, so the hold starts over.
+            val invalidHeld = app.aroundtheblock.wallet.core.sync.InvalidSendRemoval.mayRemove(refusalHold, txid) { !invalidNow }
+            if (invalidNow && !invalidHeld) continue   // invalid, not yet for long enough: neither dropped nor re-published
+            if (invalidNow) {
                 // Read the tx's own outputs BEFORE removal — once removed,
                 // NativeBridge can no longer look it up.
                 val outputs = runCatching { NativeBridge.getTransactionOutputsForHash(txid) }
                     .getOrNull()?.toList()
                 if (runCatching { NativeBridge.removeTransaction(txid) }.getOrDefault(false)) {
                     store.remove(txid)
+                    app.aroundtheblock.wallet.core.sync.InvalidSendRemoval.forget(refusalHold, txid)
                     dropped = true
                     if (outputs != null) {
                         // Clean any asset rows this dead send would otherwise
@@ -3684,7 +3701,7 @@ class SyncService : Service() {
         val raw = runCatching { NativeBridge.getSerializedTransactionForHash(txid) }.getOrNull() ?: return false
         val asset = runCatching { NativeBridge.isAssetTransaction(raw) }.getOrDefault(true)
         val digiDollar = runCatching { NativeBridge.digiDollarTxType(txid) }.getOrDefault(-1)
-        return !asset && digiDollar == 0
+        return app.aroundtheblock.wallet.core.sync.PublishOutcome.isPlainDgb(held = true, asset = asset, digiDollarType = digiDollar)
     }
 
     /**
@@ -3895,7 +3912,7 @@ class SyncService : Service() {
         val indeterminate = pct == 0 && peerCount == 0
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(getString(app.aroundtheblock.wallet.R.string.app_name))
+            .setContentTitle(getString(app.aroundtheblock.wallet.R.string.app_name_display))
             .setContentText(contentText)
             .setSmallIcon(android.R.drawable.ic_popup_sync)
             .setProgress(100, pct, indeterminate)
@@ -4169,7 +4186,7 @@ class SyncService : Service() {
          * Update this when a newer BRMainNetCheckpoints entry is added
          * to the submodule.
          */
-        private const val LATEST_CHECKPOINT_HEIGHT = 24_300_000L
+        private const val LATEST_CHECKPOINT_HEIGHT = 24_350_000L
 
         /** How far the compact-filter SCAN may trail the network tip and still count as
          *  caught up. The scan legitimately lags the header tip by a few blocks while the

@@ -42,9 +42,11 @@ class DigiDollarTransferServiceTest {
         sign: (DigiDollarTransferPlan.Plan, ByteArray, Map<String, DerivationProfile>) -> String? =
             { _, _, _ -> "00ff" },
         broadcast: (ByteArray) -> String? = { "dd-txid" },
+        relays: Boolean = true,
     ) = DigiDollarTransferService(
         sign = sign, broadcast = broadcast, log = { _, _ -> },
         recordOutgoing = { _, _, _, _, self -> recorded += self },
+        awaitRelay = { relays },
     )
 
     private fun run(
@@ -289,5 +291,25 @@ class DigiDollarTransferServiceTest {
         assertEquals(500L, r.cents)
         assertEquals(500L, r.unlocatableCents)
         assertFalse(r.moved)
+    }
+
+    // ── 4.1.2 row 20 ────────────────────────────────────────────────────────────────────────────
+
+    /** A move whose broadcast failed still names the inputs it planned, so the sweep leaves the fee
+     *  coins on the seed and a retry can pay its fee (it was refused BELOW_FEE_FLOOR). */
+    @Test fun `a failed broadcast still names its planned inputs`() {
+        val result = run(service(broadcast = { null }), scanOf(100L))
+        org.junit.Assert.assertNull(result.txid)
+        org.junit.Assert.assertTrue("the fee coin is not kept back for a retry: ${result.spentInputs}",
+            result.spentInputs.any { it.startsWith("fee") })
+    }
+
+    /** A broadcast no peer has taken is not reported MOVED: the user may discard the old seed on it. */
+    @Test fun `a transfer no peer took is sent, not moved`() {
+        val result = run(service(relays = false), scanOf(100L))
+        org.junit.Assert.assertFalse(result.moved)
+        org.junit.Assert.assertTrue(result.sentUnrelayed)
+        val relayed = run(service(relays = true), scanOf(100L))
+        org.junit.Assert.assertTrue(relayed.moved)
     }
 }

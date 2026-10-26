@@ -125,11 +125,13 @@ add_library(
         src/main/jni/bridge/jni_asset.c
         src/main/jni/bridge/jni_wallet_sign.c
         src/main/jni/bridge/slip13.c
+        src/main/jni/bridge/coin_reservation.c
         src/main/jni/bridge/jni_transaction_persist.c
         src/main/jni/bridge/jni_derive.c
         src/main/jni/bridge/jni_asset_send.c
         src/main/jni/bridge/jni_cf_recovery_policy.c
         src/main/jni/bridge/jni_publish_outcome.c
+        src/main/jni/bridge/jni_stranded_refusal.c
         src/main/jni/bridge/jni_recreate_sequence.c
         src/main/jni/bridge/jni_peer_penalty_persist.c
         src/main/jni/bridge/jni_class_paths.h

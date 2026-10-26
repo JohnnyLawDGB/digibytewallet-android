@@ -198,6 +198,12 @@ object NativeBridge {
     /** Clear SOCKS5 proxy — peers will connect directly. */
     external fun clearSocksProxy()
 
+    /**
+     * While true, peers are reached only through the SOCKS5 proxy: no direct dial, and nothing is
+     * sent on a connection opened without it. Clearing the proxy no longer means "connect directly".
+     */
+    external fun setTorRequired(required: Boolean)
+
     // === Peer / sync operations ===
     /** Inject a peer by IP address into the saved peers list for priority connection.
      *  Call BEFORE startSync() to ensure the peer is tried on the next connection cycle.
@@ -361,6 +367,36 @@ object NativeBridge {
      */
     external fun publishErrnoValue(index: Int): Int
 
+    // === Stranded-send refusal hold (test-support only) ===
+    /**
+     * The C action for a recorded send ([BRStrandedSend.h]'s `BRStrandedRefusalActionFor`): 0 = keep,
+     * 1 = remove and unlock.
+     *
+     * **Not for production use — call [app.aroundtheblock.wallet.core.sync.PublishOutcome.actionFor] instead.**
+     * This exists so `StrandedRefusalParityTest` can bind the Kotlin mirror to the C header, which is
+     * the source of truth (iOS imports it). Pure function: no wallet state, no lock.
+     */
+    external fun strandedRefusalActionFor(publishError: Int, plainDgb: Boolean, refusedByPeers: Boolean): Int
+
+    /** The C plain-DGB gate (`BRStrandedSendIsPlainDgb`), for [app.aroundtheblock.wallet.core.sync.PublishOutcome.isPlainDgb]. */
+    external fun strandedSendIsPlainDgb(held: Boolean, containsAsset: Boolean, digiDollarType: Int): Boolean
+
+    /** `BR_STRANDED_REFUSAL_HOLD_MS`, so [app.aroundtheblock.wallet.core.sync.RefusalHold.HOLD_MS] is asserted against the header. */
+    external fun strandedRefusalHoldMs(): Long
+
+    /**
+     * One send's observations replayed through the C refusal hold (`BRStrandedRefusalHoldObserve`),
+     * each answer 0 or 1. Per step, [flags]: bit 0 refused, bit 1 [managerBefore] known, bit 2
+     * [managerAfter] known, bit 3 forget the send first. Null for arrays of unequal length.
+     */
+    external fun strandedRefusalHoldRun(
+        holdMs: Long,
+        nowMs: LongArray,
+        managerBefore: LongArray,
+        managerAfter: LongArray,
+        flags: IntArray,
+    ): IntArray?
+
     // === CF recovery policy (test-support only) ===
     /**
      * The C compact-filter recovery table ([BRCFRecoveryPolicy.h]) as a bitmask:
@@ -394,6 +430,10 @@ object NativeBridge {
      *  "\x19DigiByte Signed Message:\n" compact-recoverable scheme as [signMessage].
      *  Returns "address|base64signature" (legacy P2PKH address) or null when locked. */
     external fun signIdentityMessage(message: String, siteUri: String, index: Int): String?
+
+    /** The P2PKH address a Digi-ID login would sign with, without signing: the per-site identity
+     *  for [siteUri], or the shared m/0'/0/0 identity when [siteUri] is null. Null when locked. */
+    external fun identityAddress(siteUri: String?, index: Int): String?
 
     // === Wallet state ===
     /** Returns true if the C core wallet is initialized (g_wallet != NULL). */
@@ -465,6 +505,12 @@ object NativeBridge {
      *
      *  Null on a parse failure or an empty array — never partial output. */
     external fun getRawTransactionOutputs(rawTx: ByteArray): Array<String>?
+
+    /** The same `"<vout>|<satoshis>|<scriptHex>"` listing for the draft [createTransaction] just
+     *  built, before it is signed. The draft is in the wallet's internal unsigned form, which
+     *  [getRawTransactionOutputs] (network format only, 4.1.2 row 9) cannot read — the send review
+     *  pointed at it refused every DGB send. Only ever the builder's own bytes. */
+    external fun getBuiltTransactionOutputs(unsignedTx: ByteArray): Array<String>?
 
     /** What a transaction SPENDS, one `"prevTxidHex|prevVout"` per input, prev txid in display
      *  order.

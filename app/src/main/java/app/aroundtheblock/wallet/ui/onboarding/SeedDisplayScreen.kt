@@ -3,7 +3,6 @@ package app.aroundtheblock.wallet.ui.onboarding
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -28,6 +27,7 @@ import app.aroundtheblock.wallet.ui.components.SecureWindow
 import app.aroundtheblock.wallet.ui.theme.DigiByteAccent
 import app.aroundtheblock.wallet.ui.theme.DigiByteBlue
 import app.aroundtheblock.wallet.ui.theme.DigiByteNavy
+import app.aroundtheblock.wallet.ui.components.keyboardPadding
 
 @Composable
 fun SeedDisplayScreen(
@@ -87,7 +87,7 @@ fun SeedDisplayScreen(
                         // imePadding BEFORE verticalScroll, kept as the house pattern for any
                         // screen that may gain a text field. See PassphraseScreen for what goes
                         // wrong without it.
-                        .imePadding()
+                        .keyboardPadding()
                         .verticalScroll(rememberScrollState())
                         .padding(horizontal = 24.dp, vertical = 24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally

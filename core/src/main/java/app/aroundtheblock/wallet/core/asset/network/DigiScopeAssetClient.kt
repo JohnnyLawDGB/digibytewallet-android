@@ -33,6 +33,9 @@ class DigiScopeAssetClient(
         // Shared pin set — see app.aroundtheblock.wallet.core.network.DigiScopePins. A stale
         // pin here previously killed the M3 asset parent-walk → "metadata offline".
         .certificatePinner(app.aroundtheblock.wallet.core.network.DigiScopePins.certificatePinner())
+        // A pinned host's 3xx is never followed to a host the pins do not cover (4.1.2 row 30, C18).
+        .followRedirects(false)
+        .followSslRedirects(false)
         .build()
 
     /**

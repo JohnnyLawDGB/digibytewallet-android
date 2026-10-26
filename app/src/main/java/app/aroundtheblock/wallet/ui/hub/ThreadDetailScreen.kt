@@ -38,6 +38,7 @@ import app.aroundtheblock.wallet.core.hub.ThreadDetail
 import app.aroundtheblock.wallet.ui.theme.DigiByteAccent
 import app.aroundtheblock.wallet.ui.theme.DigiByteBlue
 import app.aroundtheblock.wallet.ui.theme.DigiByteGreen
+import app.aroundtheblock.wallet.ui.components.keyboardPadding
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -68,7 +69,7 @@ fun ThreadDetailScreen(
     var signing by remember { mutableStateOf(false) }
 
     Scaffold(
-        modifier = Modifier.imePadding(),
+        modifier = Modifier.keyboardPadding(),
         topBar = {
             TopAppBar(
                 title = {
