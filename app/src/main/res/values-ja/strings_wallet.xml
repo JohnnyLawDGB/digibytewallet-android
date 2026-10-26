@@ -17,10 +17,10 @@
     <string name="onb_words_count">%1$d 単語</string>
     <string name="onb_create">新しいウォレットを作成</string>
     <string name="onb_recover">既存のウォレットを復元</string>
-    <string name="onb_footer">DigiByte — 安全、高速、分散型</string>
-    <string name="app_name_display">DigiByte ウォレット</string>
+    <string name="onb_footer">DigiByte (DGB) ネットワーク向けの独立したウォレット</string>
+    <string name="app_name_display">HoldFast Wallet</string>
     <!-- WARNING -->
-    <string name="seed_screenshot_blocked">スクリーンショットは無効です。これらの単語を書き留めてください — 復元することはできません。</string>
+    <string name="seed_screenshot_blocked">スクリーンショットは無効です。これらの単語を書き留めてください：復元することはできません。</string>
     <string name="seed_title">あなたのリカバリーフレーズ</string>
     <string name="seed_word_count">%1$d 単語のリカバリーフレーズ</string>
     <!-- WARNING -->
@@ -43,9 +43,12 @@
     <string name="pin_backspace">バックスペース</string>
     <string name="unlock_title">PIN を入力</string>
     <string name="unlock_subtitle">ロック解除するには 6 桁の PIN を入力してください</string>
-    <string name="unlock_locked">ロック中 — %1$s 後に再試行してください</string>
+    <string name="unlock_locked">ロック中：%1$s 後に再試行してください</string>
     <string name="unlock_unlocking">ロック解除中…</string>
     <string name="unlock_biometrics_cd">生体認証でロック解除</string>
+    <string name="recover_title">ウォレットを復元</string>
+    <string name="recover_body">ウォレットを復元するにはリカバリーフレーズを入力してください。</string>
+    <string name="recover_continue">続ける</string>
 
     <string name="seed_retry">再試行</string>
     <string name="verify_next">次へ</string>
@@ -65,11 +68,11 @@
     <string name="pin_err_wallet">ウォレットを作成できませんでした。もう一度お試しください。</string>
     <string name="unlock_err_failed">ロック解除に失敗しました。もう一度お試しください。</string>
     <string name="unlock_device_lock_removed">端末の画面ロックが解除されたため、ウォレットの保護キーが失われました。リカバリーフレーズでウォレットを復元してください。</string>
-    <string name="unlock_wiping">失敗回数が上限に達しました — ウォレットを消去しています</string>
+    <string name="unlock_wiping">失敗回数が上限に達しました：ウォレットを消去しています</string>
     <string name="unlock_attempts_left">PIN が正しくありません。残りの試行回数: %1$d</string>
     <string name="battery_title">バックグラウンドで同期を続ける</string>
     <string name="battery_body">画面がオフのとき、Android がこのウォレットをスリープさせることがあります。その場合 DigiByte ネットワークとの接続が切れ、アプリを開き直すまでピア数が 0 のままになることがあります。\n\n同期を続けられるよう、制限なしで実行することを許可してください。</string>
-    <string name="battery_body_samsung">\n\nSamsung では、デバイスケア → バッテリー → \"スリープにしないアプリ\" も開き、DigiByte Wallet を追加してください。</string>
+    <string name="battery_body_samsung">\n\nSamsung では、デバイスケア → バッテリー → \"スリープにしないアプリ\" も開き、HoldFast Wallet を追加してください。</string>
     <string name="battery_open_settings">設定を開く</string>
     <string name="tor_title">新しいプライバシー機能</string>
     <string name="tor_body">Tor ルーティングが利用可能になりました。有効にすると、ウォレットは Tor 経由で DigiByte ネットワークに接続し、ピアから IP アドレスを隠します。\n\nTor ルーティングを有効にしますか？</string>
@@ -97,13 +100,13 @@
     <string name="wallet_price_via">提供元: %1$s</string>
     <string name="wallet_testnet_active">テストネット有効</string>
     <string name="wallet_tor_active">Tor 有効</string>
-    <string name="wallet_tor_hidden">Tor — IP アドレスは隠されます</string>
+    <string name="wallet_tor_hidden">Tor：IP アドレスは隠されます</string>
     <string name="wallet_disconnected_peers">切断 · %1$d ピア</string>
-    <string name="wallet_history_gap">履歴に欠落 — 一部のブロックが未検証です</string>
+    <string name="wallet_history_gap">履歴に欠落：一部のブロックが未検証です</string>
     <string name="wallet_scan_missing">不足している取引をスキャン</string>
     <string name="wallet_balance_refresh_failed">残高の更新に失敗しました</string>
     <string name="wallet_reconcile_unreachable">このアップグレード後、照合ノードに接続できませんでした。表示されている残高は最新でない可能性があります。</string>
-    <string name="wallet_tor_unavailable">Tor を利用できません — 直接接続を使用します</string>
+    <string name="wallet_tor_unavailable">Tor を利用できません：直接接続を使用します</string>
     <string name="wallet_tor_timeout">Tor が時間内にネットワークへ到達しなかったため、このセッションではウォレットがピアへ直接接続します。アプリを再起動するまで、IP アドレスはピアに見えます。</string>
     <string name="wallet_node_offline">ノードがオフラインです</string>
     <string name="wallet_node_offline_body">ペアリングされたノードに到達できないか、現在 compact filters を提供していません。稼働・到達可能であること、peerblockfilters=1 が設定されていることを確認してください。</string>
@@ -121,11 +124,15 @@
     <string name="receive_request_amount">金額を指定してリクエスト（任意）</string>
     <string name="receive_amount_label">金額</string>
     <string name="receive_qr_encodes">QR の内容: %1$s</string>
-    <string name="receive_dd_note">DigiDollar は米ドル建てトークンとして受け取ります。この DigiDollar アドレスを共有してください — QR にはアドレスのみが含まれます（金額リクエストは含みません）。</string>
+    <string name="receive_dd_note">DigiDollar は米ドル建てトークンとして受け取ります。この DigiDollar アドレスを共有してください：QR にはアドレスのみが含まれます（金額リクエストは含みません）。</string>
     <string name="txd_title">取引の詳細</string>
     <string name="txd_not_found">取引が見つかりません</string>
     <string name="txd_sent">送金</string>
     <string name="txd_received">受取</string>
+    <!-- A DigiDollar activity row says what the transaction did (sent and received use txd_sent / txd_received). -->
+    <string name="tx_dd_minted">発行</string>
+    <string name="tx_dd_self_transfer">自分宛て</string>
+    <string name="tx_dd_redeemed">償還</string>
     <string name="txd_transaction_id">取引 ID</string>
     <string name="txd_block_height">ブロック高</string>
     <string name="txd_pending">保留中</string>
@@ -139,12 +146,12 @@
     <string name="txd_view_explorer">エクスプローラーで見る</string>
     <string name="txd_back_to_wallet">ウォレットに戻る</string>
 
-    <string name="wallet_sync_gap_headline">スキャン完了 — 履歴の一部が未検証です</string>
+    <string name="wallet_sync_gap_headline">スキャン完了：履歴の一部が未検証です</string>
     <string name="wallet_sync_connecting">DigiByte ネットワークに接続中</string>
     <string name="wallet_sync_scanning">取引を検索しています</string>
     <string name="wallet_sync_uptodate">最新です</string>
     <string name="wallet_sync_failed">同期に失敗しました</string>
-    <string name="wallet_sync_finishing">最終処理中 — 最近のブロックを検証しています</string>
+    <string name="wallet_sync_finishing">最終処理中：最近のブロックを検証しています</string>
     <string name="wallet_blocks_count">%1$s ブロック</string>
     <string name="wallet_sync_progress_eta">%1$d%% 完了 · %2$s · 残り %3$s</string>
     <string name="wallet_sync_progress_no_eta">%1$d%% 完了 · 残り %2$s · 推定中…</string>
@@ -162,7 +169,7 @@
     <string name="wallet_status_connecting">接続中…</string>
     <string name="wallet_gap_range_between">ブロック %1$s–%2$s</string>
     <string name="wallet_gap_range_below">%1$s 未満のブロック</string>
-    <string name="wallet_gap_body">履歴の一部（%1$s）をフィルターフリートから検証できませんでした — タップして不足している取引をスキャンしてください。</string>
+    <string name="wallet_gap_body">履歴の一部（%1$s）をフィルターフリートから検証できませんでした：タップして不足している取引をスキャンしてください。</string>
     <string name="receive_address_unavailable">アドレスを取得できません</string>
     <string name="receive_fmt_dd_testnet">DigiDollar (TD…)</string>
     <string name="receive_fmt_dd">DigiDollar (DD…)</string>
@@ -210,11 +217,11 @@
     <string name="send_network_fee_row">ネットワーク手数料</string>
     <string name="send_fee_default">デフォルト</string>
     <string name="send_fee_custom">カスタム</string>
-    <string name="send_fee_below_min">⚠ 最低リレー手数料を下回っています — 取引がブロードキャストされない可能性があります</string>
+    <string name="send_fee_below_min">⚠ 最低リレー手数料を下回っています：取引がブロードキャストされない可能性があります</string>
     <string name="send_fee_required">手数料が必要です</string>
     <string name="send_confirms_15s">約 15 秒で承認</string>
-    <string name="send_no_peers">接続中の DigiByte ピアがありません — 現在ブロードキャストできません。再接続しています…</string>
-    <string name="send_wait_for_sync">同期が完了してから送金してください — 残高はまだ復元中です。</string>
+    <string name="send_no_peers">接続中の DigiByte ピアがありません：現在ブロードキャストできません。再接続しています…</string>
+    <string name="send_wait_for_sync">同期が完了してから送金してください：残高はまだ復元中です。</string>
     <string name="send_broadcasting">ブロードキャスト中…</string>
     <string name="send_review">確認して送金</string>
     <string name="send_dialog_title">取引の確認</string>
@@ -222,7 +229,7 @@
     <string name="send_to">宛先</string>
     <string name="send_approx_usd_label">≈ USD</string>
     <string name="send_amount_dd">$%1$s DigiDollar</string>
-    <string name="send_dd_fee_value">≈ %1$s DGB</string>
+    <string name="send_dd_not_built">この DigiDollar の送金を準備できませんでした。ネットワーク手数料を支払うのに十分な DGB があるか確認してください。</string>
     <string name="send_verify_warning">上記の完全なアドレスをよく確認してください。\n取引は取り消せません。</string>
     <string name="send_send">送金</string>
     <string name="send_success">成功</string>
@@ -234,7 +241,7 @@
 
     <string name="send_hint_dgb">dgb1q… または D…</string>
     <string name="game_score_submitted">スコアを送信しました</string>
-    <string name="game_score_failed">スコアの送信に失敗しました — ログインしていますか？</string>
+    <string name="game_score_failed">スコアの送信に失敗しました：ログインしていますか？</string>
     <string name="game_close">ゲームを閉じる</string>
 
     <string name="set_title">設定</string>
@@ -258,15 +265,15 @@
     <string name="set_recover_other_sub">古い・別の導出パスのコインをこのウォレットに集約します</string>
     <string name="set_cat_info">情報</string>
     <string name="set_beta">ベータ更新</string>
-    <string name="set_beta_on">オン — テスト用のプレリリース版が提供されます</string>
-    <string name="set_beta_off">オフ — 安定版のみが提供されます</string>
+    <string name="set_beta_on">オン：テスト用のプレリリース版が提供されます</string>
+    <string name="set_beta_off">オフ：安定版のみが提供されます</string>
     <string name="set_about">アプリについて</string>
     <string name="set_about_sub">バージョン、ライセンス、オープンソース</string>
     <string name="set_report_bug">バグ報告 / フィードバック</string>
-    <string name="set_report_bug_sub">問題やアイデアを送信します — 端末とバージョンの情報は自動で入力されます</string>
+    <string name="set_report_bug_sub">問題やアイデアを送信します：端末とバージョンの情報は自動で入力されます</string>
     <string name="set_cat_advanced">詳細設定 / 開発者</string>
-    <string name="set_net_testnet">テストネット — テストチェーン、リカバリーフレーズは同じ</string>
-    <string name="set_net_mainnet">メインネット — 本番チェーン</string>
+    <string name="set_net_testnet">テストネット：テストチェーン、リカバリーフレーズは同じ</string>
+    <string name="set_net_mainnet">メインネット：本番チェーン</string>
     <string name="set_switch_testnet">テストネットに切り替えますか？</string>
     <string name="set_switch_mainnet">メインネットに切り替えますか？</string>
     <string name="set_switch_testnet_body">アプリを再起動してテストチェーンを同期します。リカバリーフレーズは変わりません。</string>
@@ -274,7 +281,7 @@
     <string name="set_restart">再起動</string>
 
     <string name="lang_restart_note">変更するとウォレット画面が再起動します。コイン、フレーズ、設定はそのままです。</string>
-    <string name="lang_unreviewed_note">翻訳は新しく、まだネイティブスピーカーの確認を受けていません。おかしな表現があれば — 特にリカバリーフレーズやコインに関する警告は — 設定 → バグ報告からお知らせください。</string>
+    <string name="lang_unreviewed_note">翻訳は新しく、まだネイティブスピーカーの確認を受けていません。おかしな表現があれば（特にリカバリーフレーズやコインに関する警告は）設定 → バグ報告からお知らせください。</string>
     <string name="lang_selected">選択中</string>
 
     <string name="as_send_title">アセットを送る</string>
@@ -336,7 +343,7 @@
     <string name="rf_may_take">少し時間がかかることがあります</string>
     <string name="rf_couldnt_finish">確認を完了できませんでした</string>
     <string name="rf_none_found">復元できる資金は見つかりませんでした</string>
-    <string name="rf_partial_body">一部の導出パスを確認できなかったため、これは最終的な結果ではありません — まだ確認できていない資金がある可能性があります。しばらくしてからもう一度お試しください。\n\n未確認: %1$s</string>
+    <string name="rf_partial_body">一部の導出パスを確認できなかったため、これは最終的な結果ではありません：まだ確認できていない資金がある可能性があります。しばらくしてからもう一度お試しください。\n\n未確認: %1$s</string>
     <string name="rf_no_coins">このシードには他の導出パス上にコインがありません。</string>
     <string name="rf_recoverable_balance">復元可能な残高</string>
     <string name="rf_found_on">検出元</string>
@@ -345,15 +352,15 @@
     <string name="rf_native_addr_note">資金はネイティブの受取アドレスに表示されます</string>
     <string name="rf_advanced_send">詳細 ▸ 別のアドレスに送る</string>
     <string name="rf_address_hint">DigiByte アドレス（D…、S…、dgb1q…）</string>
-    <string name="rf_not_in_wallet">このアドレスはあなたのウォレットにありません — 集約は取り消せません</string>
+    <string name="rf_not_in_wallet">このアドレスはあなたのウォレットにありません：集約は取り消せません</string>
     <string name="rf_sweep">資金を集約</string>
     <string name="rf_sweep_submitted">集約を送信しました</string>
     <string name="rf_will_appear">復元された資金は承認後に表示されます。</string>
     <string name="rf_txid">TXID</string>
     <string name="rf_pending">ネットワークの承認待ち</string>
-    <string name="rf_held_assets">%1$d 件をそのまま残しました — DigiAssets</string>
+    <string name="rf_held_assets">%1$d 件をそのまま残しました：DigiAssets</string>
     <string name="rf_held_assets_body">これらのコインは DigiAssets を保持しており、移動に失敗しました。通常の DGB として送ると資産が失われるため、旧ウォレットに残しています。復元をもう一度実行して再試行してください。</string>
-    <string name="rf_held_unknown">%1$d 件をそのまま残しました — 確認できませんでした</string>
+    <string name="rf_held_unknown">%1$d 件をそのまま残しました：確認できませんでした</string>
     <string name="rf_held_unknown_body">これらの出所となる取引を読み取れなかったため、DigiAssets を保持しているか判断できませんでした。リスクを避けてそのまま残しています。後でもう一度試すと解消する場合があります。</string>
     <string name="rf_and_more">…ほか %1$d 件</string>
     <string name="rf_something_wrong">問題が発生しました</string>
@@ -361,12 +368,12 @@
     <string name="rf_err_timeout">リクエストがタイムアウトしました。接続状況の良いときにもう一度お試しください。</string>
     <string name="rf_err_seed">ウォレットのシードを読み込めませんでした。ウォレットのロックを解除してもう一度お試しください。</string>
     <string name="rf_err_lookup">照会サービスに接続できませんでした。しばらくしてからお試しください。</string>
-    <string name="rf_err_generic">問題が発生しました — もう一度お試しください。</string>
+    <string name="rf_err_generic">問題が発生しました：もう一度お試しください。</string>
     <string name="rf_fail_unknown">不明な理由で失敗しました。</string>
     <string name="rf_fail_no_utxos">署名鍵に対応づけられる使用可能なアウトプットがありませんでした。</string>
     <string name="rf_fail_derive">このパスのシードから鍵を導出できませんでした。</string>
     <string name="rf_fail_broadcast">取引のブロードキャストに失敗しました。ピアに接続してからもう一度お試しください。</string>
-    <string name="rf_fail_generic">これは集約できませんでした — もう一度お試しください。</string>
+    <string name="rf_fail_generic">これは集約できませんでした：もう一度お試しください。</string>
     <string name="rf_this_wallet">このウォレット</string>
     <string name="rf_other_phrase">別のウォレットのフレーズ</string>
     <string name="rf_other_phrase_body">別のウォレットのリカバリーフレーズを入力すると、その資金をこのウォレットに移せます。フレーズは送金の署名に一度だけ使われ、保存されることはありません。</string>
@@ -400,7 +407,7 @@
     <string name="ni_save">保存</string>
     <string name="ni_exclusive">自分のノードのみ（排他）</string>
     <string name="ni_exclusive_sub">自分のノードだけで同期します。オフラインになると、公開ピアを再度有効にするまでウォレットには他のピアがありません。</string>
-    <string name="ab_powered_by">Powered by DigiByte Core 9.26</string>
+    <string name="ab_powered_by">DigiByte Core 9.26 ノードに対応</string>
     <string name="ab_wallet_info">ウォレット情報</string>
     <string name="ab_wallet_type">ウォレット種別</string>
     <string name="ab_hd_path">HD パス</string>
@@ -412,8 +419,8 @@
     <string name="ab_open_source">オープンソース</string>
     <string name="ab_source_code">ソースコード</string>
     <string name="ab_licenses">ライセンス</string>
-    <string name="ab_licenses_sub">MIT ライセンス — オープンソース</string>
-    <string name="ab_community">DigiByte コミュニティ</string>
+    <string name="ab_licenses_sub">MIT ライセンス：オープンソース</string>
+    <string name="ab_community">DigiByte ネットワーク情報</string>
     <string name="ab_report_bug">バグを報告</string>
 
     <string name="sec_pin_auth">PIN と認証</string>
@@ -424,8 +431,8 @@
     <string name="sec_biometric_no">この端末では利用できません</string>
     <string name="sec_autolock">自動ロックまでの時間</string>
     <string name="sec_wipe_after">PIN を %1$d 回間違えたら消去</string>
-    <string name="sec_wipe_after_on">オン — PIN を %1$d 回間違えるとウォレットを消去します</string>
-    <string name="sec_wipe_after_off">オフ — PIN 総当たりへの追加の保護</string>
+    <string name="sec_wipe_after_on">オン：PIN を %1$d 回間違えるとウォレットを消去します</string>
+    <string name="sec_wipe_after_off">オフ：PIN 総当たりへの追加の保護</string>
     <string name="sec_wipe_after_body">オンにすると、PIN を連続で %1$d 回間違えた時点で、このウォレット（シード・鍵・履歴）を端末から完全に消去します。\n\n端末上では取り消せません。資金はリカバリーフレーズからのみ復元できます。</string>
     <string name="sec_wipe_after_ack">リカバリーフレーズをバックアップ済みです</string>
     <string name="sec_wipe_after_enabled">%1$d 回で消去を有効にしました</string>
@@ -433,7 +440,7 @@
     <string name="sec_view_phrase">リカバリーフレーズを表示</string>
     <string name="sec_view_phrase_sub">PIN と生体認証が必要です</string>
     <string name="sec_view_phrase_body">リカバリーフレーズはウォレットへの完全なアクセス権を与えます。\n\n• 誰にも共有しないでください\n• どのウェブサイトにも入力しないでください\n• オフラインの安全な場所に保管してください\n\n続行には PIN と生体認証が必要です。</string>
-    <string name="sec_understand">理解しました — 続行</string>
+    <string name="sec_understand">理解しました：続行</string>
     <string name="sec_danger_zone">危険な操作</string>
     <string name="sec_wipe_wallet">ウォレットを消去</string>
     <string name="sec_wipe_wallet_sub">この端末からすべてのウォレットデータを削除します</string>
@@ -471,11 +478,21 @@
     <string name="did_login">Digi-ID ログイン</string>
     <string name="did_auth_title">Digi-ID 認証</string>
     <string name="did_auth_subtitle">%1$s にログインするには認証してください</string>
+    <string name="hub_sign_title">Hub の投稿に署名</string>
+    <string name="hub_sign_subtitle">あなたの ID でこの投稿に署名するには認証してください</string>
+    <string name="hub_tip_auth_title">Hub のチップを送る</string>
+    <string name="hub_tip_auth_subtitle">DigiScope のチップ残高からこのチップを送るには認証してください</string>
     <string name="did_requesting">が Digi-ID 認証を要求しています</string>
     <string name="did_warning">警告</string>
     <string name="did_insecure">安全でない接続</string>
     <string name="did_insecure_body">このサイトは HTTPS ではなく HTTP を使用しています。認証が傍受される可能性があります。</string>
     <string name="did_callback_url">コールバック URL</string>
+    <string name="did_identity_title">このサイトが認識しているサインインはどれですか？</string>
+    <string name="did_identity_hint">このウォレットを復元しましたか？以前このサイトで使っていた ID を選んでください。サインインに成功すると、ウォレットがそれを記憶します。</string>
+    <string name="did_identity_per_site">このサイト専用のキー（元の DigiByte アプリ）</string>
+    <string name="did_identity_shared">全サイト共通のキー（DigiByte wallet 3.x–4.0.76）</string>
+    <string name="did_identity_shared_note">すべてのサイトで同じなので、サイト同士がサインインを関連付けられます。このサイトがこのキーであなたを認識していた場合のみ選んでください。</string>
+    <string name="did_identity_address">アドレス: %1$s</string>
     <string name="did_approve">承認</string>
     <string name="did_deny">拒否</string>
     <string name="did_success">認証に成功しました</string>
@@ -492,7 +509,7 @@
     <string name="ni_state_synced">同期済み</string>
     <string name="ni_state_error">エラー</string>
     <string name="ni_caught_up">最新です</string>
-    <string name="ni_tor_disabled">無効 — 直接接続します</string>
+    <string name="ni_tor_disabled">無効：直接接続します</string>
     <string name="ni_tor_starting">起動中…</string>
     <string name="ni_tor_connecting">Tor ネットワークに接続中…</string>
     <string name="ni_tor_connected">ポート %1$d 経由で接続済み</string>
@@ -500,7 +517,7 @@
     <string name="ni_node_serving">✓ compact filters を提供中</string>
     <string name="ni_node_connecting">接続中…</string>
     <string name="ni_node_unreachable">⚠ 到達できません / フィルターを提供していません</string>
-    <string name="sec_locked_countdown">ロック中 — %1$s 後にもう一度お試しください</string>
+    <string name="sec_locked_countdown">ロック中：%1$s 後にもう一度お試しください</string>
     <string name="sec_autolock_1m">1 分</string>
     <string name="sec_autolock_5m">5 分</string>
     <string name="sec_autolock_15m">15 分</string>
@@ -511,38 +528,40 @@
     <string name="sec_biometric_required">生体認証が必要です</string>
     <string name="did_logged_in">%1$s にログインしました</string>
     <string name="ab_type_value">HD Wallet (BIP84)</string>
-    <string name="ab_type_desc">リカバリーフレーズから作られる階層的決定性ウォレットです。ひとつのバックアップから多数のアドレスを生成できます — 1 本のマスターキーから無制限の口座番号を得るようなものです。</string>
+    <string name="ab_type_desc">リカバリーフレーズから作られる階層的決定性ウォレットです。ひとつのバックアップから多数のアドレスを生成できます：1 本のマスターキーから無制限の口座番号を得るようなものです。</string>
     <string name="ab_path_desc">アドレスの生成に使われる導出パスです。84 = BIP84 標準、20 = DigiByte のコインタイプ（SLIP44）、0 = 最初のアカウント。これにより BIP84 対応のどのウォレットでも、同じリカバリーフレーズからアドレスを復元できます。Ian Coleman 氏の BIP39 ツールとも互換です。</string>
     <string name="ab_format_value">SegWit (Bech32)</string>
     <string name="ab_format_desc">dgb1 で始まる最新の SegWit アドレスを使用します。D で始まる従来の Legacy アドレスより効率的で、手数料も低くなります。</string>
     <string name="ab_network_value">Mainnet</string>
     <string name="ab_network_desc">メインネットは DGB が実際の価値を持つ本番の DigiByte ネットワークです。テストネットは開発者が実際の資金を使わずに試すためのものです。</string>
     <string name="ab_security_value">自己管理</string>
-    <string name="ab_security_desc">鍵がこの端末から出ることはありません。企業もサーバーもあなたの資金を預かりません — ウォレットを管理できるのはあなただけです。リカバリーフレーズを失うと、誰も代わりに復元できません。</string>
+    <string name="ab_security_desc">鍵がこの端末から出ることはありません。企業もサーバーもあなたの資金を預かりません：ウォレットを管理できるのはあなただけです。リカバリーフレーズを失うと、誰も代わりに復元できません。</string>
     <string name="ab_sync_value">SPV (Compact Filters)</string>
-    <string name="ab_sync_desc">簡易支払い検証 — ブロックチェーン全体をダウンロードせずに DigiByte の P2P ネットワークと直接同期します。BIP157/158 のコンパクトブロックフィルターを使用し、ウォレットはフィルターを取得して端末上で照合するため、保有アドレスが端末外に出ることはありません。</string>
+    <string name="ab_sync_desc">簡易支払い検証：ブロックチェーン全体をダウンロードせずに DigiByte の P2P ネットワークと直接同期します。BIP157/158 のコンパクトブロックフィルターを使用し、ウォレットはフィルターを取得して端末上で照合するため、保有アドレスが端末外に出ることはありません。</string>
     <string name="ab_security_build">AES-256-GCM seed encryption, hardware-backed Keystore</string>
     <string name="ab_core_value">9.26 (SPV node)</string>
     <string name="ab_mit">本ソフトウェアは MIT ライセンスのもとで提供されています。</string>
     <string name="ab_tagline">DigiByte は分散型ブロックチェーンおよびデジタル通貨です。</string>
+    <!-- Publisher disclaimer on the About screen. Around The Block LLC and DigiByte are names: keep them in Latin script, untranslated. -->
+    <string name="ab_disclaimer">Around The Block LLC による独立したウォレットです。DigiByte の公式アプリではありません。</string>
 
     <string name="tx_conf_short">%1$d 承認</string>
     <string name="tx_confirmed">承認済み</string>
 
     <string name="cur_title">表示通貨</string>
-    <string name="cur_note">DigiByte の残高は常に実際のものです — これは比較対象を変えるだけです。</string>
+    <string name="cur_note">DigiByte の残高は常に実際のものです：これは比較対象を変えるだけです。</string>
 
-    <string name="dsp_currency_subtitle">%1$s — %2$s</string>
+    <string name="dsp_currency_subtitle">%1$s：%2$s</string>
 
-    <string name="pass_advanced">詳細 — パスフレーズを追加</string>
+    <string name="pass_advanced">詳細：パスフレーズを追加</string>
     <string name="pass_optional">任意</string>
-    <string name="pass_what">パスフレーズは、あなたが決める追加の単語や文章です。設定すると、リカバリーフレーズだけではこのウォレットを開けなくなります — 書き留めた単語を見つけた人でも、あなたのコインは使えません。</string>
+    <string name="pass_what">パスフレーズは、あなたが決める追加の単語や文章です。設定すると、リカバリーフレーズだけではこのウォレットを開けなくなります：書き留めた単語を見つけた人でも、あなたのコインは使えません。</string>
     <string name="pass_warn">パスフレーズは書き留めてください。ただし、リカバリーフレーズとは別の場所に保管してください。同じ場所に置くと両者は再び一つの秘密になり、パスフレーズは何も守りません。紛失すると、これらの単語だけではウォレットを復元できず、誰も代わりに復元することはできません。</string>
     <string name="pass_scope">これは書き留めたバックアップを守るものです。この端末では、ウォレットをロックしているのは引き続き PIN です。</string>
     <string name="pass_enter">パスフレーズ</string>
     <string name="pass_confirm">パスフレーズの確認</string>
     <string name="pass_mismatch">パスフレーズが一致しません</string>
-    <string name="pass_too_long">長すぎます — 最大 %1$d 文字</string>
+    <string name="pass_too_long">長すぎます：最大 %1$d 文字</string>
     <string name="pass_set">パスフレーズを設定しました</string>
     <string name="pass_none">パスフレーズなし</string>
     <string name="pass_restore_label">パスフレーズ（使っていない場合は空欄）</string>
@@ -556,7 +575,7 @@
     <string name="rf_move_assets_body">上記で残した DGB を使って、資産をこのウォレットに送ります。資産の送信は取り消せません。</string>
     <string name="rf_moving_assets">資産を移動中…</string>
     <string name="rf_move_result">%2$d 件中 %1$d 件の資産を移動しました</string>
-    <string name="rf_move_failed">%1$s — 未移動：%2$s</string>
+    <string name="rf_move_failed">%1$s、未移動：%2$s</string>
     <string name="pass_screen_title">パスフレーズを追加しますか？</string>
     <string name="pass_screen_subtitle">任意です。ほとんどの方はスキップして構いません。パスフレーズはご自身で決める追加の単語や文で、これがないとリカバリーフレーズだけではこのウォレットを開けなくなります。</string>
     <string name="pass_screen_continue_with">パスフレーズを設定して続ける</string>
@@ -577,7 +596,8 @@
     <string name="rf_dd_fee_floor">ネットワーク手数料に %1$s が必要です。このウォレットには %2$s しかありません。</string>
     <string name="rf_dd_found">DigiDollar %1$s が見つかりました</string>
     <string name="rf_dd_moved">%1$s 相当の DigiDollar をこのウォレットへ移しました</string>
-    <string name="rf_dd_left_behind">%1$s 相当の DigiDollar が残りました — 移せませんでした</string>
+    <string name="rf_dd_sent_unrelayed">DigiDollar で %1$s を送信しましたが、まだネットワークで確認されていません。このウォレットに表示されるまで、以前のリカバリーフレーズを保管してください。</string>
+    <string name="rf_dd_left_behind">%1$s 相当の DigiDollar が残りました：移せませんでした</string>
     <string name="rf_dd_unreachable">DigiDollar を確認できませんでした。このウォレットが保有している可能性があります</string>
     <string name="as_rules_checking">このアセットの転送ルールを確認しています…</string>
     <string name="as_rules_bound_title">このアセットには転送ルールがあります</string>
@@ -607,7 +627,7 @@
     <string name="reconcile_spendable">使用可能</string>
     <string name="reconcile_wallet_spendable">ウォレットの使用可能残高</string>
     <string name="reconcile_matches_wallet">ウォレットの使用可能残高と一致しています。</string>
-    <string name="reconcile_does_not_match_wallet">ウォレットの使用可能残高と一致しません — 下記を参照してください。</string>
+    <string name="reconcile_does_not_match_wallet">ウォレットの使用可能残高と一致しません：下記を参照してください。</string>
     <string name="reconcile_held_asset">DigiAsset 用に確保</string>
     <string name="reconcile_held_unknown">確保：アセットの状態は不明</string>
     <string name="reconcile_proven_plain">通常の DGB（再起動後に使用可能）</string>
@@ -623,7 +643,64 @@
     <string name="market_tor_notice_title">マーケットは Tor を経由しません</string>
     <string name="market_tor_notice_body">マーケットは Tor を経由しません。サイトにはあなたの IP アドレスが見えます。</string>
     <string name="market_tor_notice_continue">続行</string>
-    <string name="move_title">DigiByte Wallet は DigiByte Mobile になりました</string>
-    <string name="move_body">このアプリは今後アップデートされません。Google Play から DigiByte Mobile をインストールし、「既存のウォレットを復元」を選んで、このウォレットのリカバリーフレーズを入力してください。チェーン上で資産は移動しません。新しいアプリに残高が表示されるまで、このアプリは残しておいてください。</string>
-    <string name="move_how">移行方法</string>
+    <string name="restore_pass_toggle">パスフレーズを設定した</string>
+    <string name="restore_pass_body">このウォレットの作成時にパスフレーズを追加した場合のみ入力してください。パスフレーズが違うと、別の空のウォレットが開きます。エラーは表示されません。</string>
+
+    <!-- ── Restore flow: word entry, restore-privately / other-formats opt-in, wallet-birth date ──
+         WARNING: restore_other_body is a privacy disclosure. It must keep saying that the check
+         SENDS the addresses the phrase derives to DigiScope (api.digiscope.me), and
+         restore_scan_body that the default restore sends nothing. Translate faithfully; never
+         soften either claim. "api.digiscope.me", "dgb1q…", "D…", Taproot and DigiDollar stay
+         as-is. -->
+    <string name="restore_err_fill_all">%1$d 単語すべてを入力してください。</string>
+    <string name="restore_err_invalid_words">無効な単語: %1$s</string>
+    <string name="restore_err_checksum">このリカバリーフレーズは無効です。各単語とその順番をもう一度確認してください。</string>
+    <string name="restore_scan_title">プライベートに復元</string>
+    <string name="restore_scan_body">続行すると、このスマートフォン自身がウォレットの取引（ネイティブ (dgb1q…)、Legacy (D…)、Taproot、DigiDollar の各アドレス）を見つけます。アドレスを誰にも送信しません。</string>
+    <string name="restore_other_title">別のウォレットアプリのフレーズですか？</string>
+    <string name="restore_other_body">Coinomi、Ledger、Trezor や一部の古いウォレットは、このウォレットが使わないアドレス形式でコインを保管しているため、同期では見つけられません。チェックを実行すると見つけられますが、その際、フレーズから導出したアドレスを DigiScope (api.digiscope.me) に送信し、DigiScope がそれらのアドレス上の資金を報告します。HoldFast Wallet または旧アプリ DigiByte のフレーズであれば不要です。後から「設定 → 別のウォレットから資金を復元」で実行することもできます。</string>
+    <string name="restore_other_check">他の形式をチェック</string>
+    <string name="restore_scan_deriving">アドレスを導出しています…</string>
+    <string name="restore_scan_duration">ノードによっては 30〜90 秒かかることがあります。</string>
+    <string name="restore_scan_failed">スキャンに失敗しました</string>
+    <string name="restore_scan_retry">チェックを再試行</string>
+    <string name="restore_found_title">資金が見つかりました</string>
+    <string name="restore_unreachable_title">DigiScope に接続できませんでした</string>
+    <string name="restore_none_title">まだ資金は検出されていません</string>
+    <plurals name="restore_found_body">
+        <item quantity="other">%2$d 個のパスに %1$s DGB</item>
+    </plurals>
+    <string name="restore_unreachable_body">チェックを実行できませんでした。続行後も、このウォレット独自の形式は同期で見つかります。再試行するか、他のアプリの形式については後で「設定 → 別のウォレットから資金を復元」を使用してください。</string>
+    <string name="restore_none_body">チェックした形式に未使用の残高はありません。続行後も、このウォレット自身の取引は同期で見つかります。</string>
+    <string name="restore_nonnative_note">%1$s DGB が別のアプリのアドレス形式上にあります。復元後、このウォレットへ移すために「別のウォレットから資金を復元」に移動します。そこで確認するまで何も移動されません。</string>
+    <string name="restore_pass_nothing_found">入力したパスフレーズでは何も見つかりませんでした。パスフレーズにはチェックサムがないため、間違っていてもエラーは出ず、別の空のウォレットが開きます。入力ミスがないか確認してください。ウォレット作成時にパスフレーズを設定していない場合は、戻ってパスフレーズ欄を閉じてください。</string>
+    <plurals name="restore_addresses_scanned">
+        <item quantity="other">%1$s · %2$d 件のアドレスをスキャン済み</item>
+    </plurals>
+    <string name="restore_date_title">このウォレットはいつ作成しましたか？</string>
+    <string name="restore_date_body">不要なブロックチェーンのスキャンを省き、より速く同期できます。</string>
+    <string name="restore_date_unsure">覚えていない</string>
+    <string name="restore_date_unsure_sub">ブロックチェーン全体をスキャン（最も遅い：不明な場合に選択）</string>
+    <string name="restore_date_warning">選択した年より前の取引は検出されません。ウォレットにそれ以前の履歴がある可能性がある場合は、より前の年を選ぶか、すべて検出するには「覚えていない」を選んでください（時間がかかります）。</string>
+    <string name="restore_date_start">復元を開始</string>
+    <string name="restore_date_restoring">ウォレットを復元しています…</string>
+    <string name="restore_date_onwards">%1$d年1月以降</string>
+    <string name="restore_date_range">%1$d年1月～12月</string>
+    <string name="restore_date_genesis">DigiByte は 2014 年 1 月にローンチ</string>
+    <!-- pkg 2.1 -->
+    <string name="send_fee_exact_at_review">100 sat/vB（ネットワークの最低額）。この取引の正確な手数料は、確認の前に表示されます。</string>
+    <string name="send_preparing">準備中…</string>
+    <string name="send_fee_raised">入力された %1$s DGB から引き上げられました。これがこの取引で支払う手数料です。</string>
+    <string name="send_err_below_dust">この金額は、ネットワークがこのアドレスに中継する最小の支払い額（%1$s DGB）を下回っています。少なくともその金額を送金してください。</string>
+    <string name="send_not_relayed_title">送信済み（まだ中継されていません）</string>
+    <string name="send_not_relayed_body">ウォレットはこの取引をブロードキャストしましたが、まだどのピアにも受け取られていないため、ネットワークに届いたかどうかはまだわかりません。アクティビティには保留中として表示されます。もう一度送信する前に、アクティビティを確認してください。</string>
+    <!-- /pkg 2.1 -->
+    <!-- pkg E2-keys: the recovery-phrase screen when the passphrase cannot be read -->
+    <string name="seedview_pass_unreadable_title">パスフレーズを読み取れませんでした</string>
+    <string name="seedview_pass_unreadable_body">このウォレットのパスフレーズを今は読み取れませんでした。リカバリーワードだけではこのウォレットを復元できない可能性があるため、パスフレーズを一緒に表示できるまで表示されません。もう一度お試しください。</string>
+    <string name="seedview_pass_retry">再試行</string>
+    <!-- /pkg E2-keys -->
+    <string name="pinstore_title">現在 PIN を確認できません</string>
+    <string name="pinstore_body">端末の安全なキーストアを開けなかったため、ウォレットはロックされたままです。何も削除されていません。アプリを閉じてもう一度開いてください。繰り返し起きる場合は端末を再起動してください。リカバリーフレーズがあれば、どの端末でもウォレットを復元できます。</string>
+    <string name="pinstore_close">アプリを閉じる</string>
 </resources>

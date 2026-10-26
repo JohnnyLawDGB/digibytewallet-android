@@ -1,0 +1,442 @@
+package app.aroundtheblock.wallet.core.db
+
+import androidx.room.Room
+import androidx.room.testing.MigrationTestHelper
+import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
+import androidx.test.core.app.ApplicationProvider
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import app.aroundtheblock.wallet.core.db.dao.AssetMetadataDao
+import app.aroundtheblock.wallet.core.db.dao.DigiIdHistoryDao
+import app.aroundtheblock.wallet.core.db.entity.AssetMetadataEntity
+import app.aroundtheblock.wallet.core.db.entity.DigiIdHistoryEntity
+import app.aroundtheblock.wallet.core.db.entity.UtxoEntity
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.test.runTest
+import org.junit.After
+import org.junit.Assert.*
+import org.junit.Before
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+import java.io.IOException
+
+private const val TEST_DB_NAME = "migration-test"
+
+@RunWith(AndroidJUnit4::class)
+class MigrationTest {
+
+    @get:Rule
+    val helper = MigrationTestHelper(
+        InstrumentationRegistry.getInstrumentation(),
+        WalletDatabase::class.java
+    )
+
+    // Full v2 in-memory database (plain Room, no SQLCipher) for DAO-level tests
+    private lateinit var db: WalletDatabase
+
+    @Before
+    fun setupInMemory() {
+        db = Room.inMemoryDatabaseBuilder(
+            ApplicationProvider.getApplicationContext(),
+            WalletDatabase::class.java
+        ).allowMainThreadQueries().build()
+    }
+
+    @After
+    fun teardown() {
+        db.close()
+    }
+
+    // -------------------------------------------------------------------------
+    // Migration path: v1 → v2
+    // -------------------------------------------------------------------------
+
+    @Test
+    @Throws(IOException::class)
+    fun migrate1To2_newTablesAndColumnsExist() {
+        // Create a version-1 database using the MigrationTestHelper (no SQLCipher)
+        val v1Db = helper.createDatabase(TEST_DB_NAME, 1)
+
+        // Populate the v1 utxos table with one row so we can verify the new
+        // asset_quantity column lands with its DEFAULT 0 after migration.
+        v1Db.execSQL(
+            "INSERT INTO utxos (txid, vout, scriptPubKey, satoshis, blockHeight, is_asset, asset_id, spent) " +
+                "VALUES ('migtest_tx', 0, X'', 100000, 1000, 0, NULL, 0)"
+        )
+
+        // Populate wallet_config so we can verify the new Tor columns
+        v1Db.execSQL(
+            "INSERT INTO wallet_config (id, creationTimestamp, defaultAddressFormat, lastSyncHeight, fiatCurrency, autoLockTimeoutMs) " +
+                "VALUES (1, 0, 2, 0, 'USD', 60000)"
+        )
+
+        v1Db.close()
+
+        // Run the migration from 1 → 2
+        val v2Db = helper.runMigrationsAndValidate(TEST_DB_NAME, 2, true, MIGRATION_1_2)
+
+        // Verify asset_quantity column exists and has default 0
+        val utxoCursor = v2Db.query("SELECT asset_quantity FROM utxos WHERE txid = 'migtest_tx'")
+        assertTrue("utxos row not found after migration", utxoCursor.moveToFirst())
+        assertEquals(0L, utxoCursor.getLong(0))
+        utxoCursor.close()
+
+        // Verify torEnabled and torPromptShown columns exist with default 0
+        val configCursor = v2Db.query("SELECT torEnabled, torPromptShown FROM wallet_config WHERE id = 1")
+        assertTrue("wallet_config row not found after migration", configCursor.moveToFirst())
+        assertEquals(0, configCursor.getInt(0))
+        assertEquals(0, configCursor.getInt(1))
+        configCursor.close()
+
+        // Verify asset_metadata table exists and is queryable
+        val assetCursor = v2Db.query("SELECT COUNT(*) FROM asset_metadata")
+        assertTrue(assetCursor.moveToFirst())
+        assertEquals(0, assetCursor.getInt(0))
+        assetCursor.close()
+
+        // Verify digiid_history table exists and is queryable
+        val digiIdCursor = v2Db.query("SELECT COUNT(*) FROM digiid_history")
+        assertTrue(digiIdCursor.moveToFirst())
+        assertEquals(0, digiIdCursor.getInt(0))
+        digiIdCursor.close()
+
+        v2Db.close()
+    }
+
+    // -------------------------------------------------------------------------
+    // DAO-level smoke tests against the in-memory v2 database
+    // -------------------------------------------------------------------------
+
+    @Test
+    fun assetMetadataDao_insertAndRetrieve() = runTest {
+        val dao: AssetMetadataDao = db.assetMetadataDao()
+        val entity = AssetMetadataEntity(
+            assetId = "Ua9UVkALVFTHnHFLnqPc1n7xJj7Rrm4kM3",
+            name = "TestAsset",
+            symbol = "TST",
+            decimals = 2,
+            totalSupply = 1_000_000L,
+            cachedAt = System.currentTimeMillis()
+        )
+        dao.insertChainFacts(entity)
+
+        val result = dao.getMetadata("Ua9UVkALVFTHnHFLnqPc1n7xJj7Rrm4kM3")
+        assertNotNull(result)
+        assertEquals("TestAsset", result!!.name)
+        assertEquals("TST", result.symbol)
+        assertEquals(2, result.decimals)
+        assertEquals(1_000_000L, result.totalSupply)
+    }
+
+    @Test
+    fun assetMetadataDao_getAllMetadata_flow() = runTest {
+        val dao: AssetMetadataDao = db.assetMetadataDao()
+        dao.insertChainFacts(AssetMetadataEntity(assetId = "asset1", name = "Alpha"))
+        dao.insertChainFacts(AssetMetadataEntity(assetId = "asset2", name = "Beta"))
+
+        val all = dao.getAllMetadata().first()
+        assertEquals(2, all.size)
+        val names = all.map { it.name }.toSet()
+        assertTrue(names.contains("Alpha"))
+        assertTrue(names.contains("Beta"))
+    }
+
+    @Test
+    fun assetMetadataDao_insertChainFacts_keepsExisting() = runTest {
+        val dao: AssetMetadataDao = db.assetMetadataDao()
+        dao.insertChainFacts(AssetMetadataEntity(assetId = "asset1", name = "Old Name"))
+        dao.insertChainFacts(AssetMetadataEntity(assetId = "asset1", name = "New Name"))
+
+        val result = dao.getMetadata("asset1")
+        assertEquals("Old Name", result!!.name)
+    }
+
+    @Test
+    fun digiIdHistoryDao_insertAndGetHistory() = runTest {
+        val dao: DigiIdHistoryDao = db.digiIdHistoryDao()
+        dao.insert(DigiIdHistoryEntity(
+            domain = "example.com",
+            callbackUrl = "digiid://example.com/callback",
+            address = "dgb1qtest",
+            timestamp = 1000L,
+            success = true
+        ))
+        dao.insert(DigiIdHistoryEntity(
+            domain = "other.com",
+            callbackUrl = "digiid://other.com/callback",
+            address = "dgb1qtest2",
+            timestamp = 2000L,
+            success = false
+        ))
+
+        val history = dao.getHistory().first()
+        assertEquals(2, history.size)
+        // Should be ordered by timestamp DESC
+        assertEquals("other.com", history[0].domain)
+        assertEquals("example.com", history[1].domain)
+    }
+
+    // -------------------------------------------------------------------------
+    // Migration path: v8 → v9 (Digi-ID key isolation — derivation column)
+    // -------------------------------------------------------------------------
+
+    @Test
+    @Throws(IOException::class)
+    fun migrate8To9_backfillsLegacyDerivation() {
+        val v8Db = helper.createDatabase(TEST_DB_NAME, 8)
+        v8Db.execSQL(
+            """INSERT INTO digiid_history (domain, callbackUrl, address, timestamp, success)
+               VALUES ('example.com', 'https://example.com/cb', 'DExample', 1000, 1)"""
+        )
+        v8Db.close()
+
+        val v9Db = helper.runMigrationsAndValidate(TEST_DB_NAME, 9, true, MIGRATION_8_9)
+        v9Db.query("SELECT derivation FROM digiid_history WHERE domain = 'example.com'").use { c ->
+            assertTrue(c.moveToFirst())
+            // Every pre-migration login was signed with the shared m/0'/0/0 key — the
+            // backfill records that fact, and IdentityKeyPolicy grandfathers on it.
+            assertEquals("legacy", c.getString(0))
+        }
+        v9Db.close()
+    }
+
+    // -------------------------------------------------------------------------
+    // Migration path: v10 → v11 (provenance derived again under the parent-id binding)
+    // -------------------------------------------------------------------------
+
+    @Test
+    @Throws(IOException::class)
+    fun migrate10To11_discardsProvenanceAndKeepsEveryAssetRow() {
+        val start = "5".repeat(64)
+        val v10Db = helper.createDatabase(TEST_DB_NAME, 10)
+        v10Db.execSQL(
+            """INSERT INTO asset_provenance (txid, assetId, totalSupply, divisibility, metadataCid,
+               issuanceOpcode, issuanceLocked) VALUES ('$start', 'LaBefore', 10, 0, NULL, 1, 1)"""
+        )
+        v10Db.execSQL(
+            """INSERT INTO asset_walk_frontier (startTxid, resumeTxid, hopsWalked, updatedAt)
+               VALUES ('$start', '${"a".repeat(64)}', 7, 1)"""
+        )
+        v10Db.execSQL(
+            """INSERT INTO utxos (txid, vout, scriptPubKey, satoshis, blockHeight, is_asset, asset_id,
+               asset_quantity, spent, asset_source)
+               VALUES ('$start', 0, X'0014', 600, 100, 1, 'LaBefore', 10, 0, 'NATIVE')"""
+        )
+        v10Db.close()
+
+        val v11Db = helper.runMigrationsAndValidate(TEST_DB_NAME, 11, true, MIGRATION_10_11)
+        v11Db.query("SELECT COUNT(*) FROM asset_provenance").use { c ->
+            assertTrue(c.moveToFirst()); assertEquals(0, c.getInt(0))
+        }
+        v11Db.query("SELECT COUNT(*) FROM asset_walk_frontier").use { c ->
+            assertTrue(c.moveToFirst()); assertEquals(0, c.getInt(0))
+        }
+        v11Db.query("SELECT asset_id, asset_quantity, spent FROM utxos WHERE txid = '$start' AND vout = 0").use { c ->
+            assertTrue("the carrier row is kept", c.moveToFirst())
+            assertEquals("LaBefore", c.getString(0))
+            assertEquals(10L, c.getLong(1))
+            assertEquals(0, c.getInt(2))
+        }
+        v11Db.close()
+    }
+
+    // -------------------------------------------------------------------------
+    // Migration path: v11 → v12 (asset credit: only backed units count)
+    // -------------------------------------------------------------------------
+
+    @Test
+    @Throws(IOException::class)
+    fun migrate11To12_everyExistingAssetRowStartsUncheckedAndKeepsItsQuantity() {
+        val start = "6".repeat(64)
+        val plain = "7".repeat(64)
+        val v11Db = helper.createDatabase(TEST_DB_NAME, 11)
+        v11Db.execSQL(
+            """INSERT INTO utxos (txid, vout, scriptPubKey, satoshis, blockHeight, is_asset, asset_id,
+               asset_quantity, spent, asset_source)
+               VALUES ('$start', 0, X'0014', 600, 100, 1, 'LaBefore', 1000000, 0, 'NATIVE')"""
+        )
+        for (tx in listOf(start, plain)) v11Db.execSQL(
+            """INSERT INTO transactions (txid, blockHeight, timestamp, amount, fee, toAddress, fromAddress,
+               confirmations, sent, received, isAssetTx, rawBytes, assetId)
+               VALUES ('$tx', 100, 1, 600, 0, '', '', 1, 0, 600, 1, NULL, 'LaBefore')"""
+        )
+        v11Db.close()
+
+        val v12Db = helper.runMigrationsAndValidate(TEST_DB_NAME, 12, true, MIGRATION_11_12)
+        v12Db.query("SELECT asset_id, asset_quantity, asset_credit FROM utxos WHERE txid = '$start' AND vout = 0").use { c ->
+            assertTrue("the row is kept", c.moveToFirst())
+            assertEquals("the first-input name is dropped until the row is decided", "unresolved:$start", c.getString(0))
+            assertEquals("the stored quantity is untouched (the hold-out rules read it)", 1_000_000L, c.getLong(1))
+            assertEquals("an existing row counts for nothing until it is decided again", "UNCHECKED", c.getString(2))
+        }
+        v12Db.query("SELECT assetId FROM transactions WHERE txid = '$start'").use { c ->
+            assertTrue(c.moveToFirst())
+            assertTrue("the history label from the old walk is dropped", c.isNull(0))
+        }
+        v12Db.query("SELECT assetId FROM transactions WHERE txid = '$plain'").use { c ->
+            assertTrue(c.moveToFirst())
+            assertEquals("a transaction with no asset row keeps its label", "LaBefore", c.getString(0))
+        }
+        v12Db.close()
+    }
+
+    @Test
+    fun history_lists_a_transaction_only_under_an_asset_a_backed_row_names() = runTest {
+        val utxos = db.utxoDao()
+        val txs = db.transactionDao()
+        fun tx(id: String) = app.aroundtheblock.wallet.core.db.entity.TransactionEntity(
+            txid = id, blockHeight = 1, timestamp = 1, amount = 600, fee = 0, toAddress = "", fromAddress = "",
+            confirmations = 1, isAssetTx = true, assetId = "assetX",
+        )
+        txs.insertAll(listOf(tx("verified"), tx("unchecked"), tx("sentAway")))
+        utxos.insertAll(listOf(
+            UtxoEntity("verified", 0, byteArrayOf(), 600, 1, isAsset = true, assetId = "assetX", assetQuantity = 5, assetCredit = "VERIFIED"),
+            UtxoEntity("unchecked", 0, byteArrayOf(), 600, 1, isAsset = true, assetId = "assetX", assetQuantity = 1_000_000),
+        ))
+
+        val listed = txs.getAssetTransactions("assetX").first().map { it.txid }.toSet()
+        assertEquals(setOf("verified", "sentAway"), listed)
+    }
+
+    @Test
+    fun backfill_labels_from_backed_rows_only() = runTest {
+        val utxos = db.utxoDao()
+        val txs = db.transactionDao()
+        fun tx(id: String) = app.aroundtheblock.wallet.core.db.entity.TransactionEntity(
+            txid = id, blockHeight = 1, timestamp = 1, amount = 600, fee = 0, toAddress = "", fromAddress = "",
+            confirmations = 1, isAssetTx = true, assetId = null,
+        )
+        txs.insertAll(listOf(tx("backed"), tx("unchecked")))
+        utxos.insertAll(listOf(
+            UtxoEntity("backed", 0, byteArrayOf(), 600, 1, isAsset = true, assetId = "assetX", assetQuantity = 5, assetCredit = "BACKED"),
+            UtxoEntity("unchecked", 0, byteArrayOf(), 600, 1, isAsset = true, assetId = "assetX", assetQuantity = 1_000_000),
+        ))
+        txs.backfillAssetIdFromUtxos()
+        assertEquals("assetX", txs.getTransaction("backed")?.assetId)
+        assertNull(txs.getTransaction("unchecked")?.assetId)
+    }
+
+    @Test
+    fun utxoDao_getAssetBalances_countsOnlyBackedRows() = runTest {
+        val dao = db.utxoDao()
+        dao.insertAll(listOf(
+            UtxoEntity("backed", 0, byteArrayOf(), 700L, 1000L, isAsset = true, assetId = "assetA", assetQuantity = 5L, assetCredit = "BACKED"),
+            UtxoEntity("verified", 0, byteArrayOf(), 700L, 1000L, isAsset = true, assetId = "assetA", assetQuantity = 7L, assetCredit = "VERIFIED"),
+            UtxoEntity("claimed", 0, byteArrayOf(), 700L, 1000L, isAsset = true, assetId = "assetA", assetQuantity = 1_000_000L),
+            UtxoEntity("mixed", 0, byteArrayOf(), 700L, 1000L, isAsset = true, assetId = "assetA", assetQuantity = 3L, assetCredit = "MIXED"),
+        ))
+
+        val balances = dao.getAssetBalances().first()
+        assertEquals(12L, balances.single().totalQuantity)
+        assertEquals(setOf("backed", "verified"), dao.getAssetUtxosByIdNow("assetA").map { it.txid }.toSet())
+    }
+
+    @Test
+    fun digiIdHistoryDao_countSuccessfulLegacy_ignoresFailuresAndSiteRows() = runTest {
+        val dao: DigiIdHistoryDao = db.digiIdHistoryDao()
+        // Successful legacy login → grandfathers the domain
+        dao.insert(DigiIdHistoryEntity(
+            domain = "old-site.com", callbackUrl = "https://old-site.com/cb",
+            address = "DLegacy", timestamp = 100L, success = true, derivation = "legacy"
+        ))
+        // Failed legacy attempt → must NOT grandfather
+        dao.insert(DigiIdHistoryEntity(
+            domain = "failed.com", callbackUrl = "https://failed.com/cb",
+            address = "DLegacy", timestamp = 100L, success = false, derivation = "legacy"
+        ))
+        // Successful per-site login → must NOT count as legacy
+        dao.insert(DigiIdHistoryEntity(
+            domain = "new-site.com", callbackUrl = "https://new-site.com/cb",
+            address = "DSite", timestamp = 100L, success = true, derivation = "site"
+        ))
+
+        assertEquals(1, dao.countSuccessfulLegacy("old-site.com"))
+        assertEquals(0, dao.countSuccessfulLegacy("failed.com"))
+        assertEquals(0, dao.countSuccessfulLegacy("new-site.com"))
+        assertEquals(0, dao.countSuccessfulLegacy("never-seen.com"))
+    }
+
+    @Test
+    fun digiIdHistoryDao_pruneOlderThan_removesOldEntries() = runTest {
+        val dao: DigiIdHistoryDao = db.digiIdHistoryDao()
+        dao.insert(DigiIdHistoryEntity(
+            domain = "old.com",
+            callbackUrl = "digiid://old.com/callback",
+            address = "dgb1qold",
+            timestamp = 500L,
+            success = true
+        ))
+        dao.insert(DigiIdHistoryEntity(
+            domain = "new.com",
+            callbackUrl = "digiid://new.com/callback",
+            address = "dgb1qnew",
+            timestamp = 5000L,
+            success = true
+        ))
+
+        dao.pruneOlderThan(1000L)
+
+        val history = dao.getHistory().first()
+        assertEquals(1, history.size)
+        assertEquals("new.com", history[0].domain)
+    }
+
+    @Test
+    fun utxoDao_assetQuantity_storedAndRetrieved() = runTest {
+        val dao = db.utxoDao()
+        // Insert an asset UTXO with a known asset_quantity (decoded from OP_RETURN)
+        val assetUtxo = UtxoEntity(
+            txid = "asset_tx_1",
+            vout = 0,
+            scriptPubKey = byteArrayOf(),
+            satoshis = 700L,          // dust amount — NOT the real asset count
+            blockHeight = 12345L,
+            isAsset = true,
+            assetId = "Ua9UVkALVFTHnHFLnqPc1n7xJj7Rrm4kM3",
+            assetQuantity = 500L,      // real asset count decoded from OP_RETURN
+            assetCredit = "VERIFIED",  // and backed: only a backed row is in the balance
+        )
+        dao.insertAll(listOf(assetUtxo))
+
+        val balances = dao.getAssetBalances().first()
+        assertEquals(1, balances.size)
+        assertEquals("Ua9UVkALVFTHnHFLnqPc1n7xJj7Rrm4kM3", balances[0].assetId)
+        assertEquals(500L, balances[0].totalQuantity)
+        assertEquals(1, balances[0].utxoCount)
+    }
+
+    @Test
+    fun utxoDao_getAssetBalances_groupsByAssetId() = runTest {
+        val dao = db.utxoDao()
+        dao.insertAll(listOf(
+            UtxoEntity("tx1", 0, byteArrayOf(), 700L, 1000L, isAsset = true, assetId = "assetA", assetQuantity = 100L, assetCredit = "VERIFIED"),
+            UtxoEntity("tx2", 0, byteArrayOf(), 700L, 1001L, isAsset = true, assetId = "assetA", assetQuantity = 200L, assetCredit = "VERIFIED"),
+            UtxoEntity("tx3", 0, byteArrayOf(), 700L, 1002L, isAsset = true, assetId = "assetB", assetQuantity = 50L, assetCredit = "VERIFIED")
+        ))
+
+        val balances = dao.getAssetBalances().first()
+        assertEquals(2, balances.size)
+
+        val byId = balances.associateBy { it.assetId }
+        assertEquals(300L, byId["assetA"]!!.totalQuantity)
+        assertEquals(2, byId["assetA"]!!.utxoCount)
+        assertEquals(50L, byId["assetB"]!!.totalQuantity)
+        assertEquals(1, byId["assetB"]!!.utxoCount)
+    }
+
+    @Test
+    fun utxoDao_getAssetBalances_excludesSpentUtxos() = runTest {
+        val dao = db.utxoDao()
+        dao.insertAll(listOf(
+            UtxoEntity("tx1", 0, byteArrayOf(), 700L, 1000L, isAsset = true, assetId = "assetA", assetQuantity = 100L, assetCredit = "VERIFIED"),
+            UtxoEntity("tx2", 0, byteArrayOf(), 700L, 1001L, isAsset = true, assetId = "assetA", assetQuantity = 200L, assetCredit = "VERIFIED")
+        ))
+        dao.markSpent("tx1", 0)
+
+        val balances = dao.getAssetBalances().first()
+        assertEquals(1, balances.size)
+        assertEquals(200L, balances[0].totalQuantity)
+        assertEquals(1, balances[0].utxoCount)
+    }
+}

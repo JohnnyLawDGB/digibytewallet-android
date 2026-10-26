@@ -1,8 +1,9 @@
 // Host KAT: a header at a height MultiShield V4 governs carries exactly the target (compact form) the reference
 // client's GetNextWorkRequiredV4 computes from the header's ancestors; with the ancestors resident the wallet
 // computes that same target, and what it does with a header that differs depends on DGB_HEADER_DIFF_CHECK
-// (0 nothing, 1 count and log, 2 refuse). A header whose ancestors are not resident is not judged and never
-// refused.
+// (0 nothing, 1 count and log, 2 refuse). A header whose ancestors are not resident is not judged; one that extends
+// the tip is never refused for it. (At level 2 one that does not extend the tip, and whose history stops at the
+// resident floor, is refused: INT-2026-10-09-E, ../int_2026_10_09_e_kat.)
 //
 // ENTRY LAYER. Headers go through the real BRPeer.c dispatch (_BRPeerAcceptMessage, "headers") into the manager's
 // own _peerRelayedBlock, wired as BRPeerManager.c wires it; the manager judges each header in
@@ -370,7 +371,8 @@ static const char *case_level_easiest_target(void)
 }
 
 // Right after the resident chain starts (one persisted header), the next headers lack the window: at levels 1 and 2
-// each is counted as skipped, and none is refused -- even at level 2.
+// each is counted as skipped, and none is refused -- even at level 2, since each extends the tip (the case of a
+// header that does not is ../int_2026_10_09_e_kat).
 static const char *case_skip_without_history(void)
 {
     const DiffRange *r = range("mainnet_recent");

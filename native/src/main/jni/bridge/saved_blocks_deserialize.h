@@ -65,7 +65,14 @@ static inline size_t deserialize_saved_blocks_guarded(const uint8_t *b, size_t l
         uint32_t blockLen = UInt32GetLE(&b[pos]); pos += 4;
         uint32_t height   = UInt32GetLE(&b[pos]); pos += 4;
 
-        if (pos + blockLen > len) break;
+#ifdef BB_2026_10_09_HARLEY_UNFIXED
+        if (pos + blockLen > len) break;   /* comparison shape: wraps on a 32-bit size_t */
+#else
+        /* Not `pos + blockLen > len`: that sum wraps on a 32-bit size_t (pos 12 +
+         * blockLen 0xFFFFFFF5 is 1), and BRMerkleBlockParse then reads past the blob
+         * (BB-2026-10-09-harley F3). pos <= len holds here (loop condition). */
+        if (blockLen > len - pos) break;
+#endif
 
         BRMerkleBlock *block = BRMerkleBlockParse(&b[pos], blockLen);
         pos += blockLen;

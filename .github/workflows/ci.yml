@@ -15,10 +15,20 @@ jobs:
     # The scheduled run is the native sweep below and nothing else.
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
+    # Least privilege: the token only reads -- the checkout, its submodule and the pin check's fetch of
+    # the public core. No step writes through it; the cache and the artifact upload use the runner's own
+    # token, which this block does not govern.
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      # The committed gradle-wrapper.jar must be one Gradle published (4.1.2 row 15, K7); the
+      # distribution it downloads is pinned by distributionSha256Sum in gradle-wrapper.properties.
+      - name: Gradle wrapper is an official release
+        uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
 
       - uses: actions/setup-java@v4
         with:
@@ -58,6 +68,22 @@ jobs:
       - name: No WebView JavaScript bridge
         run: ./scripts/check-no-js-bridge.sh
 
+      # The checkpoint generators write the wallet's trusted checkpoint tables from a remote node; they
+      # pin its host key (scripts/known_hosts.digiscope). No script may switch host-key checking off.
+      - name: No script trusts an unknown SSH host
+        run: ./scripts/check-ssh-host-keys.sh
+
+      # JNI_OnLoad binds every NativeBridge native from a generated RegisterNatives table. The
+      # script proves the table matches the Kotlin declarations and the C bodies type for type,
+      # so a drifted signature fails here rather than at System.loadLibrary on a phone.
+      - name: JNI registration table is current
+        run: python3 scripts/gen-jni-registry.py --check
+
+      # The release key signs every build on Play and on the download page. Fail if any keystore,
+      # private key or keystore.properties is ever tracked, whatever it is named.
+      - name: No signing material in the repo
+        run: ./scripts/check-no-keystore-tracked.sh
+
       # README and CLAUDE.md both drifted more than ten releases behind the app while each
       # claimed to be current. A version recorded where it cannot update is wrong by default.
       - name: Docs state the shipped version
@@ -70,7 +96,9 @@ jobs:
         run: ./scripts/osv-scan.sh
 
       - name: Unit Tests
-        run: ./gradlew testMainnetDebugUnitTest
+        # :app has a second flavor dimension (play / sideload), so its tasks are named per flavor and
+        # the root-level testMainnetDebugUnitTest would silently skip it. Name both.
+        run: ./gradlew testMainnetDebugUnitTest :app:testMainnetSideloadDebugUnitTest :app:testMainnetPlayDebugUnitTest
 
       # ASan known-answer tests compiled against the live C submodule sources. These cover
       # memory safety and wire/protocol invariants the JVM tests structurally cannot reach:
@@ -89,14 +117,14 @@ jobs:
       - name: Native host KATs
         run: ./scripts/run-host-kats.sh
 
-      - name: Build Debug APK
-        run: ./gradlew :app:assembleMainnetDebug
+      - name: Build Debug APKs (sideload + play)
+        run: ./gradlew :app:assembleMainnetSideloadDebug :app:assembleMainnetPlayDebug
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
           name: debug-apk
-          path: app/build/outputs/apk/mainnet/debug/*.apk
+          path: app/build/outputs/apk/mainnet*/debug/*.apk
           retention-days: 30
 
   # Weekly native sweep, on a quiet repository too. Needs no SDK, no JDK and no Gradle: the
@@ -105,6 +133,9 @@ jobs:
   native-kats-weekly:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
+    # Least privilege: the checkout and its submodule only.
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -116,3 +147,10 @@ jobs:
 
       - name: Native host KATs (full sweep)
         run: ./scripts/run-host-kats.sh
+
+      # A suite that names its own header-check level is built at a level no app ships, so it
+      # has to prove the pin is load-bearing. Three suites once carried the same level-1 pin and
+      # only two needed it; the third was quietly testing a verdict no user gets. Runs here
+      # rather than per-push because it re-runs each pinned suite a second time.
+      - name: Header-check level pins are load-bearing
+        run: ./scripts/check-kat-level-pins.sh

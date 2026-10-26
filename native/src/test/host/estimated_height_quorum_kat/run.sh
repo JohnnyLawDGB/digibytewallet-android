@@ -58,7 +58,7 @@ if [ -z "$RECOMPUTE_FN" ]; then
     echo "GATE FAILED: _BRPeerManagerRecomputeEstimatedHeight was not found in BRPeerManager.c."
     exit 1
 fi
-if ! printf '%s\n' "$RECOMPUTE_FN" | grep -q '_BRPeerManagerLoadMempools(manager);'; then
+if ! <<<"$RECOMPUTE_FN" grep -q '_BRPeerManagerLoadMempools(manager);'; then
     echo "GATE FAILED: the recompute's completion action must be _BRPeerManagerLoadMempools(manager),"
     echo "             the same call the two equality sites make."
     exit 1

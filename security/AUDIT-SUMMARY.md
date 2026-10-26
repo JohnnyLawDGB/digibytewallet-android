@@ -1,4 +1,21 @@
-# DigiByte Wallet v3.0.1 — Security Audit Summary
+# HoldFast Wallet — Security Audit Summary
+
+> **Read this first.** HoldFast Wallet (`app.aroundtheblock.wallet`, current release **v4.1.1**, branch `develop`) is
+> the same codebase that shipped as DigiByte Wallet (`io.digibyte`) until v4.0.87.2. This file starts with that app's
+> **v3.0.1 baseline audit (2026-03-28)**, kept as written, and appends a dated section for each later audit below it.
+> The running per-release record, including the most recent cycle, is [`AUDIT-LOG.md`](AUDIT-LOG.md); current scope
+> and how to report are in [`BUG-BOUNTY.md`](../BUG-BOUNTY.md).
+
+## Founder security review: Jared Tate (2026-09-05 to 2026-09-20)
+
+Jared Tate, the founder of DigiByte, independently reviewed this repository and its native core between
+2026-09-05 and 2026-09-20 and delivered his findings to us privately. They are fixed on private branches
+and released as security updates: the first fixes shipped in v4.0.81 (2026-09-21), and the work has
+continued through each security release since. Each release's notes describe what it fixed. As with every
+private report (see [`BUG-BOUNTY.md`](../BUG-BOUNTY.md)), a finding is described in public only once its
+fix has shipped. This review is separate from the 2026-08-30 external audit recorded further down.
+
+## v3.0.1 baseline (historical)
 
 **Date:** 2026-03-28
 **Version:** v3.0.1 (phase1-modernization branch)
@@ -74,7 +91,7 @@ v3 lineage), 10 WARNING all known (`android_sql_raw_query` is SQLCipher-internal
 `net/zetetic/*`; `android_hardcoded` = Coil + derivation paths / pref-keys /
 cert-pins, verified no real secret). **Binary analysis: every native lib incl.
 the modified `libcore-lib.so` has NX + PIE + stack canary** — the VLA heap fix did
-not weaken hardening. Scorecard: `reports/mobsf-scorecard-v3.6.6.json` (raw MobSF JSON dumps are produced by the MobSF CI workflow and not kept in-repo).
+not weaken hardening. Report: `reports/mobsf-report-v3.6.6.json`.
 
 ## Findings Summary
 
@@ -237,10 +254,10 @@ because a number baked into this file drifted (it said 42 for months after
 security/
 ├── AUDIT-SUMMARY.md                    ← This file
 ├── reports/
-│   ├── mobsf-scorecard-v3.6.6.json     ← MobSF v3.6.6 scorecard
-│   ├── mobsf-scorecard-v4.0.58.json    ← MobSF v4.0.58 scorecard
-│   └── mobsf-scorecard-v4.0.76.json    ← MobSF v4.0.76 scorecard
-│   (raw mobsf-report*.json dumps are produced by the MobSF CI workflow, not committed)
+│   ├── mobsf-report.json               ← MobSF v3.0.1 (initial)
+│   ├── mobsf-report-v3.5.30.json       ← MobSF v3.5.30 (pre-bounty)
+│   ├── mobsf-report-v3.6.6.json        ← MobSF v3.6.6 (changed-surface audit, score 68)
+│   └── mobsf-scorecard-v3.6.6.json     ← MobSF v3.6.6 scorecard
 └── tests/ (in core/src/test/java/io/digibyte/core/security/)
     ├── SeedIsolationTest.kt
     ├── ManifestSecurityTest.kt
