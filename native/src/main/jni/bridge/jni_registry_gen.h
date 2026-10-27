@@ -31,6 +31,10 @@ jlongArray JNICALL NativeBridge_digiDollarEvent(JNIEnv *env, jobject thiz, jstri
 jint JNICALL NativeBridge_digiDollarTxType(JNIEnv *env, jobject thiz, jstring txHashHex);  /* jni_transaction.c */
 void JNICALL NativeBridge_disableAutoCompactFilterFetch(JNIEnv *env, jobject thiz);  /* jni_peer.c */
 jstring JNICALL NativeBridge_dumpAllAddresses(JNIEnv *env, jobject thiz);  /* jni_wallet.c */
+jint JNICALL NativeBridge_dustDecide(JNIEnv *env, jobject thiz, jlong amount, jbyteArray script, jboolean txIsDigiDollar);  /* jni_dust_policy.c */
+jint JNICALL NativeBridge_dustDigiDollarTxType(JNIEnv *env, jobject thiz, jint version);  /* jni_dust_policy.c */
+jlong JNICALL NativeBridge_dustRelayFeePerKb(JNIEnv *env, jobject thiz);  /* jni_dust_policy.c */
+jlong JNICALL NativeBridge_dustThreshold(JNIEnv *env, jobject thiz, jbyteArray script);  /* jni_dust_policy.c */
 void JNICALL NativeBridge_enableAutoCompactFilterFetch(JNIEnv *env, jobject thiz, jlong startHeight);  /* jni_peer.c */
 jlong JNICALL NativeBridge_feeDefaultPerKb(JNIEnv *env, jobject thiz);  /* jni_fee_quote.c */
 jboolean JNICALL NativeBridge_feeQuoteRaised(JNIEnv *env, jobject thiz, jboolean custom, jlong typedTotalSats, jlong feeSats);  /* jni_fee_quote.c */
@@ -187,6 +191,10 @@ jboolean JNICALL NativeBridge_walletContainsAddress(JNIEnv *env, jobject thiz, j
     { "digiDollarTxType", "(Ljava/lang/String;)I", (void *) NativeBridge_digiDollarTxType }, \
     { "disableAutoCompactFilterFetch", "()V", (void *) NativeBridge_disableAutoCompactFilterFetch }, \
     { "dumpAllAddresses", "()Ljava/lang/String;", (void *) NativeBridge_dumpAllAddresses }, \
+    { "dustDecide", "(J[BZ)I", (void *) NativeBridge_dustDecide }, \
+    { "dustDigiDollarTxType", "(I)I", (void *) NativeBridge_dustDigiDollarTxType }, \
+    { "dustRelayFeePerKb", "()J", (void *) NativeBridge_dustRelayFeePerKb }, \
+    { "dustThreshold", "([B)J", (void *) NativeBridge_dustThreshold }, \
     { "enableAutoCompactFilterFetch", "(J)V", (void *) NativeBridge_enableAutoCompactFilterFetch }, \
     { "feeDefaultPerKb", "()J", (void *) NativeBridge_feeDefaultPerKb }, \
     { "feeQuoteRaised", "(ZJJ)Z", (void *) NativeBridge_feeQuoteRaised }, \
@@ -318,6 +326,6 @@ jboolean JNICALL NativeBridge_walletContainsAddress(JNIEnv *env, jobject thiz, j
     { "strandedSendIsPlainDgb", "(ZZI)Z", (void *) NativeBridge_strandedSendIsPlainDgb }, \
     { "walletContainsAddress", "(Ljava/lang/String;)Z", (void *) NativeBridge_walletContainsAddress }, \
 
-#define DGB_JNI_NATIVEBRIDGE_METHOD_COUNT 154
+#define DGB_JNI_NATIVEBRIDGE_METHOD_COUNT 158
 
 #endif
