@@ -134,7 +134,10 @@ comparison_arm() {
             echo "  [$bits $arm $c] GATE FAILURE: sanitizer report (a fault is not the failure this case asserts)"
             <<<"$OUT" grep -Em3 "$SAN_RE" | sed 's/^/      /'; FAIL=1
         elif [ "${mustFail/ $c /}" != "$mustFail" ]; then
-            if <<<"$OUT" grep -q "RESULT $c fail"; then
+            if <<<"$OUT" grep -q "^FAIL: setup"; then
+                echo "  [$bits $arm $c] GATE FAILURE: failed during setup, not at what the fix governs"
+                <<<"$OUT" grep -m3 '^FAIL: setup' | sed 's/^/      /'; FAIL=1
+            elif <<<"$OUT" grep -q "RESULT $c fail"; then
                 echo "  [$bits $arm $c] failed, as required: $(<<<"$OUT" grep -m1 '^FAIL:')"
             else
                 echo "  [$bits $arm $c] GATE FAILURE: did not fail (rc=$RC); this case cannot see what the fix governs"
