@@ -21,6 +21,9 @@ package app.aroundtheblock.wallet.core.send
  * marker with a type Core knows (`IsDigiDollarDustExemptOutput`, and `IsStandardTx`). The same
  * exemption is here: without it this rule would refuse every DigiDollar send. Every other output of
  * a DigiDollar transaction keeps its line.
+ *
+ * This is a mirror of the C core's `BRDustPolicy.h`, which is the source of truth (iOS imports it);
+ * `DustPolicyParityTest` binds the two on a device. Change both, or that test fails.
  */
 object DustPolicy {
     /** DigiByte Core's dust relay fee, sat/kvB. */
