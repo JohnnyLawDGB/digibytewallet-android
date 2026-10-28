@@ -15,6 +15,7 @@ import app.aroundtheblock.wallet.core.hub.WebSocketEvent
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -92,30 +93,37 @@ class ChatViewModel @Inject constructor(
 
     // ── History loading ───────────────────────────────────────────────────
 
+    /**
+     * Loads the next page of older messages. The cache is read once ([first]): a Room Flow never
+     * completes, so collecting it held this load open for the life of the screen and "load more"
+     * never ran again. The flag is cleared in `finally`, whatever the load did.
+     */
     private fun loadHistory() {
+        isLoadingHistory = true
         viewModelScope.launch {
-            isLoadingHistory = true
-            val messages = digiScopeClient.getMessages(CHAT_CHANNEL_ID, before = oldestTimestamp)
-            if (messages.isNotEmpty()) {
-                oldestTimestamp = messages.minOf { it.timestamp }
-                // Prepend older messages, avoid duplicates by id
-                val existing = _currentMessages.value
-                val existingIds = existing.map { it.id }.toSet()
-                val newMessages = messages.filter { it.id !in existingIds }
-                _currentMessages.value = (newMessages + existing).sortedBy { it.timestamp }
-                // Cache to Room
-                cachedMessageDao.insertAll(messages.map { it.toEntity(CHAT_CHANNEL_ID) })
-            } else if (oldestTimestamp == null) {
-                // No network history — try Room cache
-                cachedMessageDao.getMessagesForChannel(CHAT_CHANNEL_ID).collect { cached ->
+            try {
+                val messages = digiScopeClient.getMessages(CHAT_CHANNEL_ID, before = oldestTimestamp)
+                if (messages.isNotEmpty()) {
+                    oldestTimestamp = messages.minOf { it.timestamp }
+                    // Prepend older messages, avoid duplicates by id
+                    val existing = _currentMessages.value
+                    val existingIds = existing.map { it.id }.toSet()
+                    val newMessages = messages.filter { it.id !in existingIds }
+                    _currentMessages.value = (newMessages + existing).sortedBy { it.timestamp }
+                    // Cache to Room
+                    cachedMessageDao.insertAll(messages.map { it.toEntity(CHAT_CHANNEL_ID) })
+                } else if (oldestTimestamp == null) {
+                    // No network history — show the Room cache, read once
+                    val cached = cachedMessageDao.getMessagesForChannel(CHAT_CHANNEL_ID).first()
                     if (_currentMessages.value.isEmpty()) {
                         _currentMessages.value = cached
                             .map { it.toChatMessage() }
                             .sortedBy { it.timestamp }
                     }
                 }
+            } finally {
+                isLoadingHistory = false
             }
-            isLoadingHistory = false
         }
     }
 
