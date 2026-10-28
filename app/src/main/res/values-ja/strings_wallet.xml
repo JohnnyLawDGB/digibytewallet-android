@@ -507,6 +507,8 @@
     <string name="hub_image_wrong_type">投稿できるのは PNG、JPG、GIF、WebP の画像だけです。</string>
     <string name="hub_image_too_large">画像は 8 MB までです。小さい画像を選んでください。</string>
     <string name="hub_image_not_prepared">この写真を送信用に準備できなかったため、送信していません。別の写真を選んでください。</string>
+    <string name="hub_image_too_many_pixels">この写真は 5000 万画素を超えていて、この端末では準備できません。小さい画像を選んでください。</string>
+    <string name="hub_not_connected">Hub に接続されていないため、送信していません。少し待ってからもう一度お試しください。</string>
     <string name="hub_upload_failed">画像を送信できませんでした。接続を確認してもう一度お試しください。</string>
     <string name="did_requesting">が Digi-ID 認証を要求しています</string>
     <string name="did_warning">警告</string>

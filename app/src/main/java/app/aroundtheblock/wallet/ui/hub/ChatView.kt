@@ -553,6 +553,8 @@ private fun noticeText(notice: ChatNotice): Int = when (notice) {
     ChatNotice.IMAGE_WRONG_TYPE -> R.string.hub_image_wrong_type
     ChatNotice.IMAGE_TOO_LARGE -> R.string.hub_image_too_large
     ChatNotice.IMAGE_NOT_PREPARED -> R.string.hub_image_not_prepared
+    ChatNotice.IMAGE_TOO_MANY_PIXELS -> R.string.hub_image_too_many_pixels
+    ChatNotice.NOT_CONNECTED -> R.string.hub_not_connected
     ChatNotice.UPLOAD_FAILED -> R.string.hub_upload_failed
 }
 

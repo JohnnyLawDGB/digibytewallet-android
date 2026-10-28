@@ -29,7 +29,8 @@ import javax.inject.Inject
 /** A short, fixed notice the chat shows; the screen words it in the user's language. */
 enum class ChatNotice {
     REPORTED, REPORT_GONE, REPORT_LIMITED, REPORT_FAILED,
-    IMAGE_UNREADABLE, IMAGE_WRONG_TYPE, IMAGE_TOO_LARGE, IMAGE_NOT_PREPARED, UPLOAD_FAILED,
+    IMAGE_UNREADABLE, IMAGE_WRONG_TYPE, IMAGE_TOO_LARGE, IMAGE_TOO_MANY_PIXELS, IMAGE_NOT_PREPARED, UPLOAD_FAILED,
+    NOT_CONNECTED,
 }
 
 /**
@@ -82,6 +83,16 @@ class ChatViewModel @Inject constructor(
 
     // ── Pagination cursor ─────────────────────────────────────────────────
     private var oldestTimestamp: Long? = null
+
+    /** An older page brought nothing new (every message in it was already shown): there is no more to walk. */
+    private var olderExhausted = false
+
+    /**
+     * Every message the server said was deleted, for the life of the screen. A page that was
+     * already on its way when the delete arrived would otherwise put the message back on screen
+     * and in the cache.
+     */
+    private val deletedIds = mutableSetOf<Int>()
 
     /**
      * Held while a history page loads: one load at a time. "Load more" is dropped while it is held;
@@ -178,7 +189,7 @@ class ChatViewModel @Inject constructor(
     }
 
     fun loadMoreHistory() {
-        if (!historyLock.tryLock()) return
+        if (olderExhausted || !historyLock.tryLock()) return
         viewModelScope.launch {
             try {
                 loadPage(older = true)
@@ -190,26 +201,38 @@ class ChatViewModel @Inject constructor(
 
     /**
      * Loads one page and merges it into the chat by id: the newest page, or with [older] the page
-     * before the oldest message shown. Nothing it meets ends the screen: a failure is logged and
+     * before the oldest message shown. Nothing it meets ends the screen: a failure is dropped and
      * the next load may try again. The cache is read once ([first]): a Room Flow never completes.
+     *
+     * The older page is asked for from one second past the oldest message shown: the server pages
+     * by whole seconds (`created_at < ?`), so asking from the oldest message itself skipped the
+     * other messages posted in that same second.
      */
     private suspend fun loadPage(older: Boolean) {
         try {
-            val messages = digiScopeClient.getMessages(CHAT_CHANNEL_ID, before = if (older) oldestTimestamp else null)
+            val shownBefore = _currentMessages.value.map { it.id }.toSet()
+            val before = if (older) oldestTimestamp?.let { it + SAME_SECOND_MS } else null
+            val fetched = digiScopeClient.getMessages(CHAT_CHANNEL_ID, before = before, limit = PAGE_SIZE)
+            val messages = fetched.filter { it.id !in deletedIds }
             if (messages.isNotEmpty()) {
+                if (older && messages.all { it.id in shownBefore }) olderExhausted = true
+                if (!older) dropDeletedWhileAway(fetched, shownBefore)
                 val pageOldest = messages.minOf { it.timestamp }
                 oldestTimestamp = oldestTimestamp?.let { minOf(it, pageOldest) } ?: pageOldest
                 merge(messages)
                 // Cache to Room
-                cachedMessageDao.insertAll(messages.map { it.toEntity(CHAT_CHANNEL_ID) })
+                cachedMessageDao.insertAll(messages.filter { it.id !in deletedIds }.map { it.toEntity(CHAT_CHANNEL_ID) })
             } else if (oldestTimestamp == null) {
                 // No network history — show the Room cache, read once
                 val cached = cachedMessageDao.getMessagesForChannel(CHAT_CHANNEL_ID).first()
                 if (_currentMessages.value.isEmpty()) {
                     _currentMessages.value = cached
+                        .filter { it.id !in deletedIds }
                         .map { it.toChatMessage() }
                         .sortedBy { it.timestamp }
                 }
+            } else if (older) {
+                olderExhausted = true
             }
         } catch (e: CancellationException) {
             throw e
@@ -218,12 +241,34 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    /**
+     * The newest page is everything the server holds from its oldest message on. A message that
+     * was shown before the page was asked for, is no older than the page, and is not in it was
+     * deleted while the socket was down (the `deleted` event never reached this phone): it is
+     * taken off the screen and out of the cache. Messages older than the page are not judged, and
+     * when the page is full the messages of its oldest second are not judged either (the server
+     * may have cut that second at the page's end). A message that arrived while the page was on
+     * its way was not shown before, so it is never taken for deleted.
+     */
+    private suspend fun dropDeletedWhileAway(page: List<ChatMessage>, shownBefore: Set<Int>) {
+        val pageIds = page.map { it.id }.toSet()
+        val oldest = page.minOf { it.timestamp }
+        val from = if (page.size >= PAGE_SIZE) oldest + SAME_SECOND_MS else oldest
+        val gone = _currentMessages.value
+            .filter { it.id in shownBefore && it.id !in pageIds && it.timestamp >= from }
+            .map { it.id }
+        if (gone.isEmpty()) return
+        deletedIds += gone
+        _currentMessages.value = _currentMessages.value.filter { it.id !in gone }
+        gone.forEach { cachedMessageDao.deleteById(it) }
+    }
+
     /** [page] merged into the chat by id: a message already shown is replaced by the page's copy. */
     private fun merge(page: List<ChatMessage>) {
         val byId = LinkedHashMap<Int, ChatMessage>()
         _currentMessages.value.forEach { byId[it.id] = it }
         page.forEach { byId[it.id] = it }
-        _currentMessages.value = byId.values.sortedBy { it.timestamp }
+        _currentMessages.value = byId.values.filter { it.id !in deletedIds }.sortedBy { it.timestamp }
     }
 
     // ── WebSocket event handling ───────────────────────────────────────────
@@ -251,6 +296,7 @@ class ChatViewModel @Inject constructor(
                 }
             }
             is WebSocketEvent.Deleted -> if (event.channelId == CHAT_CHANNEL_ID) {
+                deletedIds += event.id
                 _currentMessages.value = _currentMessages.value.filter { it.id != event.id }
                 // Out of the cache too, or the offline fallback would show it again.
                 cachedMessageDao.deleteById(event.id)
@@ -267,6 +313,7 @@ class ChatViewModel @Inject constructor(
     }
 
     private suspend fun onMessage(message: ChatMessage) {
+        if (message.id in deletedIds) return
         val existing = _currentMessages.value
         if (existing.none { it.id == message.id }) {
             _currentMessages.value = existing + message
@@ -318,7 +365,10 @@ class ChatViewModel @Inject constructor(
             hubWebSocket.sendMessage(post.destination, post.content, signature, post.attachmentId)
         }
         val image = _pendingImage.value
-        if (image == null) {
+        if (hubWebSocket.connectionState.value != ConnectionState.CONNECTED) {
+            // Nothing is signed, uploaded or cleared: the post stays in the composer to send again.
+            _notice.value = ChatNotice.NOT_CONNECTED
+        } else if (image == null) {
             ChatSignPayload.chatMessage(CHAT_CHANNEL_ID, content)?.let { post ->
                 signAndSend(post)
                 onSent()
@@ -330,7 +380,10 @@ class ChatViewModel @Inject constructor(
             viewModelScope.launch {
                 try {
                     val post = upload(image)?.let { ChatSignPayload.chatMessage(CHAT_CHANNEL_ID, content, it) }
-                    if (post != null) {
+                    // The socket may have dropped during the upload: then nothing is sent or cleared.
+                    val connected = hubWebSocket.connectionState.value == ConnectionState.CONNECTED
+                    if (post != null && !connected) _notice.value = ChatNotice.NOT_CONNECTED
+                    if (post != null && connected) {
                         signAndSend(post)
                         _pendingImage.value = null
                         onSent()
@@ -352,6 +405,7 @@ class ChatViewModel @Inject constructor(
                     PickedImageProblem.WRONG_TYPE -> ChatNotice.IMAGE_WRONG_TYPE
                     PickedImageProblem.TOO_LARGE -> ChatNotice.IMAGE_TOO_LARGE
                     PickedImageProblem.NOT_PREPARED -> ChatNotice.IMAGE_NOT_PREPARED
+                    PickedImageProblem.TOO_MANY_PIXELS -> ChatNotice.IMAGE_TOO_MANY_PIXELS
                 }
                 return null
             }
@@ -431,3 +485,9 @@ private fun CachedMessageEntity.toChatMessage() = ChatMessage(
     timestamp = timestamp,
     signature = signature
 )
+
+/** The page size the chat asks for (the server's default). */
+private const val PAGE_SIZE = 50
+
+/** The server keeps `created_at` to the whole second. */
+private const val SAME_SECOND_MS = 1_000L

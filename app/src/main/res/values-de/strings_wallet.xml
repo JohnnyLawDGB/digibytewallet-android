@@ -518,6 +518,8 @@
     <string name="hub_image_wrong_type">Nur PNG-, JPG-, GIF- und WebP-Bilder können gesendet werden.</string>
     <string name="hub_image_too_large">Bilder dürfen bis zu 8 MB groß sein. Wähle ein kleineres.</string>
     <string name="hub_image_not_prepared">Dieses Foto konnte nicht zum Senden vorbereitet werden und wurde nicht gesendet. Versuche ein anderes.</string>
+    <string name="hub_image_too_many_pixels">Dieses Foto hat über 50 Megapixel und ist zu groß, um es auf diesem Telefon vorzubereiten. Wähle ein kleineres.</string>
+    <string name="hub_not_connected">Keine Verbindung zum Hub, daher wurde nichts gesendet. Versuche es gleich noch einmal.</string>
     <string name="hub_upload_failed">Das Bild wurde nicht gesendet. Prüfe deine Verbindung und versuche es erneut.</string>
     <string name="did_requesting">fordert eine Digi-ID-Authentifizierung an</string>
     <string name="did_warning">Warnung</string>

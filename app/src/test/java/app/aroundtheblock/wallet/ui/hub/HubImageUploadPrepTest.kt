@@ -54,18 +54,51 @@ class HubImageUploadPrepTest {
         return byteArrayOf(0xFF.toByte(), marker.toByte(), (length shr 8).toByte(), length.toByte()) + body
     }
 
-    /** A real JPEG decode and encode: the JDK's (see the class comment). */
-    private val jdkReencoder = JpegReencoder { jpeg ->
-        System.setProperty("java.awt.headless", "true")
-        val imageIO = Class.forName("javax.imageio.ImageIO")
-        val image = imageIO.getMethod("read", java.io.InputStream::class.java).invoke(null, ByteArrayInputStream(jpeg))
-        if (image == null) return@JpegReencoder null
-        val out = ByteArrayOutputStream()
-        val write = imageIO.getMethod(
-            "write", Class.forName("java.awt.image.RenderedImage"), String::class.java, java.io.OutputStream::class.java,
-        )
-        if (write.invoke(null, image, "jpg", out) == true) out.toByteArray() else null
+    /**
+     * A real JPEG codec: the JDK's (see the class comment). [bounds] reads the header only, as
+     * BitmapFactory's `inJustDecodeBounds` does; [reencode] decodes and encodes again, and counts
+     * its calls.
+     */
+    private open class JdkCodec : JpegCodec {
+        var reencodes = 0
+        private val imageIO = Class.forName("javax.imageio.ImageIO")
+
+        init { System.setProperty("java.awt.headless", "true") }
+
+        override fun bounds(jpeg: ByteArray): Pair<Int, Int>? {
+            val input = imageIO.getMethod("createImageInputStream", Any::class.java).invoke(null, ByteArrayInputStream(jpeg))
+            val readers = imageIO.getMethod("getImageReaders", Any::class.java).invoke(null, input) as Iterator<*>
+            val reader = readers.next() ?: return null
+            // Looked up on the public ImageReader type: the JPEG reader's own class is not exported.
+            val api = Class.forName("javax.imageio.ImageReader")
+            api.getMethod("setInput", Any::class.java).invoke(reader, input)
+            val width = api.getMethod("getWidth", Int::class.javaPrimitiveType).invoke(reader, 0) as Int
+            val height = api.getMethod("getHeight", Int::class.javaPrimitiveType).invoke(reader, 0) as Int
+            return width to height
+        }
+
+        override fun reencode(jpeg: ByteArray, sampleSize: Int): ByteArray? {
+            reencodes++
+            val image = imageIO.getMethod("read", java.io.InputStream::class.java).invoke(null, ByteArrayInputStream(jpeg))
+                ?: return null
+            val out = ByteArrayOutputStream()
+            val write = imageIO.getMethod(
+                "write", Class.forName("java.awt.image.RenderedImage"), String::class.java, java.io.OutputStream::class.java,
+            )
+            return if (write.invoke(null, image, "jpg", out) == true) out.toByteArray() else null
+        }
     }
+
+    /** A codec that reads sizes as the JDK does but whose re-encode is [reencode]. */
+    private class Codec(val reencode: (ByteArray) -> ByteArray?) : JdkCodec() {
+        override fun reencode(jpeg: ByteArray, sampleSize: Int): ByteArray? {
+            reencodes++
+            return reencode(jpeg)
+        }
+    }
+
+    /** Never re-encodes; for inputs that must not reach a re-encode. */
+    private val never = Codec { error("re-encoded") }
 
     private fun ByteArray.has(text: String) = String(this, Charsets.ISO_8859_1).contains(text)
 
@@ -99,7 +132,7 @@ class HubImageUploadPrepTest {
     }
 
     @Test fun `what is uploaded for a JPEG is only the new encoding`() {
-        val image = prepared(HubImageReader.prepare(hostileJpeg, jdkReencoder))
+        val image = prepared(HubImageReader.prepare(hostileJpeg, JdkCodec()))
 
         assertEquals("image/jpeg", image.mimeType)
         val sent = image.bytes
@@ -121,21 +154,21 @@ class HubImageUploadPrepTest {
         every { resolver.openInputStream(uri) } answers { ByteArrayInputStream(hostileJpeg) }
         val context = mockk<Context>()
         every { context.contentResolver } returns resolver
-        var reencoded = 0
-        val reader = HubImageReader(context) { reencoded++; jdkReencoder.reencode(it) }
+        val codec = JdkCodec()
+        val reader = HubImageReader(context, codec)
 
         val image = prepared(runBlocking { reader.read(uri) })
 
-        assertEquals(1, reencoded)
+        assertEquals(1, codec.reencodes)
         assertEquals("image/jpeg", image.mimeType)
         assertFalse(image.bytes.has("Exif"))
     }
 
     @Test fun `a JPEG that cannot be re-encoded is refused, never sent as it was`() {
         val failing = listOf(
-            JpegReencoder { null },
-            JpegReencoder { error("decoder crashed") },
-            JpegReencoder { pngBytes }, // what came back is not a JPEG
+            Codec { null },
+            Codec { error("decoder crashed") },
+            Codec { pngBytes }, // what came back is not a JPEG
         )
         for ((i, reencoder) in failing.withIndex()) {
             val result = HubImageReader.prepare(hostileJpeg, reencoder)
@@ -147,7 +180,6 @@ class HubImageUploadPrepTest {
     // ── other types ────────────────────────────────────────────────────────────
 
     @Test fun `PNG, GIF and WebP are sent unchanged, typed by their content, and never re-encoded`() {
-        val never = JpegReencoder { error("re-encoded a non-JPEG") }
         for ((bytes, type) in listOf(pngBytes to "image/png", gifBytes to "image/gif", webpBytes to "image/webp")) {
             val image = prepared(HubImageReader.prepare(bytes, never))
             assertEquals(type, image.mimeType)
@@ -156,7 +188,6 @@ class HubImageUploadPrepTest {
     }
 
     @Test fun `anything that is not one of the four image types is refused before an upload`() {
-        val never = JpegReencoder { error("re-encoded a non-image") }
         val others = listOf(
             "<svg xmlns=\"http://www.w3.org/2000/svg\"/>".toByteArray(),
             "<html><script>x</script></html>".toByteArray(),
@@ -174,10 +205,49 @@ class HubImageUploadPrepTest {
         }
     }
 
-    @Test fun `the decode sample size keeps the long side at least the cap`() {
+    // ── memory ─────────────────────────────────────────────────────────────────
+
+    /** [jpeg] with its baseline frame header (SOF0) claiming [width] x [height]. */
+    private fun claiming(jpeg: ByteArray, width: Int, height: Int): ByteArray {
+        val copy = jpeg.copyOf()
+        val sof = String(copy, Charsets.ISO_8859_1).indexOf("\u00FF\u00C0")
+        require(sof > 0) { "no SOF0 in the fixture" }
+        copy[sof + 5] = (height shr 8).toByte(); copy[sof + 6] = height.toByte()
+        copy[sof + 7] = (width shr 8).toByte(); copy[sof + 8] = width.toByte()
+        return copy
+    }
+
+    @Test fun `a JPEG claiming more than 50 megapixels is refused before it is decoded`() {
+        val bomb = claiming(gpsJpeg, 65_500, 65_500)
+        assertEquals("the crafted header does not read as claimed", 65_500 to 65_500, JdkCodec().bounds(bomb))
+        val codec = Codec { null }
+
+        val result = HubImageReader.prepare(bomb, codec)
+
+        assertTrue("$result", result is HubImageReader.Result.Refused)
+        assertEquals(PickedImageProblem.TOO_MANY_PIXELS, (result as HubImageReader.Result.Refused).problem)
+        assertEquals("it was handed to the decoder", 0, codec.reencodes)
+    }
+
+    @Test fun `a JPEG just under 50 megapixels is decoded, at a sample size that brings it to the cap`() {
+        var sample = 0
+        val codec = object : JdkCodec() {
+            override fun reencode(jpeg: ByteArray, sampleSize: Int): ByteArray? { sample = sampleSize; return super.reencode(gpsJpeg, 1) }
+        }
+        prepared(HubImageReader.prepare(claiming(gpsJpeg, 8_000, 6_000), codec))
+        assertEquals(4, sample) // 8000 / 4 = 2000 <= 2048, 8000 / 2 = 4000 > 2048
+    }
+
+    @Test fun `the decode sample size is the smallest that brings the long side to at most the cap`() {
         assertEquals(1, HubImageReader.sampleSizeFor(2048, 1000))
-        assertEquals(1, HubImageReader.sampleSizeFor(4095, 3000))
-        assertEquals(2, HubImageReader.sampleSizeFor(4096, 3072))
-        assertEquals(4, HubImageReader.sampleSizeFor(12_000, 9_000))
+        assertEquals(2, HubImageReader.sampleSizeFor(2049, 1000))
+        assertEquals(2, HubImageReader.sampleSizeFor(1000, 4096))
+        assertEquals(4, HubImageReader.sampleSizeFor(4097, 3000))
+        assertEquals(32, HubImageReader.sampleSizeFor(65_500, 65_500))
+        for (side in listOf(1, 2047, 2048, 2049, 3000, 4095, 4096, 4097, 9999, 65_535)) {
+            val s = HubImageReader.sampleSizeFor(side, 1)
+            assertTrue("$side / $s", (side + s - 1) / s <= HubImageReader.MAX_SIDE)
+            assertTrue("$side / $s is not the smallest", s == 1 || (side + s / 2 - 1) / (s / 2) > HubImageReader.MAX_SIDE)
+        }
     }
 }

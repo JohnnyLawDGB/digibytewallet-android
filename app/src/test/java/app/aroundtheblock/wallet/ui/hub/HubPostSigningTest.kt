@@ -46,7 +46,8 @@ class HubPostSigningTest {
         every { identity.sign(any()) } answers { signed += firstArg<String>(); signature }
         every { client.isLoggedIn() } returns false
         coEvery { client.getMessages(any(), any(), any()) } returns emptyList()
-        every { socket.connectionState } returns MutableStateFlow(ConnectionState.DISCONNECTED)
+        // Connected: a post is sent only while the socket is up.
+        every { socket.connectionState } returns MutableStateFlow(ConnectionState.CONNECTED)
         every { socket.messages } returns MutableSharedFlow<WebSocketEvent>()
         every { socket.reconnectDelayMs() } returns 5_000L
     }

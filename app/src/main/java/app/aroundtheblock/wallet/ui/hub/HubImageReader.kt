@@ -19,11 +19,15 @@ import javax.inject.Inject
 class PickedImage(val bytes: ByteArray, val mimeType: String)
 
 /** Why a picked image cannot be sent. */
-enum class PickedImageProblem { UNREADABLE, WRONG_TYPE, TOO_LARGE, NOT_PREPARED }
+enum class PickedImageProblem { UNREADABLE, WRONG_TYPE, TOO_LARGE, TOO_MANY_PIXELS, NOT_PREPARED }
 
-/** Decodes a JPEG and encodes it again; null when either step fails. */
-fun interface JpegReencoder {
-    fun reencode(jpeg: ByteArray): ByteArray?
+/** Reads a JPEG's size from its header, and decodes and encodes it again. */
+interface JpegCodec {
+    /** Width and height from the header alone (nothing decoded), or null when it cannot be read. */
+    fun bounds(jpeg: ByteArray): Pair<Int, Int>?
+
+    /** Decoded at [sampleSize] (a power of two), oriented, and encoded again; null when either step fails. */
+    fun reencode(jpeg: ByteArray, sampleSize: Int): ByteArray?
 }
 
 /**
@@ -34,7 +38,7 @@ fun interface JpegReencoder {
  * ([sniff]): PNG, JPEG, GIF and WebP, the types the server takes; anything else is refused before
  * an upload, and the upload is labelled with the type found.
  *
- * A JPEG is always decoded and encoded again ([BitmapJpegReencoder]): the new file holds the
+ * A JPEG is always decoded and encoded again ([BitmapJpegCodec]): the new file holds the
  * picture and nothing else, so a camera photo's EXIF (the place it was taken, the time, the
  * phone), XMP, comments and any bytes after its end never leave the phone. If it cannot be decoded
  * or encoded, it is not sent: the original bytes are never the fallback.
@@ -45,9 +49,9 @@ fun interface JpegReencoder {
  */
 class HubImageReader(
     private val context: Context,
-    private val reencoder: JpegReencoder,
+    private val codec: JpegCodec,
 ) {
-    @Inject constructor(@ApplicationContext context: Context) : this(context, BitmapJpegReencoder)
+    @Inject constructor(@ApplicationContext context: Context) : this(context, BitmapJpegCodec)
 
     /** The image, or why it cannot be sent. */
     suspend fun read(uri: Uri): Result = withContext(Dispatchers.IO) {
@@ -56,7 +60,7 @@ class HubImageReader(
             when {
                 bytes == null || bytes.isEmpty() -> Result.Refused(PickedImageProblem.UNREADABLE)
                 bytes.size > DigiScopeClient.MAX_IMAGE_BYTES -> Result.Refused(PickedImageProblem.TOO_LARGE)
-                else -> prepare(bytes, reencoder)
+                else -> prepare(bytes, codec)
             }
         } catch (ignored: Exception) {
             Result.Refused(PickedImageProblem.UNREADABLE)
@@ -77,19 +81,32 @@ class HubImageReader(
         /** The long side an uploaded JPEG is capped at, as the server caps every image (hub-media.js `MAX_SIDE`). */
         const val MAX_SIDE = 2048
 
+        /** The most pixels a JPEG may claim in its header before it is decoded on the phone: 50 megapixels. */
+        const val MAX_PIXELS = 50_000_000L
+
         /**
-         * The bytes uploaded for [bytes]: a JPEG re-encoded by [reencoder] (refused when that
-         * fails, or when what comes back is not a JPEG), any other allowed type unchanged, and
-         * anything else refused. The type is [sniff]ed from the bytes.
+         * The bytes uploaded for [bytes]: a JPEG re-encoded by [codec], any other allowed type
+         * unchanged, and anything else refused. The type is [sniff]ed from the bytes. A JPEG whose
+         * header cannot be read, that claims more than [MAX_PIXELS], whose re-encode fails, or whose
+         * re-encode is not a JPEG, is refused: only the re-encoder's output is ever sent for a JPEG.
+         * It is decoded at the sample size [sampleSizeFor] picks, so the decoded picture's long side
+         * is at most [MAX_SIDE] before anything else is done with it.
          */
-        fun prepare(bytes: ByteArray, reencoder: JpegReencoder): Result {
-            val type = sniff(bytes)
+        fun prepare(bytes: ByteArray, codec: JpegCodec): Result = when (val type = sniff(bytes)) {
+            null -> Result.Refused(PickedImageProblem.WRONG_TYPE)
+            JPEG -> prepareJpeg(bytes, codec)
+            else -> Result.Read(PickedImage(bytes, type))
+        }
+
+        private fun prepareJpeg(bytes: ByteArray, codec: JpegCodec): Result {
+            val bounds = runCatching { codec.bounds(bytes) }.getOrNull()?.takeIf { (w, h) -> w > 0 && h > 0 }
+            val tooManyPixels = bounds != null && bounds.first.toLong() * bounds.second > MAX_PIXELS
             // Only the re-encoder's output is ever sent for a JPEG: there is no path to the original.
-            val reencoded = if (type != JPEG) null else runCatching { reencoder.reencode(bytes) }.getOrNull()
+            val reencoded = bounds?.takeIf { !tooManyPixels }
+                ?.let { (w, h) -> runCatching { codec.reencode(bytes, sampleSizeFor(w, h)) }.getOrNull() }
                 ?.takeIf { sniff(it) == JPEG && it.size <= DigiScopeClient.MAX_IMAGE_BYTES }
             return when {
-                type == null -> Result.Refused(PickedImageProblem.WRONG_TYPE)
-                type != JPEG -> Result.Read(PickedImage(bytes, type))
+                tooManyPixels -> Result.Refused(PickedImageProblem.TOO_MANY_PIXELS)
                 reencoded == null -> Result.Refused(PickedImageProblem.NOT_PREPARED)
                 else -> Result.Read(PickedImage(reencoded, JPEG))
             }
@@ -111,10 +128,11 @@ class HubImageReader(
             }
         }
 
-        /** The largest power of two that leaves the long side of [width] x [height] at least [MAX_SIDE]. */
+        /** The smallest power of two that brings the long side of [width] x [height] to at most [MAX_SIDE] (rounding up). */
         fun sampleSizeFor(width: Int, height: Int): Int {
+            val longSide = maxOf(width, height).toLong()
             var sample = 1
-            while (maxOf(width, height) / (sample * 2) >= MAX_SIDE) sample *= 2
+            while ((longSide + sample - 1) / sample > MAX_SIDE) sample *= 2
             return sample
         }
 
@@ -134,19 +152,26 @@ class HubImageReader(
 }
 
 /**
- * The app's [JpegReencoder]: decodes with [BitmapFactory] at a power-of-two sample size (memory
- * stays bounded), applies the EXIF orientation, caps the long side at [HubImageReader.MAX_SIDE],
- * and writes a new JPEG with [Bitmap.compress], which writes the picture and no EXIF, XMP or
- * comment.
+ * The app's [JpegCodec]: reads the size from the header with [BitmapFactory] (`inJustDecodeBounds`,
+ * nothing decoded), decodes at the sample size [HubImageReader.prepare] chose (memory stays
+ * bounded), applies the EXIF orientation, caps the long side at [HubImageReader.MAX_SIDE], and
+ * writes a new JPEG with [Bitmap.compress], which writes the picture and no EXIF, XMP or comment.
  */
-object BitmapJpegReencoder : JpegReencoder {
+object BitmapJpegCodec : JpegCodec {
     private const val QUALITY = 90
 
-    override fun reencode(jpeg: ByteArray): ByteArray? {
+    override fun bounds(jpeg: ByteArray): Pair<Int, Int>? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, bounds)
+        return if (bounds.outWidth <= 0 || bounds.outHeight <= 0) null else bounds.outWidth to bounds.outHeight
+    }
+
+    override fun reencode(jpeg: ByteArray, sampleSize: Int): ByteArray? {
         var decoded: Bitmap? = null
         var oriented: Bitmap? = null
         return try {
-            val bitmap = decodeBounded(jpeg) ?: return null
+            val options = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+            val bitmap = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, options) ?: return null
             decoded = bitmap
             val orientation = ExifInterface(ByteArrayInputStream(jpeg))
                 .getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
@@ -165,15 +190,6 @@ object BitmapJpegReencoder : JpegReencoder {
             if (oriented !== decoded) oriented?.recycle()
             decoded?.recycle()
         }
-    }
-
-    private fun decodeBounded(jpeg: ByteArray): Bitmap? {
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, bounds)
-        return if (bounds.outWidth <= 0 || bounds.outHeight <= 0) null else BitmapFactory.decodeByteArray(
-            jpeg, 0, jpeg.size,
-            BitmapFactory.Options().apply { inSampleSize = HubImageReader.sampleSizeFor(bounds.outWidth, bounds.outHeight) },
-        )
     }
 
     /** The turn and flip EXIF [orientation] (1 to 8) asks for. */

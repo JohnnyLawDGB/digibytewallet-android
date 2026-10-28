@@ -515,6 +515,8 @@
     <string name="hub_image_wrong_type">Solo se pueden publicar imágenes PNG, JPG, GIF y WebP.</string>
     <string name="hub_image_too_large">Las imágenes pueden ocupar hasta 8 MB. Elige una más pequeña.</string>
     <string name="hub_image_not_prepared">No se pudo preparar esta foto para enviarla, así que no se envió. Prueba con otra.</string>
+    <string name="hub_image_too_many_pixels">Esta foto supera los 50 megapíxeles y es demasiado grande para prepararla en este teléfono. Elige una más pequeña.</string>
+    <string name="hub_not_connected">No hay conexión con el Hub, así que no se envió nada. Inténtalo de nuevo en un momento.</string>
     <string name="hub_upload_failed">La imagen no se envió. Revisa tu conexión e inténtalo de nuevo.</string>
     <string name="did_requesting">solicita autenticación Digi-ID</string>
     <string name="did_warning">Advertencia</string>

@@ -119,6 +119,146 @@ class ChatMediaViewModelTest {
         assertEquals(listOf(1), again.currentMessages.value.map { it.id })
     }
 
+    // ── deletes ────────────────────────────────────────────────────────────────
+
+    @Test fun `a page already on its way when a delete arrives does not bring the message back`() {
+        val page = CompletableDeferred<List<ChatMessage>>()
+        coEvery { client.getMessages(any(), null, any()) } coAnswers { page.await() }
+        val inserted = mutableListOf<Int>()
+        coEvery { dao.insertAll(any()) } answers { inserted += firstArg<List<CachedMessageEntity>>().map { it.id } }
+        val chat = chat() // the newest page is now on its way
+
+        events.tryEmit(WebSocketEvent.Deleted(HubWebSocket.CHAT_CHANNEL_ID, 2))
+        page.complete(listOf(message(1, 1_000_000), message(2, 1_005_000)))
+
+        assertEquals(listOf(1), chat.currentMessages.value.map { it.id })
+        assertFalse("the deleted message was cached again", 2 in inserted)
+        coVerify { dao.deleteById(2) }
+    }
+
+    @Test fun `a deleted message that is posted again over the socket is not shown`() {
+        val chat = chat()
+        events.tryEmit(WebSocketEvent.Deleted(HubWebSocket.CHAT_CHANNEL_ID, 2))
+        events.tryEmit(WebSocketEvent.Message(HubWebSocket.CHAT_CHANNEL_ID, message(2, 1_005_000)))
+        assertTrue(chat.currentMessages.value.isEmpty())
+    }
+
+    @Test fun `a message deleted while the socket was down is dropped by the next newest page`() {
+        coEvery { client.getMessages(any(), null, any()) } returns listOf(message(1, 1_000_000), message(2, 1_005_000))
+        val chat = chat()
+        assertEquals(listOf(1, 2), chat.currentMessages.value.map { it.id })
+        coEvery { client.getMessages(any(), null, any()) } returns listOf(message(1, 1_000_000))
+
+        connection.value = ConnectionState.CONNECTED
+
+        assertEquals(listOf(1), chat.currentMessages.value.map { it.id })
+        coVerify(exactly = 1) { dao.deleteById(2) }
+    }
+
+    @Test fun `messages older than the newest page are not taken for deleted`() {
+        coEvery { client.getMessages(any(), null, any()) } returns listOf(message(1, 1_000_000), message(2, 1_005_000))
+        val chat = chat()
+        coEvery { client.getMessages(any(), null, any()) } returns listOf(message(2, 1_005_000), message(3, 1_010_000))
+
+        connection.value = ConnectionState.CONNECTED
+
+        assertEquals(listOf(1, 2, 3), chat.currentMessages.value.map { it.id })
+        coVerify(exactly = 0) { dao.deleteById(any()) }
+    }
+
+    @Test fun `a message that arrives while the newest page is on its way is not taken for deleted`() {
+        val page = CompletableDeferred<List<ChatMessage>>()
+        coEvery { client.getMessages(any(), null, any()) } coAnswers { page.await() }
+        val chat = chat()
+
+        events.tryEmit(WebSocketEvent.Message(HubWebSocket.CHAT_CHANNEL_ID, message(3, 1_010_000)))
+        page.complete(listOf(message(1, 1_000_000), message(2, 1_005_000)))
+
+        assertEquals(listOf(1, 2, 3), chat.currentMessages.value.map { it.id })
+    }
+
+    // ── paging ─────────────────────────────────────────────────────────────────
+
+    /**
+     * The server keeps whole seconds and pages with `created_at < before`. Messages 1 and 2 were
+     * posted in the same second; the newest page held only 2. The older page must be asked for
+     * from one second past 2, so 1 comes back; asked for from 2 itself, 1 was skipped for good.
+     */
+    @Test fun `two messages in the same second split across pages are both shown`() {
+        val second = 1_700_000_000_000L
+        coEvery { client.getMessages(any(), null, any()) } returns listOf(message(2, second), message(3, second + 60_000))
+        coEvery { client.getMessages(any(), second + 1_000, any()) } returns listOf(message(1, second), message(2, second))
+        coEvery { client.getMessages(any(), second, any()) } returns emptyList()
+        val chat = chat()
+
+        chat.loadMoreHistory()
+
+        assertEquals(listOf(1, 2, 3), chat.currentMessages.value.map { it.id }.sorted())
+    }
+
+    @Test fun `an older page with nothing new ends the paging instead of asking again forever`() {
+        val second = 1_700_000_000_000L
+        coEvery { client.getMessages(any(), null, any()) } returns listOf(message(1, second), message(2, second))
+        coEvery { client.getMessages(any(), second + 1_000, any()) } returns listOf(message(1, second), message(2, second))
+        val chat = chat()
+
+        chat.loadMoreHistory()
+        chat.loadMoreHistory()
+        chat.loadMoreHistory()
+
+        coVerify(exactly = 1) { client.getMessages(any(), second + 1_000, any()) }
+    }
+
+    // ── not connected ──────────────────────────────────────────────────────────
+
+    @Test fun `with the socket down a text post is not signed, sent or cleared, and the user is told`() {
+        val chat = chat()
+        var cleared = 0
+
+        chat.sendMessage("gm") { cleared++ }
+
+        assertTrue(signed.isEmpty())
+        verify(exactly = 0) { socket.sendMessage(any(), any(), any(), any()) }
+        assertEquals(0, cleared)
+        assertEquals(ChatNotice.NOT_CONNECTED, chat.notice.value)
+    }
+
+    @Test fun `with the socket down an image is not uploaded and stays attached`() {
+        val uri = mockk<Uri>()
+        coEvery { reader.read(uri) } returns HubImageReader.Result.Read(PickedImage(byteArrayOf(1), "image/png"))
+        val chat = chat()
+        var cleared = 0
+
+        chat.attachImage(uri)
+        chat.sendMessage("look") { cleared++ }
+
+        coVerify(exactly = 0) { reader.read(any()) }
+        coVerify(exactly = 0) { client.uploadImage(any(), any()) }
+        assertEquals(uri, chat.pendingImage.value)
+        assertEquals(0, cleared)
+        assertEquals(ChatNotice.NOT_CONNECTED, chat.notice.value)
+    }
+
+    @Test fun `a socket that drops during the upload sends nothing and keeps the post`() {
+        val uri = mockk<Uri>()
+        coEvery { reader.read(uri) } returns HubImageReader.Result.Read(PickedImage(byteArrayOf(1), "image/png"))
+        coEvery { client.uploadImage(any(), any()) } coAnswers {
+            connection.value = ConnectionState.DISCONNECTED
+            HubImageUpload.Uploaded(42, "/api/hub/media/x.png", 1, 1)
+        }
+        val chat = chat()
+        connection.value = ConnectionState.CONNECTED
+        var cleared = 0
+
+        chat.attachImage(uri)
+        chat.sendMessage("look") { cleared++ }
+
+        verify(exactly = 0) { socket.sendMessage(any(), any(), any(), any()) }
+        assertEquals(uri, chat.pendingImage.value)
+        assertEquals(0, cleared)
+        assertEquals(ChatNotice.NOT_CONNECTED, chat.notice.value)
+    }
+
     // ── reconnect and history ──────────────────────────────────────────────────
 
     @Test fun `each reconnect fetches the newest page and merges it by id`() {
@@ -200,6 +340,7 @@ class ChatMediaViewModelTest {
         val chat = chat()
         var sent = 0
 
+        connection.value = ConnectionState.CONNECTED
         chat.attachImage(uri)
         chat.sendMessage("  look  ") { sent++ }
 
@@ -215,6 +356,7 @@ class ChatMediaViewModelTest {
         coEvery { client.uploadImage(any(), any()) } returns HubImageUpload.Uploaded(7, "/api/hub/media/y.jpg", 1, 1)
         val chat = chat()
 
+        connection.value = ConnectionState.CONNECTED
         chat.attachImage(uri)
         chat.sendMessage("")
 
@@ -228,6 +370,7 @@ class ChatMediaViewModelTest {
         val chat = chat()
         var sent = 0
 
+        connection.value = ConnectionState.CONNECTED
         chat.attachImage(uri)
         chat.sendMessage("look") { sent++ }
 
@@ -244,6 +387,7 @@ class ChatMediaViewModelTest {
         coEvery { reader.read(uri) } returns HubImageReader.Result.Refused(PickedImageProblem.TOO_LARGE)
         val chat = chat()
 
+        connection.value = ConnectionState.CONNECTED
         chat.attachImage(uri)
         chat.sendMessage("look")
 
@@ -257,6 +401,7 @@ class ChatMediaViewModelTest {
         coEvery { reader.read(uri) } returns HubImageReader.Result.Refused(PickedImageProblem.NOT_PREPARED)
         val chat = chat()
 
+        connection.value = ConnectionState.CONNECTED
         chat.attachImage(uri)
         chat.sendMessage("look")
 
@@ -266,7 +411,9 @@ class ChatMediaViewModelTest {
     }
 
     @Test fun `a text post still sends no attachment`() {
-        chat().sendMessage("gm")
+        val chat = chat()
+        connection.value = ConnectionState.CONNECTED
+        chat.sendMessage("gm")
 
         verify(exactly = 1) { socket.sendMessage(HubWebSocket.CHAT_CHANNEL_ID, "gm", "Dme|sig", null) }
         assertEquals(listOf("DigiScope Hub signed post v1\nkind: chat-message\nchannel: 1\n\ngm"), signed)

@@ -507,6 +507,8 @@
     <string name="hub_image_wrong_type">只能发送 PNG、JPG、GIF 和 WebP 图片。</string>
     <string name="hub_image_too_large">图片最大 8 MB。请选择更小的图片。</string>
     <string name="hub_image_not_prepared">无法准备这张照片以供发送，因此未发送。请换一张试试。</string>
+    <string name="hub_image_too_many_pixels">这张照片超过 5000 万像素，太大，无法在此手机上准备。请选择更小的图片。</string>
+    <string name="hub_not_connected">未连接到 Hub，因此没有发送任何内容。请稍后再试。</string>
     <string name="hub_upload_failed">图片未发送。请检查网络连接后重试。</string>
     <string name="did_requesting">正在请求 Digi-ID 认证</string>
     <string name="did_warning">警告</string>

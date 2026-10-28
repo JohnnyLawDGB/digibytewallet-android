@@ -507,6 +507,8 @@
     <string name="hub_image_wrong_type">Hanya gambar PNG, JPG, GIF, dan WebP yang bisa dikirim.</string>
     <string name="hub_image_too_large">Ukuran gambar maksimal 8 MB. Pilih yang lebih kecil.</string>
     <string name="hub_image_not_prepared">Foto ini tidak bisa disiapkan untuk dikirim, jadi tidak dikirim. Coba foto lain.</string>
+    <string name="hub_image_too_many_pixels">Foto ini lebih dari 50 megapiksel, terlalu besar untuk disiapkan di ponsel ini. Pilih yang lebih kecil.</string>
+    <string name="hub_not_connected">Tidak terhubung ke Hub, jadi tidak ada yang terkirim. Coba lagi sebentar lagi.</string>
     <string name="hub_upload_failed">Gambar tidak terkirim. Periksa koneksi Anda lalu coba lagi.</string>
     <string name="did_requesting">meminta autentikasi Digi-ID</string>
     <string name="did_warning">Peringatan</string>
