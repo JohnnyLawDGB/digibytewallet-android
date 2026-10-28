@@ -3,12 +3,15 @@ package app.aroundtheblock.wallet.core.digiscope
 import android.content.Context
 import app.aroundtheblock.wallet.core.hub.ChatMessage
 import app.aroundtheblock.wallet.core.hub.DigiRunnerStats
+import app.aroundtheblock.wallet.core.hub.HubJson
 import app.aroundtheblock.wallet.core.hub.LeaderboardEntry
 import app.aroundtheblock.wallet.core.hub.UserInfo
 import app.aroundtheblock.wallet.core.network.BoundedBody
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -18,8 +21,42 @@ import org.json.JSONObject
 data class DigiScopeProfile(
     val handle: String?,
     val address: String,
-    val tipBalance: Long
+    val tipBalance: Long,
+    /** The account's id on the server, the `userId` its chat messages carry; null when not sent. */
+    val userId: Int? = null,
+    /** The account's computed Trust Level (`trust_level`), 0 when not sent. */
+    val trustLevel: Int = 0,
+    /**
+     * Whether the server lets this account post in chat (`can_post`: Trust Level 2). Only cosmetic
+     * on the phone: the server refuses a post and an upload below L2 whatever this says.
+     */
+    val canPost: Boolean = false,
 )
+
+/** What `POST /hub/images` answered. */
+sealed class HubImageUpload {
+    /** The image is stored, not yet attached: send it with a message as `attachmentId` [id]. */
+    data class Uploaded(val id: Int, val url: String, val width: Int, val height: Int) : HubImageUpload()
+
+    /**
+     * It was refused or not delivered. [message] is the server's own text when it sent one (shown
+     * as is), [code] its machine code (`TRUST_L2_REQUIRED`, `TOO_LARGE`, `BAD_IMAGE`), [status] the
+     * HTTP status, or 0 when no answer was read.
+     */
+    data class Failed(val message: String? = null, val code: String? = null, val status: Int = 0) : HubImageUpload()
+}
+
+/** What `POST /hub/report` answered. */
+enum class HubReportResult {
+    /** `{ reported: true }`. */
+    REPORTED,
+    /** 400: the message no longer exists (deleted since it was shown). */
+    GONE,
+    /** 429: the report limit (10 an hour) is reached. */
+    LIMITED,
+    /** Anything else, or no answer. */
+    FAILED,
+}
 
 class DigiScopeClient(
     baseClient: OkHttpClient,
@@ -47,6 +84,22 @@ class DigiScopeClient(
          * with its replies. A message is at most 2,000 characters and a thread 5,000.
          */
         internal const val LIST_BODY_BYTES = 4L * 1024 * 1024
+
+        /** The largest image the server takes (hub.js multer `fileSize`): 8 MB. */
+        const val MAX_IMAGE_BYTES = 8L * 1024 * 1024
+
+        /** The image types the server takes: PNG, JPEG, GIF and WebP. */
+        val IMAGE_TYPES = setOf("image/png", "image/jpeg", "image/gif", "image/webp")
+
+        /**
+         * [ms] as the server writes `created_at` ("2026-10-28 12:00:00", UTC): the form its
+         * `before` compares against. A number there compares as smaller than every stored time, so
+         * a page asked for with one came back empty.
+         */
+        internal fun serverTime(ms: Long): String =
+            java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US)
+                .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+                .format(java.util.Date(ms))
     }
 
     // Certificate pinning for api.digiscope.me — prevents MITM via rogue CA.
@@ -242,7 +295,10 @@ class DigiScopeClient(
                 DigiScopeProfile(
                     handle = profile.optString("handle", null),
                     address = profile.optString("address", ""),
-                    tipBalance = profile.optLong("tip_balance", profile.optLong("tipBalance", 0))
+                    tipBalance = profile.optLong("tip_balance", profile.optLong("tipBalance", 0)),
+                    userId = HubJson.intOrNull(profile, "id"),
+                    trustLevel = HubJson.intOrNull(profile, "trust_level") ?: 0,
+                    canPost = profile.optBoolean("can_post", false),
                 )
             }
         } catch (e: Exception) {
@@ -253,17 +309,20 @@ class DigiScopeClient(
     // ── Hub REST: messages ────────────────────────────────────────────────────
 
     /**
-     * Fetch recent messages for a channel. Optionally paginate backwards with [before] (Unix ms).
+     * Fetch recent messages for a channel: the newest page, or with [before] (Unix ms) the page
+     * older than it. [before] is sent in the server's own time form ([serverTime]).
      */
     suspend fun getMessages(channelId: Int, before: Long? = null, limit: Int = 50): List<ChatMessage> =
         withContext(Dispatchers.IO) {
             val token = jwtToken ?: return@withContext emptyList()
             try {
-                val urlBuilder = StringBuilder("$BASE_URL/hub/channels/$channelId/messages?limit=$limit")
-                if (before != null) urlBuilder.append("&before=$before")
+                val url = "$BASE_URL/hub/channels/$channelId/messages".toHttpUrl().newBuilder()
+                    .addQueryParameter("limit", limit.toString())
+                    .apply { if (before != null) addQueryParameter("before", serverTime(before)) }
+                    .build()
 
                 val request = Request.Builder()
-                    .url(urlBuilder.toString())
+                    .url(url)
                     .header("Authorization", "Bearer $token")
                     .build()
                 client.newCall(request).execute().use { response ->
@@ -282,29 +341,67 @@ class DigiScopeClient(
     // ── Hub REST: moderation ──────────────────────────────────────────────────
 
     /**
-     * Report a message or thread. Exactly one of [messageId] / [threadId] should be non-null.
+     * Report chat message [messageId] to the moderators: `POST /hub/report` with `{ messageId }`
+     * and nothing else (the server takes an optional reason; the app sends none).
      */
-    suspend fun reportContent(
-        messageId: Int? = null,
-        threadId: Int? = null,
-        reason: String
-    ): Boolean = withContext(Dispatchers.IO) {
-        val token = jwtToken ?: return@withContext false
+    suspend fun reportMessage(messageId: Int): HubReportResult = withContext(Dispatchers.IO) {
+        val token = jwtToken ?: return@withContext HubReportResult.FAILED
         try {
-            val json = JSONObject().apply {
-                if (messageId != null) put("messageId", messageId)
-                if (threadId != null) put("threadId", threadId)
-                put("reason", reason)
-            }
-            val body = json.toString().toRequestBody("application/json".toMediaType())
+            val body = JSONObject().put("messageId", messageId).toString()
+                .toRequestBody("application/json".toMediaType())
             val request = Request.Builder()
                 .url("$BASE_URL/hub/report")
                 .header("Authorization", "Bearer $token")
                 .post(body)
                 .build()
-            client.newCall(request).execute().use { it.isSuccessful }
+            client.newCall(request).execute().use { response ->
+                when {
+                    response.code == 401 -> { handleAuthResponse(response); HubReportResult.FAILED }
+                    response.code == 400 -> HubReportResult.GONE
+                    response.code == 429 -> HubReportResult.LIMITED
+                    !response.isSuccessful -> HubReportResult.FAILED
+                    else -> {
+                        val json = BoundedBody.text(response.body, SMALL_BODY_BYTES)
+                            ?.let { runCatching { JSONObject(it) }.getOrNull() }
+                        if (json?.optBoolean("reported", false) == true) HubReportResult.REPORTED else HubReportResult.FAILED
+                    }
+                }
+            }
         } catch (e: Exception) {
-            false
+            HubReportResult.FAILED
+        }
+    }
+
+    // ── Hub REST: images ──────────────────────────────────────────────────────
+
+    /**
+     * Uploads one image for a chat post: `POST /hub/images`, multipart with exactly one part, a
+     * file named `image`, and no other field (the server takes no fields and two parts at most).
+     * [bytes] must be one of [IMAGE_TYPES] as [mimeType] and at most [MAX_IMAGE_BYTES]; anything
+     * else is refused here without a request. The server checks the image again by its content.
+     */
+    suspend fun uploadImage(bytes: ByteArray, mimeType: String): HubImageUpload = withContext(Dispatchers.IO) {
+        val token = jwtToken ?: return@withContext HubImageUpload.Failed()
+        if (mimeType !in IMAGE_TYPES) return@withContext HubImageUpload.Failed(code = "BAD_IMAGE")
+        if (bytes.isEmpty() || bytes.size > MAX_IMAGE_BYTES) return@withContext HubImageUpload.Failed(code = "TOO_LARGE")
+        try {
+            val request = Request.Builder()
+                .url("$BASE_URL/hub/images")
+                .header("Authorization", "Bearer $token")
+                .post(imageUploadBody(bytes, mimeType))
+                .build()
+            client.newCall(request).execute().use { response ->
+                if (response.code == 401) {
+                    handleAuthResponse(response)
+                    HubImageUpload.Failed(status = 401)
+                } else {
+                    val json = BoundedBody.text(response.body, SMALL_BODY_BYTES)
+                        ?.let { runCatching { JSONObject(it) }.getOrNull() }
+                    imageUploadAnswer(response.code, json)
+                }
+            }
+        } catch (e: Exception) {
+            HubImageUpload.Failed()
         }
     }
 
@@ -412,6 +509,18 @@ class DigiScopeClient(
         } catch (e: Exception) { null }
     }
 
+    /** What an upload's answer means: [status] and its body as JSON (null when it was not JSON or over the cap). */
+    private fun imageUploadAnswer(status: Int, json: JSONObject?): HubImageUpload {
+        val id = json?.let { HubJson.intOrNull(it, "id") }?.takeIf { it > 0 }
+        val url = json?.let { HubJson.text(it, "url") }
+        return when {
+            json == null -> HubImageUpload.Failed(status = status)
+            status !in 200..299 -> HubImageUpload.Failed(HubJson.text(json, "error"), HubJson.text(json, "code"), status)
+            id == null || url == null -> HubImageUpload.Failed(status = status)
+            else -> HubImageUpload.Uploaded(id, url, HubJson.intOrNull(json, "width") ?: 0, HubJson.intOrNull(json, "height") ?: 0)
+        }
+    }
+
     // ── Token helpers ─────────────────────────────────────────────────────────
 
     /** Check if a response indicates expired session, and clear token if so. */
@@ -466,21 +575,37 @@ class DigiScopeClient(
 
     // ── JSON helpers ──────────────────────────────────────────────────────────
 
-    private fun parseUserInfo(obj: JSONObject?): UserInfo = UserInfo(
+    private fun parseUserInfo(obj: JSONObject?, userId: Int?): UserInfo = UserInfo(
         handle = obj?.optString("handle", null),
-        address = obj?.optString("address", "") ?: ""
+        address = obj?.optString("address", "") ?: "",
+        userId = userId,
     )
 
     private fun parseChatMessages(array: JSONArray): List<ChatMessage> =
         (0 until array.length()).map { i -> parseChatMessage(array.getJSONObject(i)) }
 
-    private fun parseChatMessage(obj: JSONObject): ChatMessage = ChatMessage(
-        id = obj.optInt("id"),
-        content = obj.getString("content"),
-        from = parseUserInfo(obj.optJSONObject("from")),
-        timestamp = parseDatetimeToMs(obj.optString("created_at", obj.optString("timestamp", ""))),
-        signature = obj.optString("signature", "")
-    )
+    private fun parseChatMessage(obj: JSONObject): ChatMessage {
+        // The REST row is flat (handle, address, user_id); a nested `from` is taken when present.
+        val from = obj.optJSONObject("from")
+        return ChatMessage(
+            id = obj.optInt("id"),
+            // An image-only post carries empty text.
+            content = HubJson.text(obj, "content") ?: "",
+            from = if (from != null) {
+                parseUserInfo(from, HubJson.intOrNull(from, "userId"))
+            } else {
+                UserInfo(
+                    handle = HubJson.text(obj, "handle"),
+                    address = HubJson.text(obj, "address") ?: "",
+                    userId = HubJson.intOrNull(obj, "user_id"),
+                )
+            },
+            timestamp = parseDatetimeToMs(obj.optString("created_at", obj.optString("timestamp", ""))),
+            signature = obj.optString("signature", ""),
+            attachment = HubJson.attachment(obj),
+            preview = HubJson.preview(obj),
+        )
+    }
 
     /** Parse SQLite DATETIME string ("2026-03-28 00:38:46") or Unix ms to epoch ms. */
     private fun parseDatetimeToMs(value: String): Long {
@@ -496,4 +621,16 @@ class DigiScopeClient(
             System.currentTimeMillis()
         }
     }
+
 }
+
+/**
+ * The body of `POST /hub/images`: multipart form data with one part, a file named `image` with
+ * [mimeType], and nothing else. The server (multer: `fields: 0`, `parts: 2`, `.single('image')`)
+ * refuses any other field, and takes a part as a file only when it has a file name.
+ */
+internal fun imageUploadBody(bytes: ByteArray, mimeType: String): MultipartBody =
+    MultipartBody.Builder()
+        .setType(MultipartBody.FORM)
+        .addFormDataPart("image", "image", bytes.toRequestBody(mimeType.toMediaType()))
+        .build()

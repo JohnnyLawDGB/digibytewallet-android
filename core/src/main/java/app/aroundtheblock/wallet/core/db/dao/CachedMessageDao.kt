@@ -15,6 +15,10 @@ interface CachedMessageDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(messages: List<CachedMessageEntity>)
 
+    /** A message the server deleted, so the offline fallback cannot show it again. No schema change. */
+    @Query("DELETE FROM hub_cached_messages WHERE id = :id")
+    suspend fun deleteById(id: Int)
+
     @Query("DELETE FROM hub_cached_messages WHERE timestamp < :cutoff")
     suspend fun deleteOlderThan(cutoff: Long)
 
