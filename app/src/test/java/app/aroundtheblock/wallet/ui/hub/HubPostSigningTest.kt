@@ -59,7 +59,7 @@ class HubPostSigningTest {
     private fun chat(): ChatViewModel {
         val dao = mockk<CachedMessageDao>(relaxed = true)
         every { dao.getMessagesForChannel(any()) } returns flowOf(emptyList())
-        return ChatViewModel(client, socket, dao, identity).also { opened += it }
+        return ChatViewModel(client, socket, dao, identity, mockk(relaxed = true)).also { opened += it }
     }
 
     @Test fun `a chat message with spaces around it is signed exactly as it is sent`() {

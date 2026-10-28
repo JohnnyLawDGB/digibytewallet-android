@@ -84,4 +84,52 @@ class ChatSignPayloadTest {
         assertNull(ChatSignPayload.chatMessage(1, " \n\t "))
         assertNull(ChatSignPayload.chatMessage(1, "\uFEFF\u3000"))
     }
+
+    // ── v2: a post with an image (website spec 2026-10-18 §6.3) ─────────────────
+
+    private val headerV2 = "DigiScope Hub signed post v2"
+
+    @Test fun `a post with an image is signed in the v2 form, naming its attachment`() {
+        val post = ChatSignPayload.chatMessage(1, "  look  ", attachmentId = 42)!!
+        assertEquals("look", post.content)
+        assertEquals(42, post.attachmentId)
+        assertEquals("$headerV2\nkind: chat-message\nchannel: 1\nattachment: 42\n\nlook", post.signedText)
+    }
+
+    @Test fun `an image alone is a post, signed with empty text`() {
+        val post = ChatSignPayload.chatMessage(1, " \n ", attachmentId = 7)!!
+        assertEquals("", post.content)
+        assertEquals("$headerV2\nkind: chat-message\nchannel: 1\nattachment: 7\n\n", post.signedText)
+    }
+
+    /**
+     * A post without an attachment is the v1 form, byte for byte: no `attachment:` line and no v2
+     * header. The bytes are the v1 vector above, spelled out as UTF-8.
+     */
+    @Test fun `a post without an image keeps the v1 bytes exactly`() {
+        val vector = "DigiScope Hub signed post v1\nkind: chat-message\nchannel: 1\n\ngm".encodeToByteArray()
+        for (post in listOf(ChatSignPayload.chatMessage(1, "gm")!!, ChatSignPayload.chatMessage(1, "gm", attachmentId = null)!!)) {
+            assertTrue(vector.contentEquals(post.signedText.encodeToByteArray()))
+            assertNull(post.attachmentId)
+            assertFalse(post.signedText.contains("attachment"))
+        }
+    }
+
+    @Test fun `the same text with another image, or with none, is signed differently`() {
+        val a = ChatSignPayload.chatMessage(1, "gm", attachmentId = 1)!!.signedText
+        val b = ChatSignPayload.chatMessage(1, "gm", attachmentId = 2)!!.signedText
+        val none = ChatSignPayload.chatMessage(1, "gm")!!.signedText
+        assertEquals(3, setOf(a, b, none).size)
+    }
+
+    @Test fun `an attachment id the server could not have issued is not signed`() {
+        assertNull(ChatSignPayload.chatMessage(1, "gm", attachmentId = 0))
+        assertNull(ChatSignPayload.chatMessage(1, "gm", attachmentId = -5))
+    }
+
+    @Test fun `an image post is never a Digi-ID login`() {
+        val post = ChatSignPayload.chatMessage(1, "digiid://site.example/login?x=00", attachmentId = 3)!!
+        assertTrue(post.signedText.startsWith("$headerV2\n"))
+        assertNull(DigiIdRequest.parse(post.signedText))
+    }
 }

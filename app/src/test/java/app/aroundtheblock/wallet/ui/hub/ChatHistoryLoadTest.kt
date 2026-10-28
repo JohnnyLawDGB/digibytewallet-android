@@ -46,7 +46,7 @@ class ChatHistoryLoadTest {
         every { socket.reconnectDelayMs() } returns 5_000L
         // Like Room's: emits the current rows, then waits for changes and never completes.
         every { dao.getMessagesForChannel(any(), any()) } returns MutableStateFlow(emptyList<CachedMessageEntity>())
-        chat = ChatViewModel(client, socket, dao, mockk(relaxed = true))
+        chat = ChatViewModel(client, socket, dao, mockk(relaxed = true), mockk(relaxed = true))
     }
 
     @After fun tearDown() {
@@ -68,7 +68,7 @@ class ChatHistoryLoadTest {
             fromAddress = "Daddress", timestamp = 1_000L, signature = "",
         )
         every { dao.getMessagesForChannel(HubWebSocket.CHAT_CHANNEL_ID, any()) } returns MutableStateFlow(listOf(cached))
-        val withCache = ChatViewModel(client, socket, dao, mockk(relaxed = true))
+        val withCache = ChatViewModel(client, socket, dao, mockk(relaxed = true), mockk(relaxed = true))
         try {
             assertEquals(listOf("gm"), withCache.currentMessages.value.map { it.content })
             withCache.loadMoreHistory()
