@@ -69,6 +69,8 @@ class HubSessionEndTest {
         hub.connect()
         listener.captured.onOpen(socket, Response.Builder().request(socket.request()).protocol(Protocol.HTTP_1_1)
             .code(101).message("Switching Protocols").build())
+        // The join sent on open is HubJoinOnOpenTest's subject; these tests count what follows it.
+        socket.sent.clear()
         return hub to socket
     }
 

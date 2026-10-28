@@ -26,6 +26,12 @@ class HubWebSocket(
         const val WS_URL = "wss://api.digiscope.me/api/hub/ws"
 
         /**
+         * The one Hub chat room. The server closed every other channel (website migration 141),
+         * and it puts a socket in this room only when the socket sends a `join` for it.
+         */
+        const val CHAT_CHANNEL_ID = 1
+
+        /**
          * The largest frame the Hub socket accepts, in bytes of payload: 64 KiB. A chat message is
          * at most 2,000 characters (ChatView), far below this as JSON.
          */
@@ -105,6 +111,10 @@ class HubWebSocket(
             android.util.Log.i("HubWS", "connected!")
             openedAtMs = nowMs()
             _connectionState.value = ConnectionState.CONNECTED
+            // The server delivers nothing to a socket until it joins the room: join on every open,
+            // the first connect and each reconnect alike. Sent on the socket that opened, which
+            // may not be stored in [webSocket] yet, and only while the Hub session is still held.
+            if (!ended && digiScopeClient.getToken() != null) webSocket.send(joinFrame(CHAT_CHANNEL_ID))
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
@@ -191,8 +201,11 @@ class HubWebSocket(
         webSocket?.send(frame)
     }
 
+    private fun joinFrame(channelId: Int): String =
+        JSONObject().put("type", "join").put("channelId", channelId).toString()
+
     fun joinChannel(channelId: Int) {
-        sendAuthorized(JSONObject().put("type", "join").put("channelId", channelId).toString())
+        sendAuthorized(joinFrame(channelId))
     }
 
     fun leaveChannel(channelId: Int) {
