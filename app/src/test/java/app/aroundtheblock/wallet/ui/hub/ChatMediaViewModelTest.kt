@@ -137,15 +137,23 @@ class ChatMediaViewModelTest {
         assertEquals(listOf(1, 2, 3, 4), chat.currentMessages.value.map { it.id })
     }
 
-    @Test fun `a history load that fails ends, and the next one runs`() {
+    @Test fun `a history load that fails ends without an uncaught exception, and the next one runs`() {
         coEvery { client.getMessages(any(), null, any()) } returns listOf(message(1, 100))
         coEvery { dao.insertAll(any()) } throws IllegalStateException("disk full")
-        val chat = chat()
+        val uncaught = mutableListOf<Throwable>()
+        val thread = Thread.currentThread()
+        val previous = thread.uncaughtExceptionHandler
+        thread.uncaughtExceptionHandler = Thread.UncaughtExceptionHandler { _, e -> uncaught += e }
+        try {
+            val chat = chat()
+            chat.loadMoreHistory()
 
-        chat.loadMoreHistory()
-
-        coVerify(exactly = 2) { client.getMessages(HubWebSocket.CHAT_CHANNEL_ID, any(), any()) }
-        assertEquals(listOf(1), chat.currentMessages.value.map { it.id })
+            assertEquals("a failed load escaped the view model (it would end the app)", emptyList<Throwable>(), uncaught)
+            coVerify(exactly = 2) { client.getMessages(HubWebSocket.CHAT_CHANNEL_ID, any(), any()) }
+            assertEquals(listOf(1), chat.currentMessages.value.map { it.id })
+        } finally {
+            thread.uncaughtExceptionHandler = previous
+        }
     }
 
     @Test fun `a reconnect waits for a running load, and load more does not start a second`() {
