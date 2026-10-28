@@ -108,13 +108,28 @@ class HubWebSocket(
         @Volatile var ended = false
 
         override fun onOpen(webSocket: WebSocket, response: Response) {
-            android.util.Log.i("HubWS", "connected!")
             openedAtMs = nowMs()
-            _connectionState.value = ConnectionState.CONNECTED
+            // A socket that opens after the user ended it, or after the Hub session it was opened
+            // for is gone (logout, or a REST 401 that dropped the token mid-handshake), is closed at
+            // once and never joined: left open and unjoined it would read as CONNECTED, so it would
+            // never be replaced, and would later carry frames for a newer session. Closed as
+            // sendAuthorized closes a socket with no session: by us, so not counted as a refusal.
+            if (ended || digiScopeClient.getToken() == null) {
+                android.util.Log.i("HubWS", "opened with no Hub session: closing")
+                ended = true
+                webSocket.close(1000, "No Hub session")
+                if (this@HubWebSocket.webSocket === webSocket) this@HubWebSocket.webSocket = null
+                // Only the current connection's listener speaks for the state: a stale one must not
+                // overwrite a newer connection's.
+                if (this@HubWebSocket.listener === this) _connectionState.value = ConnectionState.DISCONNECTED
+                return
+            }
+            android.util.Log.i("HubWS", "connected!")
             // The server delivers nothing to a socket until it joins the room: join on every open,
             // the first connect and each reconnect alike. Sent on the socket that opened, which
-            // may not be stored in [webSocket] yet, and only while the Hub session is still held.
-            if (!ended && digiScopeClient.getToken() != null) webSocket.send(joinFrame(CHAT_CHANNEL_ID))
+            // may not be stored in [webSocket] yet.
+            webSocket.send(joinFrame(CHAT_CHANNEL_ID))
+            _connectionState.value = ConnectionState.CONNECTED
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
@@ -201,12 +216,9 @@ class HubWebSocket(
         webSocket?.send(frame)
     }
 
+    /** The join is sent only by [Listener.onOpen], on the socket that opened. */
     private fun joinFrame(channelId: Int): String =
         JSONObject().put("type", "join").put("channelId", channelId).toString()
-
-    fun joinChannel(channelId: Int) {
-        sendAuthorized(joinFrame(channelId))
-    }
 
     fun sendMessage(channelId: Int, content: String, signature: String) {
         sendAuthorized(
