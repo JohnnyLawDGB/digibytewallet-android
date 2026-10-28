@@ -210,6 +210,9 @@ class HubChatMediaParsingTest {
     @Test fun `anything but a Hub media file name loads nothing`() {
         val refused = listOf(
             "https://evil.example/api/hub/media/$file",
+            // A preview's image_url, as the server relays it from the linked page.
+            "https://example.org/card.jpg",
+            "https://api.digiscope.me/api/hub/media/$file",
             "//evil.example/api/hub/media/$file",
             "/api/hub/media/../../user/profile",
             "/api/hub/media/$file?x=1",

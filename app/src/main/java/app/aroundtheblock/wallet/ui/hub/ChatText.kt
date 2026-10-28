@@ -46,12 +46,6 @@ object ChatText {
         return (url.scheme == "http" || url.scheme == "https") && url.host.isNotEmpty()
     }
 
-    /** True for an `https:` image URL: the only preview images the chat loads. */
-    fun isHttpsImage(value: String?): Boolean {
-        val url = value?.toHttpUrlOrNull() ?: return false
-        return url.isHttps && value.startsWith("https://", ignoreCase = true)
-    }
-
     /** The host a preview links to, taken from its URL, never from the page's own `site_name`. */
     fun previewHost(url: String): String? =
         url.takeIf { isWebLink(it) }?.toHttpUrlOrNull()?.host?.removePrefix("www.")

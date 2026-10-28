@@ -100,12 +100,10 @@ internal fun ChatMessageText(content: String) {
 
 /** A message's text (if any), its image (if any) and its link preview (if any), in that order. */
 @Composable
-internal fun BubbleContent(message: ChatMessage, onOpenImage: (String) -> Unit) {
+internal fun BubbleContent(message: ChatMessage, onOpenImage: (ChatAttachment) -> Unit) {
     Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
         if (message.content.isNotEmpty()) ChatMessageText(message.content)
-        val attachment = message.attachment
-        val url = attachment?.let { HubMedia.imageUrl(it) }
-        if (attachment != null && url != null) ChatImage(url = url, attachment = attachment, onOpen = { onOpenImage(url) })
+        message.attachment?.let { attachment -> ChatImage(attachment = attachment, onOpen = { onOpenImage(attachment) }) }
         message.preview?.let { PreviewCard(it) }
     }
 }
@@ -147,16 +145,24 @@ private fun Banner(text: String, background: Color, foreground: Color, onClick: 
     }
 }
 
-/** An image posted in the chat, at its own shape within the bubble; tap to see it full size. */
+/**
+ * An image posted in the chat, at its own shape within the bubble; tap to see it full size.
+ *
+ * The image loader is handed only what [HubMedia.imageUrl] answers: a Hub media file on the
+ * DigiScope API host. Nothing else in a message (a link, a preview's image URL) is ever fetched,
+ * so a post cannot make the wallets that show it contact a host of the poster's choosing
+ * (HubImageSourcesGateTest).
+ */
 @Composable
-internal fun ChatImage(url: String, attachment: ChatAttachment, onOpen: () -> Unit) {
+internal fun ChatImage(attachment: ChatAttachment, onOpen: () -> Unit) {
+    val mediaUrl = HubMedia.imageUrl(attachment) ?: return
     val ratio = if (attachment.width > 0 && attachment.height > 0) {
         (attachment.width.toFloat() / attachment.height).coerceIn(0.3f, 3f)
     } else {
         1f
     }
     AsyncImage(
-        model = url,
+        model = mediaUrl,
         contentDescription = stringResource(R.string.hub_chat_image),
         contentScale = ContentScale.Fit,
         modifier = Modifier
@@ -170,9 +176,10 @@ internal fun ChatImage(url: String, attachment: ChatAttachment, onOpen: () -> Un
 }
 
 /**
- * The server's preview of a link: the link's host (from its URL, never the page's own site name),
- * title and description as plain text, and its image only when it is an `https:` URL. Tapping it
- * opens the link when it is an http(s) link.
+ * The server's preview of a link, as text only: the link's host (from its URL), the page's own
+ * site name, title and description. Its `image_url` is never loaded: it names a host the poster
+ * chose, and fetching it would show that host the address of every wallet that scrolled past.
+ * Tapping the card opens the link when it is an http(s) link.
  */
 @Composable
 internal fun PreviewCard(preview: LinkPreview) {
@@ -186,32 +193,22 @@ internal fun PreviewCard(preview: LinkPreview) {
             .widthIn(max = 260.dp)
             .then(if (host != null) Modifier.clickable { openWebLink(context, preview.url) } else Modifier),
     ) {
-        Column {
-            if (ChatText.isHttpsImage(preview.imageUrl)) {
-                AsyncImage(
-                    model = preview.imageUrl,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 130.dp)
-                        .aspectRatio(1.91f),
+        Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            val muted = MaterialTheme.colorScheme.onSurfaceVariant
+            host?.let {
+                Text(it, style = MaterialTheme.typography.labelSmall, color = muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            preview.siteName?.let {
+                Text(it, style = MaterialTheme.typography.labelSmall, color = muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            preview.title?.let {
+                Text(
+                    it, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis,
                 )
             }
-            Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                val muted = MaterialTheme.colorScheme.onSurfaceVariant
-                host?.let {
-                    Text(it, style = MaterialTheme.typography.labelSmall, color = muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-                preview.title?.let {
-                    Text(
-                        it, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                preview.description?.let {
-                    Text(it, style = MaterialTheme.typography.labelSmall, color = muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                }
+            preview.description?.let {
+                Text(it, style = MaterialTheme.typography.labelSmall, color = muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
         }
     }
@@ -303,7 +300,8 @@ internal fun PostGateNote() {
 
 /** A chat image full size, fitted to the screen; tap anywhere, the close button or back to leave. */
 @Composable
-internal fun HubImageViewer(url: String, onDismiss: () -> Unit) {
+internal fun HubImageViewer(attachment: ChatAttachment, onDismiss: () -> Unit) {
+    val mediaUrl = HubMedia.imageUrl(attachment) ?: return
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Box(
             modifier = Modifier
@@ -313,7 +311,7 @@ internal fun HubImageViewer(url: String, onDismiss: () -> Unit) {
             contentAlignment = Alignment.Center,
         ) {
             AsyncImage(
-                model = url,
+                model = mediaUrl,
                 contentDescription = stringResource(R.string.hub_chat_image),
                 contentScale = ContentScale.Fit,
                 modifier = Modifier.fillMaxSize(),

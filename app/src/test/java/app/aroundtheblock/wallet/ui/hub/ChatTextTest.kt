@@ -12,8 +12,7 @@ import org.junit.Test
 
 /**
  * Chat text is shown as plain text; only `http(s)://` links in it are made tappable, and nothing in
- * it is read as markup. A preview image is loaded only from an `https:` URL, and a preview names
- * the host from its URL, never the linked page's own site name.
+ * it is read as markup. A preview names the host from its URL.
  */
 class ChatTextTest {
 
@@ -40,14 +39,6 @@ class ChatTextTest {
     @Test fun `the pieces put back together are the text exactly`() {
         val text = "a https://x.example/p?q=1, b http://y.example. https://z.example!!"
         assertEquals(text, ChatText.pieces(text).joinToString("") { it.text })
-    }
-
-    @Test fun `a preview image is loaded only over https`() {
-        assertTrue(ChatText.isHttpsImage("https://example.org/card.jpg"))
-        assertFalse(ChatText.isHttpsImage("http://example.org/card.jpg"))
-        assertFalse(ChatText.isHttpsImage("data:image/png;base64,AAAA"))
-        assertFalse(ChatText.isHttpsImage("//example.org/card.jpg"))
-        assertFalse(ChatText.isHttpsImage(null))
     }
 
     @Test fun `a preview names the host from its URL`() {

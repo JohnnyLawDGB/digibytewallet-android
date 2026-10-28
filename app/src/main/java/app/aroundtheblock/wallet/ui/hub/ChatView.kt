@@ -35,6 +35,7 @@ import androidx.compose.ui.res.stringResource
 import app.aroundtheblock.wallet.R
 import app.aroundtheblock.wallet.ui.components.rememberSpendAuth
 import kotlinx.coroutines.launch
+import app.aroundtheblock.wallet.core.hub.ChatAttachment
 import app.aroundtheblock.wallet.core.hub.ChatMessage
 import app.aroundtheblock.wallet.core.hub.ConnectionState
 import app.aroundtheblock.wallet.ui.theme.DigiByteAccent
@@ -77,7 +78,7 @@ fun ChatScreen(
     val pendingImage by viewModel.pendingImage.collectAsStateWithLifecycle()
     val uploading by viewModel.uploading.collectAsStateWithLifecycle()
     val myUserId by viewModel.myUserId.collectAsStateWithLifecycle()
-    var fullImage by remember { mutableStateOf<String?>(null) }
+    var fullImage by remember { mutableStateOf<ChatAttachment?>(null) }
 
     // The system photo picker: the app gets a read grant for the one image picked, and needs no
     // storage permission.
@@ -119,10 +120,10 @@ fun ChatScreen(
                 isMine = { message -> isOwnMessage(message, myUserId, viewModel.myAddress) },
                 onLoadMore = { viewModel.loadMoreHistory() },
                 onReport = { id -> viewModel.report(id) },
-                onOpenImage = { url -> fullImage = url },
+                onOpenImage = { attachment -> fullImage = attachment },
             )
         }
-        fullImage?.let { url -> HubImageViewer(url = url, onDismiss = { fullImage = null }) }
+        fullImage?.let { attachment -> HubImageViewer(attachment = attachment, onDismiss = { fullImage = null }) }
 
         // ── Typing indicator ──────────────────────────────────────────────
         if (typingUsers.isNotEmpty()) {
@@ -271,7 +272,7 @@ private fun MessageList(
     isMine: (ChatMessage) -> Boolean,
     onLoadMore: () -> Unit,
     onReport: (Int) -> Unit,
-    onOpenImage: (String) -> Unit,
+    onOpenImage: (ChatAttachment) -> Unit,
 ) {
     val listState = rememberLazyListState()
 
@@ -338,7 +339,7 @@ private fun MessageBubble(
     message: ChatMessage,
     isMe: Boolean = false,
     onReport: () -> Unit = {},
-    onOpenImage: (String) -> Unit = {},
+    onOpenImage: (ChatAttachment) -> Unit = {},
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     val isEnigma = message.from.handle?.equals(ENIGMA_HANDLE, ignoreCase = true) == true
