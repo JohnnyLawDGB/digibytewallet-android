@@ -483,8 +483,6 @@
     <string name="did_auth_subtitle">%1$s hesabına giriş için kimliğinizi doğrulayın</string>
     <string name="hub_sign_title">Hub Gönderisini İmzala</string>
     <string name="hub_sign_subtitle">Bu gönderiyi kimliğinizle imzalamak için kimlik doğrulaması yapın</string>
-    <string name="hub_tip_auth_title">Hub Bahşişi Gönder</string>
-    <string name="hub_tip_auth_subtitle">Bu bahşişi DigiScope bahşiş bakiyenizden göndermek için kimlik doğrulaması yapın</string>
     <string name="hub_tab_chat">Sohbet</string>
     <string name="hub_tab_digirunner">DigiRunner</string>
     <string name="hub_signin_prompt">Sohbete katılmak için Digi-ID ile oturum açın.</string>

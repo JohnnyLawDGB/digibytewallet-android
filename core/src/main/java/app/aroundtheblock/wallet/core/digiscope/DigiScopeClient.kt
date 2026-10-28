@@ -279,30 +279,6 @@ class DigiScopeClient(
             }
         }
 
-    // ── Hub REST: tipping ─────────────────────────────────────────────────────
-
-    /**
-     * Send a tip to another user by their handle. [amount] is in DGB satoshis.
-     */
-    suspend fun sendTip(toHandle: String, amount: Long): Boolean = withContext(Dispatchers.IO) {
-        val token = jwtToken ?: return@withContext false
-        try {
-            val json = JSONObject().apply {
-                put("toHandle", toHandle)
-                put("amount", amount)
-            }
-            val body = json.toString().toRequestBody("application/json".toMediaType())
-            val request = Request.Builder()
-                .url("$BASE_URL/hub/tip")
-                .header("Authorization", "Bearer $token")
-                .post(body)
-                .build()
-            client.newCall(request).execute().use { it.isSuccessful }
-        } catch (e: Exception) {
-            false
-        }
-    }
-
     // ── Hub REST: moderation ──────────────────────────────────────────────────
 
     /**

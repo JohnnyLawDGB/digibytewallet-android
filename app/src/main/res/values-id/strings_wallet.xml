@@ -480,8 +480,6 @@
     <string name="did_auth_subtitle">Autentikasi untuk masuk ke %1$s</string>
     <string name="hub_sign_title">Tanda Tangani Posting Hub</string>
     <string name="hub_sign_subtitle">Autentikasi untuk menandatangani posting ini dengan identitas Anda</string>
-    <string name="hub_tip_auth_title">Kirim Tip Hub</string>
-    <string name="hub_tip_auth_subtitle">Autentikasi untuk mengirim tip ini dari saldo tip DigiScope Anda</string>
     <string name="hub_tab_chat">Obrolan</string>
     <string name="hub_tab_digirunner">DigiRunner</string>
     <string name="hub_signin_prompt">Masuk dengan Digi-ID untuk ikut dalam percakapan.</string>

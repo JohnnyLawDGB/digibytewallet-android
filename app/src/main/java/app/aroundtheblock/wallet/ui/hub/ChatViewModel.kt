@@ -57,9 +57,6 @@ class ChatViewModel @Inject constructor(
     private var oldestTimestamp: Long? = null
     private var isLoadingHistory = false
 
-    // ── Expose DigiScopeClient for use by composable-layer tip sheet ─────
-    internal val digiScopeClientExposed get() = digiScopeClient
-
     // ── Typing indicators ─────────────────────────────────────────────────
     private val _typingUsers = MutableStateFlow<List<UserInfo>>(emptyList())
     val typingUsers: StateFlow<List<UserInfo>> = _typingUsers.asStateFlow()

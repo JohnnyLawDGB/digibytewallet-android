@@ -483,8 +483,6 @@
     <string name="did_auth_subtitle">%1$s में लॉग इन करने के लिए प्रमाणित करें</string>
     <string name="hub_sign_title">हब पोस्ट पर हस्ताक्षर करें</string>
     <string name="hub_sign_subtitle">अपनी पहचान से इस पोस्ट पर हस्ताक्षर करने के लिए प्रमाणीकरण करें</string>
-    <string name="hub_tip_auth_title">हब टिप भेजें</string>
-    <string name="hub_tip_auth_subtitle">अपने DigiScope टिप बैलेंस से यह टिप भेजने के लिए प्रमाणीकरण करें</string>
     <string name="hub_tab_chat">चैट</string>
     <string name="hub_tab_digirunner">DigiRunner</string>
     <string name="hub_signin_prompt">बातचीत में शामिल होने के लिए Digi-ID से साइन इन करें।</string>

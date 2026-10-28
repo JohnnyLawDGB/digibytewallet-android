@@ -33,7 +33,6 @@ import app.aroundtheblock.wallet.ui.components.rememberSpendAuth
 import kotlinx.coroutines.launch
 import app.aroundtheblock.wallet.core.hub.ChatMessage
 import app.aroundtheblock.wallet.core.hub.ConnectionState
-import app.aroundtheblock.wallet.core.hub.UserInfo
 import app.aroundtheblock.wallet.ui.theme.DigiByteAccent
 import app.aroundtheblock.wallet.ui.theme.DigiByteBlue
 import app.aroundtheblock.wallet.ui.theme.DigiByteGreen
@@ -79,9 +78,6 @@ fun ChatScreen(
     val signSubtitle = stringResource(R.string.hub_sign_subtitle)
     var signing by remember { mutableStateOf(false) }
 
-    // Tip sheet state
-    var tipTarget by remember { mutableStateOf<UserInfo?>(null) }
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -105,8 +101,7 @@ fun ChatScreen(
             MessageList(
                 messages = messages,
                 myAddress = viewModel.myAddress,
-                onLoadMore = { viewModel.loadMoreHistory() },
-                onTapHandle = { userInfo -> tipTarget = userInfo }
+                onLoadMore = { viewModel.loadMoreHistory() }
             )
         }
 
@@ -162,15 +157,6 @@ fun ChatScreen(
                 }
             },
             onTyping = { viewModel.sendTypingIndicator() }
-        )
-    }
-
-    // ── Tip bottom sheet ──────────────────────────────────────────────────
-    tipTarget?.let { target ->
-        TipBottomSheet(
-            target = target,
-            digiScopeClient = viewModel.digiScopeClientExposed,
-            onDismiss = { tipTarget = null }
         )
     }
 }
@@ -262,8 +248,7 @@ private fun ConnectionDot(state: ConnectionState) {
 private fun MessageList(
     messages: List<ChatMessage>,
     myAddress: String,
-    onLoadMore: () -> Unit,
-    onTapHandle: (UserInfo) -> Unit
+    onLoadMore: () -> Unit
 ) {
     val listState = rememberLazyListState()
 
@@ -314,8 +299,7 @@ private fun MessageList(
         items(messages, key = { it.id }) { message ->
             MessageBubble(
                 message = message,
-                isMe = message.from.address == myAddress,
-                onTapHandle = onTapHandle
+                isMe = message.from.address == myAddress
             )
         }
     }
@@ -326,8 +310,7 @@ private fun MessageList(
 @Composable
 private fun MessageBubble(
     message: ChatMessage,
-    isMe: Boolean = false,
-    onTapHandle: (UserInfo) -> Unit
+    isMe: Boolean = false
 ) {
     val isEnigma = message.from.handle?.equals(ENIGMA_HANDLE, ignoreCase = true) == true
 
@@ -387,8 +370,7 @@ private fun MessageBubble(
                     fontWeight = FontWeight.SemiBold,
                     color = handleColor,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.clickable { onTapHandle(message.from) }
+                    overflow = TextOverflow.Ellipsis
                 )
 
                 if (isEnigma) {

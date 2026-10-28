@@ -38,7 +38,6 @@ class HubResponseCloseTest {
         "link tip wallet" to { it.linkTipWallet("Daddress") },
         "profile" to { it.getProfile() },
         "messages" to { it.getMessages(1) },
-        "tip" to { it.sendTip("handle", 1) },
         "report" to { it.reportContent(messageId = 1, reason = "reason") },
         "handle availability" to { it.checkHandleAvailable("handle") },
         "game score" to { it.submitDigiRunnerScore(1, 1, 1, 1) },

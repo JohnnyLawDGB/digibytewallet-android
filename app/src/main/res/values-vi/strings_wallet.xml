@@ -480,8 +480,6 @@
     <string name="did_auth_subtitle">Xác thực để đăng nhập vào %1$s</string>
     <string name="hub_sign_title">Ký bài đăng Hub</string>
     <string name="hub_sign_subtitle">Xác thực để ký bài đăng này bằng danh tính của bạn</string>
-    <string name="hub_tip_auth_title">Gửi tiền tip Hub</string>
-    <string name="hub_tip_auth_subtitle">Xác thực để gửi tiền tip này từ số dư tip DigiScope của bạn</string>
     <string name="hub_tab_chat">Trò chuyện</string>
     <string name="hub_tab_digirunner">DigiRunner</string>
     <string name="hub_signin_prompt">Đăng nhập bằng Digi-ID để tham gia cuộc trò chuyện.</string>

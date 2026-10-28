@@ -473,8 +473,6 @@
     <string name="did_auth_subtitle">Authentifiez-vous pour vous connecter à %1$s</string>
     <string name="hub_sign_title">Signer la publication du Hub</string>
     <string name="hub_sign_subtitle">Authentifiez-vous pour signer cette publication avec votre identité</string>
-    <string name="hub_tip_auth_title">Envoyer un pourboire Hub</string>
-    <string name="hub_tip_auth_subtitle">Authentifiez-vous pour envoyer ce pourboire depuis votre solde de pourboires DigiScope</string>
     <string name="hub_tab_chat">Chat</string>
     <string name="hub_tab_digirunner">DigiRunner</string>
     <string name="hub_signin_prompt">Connectez-vous avec Digi-ID pour participer à la conversation.</string>
