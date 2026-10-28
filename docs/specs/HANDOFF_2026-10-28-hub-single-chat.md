@@ -89,7 +89,7 @@ a link; patch that message in place.
   show `message` as is.
 - **Upload (L2 only):** `POST /api/hub/images`, multipart, ONE part named `image`, no other
   fields; PNG/JPEG/GIF/WebP, max 8 MB; 10 uploads/hour. Returns `{ id, url, width, height }`.
-  Then send the WS `message` with `attachment_id: id` (text may be empty). Use the system photo
+  Then send the WS `message` with `attachmentId: id` (camelCase, as `hub-ws.js` reads it; text may be empty). Use the system photo
   picker (`PickVisualMedia`), no storage permission.
 - **Signing:** add the `DigiScope Hub signed post v2` form with an `attachment: <id>` line
   (omitted when none), per the website spec §6.3. v1 stays for text-only posts. The server
