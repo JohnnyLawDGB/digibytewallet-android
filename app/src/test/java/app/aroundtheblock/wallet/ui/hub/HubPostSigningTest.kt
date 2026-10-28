@@ -7,7 +7,6 @@ import app.aroundtheblock.wallet.core.hub.ConnectionState
 import app.aroundtheblock.wallet.core.hub.HubWebSocket
 import app.aroundtheblock.wallet.core.hub.WebSocketEvent
 import io.mockk.coEvery
-import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -48,7 +47,6 @@ class HubPostSigningTest {
         every { client.isLoggedIn() } returns false
         coEvery { client.getChannels() } returns emptyList()
         coEvery { client.getMessages(any(), any(), any()) } returns emptyList()
-        coEvery { client.getThreads(any(), any()) } returns emptyList()
         every { socket.connectionState } returns MutableStateFlow(ConnectionState.DISCONNECTED)
         every { socket.messages } returns MutableSharedFlow<WebSocketEvent>()
         every { socket.reconnectDelayMs() } returns 5_000L
@@ -64,8 +62,6 @@ class HubPostSigningTest {
         every { dao.getMessagesForChannel(any()) } returns flowOf(emptyList())
         return ChatViewModel(client, socket, dao, identity).also { opened += it }
     }
-
-    private fun forum(): ForumViewModel = ForumViewModel(client, identity).also { opened += it }
 
     @Test fun `a chat message with spaces around it is signed exactly as it is sent`() {
         chat().sendMessage("  gm  ")
@@ -83,32 +79,10 @@ class HubPostSigningTest {
         assertEquals(listOf("$header\nkind: chat-message\nchannel: 3\n\ngm"), signed)
     }
 
-    @Test fun `a new thread is signed exactly as it is sent, for its channel`() {
-        coEvery { client.createThread(any(), any(), any(), any()) } returns null
-
-        forum().createThread(" Proposal ", " body \n", 7) { }
-
-        coVerify { client.createThread(7, "Proposal", "body", signature) }
-        assertEquals(listOf("$header\nkind: forum-thread\nchannel: 7\ntitle: Proposal\n\nbody"), signed)
-    }
-
-    @Test fun `a reply is signed exactly as it is sent, for its thread`() {
-        coEvery { client.replyToThread(any(), any(), any()) } returns null
-
-        forum().replyToThread(42, " yes ") { }
-
-        coVerify { client.replyToThread(42, "yes", signature) }
-        assertEquals(listOf("$header\nkind: forum-reply\nthread: 42\n\nyes"), signed)
-    }
-
     @Test fun `nothing is signed for a post with nothing to send`() {
         chat().sendMessage(" \n ")
-        forum().createThread(" ", "body", 6) { }
-        forum().replyToThread(42, "\u3000") { }
 
         assertEquals(emptyList<String>(), signed)
         verify(exactly = 0) { socket.sendMessage(any(), any(), any()) }
-        coVerify(exactly = 0) { client.createThread(any(), any(), any(), any()) }
-        coVerify(exactly = 0) { client.replyToThread(any(), any(), any()) }
     }
 }

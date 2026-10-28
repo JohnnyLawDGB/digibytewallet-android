@@ -491,6 +491,17 @@
     <string name="hub_sign_subtitle">Подтвердите личность, чтобы подписать эту публикацию своим идентификатором</string>
     <string name="hub_tip_auth_title">Отправить чаевые в Hub</string>
     <string name="hub_tip_auth_subtitle">Подтвердите личность, чтобы отправить эти чаевые с вашего баланса чаевых DigiScope</string>
+    <string name="hub_tab_chat">Чат</string>
+    <string name="hub_tab_digirunner">DigiRunner</string>
+    <string name="hub_signin_prompt">Войдите через Digi-ID, чтобы присоединиться к разговору.</string>
+    <string name="hub_signin_button">Войти через Digi-ID</string>
+    <string name="hub_handle_prompt">Выберите ник, чтобы другие могли упоминать вас и отправлять чаевые.</string>
+    <string name="hub_handle_button">Выбрать ник</string>
+    <string name="hub_menu_more">Другие действия</string>
+    <string name="hub_menu_logout">Выйти</string>
+    <string name="hub_logout_title">Выйти из Hub?</string>
+    <string name="hub_logout_body">Сеанс DigiScope будет удалён с этого устройства. Ваш ник останется на сервере, и вы сможете снова войти через Digi-ID. Кошелёк это не затрагивает.</string>
+    <string name="hub_menu_delete_account">Удалить мой аккаунт DigiScope</string>
     <string name="did_requesting">запрашивает аутентификацию Digi-ID</string>
     <string name="did_warning">Предупреждение</string>
     <string name="did_insecure">Небезопасное соединение</string>

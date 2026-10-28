@@ -13,9 +13,9 @@ import org.junit.Test
  *
  *  - The native signing calls are made in exactly three files: an approved Digi-ID login
  *    (DigiIdManager), Hub quick login (DigiScopeClient), and Hub posts (HubIdentity).
- *  - Hub posts are signed in exactly the three posting actions, each of which a gated screen calls
- *    only under the gate's answer: ChatViewModel.sendMessage, ForumViewModel.createThread and
- *    ForumViewModel.replyToThread.
+ *  - Hub posts are signed in exactly one posting action, which a gated screen calls only under the
+ *    gate's answer: ChatViewModel.sendMessage. (The forum, and its two posting actions, were
+ *    removed from the app; a new posting action must be added here deliberately.)
  *
  * It reads code: a comment or a string naming the calls is no call.
  */
@@ -38,7 +38,7 @@ class IdentitySigningSitesGateTest {
         assertEquals(setOf("DigiIdManager.kt", "DigiScopeClient.kt", "HubIdentity.kt"), found)
     }
 
-    @Test fun `Hub posts are signed only in the three posting actions`() {
+    @Test fun `Hub posts are signed only in the chat posting action`() {
         val declared = Regex("""(?<!\w)fun\s+(\w+)\s*\(""")
         val sites = mutableListOf<String>()
         for ((path, file) in sources) {
@@ -48,7 +48,7 @@ class IdentitySigningSitesGateTest {
             }
         }
         assertEquals(
-            listOf("ChatViewModel.kt:sendMessage", "ForumViewModel.kt:createThread", "ForumViewModel.kt:replyToThread"),
+            listOf("ChatViewModel.kt:sendMessage"),
             sites.sorted(),
         )
     }

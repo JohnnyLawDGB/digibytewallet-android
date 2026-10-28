@@ -485,6 +485,17 @@
     <string name="hub_sign_subtitle">Bu gönderiyi kimliğinizle imzalamak için kimlik doğrulaması yapın</string>
     <string name="hub_tip_auth_title">Hub Bahşişi Gönder</string>
     <string name="hub_tip_auth_subtitle">Bu bahşişi DigiScope bahşiş bakiyenizden göndermek için kimlik doğrulaması yapın</string>
+    <string name="hub_tab_chat">Sohbet</string>
+    <string name="hub_tab_digirunner">DigiRunner</string>
+    <string name="hub_signin_prompt">Sohbete katılmak için Digi-ID ile oturum açın.</string>
+    <string name="hub_signin_button">Digi-ID ile oturum aç</string>
+    <string name="hub_handle_prompt">Başkalarının sizi anabilmesi ve bahşiş gönderebilmesi için bir kullanıcı adı seçin.</string>
+    <string name="hub_handle_button">Kullanıcı adı seç</string>
+    <string name="hub_menu_more">Diğer seçenekler</string>
+    <string name="hub_menu_logout">Çıkış yap</string>
+    <string name="hub_logout_title">Hub\'dan çıkış yapılsın mı?</string>
+    <string name="hub_logout_body">Bu işlem DigiScope oturumunuzu bu cihazdan kaldırır. Kullanıcı adınız sunucuda kalır ve Digi-ID ile yeniden oturum açabilirsiniz. Cüzdanınız bundan etkilenmez.</string>
+    <string name="hub_menu_delete_account">DigiScope hesabımı sil</string>
     <string name="did_requesting">Digi-ID kimlik doğrulaması istiyor</string>
     <string name="did_warning">Uyarı</string>
     <string name="did_insecure">Güvenli olmayan bağlantı</string>

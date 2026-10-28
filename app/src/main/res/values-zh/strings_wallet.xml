@@ -482,6 +482,17 @@
     <string name="hub_sign_subtitle">请验证身份，以使用您的身份签署此帖子</string>
     <string name="hub_tip_auth_title">发送 Hub 打赏</string>
     <string name="hub_tip_auth_subtitle">请验证身份，以从您的 DigiScope 打赏余额发送此打赏</string>
+    <string name="hub_tab_chat">聊天</string>
+    <string name="hub_tab_digirunner">DigiRunner</string>
+    <string name="hub_signin_prompt">使用 Digi-ID 登录即可加入对话。</string>
+    <string name="hub_signin_button">使用 Digi-ID 登录</string>
+    <string name="hub_handle_prompt">选择一个用户名，方便他人提及你并给你打赏。</string>
+    <string name="hub_handle_button">选择用户名</string>
+    <string name="hub_menu_more">更多选项</string>
+    <string name="hub_menu_logout">退出登录</string>
+    <string name="hub_logout_title">退出 Hub？</string>
+    <string name="hub_logout_body">这会从此设备上移除你的 DigiScope 会话。你的用户名仍保留在服务器上，你可以随时用 Digi-ID 重新登录。你的钱包不受影响。</string>
+    <string name="hub_menu_delete_account">删除我的 DigiScope 账户</string>
     <string name="did_requesting">正在请求 Digi-ID 认证</string>
     <string name="did_warning">警告</string>
     <string name="did_insecure">连接不安全</string>

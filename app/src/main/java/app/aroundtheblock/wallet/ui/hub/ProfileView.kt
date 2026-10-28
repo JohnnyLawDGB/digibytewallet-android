@@ -7,6 +7,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -32,15 +33,18 @@ import app.aroundtheblock.wallet.ui.theme.DigiByteGreen
 import app.aroundtheblock.wallet.ui.util.openExternalUrl
 import app.aroundtheblock.wallet.ui.components.keyboardPadding
 
-@Composable
-fun ProfileScreen(
-    viewModel: ProfileViewModel = hiltViewModel()
-) {
-    // Refresh profile every time this tab becomes visible
-    androidx.compose.runtime.LaunchedEffect(Unit) {
-        viewModel.loadProfile()
-    }
 
+// ── Hub account controls, shown inside the Chat tab ─────────────────────
+
+/**
+ * What the Chat tab shows about the Hub account: a Digi-ID sign-in when signed out, a prompt to
+ * choose a handle once signed in without one, and nothing once a handle exists (the chat is then
+ * the whole content). This replaced the separate Profile tab when the Hub was cut to Chat and
+ * DigiRunner.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun HubAccountStrip(viewModel: ProfileViewModel) {
     val profileState by viewModel.profileState.collectAsStateWithLifecycle()
     val handleInput by viewModel.handleInput.collectAsStateWithLifecycle()
     val handleAvailable by viewModel.handleAvailable.collectAsStateWithLifecycle()
@@ -55,175 +59,127 @@ fun ProfileScreen(
     // action the in-app Digi-ID approve gates, so it carries the same credential check.
     val authTitle = stringResource(R.string.did_auth_title)
     val authSubtitle = stringResource(R.string.did_auth_subtitle, "DigiScope")
+    var showHandleSheet by remember { mutableStateOf(false) }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-    ) {
-        when (val state = profileState) {
-            is ProfileState.Loading -> {
-                CircularProgressIndicator(
-                    color = DigiByteBlue,
-                    modifier = Modifier.align(Alignment.Center)
-                )
-            }
-
-            is ProfileState.NotLoggedIn -> {
-                NotLoggedInContent(onQuickLogin = {
-                    scope.launch {
-                        // Denied: nothing happens — the login card stays as it was.
-                        if (spendAuth.authorize(context as? androidx.fragment.app.FragmentActivity, authTitle, authSubtitle)) {
-                            viewModel.quickLogin()
-                        }
-                    }
-                })
-            }
-
-            is ProfileState.NoHandle -> {
-                RegisterHandleContent(
-                    address = state.address,
-                    handleInput = handleInput,
-                    handleAvailable = handleAvailable,
-                    isCheckingHandle = isCheckingHandle,
-                    isRegistering = isRegistering,
-                    registrationError = registrationError,
-                    onHandleChange = { viewModel.onHandleInputChange(it) },
-                    onCheckAvailability = { viewModel.checkAvailability() },
-                    onRegister = { viewModel.registerHandle() },
-                    onClearError = { viewModel.clearRegistrationError() }
-                )
-            }
-
-            is ProfileState.HasProfile -> {
-                ProfileContent(
-                    profile = state.profile,
-                    onLogout = { viewModel.logout() }
-                )
-            }
-
-            is ProfileState.Error -> {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(32.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    Icon(
-                        Icons.Default.ErrorOutline,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.size(48.dp)
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        text = state.message,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center
-                    )
-                    Spacer(Modifier.height(16.dp))
-                    OutlinedButton(onClick = { viewModel.loadProfile() }) {
-                        Text("Retry")
+    when (val state = profileState) {
+        is ProfileState.NotLoggedIn -> AccountPromptCard(
+            text = stringResource(R.string.hub_signin_prompt),
+            action = stringResource(R.string.hub_signin_button),
+            onAction = {
+                scope.launch {
+                    // Denied: nothing happens — the sign-in card stays as it was.
+                    if (spendAuth.authorize(context as? androidx.fragment.app.FragmentActivity, authTitle, authSubtitle)) {
+                        viewModel.quickLogin()
                     }
                 }
             }
-        }
-    }
-}
+        )
 
-// ── Not logged in ──────────────────────────────────────────────────────────
-
-@Composable
-private fun NotLoggedInContent(onQuickLogin: () -> Unit = {}) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Box(
-            modifier = Modifier
-                .size(80.dp)
-                .clip(CircleShape)
-                .background(DigiByteBlue.copy(alpha = 0.15f)),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                Icons.Default.Person,
-                contentDescription = null,
-                tint = DigiByteBlue,
-                modifier = Modifier.size(44.dp)
+        is ProfileState.NoHandle -> {
+            AccountPromptCard(
+                text = stringResource(R.string.hub_handle_prompt),
+                action = stringResource(R.string.hub_handle_button),
+                onAction = { showHandleSheet = true }
             )
-        }
-
-        Spacer(Modifier.height(20.dp))
-
-        Text(
-            text = "Community Profile",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-
-        Spacer(Modifier.height(8.dp))
-
-        Text(
-            text = "Log in with Digi-ID to create your community profile, register a handle, and participate in the forum.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center
-        )
-
-        Spacer(Modifier.height(24.dp))
-
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                FeatureRow(Icons.Default.Tag, "Choose a pseudonymous handle")
-                FeatureRow(Icons.Default.Forum, "Post and reply in the forum")
-                FeatureRow(Icons.Default.Paid, "Send and receive DGB tips")
+            if (showHandleSheet) {
+                ModalBottomSheet(onDismissRequest = { showHandleSheet = false }) {
+                    RegisterHandleContent(
+                        address = state.address,
+                        handleInput = handleInput,
+                        handleAvailable = handleAvailable,
+                        isCheckingHandle = isCheckingHandle,
+                        isRegistering = isRegistering,
+                        registrationError = registrationError,
+                        onHandleChange = { viewModel.onHandleInputChange(it) },
+                        onCheckAvailability = { viewModel.checkAvailability() },
+                        onRegister = { viewModel.registerHandle() },
+                        onClearError = { viewModel.clearRegistrationError() }
+                    )
+                }
             }
         }
 
-        Spacer(Modifier.height(24.dp))
-
-        Button(
-            onClick = onQuickLogin,
-            modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(containerColor = DigiByteBlue)
-        ) {
-            Icon(Icons.Default.Login, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(8.dp))
-            Text("Connect to DigiScope", color = Color.White)
-        }
+        // Signed in with a handle: the chat is the content. Loading or a failed profile load
+        // shows nothing here; the tab reloads the profile each time it opens.
+        else -> Unit
     }
 }
 
 @Composable
-private fun FeatureRow(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
+private fun AccountPromptCard(text: String, action: String, onAction: () -> Unit) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(12.dp),
+        tonalElevation = 2.dp
     ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            tint = DigiByteAccent,
-            modifier = Modifier.size(18.dp)
-        )
-        Text(
-            text = text,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f)
+            )
+            Spacer(Modifier.width(12.dp))
+            Button(
+                onClick = onAction,
+                colors = ButtonDefaults.buttonColors(containerColor = DigiByteBlue)
+            ) {
+                Text(action, color = Color.White)
+            }
+        }
+    }
+}
+
+/**
+ * The chat header's account menu, shown only while a Hub session exists: log out, and the
+ * in-app path to delete the DigiScope account that Google Play requires where an account can be
+ * created. Logging out ends the session on the server and clears the cached chat
+ * ([ProfileViewModel.logout]).
+ */
+@Composable
+fun HubAccountMenu(onLogout: () -> Unit) {
+    val context = LocalContext.current
+    var expanded by remember { mutableStateOf(false) }
+    var confirmLogout by remember { mutableStateOf(false) }
+
+    Box {
+        IconButton(onClick = { expanded = true }) {
+            Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.hub_menu_more))
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.hub_menu_logout)) },
+                leadingIcon = { Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null) },
+                onClick = { expanded = false; confirmLogout = true }
+            )
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.hub_menu_delete_account)) },
+                leadingIcon = { Icon(Icons.Default.DeleteOutline, contentDescription = null) },
+                onClick = { expanded = false; openExternalUrl(context, DELETE_ACCOUNT_URL) }
+            )
+        }
+    }
+
+    if (confirmLogout) {
+        AlertDialog(
+            onDismissRequest = { confirmLogout = false },
+            title = { Text(stringResource(R.string.hub_logout_title)) },
+            text = { Text(stringResource(R.string.hub_logout_body), style = MaterialTheme.typography.bodyMedium) },
+            confirmButton = {
+                TextButton(
+                    onClick = { confirmLogout = false; onLogout() },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) { Text(stringResource(R.string.hub_menu_logout)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmLogout = false }) { Text(stringResource(R.string.common_cancel)) }
+            }
         )
     }
 }
@@ -436,202 +392,3 @@ private fun RegisterHandleContent(
 
 /** The privacy policy's account-deletion section — also the link registered with Play. */
 private const val DELETE_ACCOUNT_URL = "https://digiscope.me/wallet/privacy-policy#delete-account"
-
-// ── Profile display (has handle) ──────────────────────────────────────────
-
-@Composable
-private fun ProfileContent(
-    profile: DigiScopeProfile,
-    onLogout: () -> Unit
-) {
-    var showLogoutDialog by remember { mutableStateOf(false) }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Spacer(Modifier.height(16.dp))
-
-        // Avatar
-        Box(
-            modifier = Modifier
-                .size(80.dp)
-                .clip(CircleShape)
-                .background(DigiByteBlue.copy(alpha = 0.2f)),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = profile.handle?.take(1)?.uppercase() ?: "?",
-                style = MaterialTheme.typography.headlineLarge,
-                color = DigiByteAccent,
-                fontWeight = FontWeight.Bold
-            )
-        }
-
-        // Handle
-        Text(
-            text = "@${profile.handle}",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-
-        // DGB address
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-            shape = RoundedCornerShape(8.dp)
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Icon(
-                    Icons.Default.AccountBalanceWallet,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(14.dp)
-                )
-                val addr = profile.address
-                Text(
-                    text = if (addr.length > 24) "${addr.take(12)}…${addr.takeLast(10)}" else addr,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-
-        // Tip balance card
-        Card(
-            shape = RoundedCornerShape(12.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(DigiByteGreen.copy(alpha = 0.15f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            Icons.Default.Paid,
-                            contentDescription = null,
-                            tint = DigiByteGreen,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                    Column {
-                        Text(
-                            text = "Tip Balance",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = "${String.format("%.8f", profile.tipBalance / 100_000_000.0)} DGB",
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = FontWeight.SemiBold,
-                            color = DigiByteGreen
-                        )
-                    }
-                }
-
-                Icon(
-                    Icons.Default.ChevronRight,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
-                )
-            }
-        }
-
-        Spacer(Modifier.height(8.dp))
-
-        // Unlink / logout
-        OutlinedButton(
-            onClick = { showLogoutDialog = true },
-            colors = ButtonDefaults.outlinedButtonColors(
-                contentColor = MaterialTheme.colorScheme.error
-            ),
-            border = ButtonDefaults.outlinedButtonBorder.copy(
-                width = 1.dp
-            ),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Icon(
-                Icons.Default.LinkOff,
-                contentDescription = null,
-                modifier = Modifier.size(18.dp)
-            )
-            Spacer(Modifier.width(8.dp))
-            Text("Unlink DigiScope Account")
-        }
-
-        // Unlinking only forgets the session on this device. Play requires an in-app way to ask for
-        // the account itself to be deleted; the request goes by email, and this page says how and
-        // what is deleted and kept. Shown only here, where an account exists.
-        val context = LocalContext.current
-        TextButton(
-            onClick = { openExternalUrl(context, DELETE_ACCOUNT_URL) },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(
-                "Delete my DigiScope account",
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-
-    if (showLogoutDialog) {
-        AlertDialog(
-            onDismissRequest = { showLogoutDialog = false },
-            icon = {
-                Icon(
-                    Icons.Default.LinkOff,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.error
-                )
-            },
-            title = { Text("Unlink Account?") },
-            text = {
-                Text(
-                    "This will remove your DigiScope session from this device. " +
-                    "Your handle and profile remain on the server. You can log back in with Digi-ID.",
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showLogoutDialog = false
-                        onLogout()
-                    },
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.error
-                    )
-                ) {
-                    Text("Unlink")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showLogoutDialog = false }) {
-                    Text("Cancel")
-                }
-            }
-        )
-    }
-}

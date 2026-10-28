@@ -485,6 +485,17 @@
     <string name="hub_sign_subtitle">अपनी पहचान से इस पोस्ट पर हस्ताक्षर करने के लिए प्रमाणीकरण करें</string>
     <string name="hub_tip_auth_title">हब टिप भेजें</string>
     <string name="hub_tip_auth_subtitle">अपने DigiScope टिप बैलेंस से यह टिप भेजने के लिए प्रमाणीकरण करें</string>
+    <string name="hub_tab_chat">चैट</string>
+    <string name="hub_tab_digirunner">DigiRunner</string>
+    <string name="hub_signin_prompt">बातचीत में शामिल होने के लिए Digi-ID से साइन इन करें।</string>
+    <string name="hub_signin_button">Digi-ID से साइन इन करें</string>
+    <string name="hub_handle_prompt">एक हैंडल चुनें ताकि दूसरे आपका उल्लेख कर सकें और आपको टिप भेज सकें।</string>
+    <string name="hub_handle_button">हैंडल चुनें</string>
+    <string name="hub_menu_more">और विकल्प</string>
+    <string name="hub_menu_logout">लॉग आउट करें</string>
+    <string name="hub_logout_title">Hub से लॉग आउट करें?</string>
+    <string name="hub_logout_body">इससे इस डिवाइस से आपका DigiScope सत्र हट जाएगा। आपका हैंडल सर्वर पर बना रहेगा, और आप Digi-ID से फिर से साइन इन कर सकते हैं। आपके वॉलेट पर इसका कोई असर नहीं पड़ता।</string>
+    <string name="hub_menu_delete_account">मेरा DigiScope खाता हटाएँ</string>
     <string name="did_requesting">Digi-ID प्रमाणीकरण का अनुरोध कर रहा है</string>
     <string name="did_warning">चेतावनी</string>
     <string name="did_insecure">असुरक्षित कनेक्शन</string>

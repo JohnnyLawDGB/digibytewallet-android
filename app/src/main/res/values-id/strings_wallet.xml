@@ -482,6 +482,17 @@
     <string name="hub_sign_subtitle">Autentikasi untuk menandatangani posting ini dengan identitas Anda</string>
     <string name="hub_tip_auth_title">Kirim Tip Hub</string>
     <string name="hub_tip_auth_subtitle">Autentikasi untuk mengirim tip ini dari saldo tip DigiScope Anda</string>
+    <string name="hub_tab_chat">Obrolan</string>
+    <string name="hub_tab_digirunner">DigiRunner</string>
+    <string name="hub_signin_prompt">Masuk dengan Digi-ID untuk ikut dalam percakapan.</string>
+    <string name="hub_signin_button">Masuk dengan Digi-ID</string>
+    <string name="hub_handle_prompt">Pilih handle agar orang lain bisa menyebut dan memberi tip kepada Anda.</string>
+    <string name="hub_handle_button">Pilih handle</string>
+    <string name="hub_menu_more">Opsi lainnya</string>
+    <string name="hub_menu_logout">Keluar</string>
+    <string name="hub_logout_title">Keluar dari Hub?</string>
+    <string name="hub_logout_body">Ini menghapus sesi DigiScope Anda dari perangkat ini. Handle Anda tetap ada di server, dan Anda bisa masuk lagi dengan Digi-ID. Dompet Anda tidak terpengaruh.</string>
+    <string name="hub_menu_delete_account">Hapus akun DigiScope saya</string>
     <string name="did_requesting">meminta autentikasi Digi-ID</string>
     <string name="did_warning">Peringatan</string>
     <string name="did_insecure">Koneksi Tidak Aman</string>

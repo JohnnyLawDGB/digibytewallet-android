@@ -490,6 +490,17 @@
     <string name="hub_sign_subtitle">Autentícate para firmar esta publicación con tu identidad</string>
     <string name="hub_tip_auth_title">Enviar propina del Hub</string>
     <string name="hub_tip_auth_subtitle">Autentícate para enviar esta propina desde tu saldo de propinas de DigiScope</string>
+    <string name="hub_tab_chat">Chat</string>
+    <string name="hub_tab_digirunner">DigiRunner</string>
+    <string name="hub_signin_prompt">Inicia sesión con Digi-ID para unirte a la conversación.</string>
+    <string name="hub_signin_button">Iniciar sesión con Digi-ID</string>
+    <string name="hub_handle_prompt">Elige un alias para que otros puedan mencionarte y enviarte propinas.</string>
+    <string name="hub_handle_button">Elegir un alias</string>
+    <string name="hub_menu_more">Más opciones</string>
+    <string name="hub_menu_logout">Cerrar sesión</string>
+    <string name="hub_logout_title">¿Cerrar sesión en el Hub?</string>
+    <string name="hub_logout_body">Esto elimina tu sesión de DigiScope de este dispositivo. Tu alias permanece en el servidor y puedes volver a iniciar sesión con Digi-ID. Tu billetera no se ve afectada.</string>
+    <string name="hub_menu_delete_account">Eliminar mi cuenta de DigiScope</string>
     <string name="did_requesting">solicita autenticación Digi-ID</string>
     <string name="did_warning">Advertencia</string>
     <string name="did_insecure">Conexión insegura</string>
