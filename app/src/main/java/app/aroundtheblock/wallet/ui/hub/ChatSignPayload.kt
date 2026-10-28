@@ -35,8 +35,11 @@ package app.aroundtheblock.wallet.ui.hub
  * forum, but those kinds stay distinct from `chat-message`, so a chat signature still cannot be
  * taken for a forum post.
  *
- * Anyone checking a post rebuilds that text from the post and the place it appeared, and checks
- * the signature against the author's address.
+ * Anyone checking a v1 post rebuilds that text from the post and the place it appeared, and checks
+ * the signature against the author's address. A v2 post can be checked the same way only once the
+ * server exposes the attachment's id (`attachment.id`) with the message: today it returns the
+ * attachment's path and size but not its id, so a third party cannot yet rebuild the
+ * `attachment:` line (a server change is planned separately).
  *
  * What is sent is what was typed less the blank characters at its two ends: every character the
  * Hub trims off a post (ECMAScript's trim) and every one Kotlin's trim takes, so the Hub stores
