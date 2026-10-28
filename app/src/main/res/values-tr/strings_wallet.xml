@@ -509,6 +509,7 @@
     <string name="hub_image_unreadable">Bu görsel okunamadı. Yeniden seçin.</string>
     <string name="hub_image_wrong_type">Yalnızca PNG, JPG, GIF ve WebP görseller gönderilebilir.</string>
     <string name="hub_image_too_large">Görseller en fazla 8 MB olabilir. Daha küçük bir tane seçin.</string>
+    <string name="hub_image_not_prepared">Bu fotoğraf gönderim için hazırlanamadı, bu yüzden gönderilmedi. Başka bir tane deneyin.</string>
     <string name="hub_upload_failed">Görsel gönderilmedi. Bağlantınızı kontrol edip tekrar deneyin.</string>
     <string name="did_requesting">Digi-ID kimlik doğrulaması istiyor</string>
     <string name="did_warning">Uyarı</string>

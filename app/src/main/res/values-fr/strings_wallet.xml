@@ -499,6 +499,7 @@
     <string name="hub_image_unreadable">Cette image n’a pas pu être lue. Choisissez-la à nouveau.</string>
     <string name="hub_image_wrong_type">Seules les images PNG, JPG, GIF et WebP peuvent être publiées.</string>
     <string name="hub_image_too_large">Les images peuvent faire jusqu’à 8 Mo. Choisissez-en une plus petite.</string>
+    <string name="hub_image_not_prepared">Cette photo n’a pas pu être préparée pour l’envoi, elle n’a donc pas été envoyée. Essayez-en une autre.</string>
     <string name="hub_upload_failed">L’image n’a pas été envoyée. Vérifiez votre connexion et réessayez.</string>
     <string name="did_requesting">demande une authentification Digi-ID</string>
     <string name="did_warning">Avertissement</string>

@@ -515,6 +515,7 @@
     <string name="hub_image_unreadable">Не удалось прочитать это изображение. Выберите его снова.</string>
     <string name="hub_image_wrong_type">Можно отправлять только изображения PNG, JPG, GIF и WebP.</string>
     <string name="hub_image_too_large">Размер изображения до 8 МБ. Выберите изображение поменьше.</string>
+    <string name="hub_image_not_prepared">Это фото не удалось подготовить к отправке, поэтому оно не отправлено. Попробуйте другое.</string>
     <string name="hub_upload_failed">Изображение не отправлено. Проверьте подключение и попробуйте снова.</string>
     <string name="did_requesting">запрашивает аутентификацию Digi-ID</string>
     <string name="did_warning">Предупреждение</string>

@@ -509,6 +509,7 @@
     <string name="hub_image_unreadable">वह चित्र पढ़ा नहीं जा सका। उसे फिर से चुनें।</string>
     <string name="hub_image_wrong_type">केवल PNG, JPG, GIF और WebP चित्र भेजे जा सकते हैं।</string>
     <string name="hub_image_too_large">चित्र 8 MB तक हो सकते हैं। कोई छोटा चित्र चुनें।</string>
+    <string name="hub_image_not_prepared">यह फ़ोटो भेजने के लिए तैयार नहीं हो सकी, इसलिए भेजी नहीं गई। कोई दूसरी फ़ोटो चुनें।</string>
     <string name="hub_upload_failed">चित्र नहीं भेजा गया। अपना कनेक्शन जाँचें और फिर कोशिश करें।</string>
     <string name="did_requesting">Digi-ID प्रमाणीकरण का अनुरोध कर रहा है</string>
     <string name="did_warning">चेतावनी</string>

@@ -29,7 +29,7 @@ import javax.inject.Inject
 /** A short, fixed notice the chat shows; the screen words it in the user's language. */
 enum class ChatNotice {
     REPORTED, REPORT_GONE, REPORT_LIMITED, REPORT_FAILED,
-    IMAGE_UNREADABLE, IMAGE_WRONG_TYPE, IMAGE_TOO_LARGE, UPLOAD_FAILED,
+    IMAGE_UNREADABLE, IMAGE_WRONG_TYPE, IMAGE_TOO_LARGE, IMAGE_NOT_PREPARED, UPLOAD_FAILED,
 }
 
 /**
@@ -351,6 +351,7 @@ class ChatViewModel @Inject constructor(
                     PickedImageProblem.UNREADABLE -> ChatNotice.IMAGE_UNREADABLE
                     PickedImageProblem.WRONG_TYPE -> ChatNotice.IMAGE_WRONG_TYPE
                     PickedImageProblem.TOO_LARGE -> ChatNotice.IMAGE_TOO_LARGE
+                    PickedImageProblem.NOT_PREPARED -> ChatNotice.IMAGE_NOT_PREPARED
                 }
                 return null
             }

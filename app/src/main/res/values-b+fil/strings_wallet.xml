@@ -509,6 +509,7 @@
     <string name="hub_image_unreadable">Hindi mabasa ang larawang iyon. Piliin ulit ito.</string>
     <string name="hub_image_wrong_type">PNG, JPG, GIF at WebP na larawan lang ang maipo-post.</string>
     <string name="hub_image_too_large">Hanggang 8 MB lang ang larawan. Pumili ng mas maliit.</string>
+    <string name="hub_image_not_prepared">Hindi naihanda ang larawang ito para ipadala, kaya hindi ito naipadala. Sumubok ng iba.</string>
     <string name="hub_upload_failed">Hindi naipadala ang larawan. Tingnan ang koneksyon mo at subukan ulit.</string>
     <string name="did_requesting">ay humihiling ng Digi-ID authentication</string>
     <string name="did_warning">Babala</string>

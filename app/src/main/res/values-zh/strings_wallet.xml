@@ -506,6 +506,7 @@
     <string name="hub_image_unreadable">无法读取该图片。请重新选择。</string>
     <string name="hub_image_wrong_type">只能发送 PNG、JPG、GIF 和 WebP 图片。</string>
     <string name="hub_image_too_large">图片最大 8 MB。请选择更小的图片。</string>
+    <string name="hub_image_not_prepared">无法准备这张照片以供发送，因此未发送。请换一张试试。</string>
     <string name="hub_upload_failed">图片未发送。请检查网络连接后重试。</string>
     <string name="did_requesting">正在请求 Digi-ID 认证</string>
     <string name="did_warning">警告</string>

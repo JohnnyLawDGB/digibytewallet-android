@@ -611,6 +611,7 @@
     <string name="hub_image_unreadable">That image could not be read. Pick it again.</string>
     <string name="hub_image_wrong_type">Only PNG, JPG, GIF and WebP images can be posted.</string>
     <string name="hub_image_too_large">Images can be up to 8 MB. Pick a smaller one.</string>
+    <string name="hub_image_not_prepared">This photo could not be prepared for sending, so it was not sent. Try another one.</string>
     <string name="hub_upload_failed">The image was not sent. Check your connection and try again.</string>
     <string name="did_requesting">is requesting Digi-ID authentication</string>
     <string name="did_warning">Warning</string>

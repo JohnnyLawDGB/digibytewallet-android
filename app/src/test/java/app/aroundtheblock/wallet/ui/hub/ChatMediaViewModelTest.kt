@@ -252,6 +252,19 @@ class ChatMediaViewModelTest {
         assertTrue(signed.isEmpty())
     }
 
+    @Test fun `a JPEG that could not be re-encoded is not uploaded, and the user is told`() {
+        val uri = mockk<Uri>()
+        coEvery { reader.read(uri) } returns HubImageReader.Result.Refused(PickedImageProblem.NOT_PREPARED)
+        val chat = chat()
+
+        chat.attachImage(uri)
+        chat.sendMessage("look")
+
+        coVerify(exactly = 0) { client.uploadImage(any(), any()) }
+        verify(exactly = 0) { socket.sendMessage(any(), any(), any(), any()) }
+        assertEquals(ChatNotice.IMAGE_NOT_PREPARED, chat.notice.value)
+    }
+
     @Test fun `a text post still sends no attachment`() {
         chat().sendMessage("gm")
 

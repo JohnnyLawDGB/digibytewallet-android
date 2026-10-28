@@ -506,6 +506,7 @@
     <string name="hub_image_unreadable">Không đọc được ảnh đó. Hãy chọn lại.</string>
     <string name="hub_image_wrong_type">Chỉ có thể đăng ảnh PNG, JPG, GIF và WebP.</string>
     <string name="hub_image_too_large">Ảnh tối đa 8 MB. Hãy chọn ảnh nhỏ hơn.</string>
+    <string name="hub_image_not_prepared">Không thể chuẩn bị ảnh này để gửi nên ảnh chưa được gửi. Hãy thử ảnh khác.</string>
     <string name="hub_upload_failed">Ảnh chưa được gửi. Hãy kiểm tra kết nối và thử lại.</string>
     <string name="did_requesting">đang yêu cầu xác thực Digi-ID</string>
     <string name="did_warning">Cảnh báo</string>
