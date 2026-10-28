@@ -208,10 +208,6 @@ class HubWebSocket(
         sendAuthorized(joinFrame(channelId))
     }
 
-    fun leaveChannel(channelId: Int) {
-        sendAuthorized(JSONObject().put("type", "leave").put("channelId", channelId).toString())
-    }
-
     fun sendMessage(channelId: Int, content: String, signature: String) {
         sendAuthorized(
             JSONObject()

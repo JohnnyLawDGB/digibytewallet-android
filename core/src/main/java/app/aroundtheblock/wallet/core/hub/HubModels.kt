@@ -1,7 +1,5 @@
 package app.aroundtheblock.wallet.core.hub
 
-data class Channel(val id: Int, val name: String, val description: String, val type: String)
-
 data class ChatMessage(
     val id: Int,
     val content: String,

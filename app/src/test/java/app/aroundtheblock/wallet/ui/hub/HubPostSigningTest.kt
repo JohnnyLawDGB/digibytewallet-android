@@ -45,7 +45,6 @@ class HubPostSigningTest {
         every { identity.address() } returns "Didentity"
         every { identity.sign(any()) } answers { signed += firstArg<String>(); signature }
         every { client.isLoggedIn() } returns false
-        coEvery { client.getChannels() } returns emptyList()
         coEvery { client.getMessages(any(), any(), any()) } returns emptyList()
         every { socket.connectionState } returns MutableStateFlow(ConnectionState.DISCONNECTED)
         every { socket.messages } returns MutableSharedFlow<WebSocketEvent>()
@@ -70,13 +69,11 @@ class HubPostSigningTest {
         assertEquals(listOf("$header\nkind: chat-message\nchannel: 1\n\ngm"), signed)
     }
 
-    @Test fun `a chat message is signed for the channel it is sent to`() {
-        val chat = chat()
-        chat.selectChannel(3)
-        chat.sendMessage("gm")
+    @Test fun `a chat message is signed for the one chat room it is sent to`() {
+        chat().sendMessage("gm")
 
-        verify { socket.sendMessage(3, "gm", signature) }
-        assertEquals(listOf("$header\nkind: chat-message\nchannel: 3\n\ngm"), signed)
+        verify { socket.sendMessage(HubWebSocket.CHAT_CHANNEL_ID, "gm", signature) }
+        assertEquals(listOf("$header\nkind: chat-message\nchannel: ${HubWebSocket.CHAT_CHANNEL_ID}\n\ngm"), signed)
     }
 
     @Test fun `nothing is signed for a post with nothing to send`() {

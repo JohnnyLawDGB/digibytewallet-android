@@ -22,7 +22,7 @@ import org.junit.Test
 
 /**
  * 4.1.2 row 8 (N4): a Hub socket sends nothing once its session is gone. Logout forgets the token, but
- * the socket opened with it stayed up and every join / leave / message / typing frame still went out.
+ * the socket opened with it stayed up and every join / message / typing frame still went out.
  * Now a frame goes out only while a token is held; without one the socket is closed instead.
  * Driven through the real [HubWebSocket.connect], as HubSocketFrameCapTest does; no socket is opened.
  */
@@ -52,7 +52,6 @@ class HubSessionEndTest {
         hub.joinChannel(1)
         hub.sendMessage(1, "gm", "sig")
         hub.sendTyping(1)
-        hub.leaveChannel(1)
         assertTrue("frames went out with no session: ${socket.sent}", socket.sent.isEmpty())
         assertEquals("the socket was not closed", 1000, socket.closeCode)
         assertEquals(ConnectionState.DISCONNECTED, hub.connectionState.value)

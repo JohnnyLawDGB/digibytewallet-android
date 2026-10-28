@@ -63,7 +63,7 @@ class BoundedEndpointsTest {
         const val MiB = 1024L * KiB
 
         const val HUB_SMALL = 64 * KiB       // Hub: login, profile, single replies, game stats
-        const val HUB_LIST = 4 * MiB         // Hub: channels, messages, threads, a thread with its replies
+        const val HUB_LIST = 4 * MiB         // Hub: the chat room's messages
         const val RELEASES = 4 * MiB         // the releases repository's GitHub API answer
         const val PRICE = 64 * KiB           // CoinGecko / Binance tickers
         const val ASSET_DATA = 1 * MiB       // asset indexers: one asset's data
@@ -107,7 +107,6 @@ class BoundedEndpointsTest {
         Case("hub game leaderboard", HUB_SMALL, emptyList<Any>()) { hub(it).getDigiRunnerLeaderboard() },
         // The score is accepted on the status; its answer is read only for the log.
         Case("hub game score answer", HUB_SMALL, true) { hub(it).submitDigiRunnerScore(1, 1, 1, 1) },
-        Case("hub channels", HUB_LIST, emptyList<Any>()) { hub(it).getChannels() },
         Case("hub messages", HUB_LIST, emptyList<Any>()) { hub(it).getMessages(1) },
         // Releases (sideload builds)
         Case("update check, latest release", RELEASES, null) { UpdateChecker(it, REPO).checkForUpdate("0.0.1") },
@@ -185,12 +184,12 @@ class BoundedEndpointsTest {
     // ── exactly the cap ────────────────────────────────────────────────────────
 
     @Test fun `hub lists - an answer of exactly the cap is read, one byte more is refused`() {
-        val json = """[{"id":1,"name":"general","description":"PAD","type":"text"}]"""
+        val json = """{"messages":[{"id":1,"content":"gm","note":"PAD"}]}"""
         val client = { length: Long -> clientServing(Served { textSource(padded(json, length)) }) }
 
-        val channels = runBlocking { hub(client(HUB_LIST)).getChannels() }
-        assertEquals(listOf("general"), channels.map { it.name })
-        assertEquals(emptyList<Any>(), runBlocking { hub(client(HUB_LIST + 1)).getChannels() })
+        val messages = runBlocking { hub(client(HUB_LIST)).getMessages(1) }
+        assertEquals(listOf("gm"), messages.map { it.content })
+        assertEquals(emptyList<Any>(), runBlocking { hub(client(HUB_LIST + 1)).getMessages(1) })
     }
 
     @Test fun `hub single answers - an answer of exactly the cap is read, one byte more is refused`() {

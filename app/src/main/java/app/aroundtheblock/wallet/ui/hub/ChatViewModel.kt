@@ -6,21 +6,22 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import app.aroundtheblock.wallet.core.db.dao.CachedMessageDao
 import app.aroundtheblock.wallet.core.db.entity.CachedMessageEntity
 import app.aroundtheblock.wallet.core.digiscope.DigiScopeClient
-import app.aroundtheblock.wallet.core.hub.Channel
 import app.aroundtheblock.wallet.core.hub.ChatMessage
 import app.aroundtheblock.wallet.core.hub.ConnectionState
 import app.aroundtheblock.wallet.core.hub.HubWebSocket
+import app.aroundtheblock.wallet.core.hub.HubWebSocket.Companion.CHAT_CHANNEL_ID
 import app.aroundtheblock.wallet.core.hub.UserInfo
 import app.aroundtheblock.wallet.core.hub.WebSocketEvent
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+/**
+ * The Hub chat: one room, [CHAT_CHANNEL_ID]. The server closed every other channel (website
+ * migration 141), so there is nothing to choose; the socket joins the room each time it opens.
+ */
 @HiltViewModel
 class ChatViewModel @Inject constructor(
     private val digiScopeClient: DigiScopeClient,
@@ -32,19 +33,12 @@ class ChatViewModel @Inject constructor(
     // ── Current user's address (for identifying own messages) ──────────────
     val myAddress: String = hubIdentity.address()
 
-    // ── Channels ──────────────────────────────────────────────────────────
-    private val _channels = MutableStateFlow<List<Channel>>(emptyList())
-    val channels: StateFlow<List<Channel>> = _channels.asStateFlow()
-
     // ── Messages ──────────────────────────────────────────────────────────
     private val _currentMessages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val currentMessages: StateFlow<List<ChatMessage>> = _currentMessages.asStateFlow()
 
     // ── WebSocket state ───────────────────────────────────────────────────
     val connectionState: StateFlow<ConnectionState> = hubWebSocket.connectionState
-
-    // ── Selected channel ──────────────────────────────────────────────────
-    val selectedChannel = MutableStateFlow(1)
 
     // ── Login state ───────────────────────────────────────────────────────
     val isLoggedIn: StateFlow<Boolean> = MutableStateFlow(digiScopeClient.isLoggedIn())
@@ -79,12 +73,11 @@ class ChatViewModel @Inject constructor(
     val sendError: StateFlow<String?> = _sendError.asStateFlow()
 
     init {
-        loadChannels()
         if (digiScopeClient.isLoggedIn()) {
             hubWebSocket.connect()
         }
         observeWebSocketEvents()
-        loadHistory(channelId = 1)
+        loadHistory()
         // Poll for login state — reconnects WebSocket after login or disconnect. Each wait is the
         // socket's own: it grows while the server keeps refusing the socket, and starts over once
         // a connection has held (HubWebSocket.reconnectDelayMs).
@@ -94,54 +87,18 @@ class ChatViewModel @Inject constructor(
                 if (digiScopeClient.isLoggedIn() &&
                     hubWebSocket.connectionState.value == ConnectionState.DISCONNECTED) {
                     hubWebSocket.connect()
-                    loadChannels()
-                    loadHistory(selectedChannel.value)
+                    loadHistory()
                 }
             }
         }
     }
 
-    // ── Channel loading ───────────────────────────────────────────────────
-
-    private fun loadChannels() {
-        viewModelScope.launch {
-            val fetched = digiScopeClient.getChannels()
-            if (fetched.isNotEmpty()) {
-                _channels.value = fetched
-            } else {
-                // Fallback static list — displayed even when not logged in
-                _channels.value = listOf(
-                    Channel(1, "General",    "General discussion",      "text"),
-                    Channel(2, "Trading",    "Price and trading talk",  "text"),
-                    Channel(3, "Dev",        "Developer discussion",    "text"),
-                    Channel(4, "Assets",     "DigiAssets talk",         "text"),
-                    Channel(5, "Ask Enigma", "Chat with the Enigma AI", "bot")
-                )
-            }
-        }
-    }
-
-    // ── Channel selection ─────────────────────────────────────────────────
-
-    fun selectChannel(channelId: Int) {
-        val old = selectedChannel.value
-        if (old == channelId) return
-
-        hubWebSocket.leaveChannel(old)
-        selectedChannel.value = channelId
-        _currentMessages.value = emptyList()
-        oldestTimestamp = null
-
-        hubWebSocket.joinChannel(channelId)
-        loadHistory(channelId)
-    }
-
     // ── History loading ───────────────────────────────────────────────────
 
-    private fun loadHistory(channelId: Int) {
+    private fun loadHistory() {
         viewModelScope.launch {
             isLoadingHistory = true
-            val messages = digiScopeClient.getMessages(channelId, before = oldestTimestamp)
+            val messages = digiScopeClient.getMessages(CHAT_CHANNEL_ID, before = oldestTimestamp)
             if (messages.isNotEmpty()) {
                 oldestTimestamp = messages.minOf { it.timestamp }
                 // Prepend older messages, avoid duplicates by id
@@ -150,10 +107,10 @@ class ChatViewModel @Inject constructor(
                 val newMessages = messages.filter { it.id !in existingIds }
                 _currentMessages.value = (newMessages + existing).sortedBy { it.timestamp }
                 // Cache to Room
-                cachedMessageDao.insertAll(messages.map { it.toEntity(channelId) })
+                cachedMessageDao.insertAll(messages.map { it.toEntity(CHAT_CHANNEL_ID) })
             } else if (oldestTimestamp == null) {
                 // No network history — try Room cache
-                cachedMessageDao.getMessagesForChannel(channelId).collect { cached ->
+                cachedMessageDao.getMessagesForChannel(CHAT_CHANNEL_ID).collect { cached ->
                     if (_currentMessages.value.isEmpty()) {
                         _currentMessages.value = cached
                             .map { it.toChatMessage() }
@@ -167,7 +124,7 @@ class ChatViewModel @Inject constructor(
 
     fun loadMoreHistory() {
         if (isLoadingHistory) return
-        loadHistory(selectedChannel.value)
+        loadHistory()
     }
 
     // ── WebSocket event handling ───────────────────────────────────────────
@@ -177,7 +134,7 @@ class ChatViewModel @Inject constructor(
             hubWebSocket.messages.collect { event ->
                 when (event) {
                     is WebSocketEvent.Message -> {
-                        if (event.channelId == selectedChannel.value) {
+                        if (event.channelId == CHAT_CHANNEL_ID) {
                             val existing = _currentMessages.value
                             if (existing.none { it.id == event.message.id }) {
                                 _currentMessages.value = existing + event.message
@@ -189,7 +146,7 @@ class ChatViewModel @Inject constructor(
                         }
                     }
                     is WebSocketEvent.Typing -> {
-                        if (event.channelId == selectedChannel.value) {
+                        if (event.channelId == CHAT_CHANNEL_ID) {
                             // Show typing indicator for 3 seconds then clear
                             val current = _typingUsers.value.toMutableList()
                             if (current.none { it.address == event.from.address }) {
@@ -204,7 +161,7 @@ class ChatViewModel @Inject constructor(
                         }
                     }
                     is WebSocketEvent.OnlineCount -> {
-                        if (event.channelId == selectedChannel.value) {
+                        if (event.channelId == CHAT_CHANNEL_ID) {
                             _onlineCount.value = event.count
                         }
                     }
@@ -220,12 +177,12 @@ class ChatViewModel @Inject constructor(
     // ── Send message ──────────────────────────────────────────────────────
 
     /**
-     * Sends [content] to the selected channel, signed with the wallet's identity. The text signed
-     * and the text sent are one [ChatSignPayload]: the message exactly as sent, bound to the
-     * channel it is sent to. The screen calls this only once the spend gate has passed.
+     * Sends [content] to the chat room, signed with the wallet's identity. The text signed and the
+     * text sent are one [ChatSignPayload]: the message exactly as sent, bound to the room it is
+     * sent to. The screen calls this only once the spend gate has passed.
      */
     fun sendMessage(content: String) {
-        val post = ChatSignPayload.chatMessage(selectedChannel.value, content) ?: return
+        val post = ChatSignPayload.chatMessage(CHAT_CHANNEL_ID, content) ?: return
         _sendError.value = null
         // Sign the post — returns null when native stub not available
         val signature = try {
@@ -237,7 +194,7 @@ class ChatViewModel @Inject constructor(
     }
 
     fun sendTypingIndicator() {
-        hubWebSocket.sendTyping(selectedChannel.value)
+        hubWebSocket.sendTyping(CHAT_CHANNEL_ID)
     }
 
     fun clearSendError() {

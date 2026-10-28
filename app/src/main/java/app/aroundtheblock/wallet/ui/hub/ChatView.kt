@@ -2,9 +2,7 @@ package app.aroundtheblock.wallet.ui.hub
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -34,7 +32,6 @@ import app.aroundtheblock.wallet.R
 import app.aroundtheblock.wallet.ui.components.rememberSpendAuth
 import kotlinx.coroutines.launch
 import app.aroundtheblock.wallet.core.hub.ChatMessage
-import app.aroundtheblock.wallet.core.hub.Channel
 import app.aroundtheblock.wallet.core.hub.ConnectionState
 import app.aroundtheblock.wallet.core.hub.UserInfo
 import app.aroundtheblock.wallet.ui.theme.DigiByteAccent
@@ -52,6 +49,9 @@ private const val ENIGMA_HANDLE = "Enigma"
 private val EnigmaPurple = Color(0xFF7B2FBE)
 private val EnigmaPurpleLight = Color(0xFF9C27B0).copy(alpha = 0.18f)
 
+// ── The one chat room, as the header names it (the server's name for channel 1) ──
+private const val CHAT_ROOM_NAME = "chat"
+
 // ── Max message length (matches backend limit) ────────────────────────────
 private const val MAX_MESSAGE_LENGTH = 2000
 
@@ -63,10 +63,8 @@ fun ChatScreen(
     /** Actions in the header while signed in: the account menu (HubAccountMenu). */
     headerActions: @Composable () -> Unit = {},
 ) {
-    val channels by viewModel.channels.collectAsStateWithLifecycle()
     val messages by viewModel.currentMessages.collectAsStateWithLifecycle()
     val connectionState by viewModel.connectionState.collectAsStateWithLifecycle()
-    val selectedChannelId by viewModel.selectedChannel.collectAsStateWithLifecycle()
     val isLoggedIn by viewModel.isLoggedIn.collectAsStateWithLifecycle()
     val typingUsers by viewModel.typingUsers.collectAsStateWithLifecycle()
     val onlineCount by viewModel.onlineCount.collectAsStateWithLifecycle()
@@ -94,16 +92,7 @@ fun ChatScreen(
         ChatHeader(
             connectionState = connectionState,
             onlineCount = onlineCount,
-            selectedChannelId = selectedChannelId,
-            channels = channels,
             actions = headerActions
-        )
-
-        // ── Channel chips ─────────────────────────────────────────────────
-        ChannelChipRow(
-            channels = channels,
-            selectedChannelId = selectedChannelId,
-            onChannelSelected = { viewModel.selectChannel(it) }
         )
 
         HorizontalDivider(
@@ -192,12 +181,8 @@ fun ChatScreen(
 private fun ChatHeader(
     connectionState: ConnectionState,
     onlineCount: Int,
-    selectedChannelId: Int,
-    channels: List<Channel>,
     actions: @Composable () -> Unit = {}
 ) {
-    val channelName = channels.find { it.id == selectedChannelId }?.name ?: "Chat"
-
     Surface(
         color = MaterialTheme.colorScheme.surface,
         tonalElevation = 2.dp
@@ -218,13 +203,13 @@ private fun ChatHeader(
                 )
                 if (onlineCount > 0) {
                     Text(
-                        text = "#$channelName · $onlineCount online",
+                        text = "#$CHAT_ROOM_NAME · $onlineCount online",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 } else {
                     Text(
-                        text = "#$channelName",
+                        text = "#$CHAT_ROOM_NAME",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -268,44 +253,6 @@ private fun ConnectionDot(state: ConnectionState) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             fontSize = 10.sp
         )
-    }
-}
-
-// ── Channel chips ─────────────────────────────────────────────────────────
-
-@Composable
-private fun ChannelChipRow(
-    channels: List<Channel>,
-    selectedChannelId: Int,
-    onChannelSelected: (Int) -> Unit
-) {
-    val scrollState = androidx.compose.foundation.rememberScrollState()
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(scrollState)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        channels.forEach { channel ->
-            val selected = channel.id == selectedChannelId
-            FilterChip(
-                selected = selected,
-                onClick = { onChannelSelected(channel.id) },
-                label = {
-                    Text(
-                        text = if (channel.type == "bot") "✨ ${channel.name}" else channel.name,
-                        style = MaterialTheme.typography.labelMedium
-                    )
-                },
-                colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = DigiByteBlue,
-                    selectedLabelColor = Color.White,
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    labelColor = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            )
-        }
     }
 }
 

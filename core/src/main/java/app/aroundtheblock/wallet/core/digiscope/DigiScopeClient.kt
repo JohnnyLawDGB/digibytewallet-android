@@ -1,7 +1,6 @@
 package app.aroundtheblock.wallet.core.digiscope
 
 import android.content.Context
-import app.aroundtheblock.wallet.core.hub.Channel
 import app.aroundtheblock.wallet.core.hub.ChatMessage
 import app.aroundtheblock.wallet.core.hub.DigiRunnerStats
 import app.aroundtheblock.wallet.core.hub.LeaderboardEntry
@@ -44,7 +43,7 @@ class DigiScopeClient(
         internal const val SMALL_BODY_BYTES = 64L * 1024
 
         /**
-         * The most a Hub list may be: 4 MiB — the channels, a page of messages or threads, a thread
+         * The most a Hub list may be: 4 MiB — a page of messages or threads, a thread
          * with its replies. A message is at most 2,000 characters and a thread 5,000.
          */
         internal const val LIST_BODY_BYTES = 4L * 1024 * 1024
@@ -248,37 +247,6 @@ class DigiScopeClient(
             }
         } catch (e: Exception) {
             null
-        }
-    }
-
-    // ── Hub REST: channels ────────────────────────────────────────────────────
-
-    /**
-     * Fetch all available hub channels.
-     */
-    suspend fun getChannels(): List<Channel> = withContext(Dispatchers.IO) {
-        val token = jwtToken ?: return@withContext emptyList()
-        try {
-            val request = Request.Builder()
-                .url("$BASE_URL/hub/channels")
-                .header("Authorization", "Bearer $token")
-                .build()
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@withContext emptyList()
-
-                val array = JSONArray(BoundedBody.text(response.body, LIST_BODY_BYTES) ?: return@withContext emptyList())
-                (0 until array.length()).map { i ->
-                    val obj = array.getJSONObject(i)
-                    Channel(
-                        id = obj.getInt("id"),
-                        name = obj.getString("name"),
-                        description = obj.optString("description", ""),
-                        type = obj.optString("type", "text")
-                    )
-                }
-            }
-        } catch (e: Exception) {
-            emptyList()
         }
     }
 
