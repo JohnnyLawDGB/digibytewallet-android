@@ -57,7 +57,7 @@ shopt -s nullglob; SHA3_SRCS=("$CORE_DIR"/crypto/sha3/*.c); shopt -u nullglob
 build() {   # <out> <64|32> <unfixed 0|1>
     local out="$1" bits="$2" unfixed="$3"
     local m=(); [ "$bits" = "32" ] && m=(-m32)
-    clang -w -include stdint.h -g -fsanitize=address -fno-omit-frame-pointer "${m[@]}" \
+    clang -w -include stdint.h -g -fsanitize=address -fno-omit-frame-pointer ${m[@]+"${m[@]}"} \
         -DDIGIDOLLAR_EVENT_UNFIXED="$unfixed" \
         -I "$CORE_DIR" -I "$CORE_DIR/secp256k1/include" -I "$BRIDGE_DIR" \
         "$SCRIPT_DIR/digidollar_realtx_kat_main.c" \

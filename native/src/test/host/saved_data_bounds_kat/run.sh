@@ -97,7 +97,7 @@ build() {
     local m=()
     [ "$bits" = "32" ] && m=(-m32)
     clang -w -include stdint.h -g -fsanitize=address -fno-omit-frame-pointer \
-        -DDGB_HEADER_POW_CHECK="$POW_LEVEL" -DDGB_HEADER_DIFF_CHECK="$DIFF_LEVEL" "${m[@]}" "$@" \
+        -DDGB_HEADER_POW_CHECK="$POW_LEVEL" -DDGB_HEADER_DIFF_CHECK="$DIFF_LEVEL" ${m[@]+"${m[@]}"} "$@" \
         -I "$CORE_DIR" \
         -I "$CORE_DIR/secp256k1/include" \
         -I "$CORE_DIR/secp256k1" \
@@ -156,7 +156,7 @@ run_bits() {
 
     if [ "${#control[@]}" -gt 0 ]; then
         echo "--- RED ARM, 64-bit control: the earlier guard holds where size_t cannot wrap ---"
-        for c in "${control[@]}"; do
+        for c in ${control[@]+"${control[@]}"}; do
             run_case "$BUILD_DIR/red${bits}" "$c"
             if clean_pass "$c"; then
                 echo "  [$bits red $c] rejected cleanly (rc=$RC): the defect is the 32-bit wrap"

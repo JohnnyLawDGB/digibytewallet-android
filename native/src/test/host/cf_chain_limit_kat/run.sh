@@ -50,7 +50,7 @@ build() {
     [ "$bits" = "32" ] && m=(-m32)
     # -DDEBUG: peer_log is compiled out on the host without it (BRPeer.h); the log lines are evidence.
     "${CC:-clang}" -w -include stdint.h -g -DDEBUG -fsanitize=address -fno-omit-frame-pointer \
-        "${m[@]}" "$@" \
+        ${m[@]+"${m[@]}"} "$@" \
         -I "$CORE_DIR" -I "$CORE_DIR/secp256k1/include" -I "$CORE_DIR/secp256k1" \
         "$SCRIPT_DIR/cf_chain_limit_kat_main.c" "${UNITS[@]}" \
         -lm -lpthread -o "$out"

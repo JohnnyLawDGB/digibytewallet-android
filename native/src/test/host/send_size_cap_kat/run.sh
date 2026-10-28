@@ -52,7 +52,7 @@ build() {
     local m=()
     [ "$bits" = "32" ] && m=(-m32)
     clang -w -include stdint.h -g -O1 -fsanitize=address -fno-omit-frame-pointer -DNDEBUG \
-        "${m[@]}" "$@" \
+        ${m[@]+"${m[@]}"} "$@" \
         -I "$CORE_DIR" \
         -I "$CORE_DIR/secp256k1/include" \
         "$SCRIPT_DIR/send_size_cap_kat_main.c" \

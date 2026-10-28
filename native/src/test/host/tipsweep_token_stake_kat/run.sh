@@ -94,7 +94,7 @@ build() {
     local out="$1"; shift
     local m=()
     [ "${KAT_BITS:-64}" = "32" ] && m=(-m32)
-    clang -w -include stdint.h "${m[@]}" "$@" \
+    clang -w -include stdint.h ${m[@]+"${m[@]}"} "$@" \
         -fsanitize=address -fno-omit-frame-pointer -g \
         -I "$CORE_DIR" \
         -I "$BRIDGE_DIR" \

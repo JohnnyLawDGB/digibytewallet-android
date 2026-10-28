@@ -37,7 +37,7 @@ UNITS=("$CORE_DIR/BRKey.c" "$CORE_DIR/BRNetwork.c" "$CORE_DIR/BRAddress.c" "$COR
 build() {   # <out> <64|32> [-D...]
     local out="$1" bits="$2"; shift 2
     local m=(); [ "$bits" = "32" ] && m=(-m32)
-    clang -w -include stdint.h -g -fsanitize=address -fno-omit-frame-pointer "${m[@]}" "$@" \
+    clang -w -include stdint.h -g -fsanitize=address -fno-omit-frame-pointer ${m[@]+"${m[@]}"} "$@" \
         -I "$CORE_DIR" -I "$CORE_DIR/secp256k1/include" -I "$CORE_DIR/secp256k1" \
         "$SCRIPT_DIR/pubkey_length_runtime_kat_main.c" "${UNITS[@]}" -lpthread -lm -o "$out"
 }

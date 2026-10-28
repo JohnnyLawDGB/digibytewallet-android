@@ -20,6 +20,9 @@
 # RED cases must FAIL in their arm and PASS in green. GUARD cases must PASS in every arm built.
 # Every case, every arm, both word sizes: no sanitizer report. A build error is never evidence.
 set -uo pipefail   # not -e: the red arms' nonzero exits must be captured
+# Needs bash 4 or later (declare -A). Under an older bash (macOS's /bin/bash is 3.2) the script would
+# stop at it, and the EXIT trap would then report success. Refuse instead.
+[ "${BASH_VERSINFO[0]}" -ge 4 ] || { echo "GATE FAILURE: needs bash 4 or later (declare -A); this is bash $BASH_VERSION"; exit 1; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../../.." && pwd)"
@@ -72,7 +75,7 @@ build() {
     # built. This suite is about the filter chain and the scan ledger, not the target; the level-2 verdicts are
     # pinned in header_diff_v4_kat and int_2026_10_09_e_kat. Proof of work stays at the shipped level.
     "${CC:-clang}" -w -include stdint.h -g -DDEBUG -fsanitize=address -fno-omit-frame-pointer \
-        -DDGB_HEADER_DIFF_CHECK=1 "${m[@]}" "$@" \
+        -DDGB_HEADER_DIFF_CHECK=1 ${m[@]+"${m[@]}"} "$@" \
         -I "$CORE_DIR" -I "$CORE_DIR/secp256k1/include" -I "$CORE_DIR/secp256k1" \
         "$SCRIPT_DIR/cf_reorg_rewind_kat_main.c" "${UNITS[@]}" \
         -lm -lpthread -o "$out"

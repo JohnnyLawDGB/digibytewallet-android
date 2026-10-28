@@ -51,7 +51,7 @@ static uint8_t *from_hex(const char *hex, size_t *len)
 /* Display-order hex of an id held in internal order. */
 static void display_hex(UInt256 h, char out[65])
 {
-    for (int k = 0; k < 32; k++) sprintf(out + 2 * k, "%02x", h.u8[31 - k]);
+    for (int k = 0; k < 32; k++) snprintf(out + 2 * k, 3, "%02x", h.u8[31 - k]);
     out[64] = '\0';
 }
 
