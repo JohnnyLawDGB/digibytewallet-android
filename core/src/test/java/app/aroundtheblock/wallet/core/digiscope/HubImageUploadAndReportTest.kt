@@ -136,14 +136,21 @@ class HubImageUploadAndReportTest {
      * hub-service.js pages with `created_at < ?` against its own "YYYY-MM-DD HH:MM:SS" (UTC). A
      * number there compares below every stored time in SQLite, so the older page came back empty.
      */
-    @Test fun `an older page is asked for in the server's own time form`() {
-        val server = Server(200, """{"messages":[]}""")
-        val ms = java.time.Instant.parse("2026-10-28T12:34:56.789Z").toEpochMilli()
-        runBlocking { hub(server).getMessages(1, before = ms) }
+    /** Run on a phone set to Chicago time, so the form is UTC on any machine, not only on a UTC one. */
+    @Test fun `an older page is asked for in the server's own time form, in UTC`() {
+        val zone = java.util.TimeZone.getDefault()
+        java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("America/Chicago"))
+        try {
+            val server = Server(200, """{"messages":[]}""")
+            val ms = java.time.Instant.parse("2026-10-28T12:34:56.789Z").toEpochMilli()
+            runBlocking { hub(server).getMessages(1, before = ms) }
 
-        val url = server.requests.single().url
-        assertEquals("2026-10-28 12:34:56", url.queryParameter("before"))
-        assertEquals("50", url.queryParameter("limit"))
+            val url = server.requests.single().url
+            assertEquals("2026-10-28 12:34:56", url.queryParameter("before"))
+            assertEquals("50", url.queryParameter("limit"))
+        } finally {
+            java.util.TimeZone.setDefault(zone)
+        }
     }
 
     @Test fun `the newest page is asked for with no before`() {
