@@ -102,6 +102,28 @@ static void peerAsksFor(BRPeerManager *m, BRPeer *p, UInt256 hash)
     if (served) BRTransactionFree(served);   /* the answer is a private copy (see publish_list_ownership_kat) */
 }
 
+/* Before BRPeerManagerFree: answer what is still queued on the synthetic peers (pongs and a mempool
+ * request), as each peer's thread does on its way out. These peers have no thread and
+ * BRPeerManagerFree frees them as they are, so each callback's context would leak. */
+static void drainPeers(BRPeerManager *m)
+{
+    for (size_t i = 0; i < array_count(m->connectedPeers); i++) {
+        BRPeerContext *ctx = (BRPeerContext *)m->connectedPeers[i];
+        void (*cb)(void *, int) = NULL;
+        void *cbInfo = NULL;
+
+        while (_BRPeerPongPop(ctx, &cb, &cbInfo)) {
+            if (cb) cb(cbInfo, 0);
+            cb = NULL; cbInfo = NULL;
+        }
+        if (ctx->mempoolCallback) {
+            cb = ctx->mempoolCallback; cbInfo = ctx->mempoolInfo;
+            ctx->mempoolCallback = NULL; ctx->mempoolInfo = NULL;
+            cb(cbInfo, 0);
+        }
+    }
+}
+
 int main(void)
 {
     BRWallet *w = makeWallet();
@@ -160,6 +182,10 @@ int main(void)
     check(told(later, fHash), "a flood is announced to a peer that connects later");
     peerAsksFor(m, later, fHash);
     check(BRPeerManagerRelayCount(m, fHash) == 1, "a getdata for a flood still counts as that peer taking it");
+
+    drainPeers(m);
+    BRPeerManagerFree(m);   /* releases the publish list's own objects */
+    BRWalletFree(w);
 
     printf("\n%s (%d failure%s)\n", g_fail ? "FAILED" : "PASSED", g_fail, g_fail == 1 ? "" : "s");
     return g_fail ? 1 : 0;

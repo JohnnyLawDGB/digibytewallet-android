@@ -71,11 +71,10 @@ build() {
         -o "$out"
 }
 
-# LeakSanitizer OFF for both arms. The FIXED arm deliberately degrades a height-mismatched
-# checkpoint-stub replacement to a LEAK (the stub is spared but never freed -- it's only resident
-# in manager->checkpoints, and BRSetFree releases just the hash table, never the items). That leak
-# is the correct, intended behavior under test, not a bug this gate should catch.
-export ASAN_OPTIONS=detect_leaks=0
+# LeakSanitizer stays on where the platform has it (Linux). The FIXED arm leaves a height-mismatched
+# checkpoint stub resident in manager->checkpoints alone (spared, never dangling); the manager's
+# teardown releases a block only that set holds, so the run is leak-clean. The red arm stops at its
+# use-after-free report, before any leak check.
 
 # -DNDEBUG on BOTH arms: this mirrors the shipped APK (AGP release => -O2 -DNDEBUG, see
 # native/CMakeLists.txt) where assert() compiles to nothing. The UNFIXED arm needs this to reach

@@ -66,6 +66,11 @@ static BRTransaction *mkTx(const uint8_t *spk, size_t spkLen, UInt256 prevHash, 
     return tx;
 }
 
+// Register; a tx the wallet refused (and does not hold as a kept record) stays the caller's: free it.
+static void registerOrFree(BRWallet *w, BRTransaction *tx) {
+    if (! BRWalletRegisterTransaction(w, tx) && BRWalletTransactionForHash(w, tx->txHash) != tx) BRTransactionFree(tx);
+}
+
 static BRWallet *newWallet(void) {
     uint8_t seed[64]; BRBIP39DeriveKey(seed, kMnemonic, NULL);
     BRWallet *w = BRWalletNew(NULL, 0, BRBIP32MasterPubKeyBIP84(seed, sizeof(seed)));
@@ -92,7 +97,7 @@ static int run_bound(size_t N) {
         txs[i] = mkTx(spk, spkLen, prev, 0);
     }
     // Register youngest-first (tx[0] .. tx[N-1]): reverse of the dependency order.
-    for (size_t i = 0; i < N; i++) BRWalletRegisterTransaction(w, txs[i]);
+    for (size_t i = 0; i < N; i++) registerOrFree(w, txs[i]);
 
     printf("registered %zu maxsteps %zu\n", N, _kat_asc_max);
     BRWalletFree(w);
@@ -125,7 +130,7 @@ static int run_honest(void) {
     }
     // Register in a deliberately scrambled order.
     int order[M] = { 2, 0, 5, 4, 7, 1, 6, 3 };
-    for (int i = 0; i < M; i++) BRWalletRegisterTransaction(w, txs[order[i]]);
+    for (int i = 0; i < M; i++) registerOrFree(w, txs[order[i]]);
 
     size_t n = BRWalletTransactions(w, NULL, 0);
     BRTransaction **out = (BRTransaction **)calloc(n ? n : 1, sizeof(*out));

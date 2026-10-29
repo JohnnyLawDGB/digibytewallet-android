@@ -222,6 +222,7 @@ int main(void)
 
     test_install_saved_block_height_mismatch(wallet);
     test_relayed_equal_hash_height_mismatch(wallet);
+    BRWalletFree(wallet);
 
     if (g_fail) { printf("\ncheckpoint_stub_free_guard_kat: FAIL\n"); return 1; }
     printf("\ncheckpoint_stub_free_guard_kat: PASS\n");
