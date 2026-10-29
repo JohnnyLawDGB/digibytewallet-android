@@ -489,8 +489,6 @@
     <string name="did_auth_subtitle">Подтвердите личность для входа на %1$s</string>
     <string name="hub_sign_title">Подписать публикацию в Hub</string>
     <string name="hub_sign_subtitle">Подтвердите личность, чтобы подписать эту публикацию своим идентификатором</string>
-    <string name="hub_tip_auth_title">Отправить чаевые в Hub</string>
-    <string name="hub_tip_auth_subtitle">Подтвердите личность, чтобы отправить эти чаевые с вашего баланса чаевых DigiScope</string>
     <string name="hub_tab_chat">Чат</string>
     <string name="hub_tab_digirunner">DigiRunner</string>
     <string name="hub_signin_prompt">Войдите через Digi-ID, чтобы присоединиться к разговору.</string>

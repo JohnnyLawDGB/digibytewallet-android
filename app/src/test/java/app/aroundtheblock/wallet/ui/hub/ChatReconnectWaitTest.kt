@@ -40,7 +40,6 @@ class ChatReconnectWaitTest {
         Dispatchers.setMain(StandardTestDispatcher(scheduler))
         val client = mockk<DigiScopeClient>(relaxed = true)
         every { client.isLoggedIn() } returns true
-        coEvery { client.getChannels() } returns emptyList()
         coEvery { client.getMessages(any(), any(), any()) } returns emptyList()
         // The server refuses every connection: the socket stays down and asks for a minute's wait.
         every { socket.connectionState } returns MutableStateFlow(ConnectionState.DISCONNECTED)

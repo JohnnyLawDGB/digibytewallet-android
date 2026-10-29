@@ -488,8 +488,6 @@
     <string name="did_auth_subtitle">Autentícate para iniciar sesión en %1$s</string>
     <string name="hub_sign_title">Firmar publicación del Hub</string>
     <string name="hub_sign_subtitle">Autentícate para firmar esta publicación con tu identidad</string>
-    <string name="hub_tip_auth_title">Enviar propina del Hub</string>
-    <string name="hub_tip_auth_subtitle">Autentícate para enviar esta propina desde tu saldo de propinas de DigiScope</string>
     <string name="hub_tab_chat">Chat</string>
     <string name="hub_tab_digirunner">DigiRunner</string>
     <string name="hub_signin_prompt">Inicia sesión con Digi-ID para unirte a la conversación.</string>

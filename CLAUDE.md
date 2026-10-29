@@ -114,6 +114,7 @@ Any user-facing string ships in **every language in `AppLocale.SUPPORTED` in the
 - Backend: `/opt/digiscope-backend/` on `digiscope.me` (PM2 id=5, port 3001)
 - REST at `/api/hub/*`, WebSocket at `/api/hub/ws`
 - Hub tabs: Chat and DigiRunner only (Forum and Profile removed; Hub sign-in, handle, logout and the Play-required delete-account link live in the Chat tab: `HubAccountStrip` / `HubAccountMenu` in `ProfileView.kt`)
+- One chat room, `HubWebSocket.CHAT_CHANNEL_ID` (1); the server closed the other channels (website migration 141). The server delivers nothing to a socket until it sends `join`, so `HubWebSocket.onOpen` joins on every open (connect and reconnect). No channel chooser and no in-chat tipping (`POST /hub/tip` answers 501)
 
 ### DigiRunner Game
 - 4 files: GameState.kt, GamePhysics.kt, GameRenderer.kt, DigiRunnerGame.kt

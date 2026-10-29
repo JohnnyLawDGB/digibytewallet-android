@@ -26,6 +26,12 @@ class HubWebSocket(
         const val WS_URL = "wss://api.digiscope.me/api/hub/ws"
 
         /**
+         * The one Hub chat room. The server closed every other channel (website migration 141),
+         * and it puts a socket in this room only when the socket sends a `join` for it.
+         */
+        const val CHAT_CHANNEL_ID = 1
+
+        /**
          * The largest frame the Hub socket accepts, in bytes of payload: 64 KiB. A chat message is
          * at most 2,000 characters (ChatView), far below this as JSON.
          */
@@ -102,8 +108,27 @@ class HubWebSocket(
         @Volatile var ended = false
 
         override fun onOpen(webSocket: WebSocket, response: Response) {
-            android.util.Log.i("HubWS", "connected!")
             openedAtMs = nowMs()
+            // A socket that opens after the user ended it, or after the Hub session it was opened
+            // for is gone (logout, or a REST 401 that dropped the token mid-handshake), is closed at
+            // once and never joined: left open and unjoined it would read as CONNECTED, so it would
+            // never be replaced, and would later carry frames for a newer session. Closed as
+            // sendAuthorized closes a socket with no session: by us, so not counted as a refusal.
+            if (ended || digiScopeClient.getToken() == null) {
+                android.util.Log.i("HubWS", "opened with no Hub session: closing")
+                ended = true
+                webSocket.close(1000, "No Hub session")
+                if (this@HubWebSocket.webSocket === webSocket) this@HubWebSocket.webSocket = null
+                // Only the current connection's listener speaks for the state: a stale one must not
+                // overwrite a newer connection's.
+                if (this@HubWebSocket.listener === this) _connectionState.value = ConnectionState.DISCONNECTED
+                return
+            }
+            android.util.Log.i("HubWS", "connected!")
+            // The server delivers nothing to a socket until it joins the room: join on every open,
+            // the first connect and each reconnect alike. Sent on the socket that opened, which
+            // may not be stored in [webSocket] yet.
+            webSocket.send(joinFrame(CHAT_CHANNEL_ID))
             _connectionState.value = ConnectionState.CONNECTED
         }
 
@@ -191,13 +216,9 @@ class HubWebSocket(
         webSocket?.send(frame)
     }
 
-    fun joinChannel(channelId: Int) {
-        sendAuthorized(JSONObject().put("type", "join").put("channelId", channelId).toString())
-    }
-
-    fun leaveChannel(channelId: Int) {
-        sendAuthorized(JSONObject().put("type", "leave").put("channelId", channelId).toString())
-    }
+    /** The join is sent only by [Listener.onOpen], on the socket that opened. */
+    private fun joinFrame(channelId: Int): String =
+        JSONObject().put("type", "join").put("channelId", channelId).toString()
 
     fun sendMessage(channelId: Int, content: String, signature: String) {
         sendAuthorized(

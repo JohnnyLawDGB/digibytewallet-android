@@ -480,8 +480,6 @@
     <string name="did_auth_subtitle">请验证身份以登录 %1$s</string>
     <string name="hub_sign_title">签署 Hub 帖子</string>
     <string name="hub_sign_subtitle">请验证身份，以使用您的身份签署此帖子</string>
-    <string name="hub_tip_auth_title">发送 Hub 打赏</string>
-    <string name="hub_tip_auth_subtitle">请验证身份，以从您的 DigiScope 打赏余额发送此打赏</string>
     <string name="hub_tab_chat">聊天</string>
     <string name="hub_tab_digirunner">DigiRunner</string>
     <string name="hub_signin_prompt">使用 Digi-ID 登录即可加入对话。</string>

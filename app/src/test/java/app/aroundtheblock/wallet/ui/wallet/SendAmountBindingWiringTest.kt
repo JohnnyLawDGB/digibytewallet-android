@@ -159,7 +159,6 @@ class SendAmountBindingWiringTest {
         "wallet/ReceiveScreen.kt",
         "asset/AssetViewModel.kt",
         "asset/AssetSendScreen.kt",
-        "hub/TipBottomSheet.kt",
     )
 
     /**
