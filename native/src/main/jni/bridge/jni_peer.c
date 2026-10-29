@@ -984,12 +984,7 @@ NativeBridge_startSync(JNIEnv *env, jobject thiz) {
          * Free only the ARRAY, never the elements: the array itself was malloc'd by
          * deserialize_saved_blocks_guarded and is not adopted. Nulling the pointer makes any
          * later use fail loudly as NULL rather than silently as freed memory, and the tip height
-         * survives as a cached scalar (see getSavedBlocksTip).
-         *
-         * KNOWN RESIDUAL, deliberately not widened here: BRPeerManagerFree does BRSetFree without
-         * freeing the blocks still resident, so blocks never pruned leak at teardown. That is
-         * pre-existing, bounded by the retained set, and strictly preferable to a use-after-free.
-         * Fixing it belongs with the core's teardown path, not the bridge's. */
+         * survives as a cached scalar (see getSavedBlocksTip). */
         if (g_savedBlocks) {
             free(g_savedBlocks);           /* array only — elements now belong to the manager */
             g_savedBlocks = NULL;

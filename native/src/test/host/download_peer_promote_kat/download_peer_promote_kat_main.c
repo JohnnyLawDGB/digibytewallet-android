@@ -96,22 +96,14 @@ static void killPeer(BRPeerManager *m, BRPeer *peer, int error)
     _peerDisconnected(&info, error);   /* frees peer */
 }
 
-/* Before BRPeerManagerFree: answer what is still queued on the synthetic peers, as each peer's thread
- * does on its way out (_peerThreadRoutine's drain). These peers have no thread, and BRPeerManagerFree
- * frees them as they are, so a ping BRPeerManagerPublishTx queued on one would never be answered and
- * its callback context would leak. */
+/* Before BRPeerManagerFree: answer what is still queued on the synthetic peers (pongs and a mempool
+ * request), as each peer's thread does on its way out (_peerThreadRoutine's drain). These peers have no
+ * thread, and BRPeerManagerFree frees them as they are, so a ping BRPeerManagerPublishTx queued on one
+ * would never be answered and its callback context would leak. BRPeerCancelPendingCallbacks is core's
+ * own drain for a peer whose thread has ended. */
 static void drainPeers(BRPeerManager *m)
 {
-    for (size_t i = 0; i < array_count(m->connectedPeers); i++) {
-        BRPeerContext *ctx = (BRPeerContext *)m->connectedPeers[i];
-        void (*cb)(void *, int) = NULL;
-        void *cbInfo = NULL;
-
-        while (_BRPeerPongPop(ctx, &cb, &cbInfo)) {
-            if (cb) cb(cbInfo, 0);
-            cb = NULL; cbInfo = NULL;
-        }
-    }
+    for (size_t i = 0; i < array_count(m->connectedPeers); i++) BRPeerCancelPendingCallbacks(m->connectedPeers[i]);
 }
 
 static int isConnectedPeer(BRPeerManager *m, BRPeer *p)

@@ -115,6 +115,13 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq gcc-multilib
 
       - name: Native host KATs
+        env:
+          # LeakSanitizer on for every ASan arm, as core CI does (core #49). LSAN_OPTIONS is read
+          # after ASAN_OPTIONS, so this overrides a run.sh's detect_leaks=0; a run.sh that sets
+          # LSAN_OPTIONS itself for one run (a comparison arm whose defect is the leak another case
+          # asserts) keeps its own. A suite must free what it allocates, so a leak shows up as a
+          # failing suite.
+          LSAN_OPTIONS: detect_leaks=1
         run: ./scripts/run-host-kats.sh
 
       # The parity tests (core/src/androidTest: Kotlin against the C core through JNI) run only on
@@ -152,6 +159,9 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq gcc-multilib
 
       - name: Native host KATs (full sweep)
+        env:
+          # LeakSanitizer on, as in the per-push sweep above.
+          LSAN_OPTIONS: detect_leaks=1
         run: ./scripts/run-host-kats.sh
 
       # A suite that names its own header-check level is built at a level no app ships, so it

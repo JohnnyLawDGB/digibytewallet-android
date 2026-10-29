@@ -48,4 +48,6 @@ clang -w -include stdint.h \
     -lm -lpthread \
     -o "$BUILD_DIR/download_peer_promote_kat"
 
-ASAN_OPTIONS=detect_leaks=0 "$BUILD_DIR/download_peer_promote_kat"
+# LeakSanitizer stays on where the platform has it (Linux): every case drains its peers' pending
+# callbacks and frees its manager and wallet.
+"$BUILD_DIR/download_peer_promote_kat"

@@ -146,15 +146,16 @@ int main(void) {
     BRTransaction *real4 = receive(w, 0x41, 100000000ULL, 700000);
     reg(w, real4);
     BRTransaction *root = receive(w, 0x42, 100000000000ULL, TX_UNCONFIRMED);
+    UInt256 rootHash = root->txHash;
     reg(w, root);
-    BRTransaction *child = payFrom(w, root->txHash, 0, 90000000000ULL, TX_UNCONFIRMED);
+    BRTransaction *child = payFrom(w, rootHash, 0, 90000000000ULL, TX_UNCONFIRMED);
     UInt256 childHash = child->txHash;
     reg(w, child);
     BRTransaction *inflate = payFrom(w, real4->txHash, 0, 50000000000ULL, TX_UNCONFIRMED);   // spends 1, pays 500
     UInt256 inflateHash = inflate->txHash;
     reg(w, inflate);
     s = build(w, 1000000000ULL);
-    ck(s == NULL || (! spentInput(s, childHash) && ! spentInput(s, inflateHash) && ! spentInput(s, root->txHash)),
+    ck(s == NULL || (! spentInput(s, childHash) && ! spentInput(s, inflateHash) && ! spentInput(s, rootHash)),
        "neither a child of a foreign receive nor a tx paying out more than it spends is selected");
     if (s) BRTransactionFree(s);
     BRWalletFree(w);
