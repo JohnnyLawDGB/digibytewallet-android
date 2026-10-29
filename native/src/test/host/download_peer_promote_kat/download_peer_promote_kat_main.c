@@ -96,6 +96,24 @@ static void killPeer(BRPeerManager *m, BRPeer *peer, int error)
     _peerDisconnected(&info, error);   /* frees peer */
 }
 
+/* Before BRPeerManagerFree: answer what is still queued on the synthetic peers, as each peer's thread
+ * does on its way out (_peerThreadRoutine's drain). These peers have no thread, and BRPeerManagerFree
+ * frees them as they are, so a ping BRPeerManagerPublishTx queued on one would never be answered and
+ * its callback context would leak. */
+static void drainPeers(BRPeerManager *m)
+{
+    for (size_t i = 0; i < array_count(m->connectedPeers); i++) {
+        BRPeerContext *ctx = (BRPeerContext *)m->connectedPeers[i];
+        void (*cb)(void *, int) = NULL;
+        void *cbInfo = NULL;
+
+        while (_BRPeerPongPop(ctx, &cb, &cbInfo)) {
+            if (cb) cb(cbInfo, 0);
+            cb = NULL; cbInfo = NULL;
+        }
+    }
+}
+
 static int isConnectedPeer(BRPeerManager *m, BRPeer *p)
 {
     for (size_t i = 0; i < array_count(m->connectedPeers); i++) if (m->connectedPeers[i] == p) return 1;
@@ -130,6 +148,7 @@ int main(void)
         check(g_lastError != ENOTCONN, "a new send is published, not refused with ENOTCONN");
         check(isConnectedPeer(m, a) && isConnectedPeer(m, b), "the remaining peers are untouched");
 
+        drainPeers(m);
         BRPeerManagerFree(m);
         BRWalletFree(w);
     }
@@ -150,6 +169,7 @@ int main(void)
         check(m->isConnected == 0 && m->downloadPeer == NULL, "no peer left: not connected");
         check(g_lastError == ENOTCONN, "the pending send is cancelled with ENOTCONN, as before");
 
+        drainPeers(m);
         BRPeerManagerFree(m);
         BRWalletFree(w);
     }
