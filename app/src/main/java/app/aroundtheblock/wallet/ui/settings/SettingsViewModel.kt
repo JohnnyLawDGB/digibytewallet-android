@@ -14,6 +14,7 @@ import app.aroundtheblock.wallet.core.db.dao.WalletConfigDao
 import app.aroundtheblock.wallet.core.db.entity.WalletConfigEntity
 import app.aroundtheblock.wallet.core.isTestnet
 import app.aroundtheblock.wallet.core.model.SyncFrontier
+import app.aroundtheblock.wallet.core.model.SyncStage
 import app.aroundtheblock.wallet.core.model.SyncState
 import app.aroundtheblock.wallet.core.model.deriveSyncFrontier
 import app.aroundtheblock.wallet.core.security.PinManager
@@ -86,16 +87,19 @@ class SettingsViewModel @Inject constructor(
     private val _abandonedBandUnrecovered = MutableStateFlow(false)
 
     /** CF-gated sync frontier — the SAME derivation ([deriveSyncFrontier]) the
-     *  main wallet screen uses, so the Network Info screen shares its CF-gated
-     *  STAGE and can't categorically diverge (e.g. show "Synced" while cfheaders
-     *  lags). Inputs are polled per-VM, so the exact block number can differ by
+     *  main wallet screen uses, through the same process-wide session (its
+     *  "reached Synced this session" latch), so the Network Info screen shares its
+     *  CF-gated STAGE and can't categorically diverge (e.g. show "Synced" while
+     *  cfheaders lags, or "Syncing" while the main card shows Synced). Inputs are polled per-VM, so the exact block number can differ by
      *  a poll interval during active sync; it converges in steady state. */
     val syncFrontier: StateFlow<SyncFrontier> = combine(
         syncState, _peerCount, _lastBlockHeight, _estimatedHeight, _externalTip, _cfTip,
         _scanFrontier, _abandonedBandUnrecovered,
     ) { values ->
         @Suppress("UNCHECKED_CAST")
-        deriveSyncFrontier(
+        // Through the process-wide session, as the main card does: the same
+        // "reached Synced this session" latch, so the lead rule reads the same here.
+        walletManager.syncFrontierSession.derive(
             state = values[0] as SyncState,
             peerCount = values[1] as Int,
             currentHeight = values[2] as Long,
@@ -111,7 +115,7 @@ class SettingsViewModel @Inject constructor(
         )
     }.stateIn(
         viewModelScope, SharingStarted.Eagerly,
-        deriveSyncFrontier(SyncState.Idle, 0, 0L, 0L, 0L, 0L)
+        SyncFrontier(stage = SyncStage.Connecting, currentBlock = 0L, targetBlock = 0L, progressFraction = 0f)
     )
 
     // ── Wallet config ─────────────────────────────────────────────────────────

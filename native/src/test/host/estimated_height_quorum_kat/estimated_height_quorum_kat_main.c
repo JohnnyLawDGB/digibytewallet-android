@@ -154,6 +154,28 @@ static size_t postSyncRegistrations(BRPeerManager *m)
     return n;
 }
 
+/* Before BRPeerManagerFree: answer what is still queued on the synthetic peers (the _postSyncDone
+ * pongs and mempool request above), as each peer's thread does on its way out. These peers have no
+ * thread and BRPeerManagerFree frees them as they are, so each callback's context would leak. */
+static void drainPeers(BRPeerManager *m)
+{
+    for (size_t i = 0; i < array_count(m->connectedPeers); i++) {
+        BRPeerContext *ctx = (BRPeerContext *)m->connectedPeers[i];
+        void (*cb)(void *, int) = NULL;
+        void *cbInfo = NULL;
+
+        while (_BRPeerPongPop(ctx, &cb, &cbInfo)) {
+            if (cb) cb(cbInfo, 0);
+            cb = NULL; cbInfo = NULL;
+        }
+        if (ctx->mempoolCallback) {
+            cb = ctx->mempoolCallback; cbInfo = ctx->mempoolInfo;
+            ctx->mempoolCallback = NULL; ctx->mempoolInfo = NULL;
+            cb(cbInfo, 0);
+        }
+    }
+}
+
 /* Completion reachability by construction: the estimate is a sampled report, the bound, or the
  * tip -- never a height no chain passes through at the right moment (an average, say). */
 static int isSampledOrBound(uint32_t est, const uint32_t *claims, size_t n, uint32_t tip, uint32_t cap)
@@ -190,6 +212,7 @@ int main(void)
         check(isSampledOrBound(m->estimatedHeight, claims, 5, L, CAP1), "the estimate is a sampled report, the bound or the tip");
         check(postSyncRegistrations(m) == 0, "an upward move runs no completion action");
 
+        drainPeers(m);
         BRPeerManagerFree(m);
         BRMerkleBlockFree(tip);
         BRWalletFree(w);
@@ -230,6 +253,7 @@ int main(void)
         check(m->downloadPeer == a || m->downloadPeer == b || m->downloadPeer == c, "an honest peer is the download peer");
         check(m->estimatedHeight >= m->lastBlock->height, "never below the held tip");
 
+        drainPeers(m);
         BRPeerManagerFree(m);
         BRMerkleBlockFree(tip);
         BRWalletFree(w);
@@ -250,6 +274,7 @@ int main(void)
         _BRPeerManagerAdoptDownloadPeer(m, far);
         check(m->estimatedHeight == H, "two reports: the lower median H wins over the far report");
         check(isSampledOrBound(m->estimatedHeight, claims2, 2, L, CAP1), "the estimate is a sampled report, the bound or the tip");
+        drainPeers(m);
         BRPeerManagerFree(m);
         BRMerkleBlockFree(tip);
 
@@ -261,6 +286,7 @@ int main(void)
         check(m->estimatedHeight == CAP1, "one far report: bounded to the tip plus the growth floor");
         check(m->estimatedHeight >= L, "never below the held tip");
         check(isSampledOrBound(m->estimatedHeight, claims1, 1, L, CAP1), "the estimate is a sampled report, the bound or the tip");
+        drainPeers(m);
         BRPeerManagerFree(m);
         BRMerkleBlockFree(tip);
 
@@ -271,6 +297,7 @@ int main(void)
         _BRPeerManagerAdoptDownloadPeer(m, stale);
         check(m->estimatedHeight == L, "one report below the tip: the estimate is the held tip, never lower");
         check(isSampledOrBound(m->estimatedHeight, claimsLow, 1, L, CAP1), "the estimate is a sampled report, the bound or the tip");
+        drainPeers(m);
         BRPeerManagerFree(m);
         BRMerkleBlockFree(tip);
 
@@ -309,6 +336,7 @@ int main(void)
         check(atomic_load_explicit(&m->cachedEstimatedHeight, memory_order_relaxed) == L,
               "the tick mirrored the estimate for the lock-free readers");
 
+        drainPeers(m);
         BRPeerManagerFree(m);
         BRMerkleBlockFree(tip);
         BRWalletFree(w);
@@ -340,6 +368,7 @@ int main(void)
         BRPeerManagerKeepAlive(m);
         check(m->estimatedHeight == H + 300u, "never below a height already reached: a stale report does not lower the estimate");
 
+        drainPeers(m);
         BRPeerManagerFree(m);
         BRMerkleBlockFree(tip);
         BRWalletFree(w);
@@ -365,6 +394,7 @@ int main(void)
         check(m->estimatedHeight == claim, "a month after the tip the bound is loose: the report is taken as is");
         check(m->estimatedHeight >= m->lastBlock->height, "never below the held tip");
 
+        drainPeers(m);
         BRPeerManagerFree(m);
         BRMerkleBlockFree(tip);
         BRWalletFree(w);

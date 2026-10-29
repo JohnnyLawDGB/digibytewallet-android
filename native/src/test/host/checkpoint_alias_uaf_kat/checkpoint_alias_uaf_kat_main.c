@@ -51,6 +51,7 @@ static void check(int cond, const char *what) {
 
 int main(void)
 {
+    setvbuf(stdout, NULL, _IONBF, 0);   /* LeakSanitizer ends a leaking run with _exit: keep the output */
 #ifdef CHECKPOINT_ALIAS_UNFIXED
     printf("ARM: UNFIXED (-DCHECKPOINT_ALIAS_UNFIXED)\n");
 #else
@@ -140,8 +141,14 @@ int main(void)
     check(mismatched == 0, "every checkpoint still readable after a prune past its height");
     check(BRSetCount(m->checkpoints) == cpCount, "checkpoint set was not emptied by pruning");
 
+    /* Drop this harness's own references to the blocks before the teardown, so a leak check sees
+     * only what the manager holds: a checkpoint stub the prune spared is reachable from nothing else. */
+    topCp = NULL; last = NULL;
+    memset(cps, 0, cpCount * sizeof(*cps));
     free(cps);
     free(heights);
+    BRPeerManagerFree(m);   /* no peer threads: freed now, with every resident block */
+    BRWalletFree(wallet);
 
     if (g_fail) { printf("checkpoint_alias_uaf_kat: FAIL\n"); return 1; }
     printf("checkpoint_alias_uaf_kat: PASS\n");

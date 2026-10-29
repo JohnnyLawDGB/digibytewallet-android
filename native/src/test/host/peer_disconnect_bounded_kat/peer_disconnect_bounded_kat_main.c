@@ -77,6 +77,12 @@ int main(void)
 
     printf("BRPeerManagerDisconnect returned after %.1fs\n", elapsed);
 
+    /* Teardown: the pinned thread was never real, so un-pin it and free the manager now (with the
+     * count at 1, BRPeerManagerFree would park it for a thread that does not exist). */
+    m->peerThreadCount = 0;
+    BRPeerManagerFree(m);
+    BRWalletFree(wallet);
+
     /* Upper bound generous for a loaded CI box; the point is that it RETURNS. */
     double limit = (double)PEER_DISCONNECT_WAIT_SECS * 3.0;
     if (elapsed > limit) {

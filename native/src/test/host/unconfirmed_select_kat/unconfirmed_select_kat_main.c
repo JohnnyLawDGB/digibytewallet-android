@@ -61,6 +61,15 @@ static BRTransaction *receive(BRWallet *w, uint8_t tag, uint64_t amt, uint32_t h
     return payFrom(w, h, 0, amt, height);
 }
 
+// BRWalletRegisterTransaction keeps the tx, or refuses it and leaves it with the caller, which frees it
+// here (a refused tx the wallet still holds, as a kept non-wallet record, is the wallet's). Returns the
+// register result; a caller that reads the tx afterwards takes its hash first.
+static int reg(BRWallet *w, BRTransaction *tx) {
+    int r = BRWalletRegisterTransaction(w, tx);
+    if (! r && BRWalletTransactionForHash(w, tx->txHash) != tx) BRTransactionFree(tx);
+    return r;
+}
+
 static int spentInput(const BRTransaction *s, UInt256 h) {
     for (size_t i = 0; s && i < s->inCount; i++) if (UInt256Eq(s->inputs[i].txHash, h)) return 1;
     return 0;
@@ -80,9 +89,9 @@ int main(void) {
     printf("[1] a foreign unconfirmed receive is not spent\n");
     BRWallet *w = BRWalletNew(NULL, 0, g_mpk);
     BRTransaction *real = receive(w, 0x11, 100000000ULL, 700000);
-    BRWalletRegisterTransaction(w, real);
+    reg(w, real);
     BRTransaction *fake = receive(w, 0x12, 100000000000ULL, TX_UNCONFIRMED);
-    BRWalletRegisterTransaction(w, fake);
+    reg(w, fake);
     ck(BRWalletBalance(w) == 100100000000ULL, "the balance shows both (display is unchanged)");
     s = build(w, 1000000000ULL);
     ck(s == NULL, "a 10 DGB send only the unconfirmed receive could pay is refused");
@@ -107,7 +116,7 @@ int main(void) {
 
     printf("[2] own unconfirmed change stays spendable\n");
     w = BRWalletNew(NULL, 0, g_mpk);
-    BRWalletRegisterTransaction(w, receive(w, 0x21, 200000000ULL, 700000));
+    reg(w, receive(w, 0x21, 200000000ULL, 700000));
     s = build(w, 100000000ULL);
     ck(s && BRWalletSignTransaction(w, s, 0, g_seed, sizeof(g_seed)) == 1, "a 1 DGB send signs");
     BRTransaction *send1 = s;
@@ -119,7 +128,7 @@ int main(void) {
 
     printf("[3] confirmed coins are taken first\n");
     BRTransaction *later = receive(w, 0x31, 100000000ULL, 700010);
-    BRWalletRegisterTransaction(w, later);
+    reg(w, later);
     s = build(w, 50000000ULL);
     ck(s && s->inCount == 1 && spentInput(s, later->txHash), "the confirmed coin is taken over the unconfirmed change");
     if (s) BRTransactionFree(s);
@@ -135,15 +144,17 @@ int main(void) {
     printf("[4] relayed chains are not own\n");
     w = BRWalletNew(NULL, 0, g_mpk);
     BRTransaction *real4 = receive(w, 0x41, 100000000ULL, 700000);
-    BRWalletRegisterTransaction(w, real4);
+    reg(w, real4);
     BRTransaction *root = receive(w, 0x42, 100000000000ULL, TX_UNCONFIRMED);
-    BRWalletRegisterTransaction(w, root);
+    reg(w, root);
     BRTransaction *child = payFrom(w, root->txHash, 0, 90000000000ULL, TX_UNCONFIRMED);
-    BRWalletRegisterTransaction(w, child);
+    UInt256 childHash = child->txHash;
+    reg(w, child);
     BRTransaction *inflate = payFrom(w, real4->txHash, 0, 50000000000ULL, TX_UNCONFIRMED);   // spends 1, pays 500
-    BRWalletRegisterTransaction(w, inflate);
+    UInt256 inflateHash = inflate->txHash;
+    reg(w, inflate);
     s = build(w, 1000000000ULL);
-    ck(s == NULL || (! spentInput(s, child->txHash) && ! spentInput(s, inflate->txHash) && ! spentInput(s, root->txHash)),
+    ck(s == NULL || (! spentInput(s, childHash) && ! spentInput(s, inflateHash) && ! spentInput(s, root->txHash)),
        "neither a child of a foreign receive nor a tx paying out more than it spends is selected");
     if (s) BRTransactionFree(s);
     BRWalletFree(w);

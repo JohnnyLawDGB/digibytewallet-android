@@ -164,7 +164,7 @@ if ! grep -q "ALL PASS" "$BUILD_DIR/green.log"; then
 fi
 echo "GREEN confirmed:"
 sed 's/^/    | /' "$BUILD_DIR/green.log"
-# Arm 5 tears everything down, so it is judged by the leak checker too (arms 1-4 leave managers up).
+# Arm 5 is judged by the leak checker on its own too (every arm tears its manager and wallet down).
 ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 detect_leaks=1 symbolize=0" LSAN_OPTIONS="exitcode=23" \
     "$BUILD_DIR/two" 5 > "$BUILD_DIR/green.5.log" 2>&1
 if [ $? -ne 0 ] || ! grep -q "ALL PASS" "$BUILD_DIR/green.5.log"; then

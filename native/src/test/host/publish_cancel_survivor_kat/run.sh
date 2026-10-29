@@ -36,11 +36,10 @@ trap 'rm -rf "$BUILD_DIR"' EXIT
 
 SHA3_SRCS=("$CORE_DIR"/crypto/sha3/*.c)
 
-# LeakSanitizer OFF: this KAT deliberately does not tear the managers down (BRPeerManagerFree
-# would drive teardown through synthetic socket-less peers, which is not what is being measured).
-# ASan itself stays ON — the use-after-free read in test_survivor_keeps_publish_alive is an
-# assertion, not an accident.
-export ASAN_OPTIONS=detect_leaks=0
+# LeakSanitizer stays on where the platform has it (Linux): every test tears its manager and wallet
+# down, and main.c writes unbuffered so a leak report cannot swallow the red arm's output. ASan
+# itself stays ON — the use-after-free read in test_survivor_keeps_publish_alive is an assertion,
+# not an accident.
 
 build() {
     local out="$1"; shift

@@ -18,8 +18,6 @@
 # return would mean the loop never executed, which would prove nothing about the deadline.
 set -u
 
-export ASAN_OPTIONS=detect_leaks=0
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CORE_DIR="$(cd "$SCRIPT_DIR/../../../main/jni/digibytewallet-core" && pwd)"
 BUILD_DIR="$(mktemp -d)"
@@ -65,11 +63,8 @@ build() {
         -o "$out"
 }
 
-# LeakSanitizer OFF for both arms. This KAT deliberately does not tear the manager down, so LSan
-# reports ~900 KB and exits nonzero on its own — which masks the result completely: the red arm
-# "failed" for the wrong reason and the gate correctly rejected it. Leaks are not what this gate
-# measures.
-export ASAN_OPTIONS=detect_leaks=0
+# LeakSanitizer stays on where the platform has it (Linux). The fixed arm frees the manager and the
+# wallet once BRPeerManagerDisconnect returns; the red arm hangs and is killed, so no leak check runs.
 
 echo "=== building UNFIXED (red arm: checkpoint-identity guard compiled out) ==="
 if ! build "$BUILD_DIR/kat_unfixed" -DDISCONNECT_WAIT_UNBOUNDED; then
