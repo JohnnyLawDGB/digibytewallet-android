@@ -74,10 +74,16 @@ build() {
 
 FAILS=0
 # expect <label> <binary> <case> <want: pass|fail|san|leak>   ("release" runs with LeakSanitizer on)
+# In the comparison arm, count, bytes and own also leak the records it keeps without bound (that is
+# the defect; "release" is the case that asserts it), so they run with LeakSanitizer off there:
+# LSAN_OPTIONS outranks ASAN_OPTIONS, and a sweep that sets detect_leaks=1 would otherwise report
+# the leak in place of the result those cases assert.
 expect() {
     local label="$1" bin="$2" kase="$3" want="$4" out="$BUILD_DIR/$1.$3.out" rc got leaks=0
+    local lsan="${LSAN_OPTIONS:-}"
     [ "$kase" = "release" ] && leaks=1
-    ASAN_OPTIONS="abort_on_error=1 detect_leaks=$leaks symbolize=0" bounded "$out" "$bin" "$kase"; rc=$?
+    [ "$kase" != "release" ] && [[ "$label" == red* ]] && lsan="detect_leaks=0"
+    LSAN_OPTIONS="$lsan" ASAN_OPTIONS="abort_on_error=1 detect_leaks=$leaks symbolize=0" bounded "$out" "$bin" "$kase"; rc=$?
     if grep -Eq "$SAN_RE" "$out"; then got=san
     elif grep -q "ERROR: LeakSanitizer" "$out"; then got=leak
     elif [ "$rc" -eq 124 ]; then got=timeout

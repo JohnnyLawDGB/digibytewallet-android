@@ -288,6 +288,9 @@ static void arm_no_connection(void)
     check(array_count(m->publishedTx) == 0, "the publish list holds nothing");
     checkReleasedOnce(tx, "the publisher released the object it was handed, once");
     serializeAndCheck(w, h, tx, "the wallet serializes its records after a not-connected release");
+
+    BRPeerManagerFree(m);   /* teardown: the list and the peers are the manager's, the record the wallet's */
+    BRWalletFree(w);
 }
 
 /* (2) Duplicate: an equal send is already pending, so BRPeerManagerPublishTx keeps the object
@@ -317,6 +320,9 @@ static void arm_duplicate(void)
           "the pending entry adopted the new callback");
     checkReleasedOnce(tx, "the publisher released the fresh object it was handed, once");
     serializeAndCheck(w, h, tx, "the wallet serializes its records after a duplicate release");
+
+    BRPeerManagerFree(m);   /* teardown: the list and the peers are the manager's, the record the wallet's */
+    BRWalletFree(w);
 }
 
 /* (3) Terminal disconnect: the download peer drops at the connect-failure ceiling, so the
@@ -346,6 +352,9 @@ static void arm_terminal_disconnect(void)
     check(array_count(m->publishedTx) == 0, "the publish list holds nothing");
     checkReleasedOnce(tx, "the publisher released the object it was handed, once");
     serializeAndCheck(w, h, tx, "the wallet serializes its records after a terminal disconnect");
+
+    BRPeerManagerFree(m);   /* teardown: the list and the peers are the manager's, the record the wallet's */
+    BRWalletFree(w);
 }
 
 /* (4) Timeout with no surviving publish peer: the one handshook peer times out and nothing is
@@ -375,6 +384,9 @@ static void arm_timeout_zero_survivors(void)
     check(array_count(m->publishedTx) == 0, "the publish list holds nothing");
     checkReleasedOnce(tx, "the publisher released the object it was handed, once");
     serializeAndCheck(w, h, tx, "the wallet serializes its records after a broadcast timeout");
+
+    BRPeerManagerFree(m);   /* teardown: the list and the peers are the manager's, the record the wallet's */
+    BRWalletFree(w);
 }
 
 /* (5) Re-publish of a registered send: the wallet already holds its record (the 90-second

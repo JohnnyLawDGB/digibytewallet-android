@@ -71,6 +71,12 @@ static void whole(BRWallet *w, BRTransaction *C, BRTransaction *T, const char *l
     if (s) BRTransactionFree(s);
 }
 
+// A tx the wallet refused stays its caller's: before the wallet goes, free each one the wallet does not
+// hold (a refused tx is never released by the wallet, and none of these is removed from it).
+static void releaseIfRefused(BRWallet *w, BRTransaction *tx) {
+    if (BRWalletTransactionForHash(w, tx->txHash) != tx) BRTransactionFree(tx);
+}
+
 static BRWallet *g_w; static BRTransaction *g_T; static int g_r = -1;
 static void *regThread(void *a) { (void)a; g_r = BRWalletRegisterTransaction(g_w, g_T); return NULL; }
 static void *validThread(void *a) { (void)a; g_r = BRWalletTransactionIsValid(g_w, g_T); return NULL; }
@@ -115,6 +121,8 @@ int main(void) {
         if (BRWalletRegisterTransaction(w, C2) == 0 || BRWalletTransactionForHash(w, C2->txHash) != C2) BRTransactionFree(C2);
         ck(BRWalletContainsAddress(w, far[150].s), "setup: the window now holds the address");
         ck(BRWalletOutpointSpent(w, C->txHash, 0) == 0, "C is not spent by the unsigned spend");
+        releaseIfRefused(w, C);
+        releaseIfRefused(w, T);
         BRWalletFree(w);
     }
 
@@ -171,6 +179,9 @@ int main(void) {
                       : "signed first: the signed send is valid, the forged one is not");
         ck(BRWalletBalance(w) == 100000000ULL - BRWalletAmountSentByTx(w, S) + BRWalletAmountReceivedFromTx(w, S),
            "  ... and the balance is C less what the signed send spends");
+        releaseIfRefused(w, F);
+        releaseIfRefused(w, C);
+        if (S && ! regS) BRTransactionFree(S);
         BRWalletFree(w);
     }
 

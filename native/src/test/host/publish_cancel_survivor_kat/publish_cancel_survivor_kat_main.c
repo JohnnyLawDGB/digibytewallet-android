@@ -169,6 +169,8 @@ static void test_survivor_keeps_publish_alive(void)
         check(m->publishedTx[0].callback == recordPublishResult,
               "the callback is still armed for the real verdict");
     }
+    BRPeerManagerFree(m);   /* teardown: any entry still listed is answered and released here */
+    BRWalletFree(wallet);
 }
 
 /* THE OTHER DIRECTION. Nothing left to carry it — cancelling is correct, and must still happen.
@@ -189,6 +191,8 @@ static void test_last_peer_still_cancels(void)
     check(g_cbCount == 1, "the publish callback fired exactly once");
     check(g_cbError == ETIMEDOUT, "and reported ETIMEDOUT, the real cause");
     check(array_count(m->publishedTx) == 0, "the publish was removed from the pending list");
+    BRPeerManagerFree(m);   /* teardown: any entry still listed is answered and released here */
+    BRWalletFree(wallet);
 }
 
 /* A peer that never handshook was never sent an inv, so it cannot keep a publish alive either.
@@ -210,6 +214,8 @@ static void test_only_unhandshook_peers_left(void)
 
     check(g_cbCount == 1, "the publish callback fired — the half-open peer cannot carry it");
     check(g_cbError == ETIMEDOUT, "and reported ETIMEDOUT");
+    BRPeerManagerFree(m);   /* teardown: any entry still listed is answered and released here */
+    BRWalletFree(wallet);
 }
 
 /* Re-publishing a send that is still pending (exactly what the 90s stranded sweep does, and
@@ -236,10 +242,16 @@ static void test_duplicate_publish_adopts_tracking(void)
           "the untracked entry adopted the fresh callback");
     check(adopted == 0,
           "and reported 'not newly added', so the caller knows it still owns its copy");
+    BRPeerManagerFree(m);   /* teardown: any entry still listed is answered and released here */
+    BRWalletFree(wallet);
 }
 
 int main(void)
 {
+    /* Unbuffered: LeakSanitizer ends a leaking run with _exit, which drops buffered output, and the
+     * red arm's gate reads that output. */
+    setvbuf(stdout, NULL, _IONBF, 0);
+
 #ifdef PUBLISH_SURVIVOR_UNFIXED
     printf("ARM: UNFIXED (-DPUBLISH_SURVIVOR_UNFIXED) — any handshook peer's timeout cancels "
            "every pending publish\n");
