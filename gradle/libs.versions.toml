@@ -29,7 +29,7 @@ androidxHilt = "1.2.0"
 room = "2.8.5"
 lifecycle = "2.8.7"
 camerax = "1.4.1"
-coroutines = "1.8.1"
+coroutines = "1.11.0"
 
 # --- Standalone libraries ----------------------------------------------------
 activityCompose = "1.9.3"
