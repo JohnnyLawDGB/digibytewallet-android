@@ -1624,7 +1624,9 @@ class SyncService : Service() {
                     runCatching { NativeBridge.rerequestHeadersFromTip() }
                     // An own node keeps the pin slot (BROwnNodeWatchdogMayPin): pinning a canon
                     // peer over it would drop an exclusive node to public peers for the session.
-                    val fp = if (NativeBridge.ownNodeWatchdogMayPin(ownNodePinned)) nextValidatedFilterPeer(pinRotation++) else null
+                    // The rotation advances either way, as iOS's does, so both pick the same peer next.
+                    val rotation = pinRotation++
+                    val fp = if (NativeBridge.ownNodeWatchdogMayPin(ownNodePinned)) nextValidatedFilterPeer(rotation) else null
                     if (fp != null) {
                         android.util.Log.i(
                             "SyncService",
@@ -1946,7 +1948,9 @@ class SyncService : Service() {
                     corruptHeals++
                     lastCorruptHealMs = nowMs
                     // No canon pin over an own node (BROwnNodeWatchdogMayPin); the heal still runs.
-                    val fp = if (NativeBridge.ownNodeWatchdogMayPin(ownNodePinned)) nextValidatedFilterPeer(corruptHealRotation++) else null
+                    // The rotation advances either way, as the core's does for iOS (BRBip158WatchdogStep).
+                    val rotation = corruptHealRotation++
+                    val fp = if (NativeBridge.ownNodeWatchdogMayPin(ownNodePinned)) nextValidatedFilterPeer(rotation) else null
                     android.util.Log.w("SyncService",
                         "BIP158 watchdog: filter chain WEDGED at $cfTipNow after re-anchor " +
                         "(heal $corruptHeals/$MAX_CF_CORRUPT_HEALS) — persisted chain looks corrupt; " +
