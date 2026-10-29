@@ -17,6 +17,10 @@
 #   * UNFIXED (-DCHECKPOINT_ALIAS_UNFIXED): frees unconditionally. ASan MUST report
 #     heap-use-after-free. This build MUST FAIL.
 #   * FIXED (no flag): the checkpoint-identity guard is live. MUST PASS.
+#   * LEAK ARM (-DCHECKPOINT_RELEASE_UNFIXED, Linux only: it needs LeakSanitizer): the checkpoint
+#     stubs the prune spared stay in manager->checkpoints alone, and BRPeerManagerFree used to
+#     release only the blocks and orphans sets' contents. LeakSanitizer MUST report them; the
+#     FIXED build runs with LeakSanitizer on and MUST NOT.
 #
 # DETERMINISTIC -- no threads, no timing, fails 100% of the time when unfixed. The red arm must
 # fail on an ASan report or one of the KAT's own assertions, never merely on a nonzero exit.
@@ -67,11 +71,9 @@ build() {
         -o "$out"
 }
 
-# LeakSanitizer OFF for both arms. This KAT deliberately does not tear the manager down, so LSan
-# reports ~900 KB and exits nonzero on its own — which masks the result completely: the red arm
-# "failed" for the wrong reason and the gate correctly rejected it. Leaks are not what this gate
-# measures.
-export ASAN_OPTIONS=detect_leaks=0
+# LeakSanitizer stays on where the platform has it (Linux). The KAT frees the manager and the wallet
+# at the end; before it did, LSan reported ~900 KB and exited nonzero on its own, masking the result.
+# The red arm stops at its use-after-free report, before any leak check.
 
 echo "=== building UNFIXED (red arm: checkpoint-identity guard compiled out) ==="
 if ! build "$BUILD_DIR/kat_unfixed" -DCHECKPOINT_ALIAS_UNFIXED; then
@@ -105,9 +107,37 @@ fi
 grep -E "heap-use-after-free|\[FAIL\]" "$RED_OUT" | head -3 | sed 's/^/  red: /'
 echo "(red arm reported use-after-free on a freed checkpoint, as required)"
 
+HAVE_LSAN=0
+[ "$(uname -s)" = Linux ] && HAVE_LSAN=1
+
+if [ "$HAVE_LSAN" -eq 1 ]; then
+    echo
+    echo "---- LEAK ARM: LeakSanitizer must report the spared checkpoint stubs ----"
+    if ! build "$BUILD_DIR/kat_leak" -DCHECKPOINT_RELEASE_UNFIXED; then
+        echo "BUILD FAILURE (leak arm)"; exit 1
+    fi
+    LEAK_OUT="$BUILD_DIR/leak.out"
+    if LSAN_OPTIONS=detect_leaks=1 ASAN_OPTIONS=detect_leaks=1 "$BUILD_DIR/kat_leak" > "$LEAK_OUT" 2>&1; then
+        cat "$LEAK_OUT"
+        echo "GATE FAILURE: the leak arm passed: the teardown leak is not what this run measures."
+        exit 1
+    fi
+    if ! grep -q "ERROR: LeakSanitizer" "$LEAK_OUT" || ! grep -q "checkpoint_alias_uaf_kat: PASS" "$LEAK_OUT"; then
+        cat "$LEAK_OUT"
+        echo "GATE FAILURE: the leak arm failed, but not on a leak report after its checks passed."
+        exit 1
+    fi
+    grep -E "SUMMARY: AddressSanitizer" "$LEAK_OUT" | sed 's/^/  leak: /'
+    echo "(leak arm reported the spared checkpoint stubs, as required)"
+else
+    echo
+    echo "(leak arm skipped: no LeakSanitizer on $(uname -s))"
+fi
+
 echo
 echo "---- GREEN ARM: must PASS ----"
-if ! "$BUILD_DIR/kat_fixed"; then
+if [ "$HAVE_LSAN" -eq 1 ]; then GREEN_LSAN=detect_leaks=1; else GREEN_LSAN="${LSAN_OPTIONS:-}"; fi
+if ! LSAN_OPTIONS="$GREEN_LSAN" "$BUILD_DIR/kat_fixed"; then
     echo "GATE FAILURE: the FIXED build did not pass."
     exit 1
 fi
