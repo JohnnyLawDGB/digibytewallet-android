@@ -237,8 +237,9 @@ class WalletViewModel @Inject constructor(
      *  anti-flash balance guard: before first Complete we protect the
      *  UI from flashing to 0 during initial discovery; after first
      *  Complete we always trust the native balance so sends actually
-     *  debit the displayed amount. */
-    @Volatile private var hasReachedSyncedOnce: Boolean = false
+     *  debit the displayed amount. Process-wide, shared with Network Info:
+     *  [WalletManager.syncFrontierSession] latches it from the derived frontier. */
+    private val hasReachedSyncedOnce: Boolean get() = walletManager.syncFrontierSession.reachedSynced
 
     /** First wall-clock time we observed peers=0 in the current stall.
      *  0 means "not currently stalled". Set to `now` on the first zero,
@@ -295,7 +296,14 @@ class WalletViewModel @Inject constructor(
         // Network Info screen and the DigiRunner overlay (see deriveSyncFrontier
         // in core.model). Keeping this derivation in one place is what stops the
         // main screen and Network Info from disagreeing about "Synced".
-        val frontier = deriveSyncFrontier(
+        //
+        // Derived through the process-wide session, which hands deriveSyncFrontier the
+        // previous derivation's "reached Synced this session" latch and latches it from
+        // this one (Synced, or an un-recovered band as the only hold). Network Info derives
+        // through the same session, so the two cannot disagree on the lead rule. The latch
+        // also gates the anti-flash balance guard in pollNativeBalance, so post-sync sends
+        // correctly debit the shown balance (the "4 DGB shown but all spent" symptom).
+        val frontier = walletManager.syncFrontierSession.derive(
             state = state,
             peerCount = peers,
             currentHeight = current,
@@ -304,22 +312,7 @@ class WalletViewModel @Inject constructor(
             cfTip = cfTip,
             scanFrontier = scanFrontier,
             abandonedBandUnrecovered = abandonedBand != null,
-            // The previous emission's latch (set just below): "this process has already
-            // derived Synced". Lets the lead rule treat an implausibly far target as
-            // unproven, without touching a cold start whose Complete is sticky from prefs.
-            reachedSyncedThisSession = hasReachedSyncedOnce,
         )
-
-        // Latch hasReachedSyncedOnce — gates the anti-flash balance guard in
-        // pollNativeBalance so that post-sync sends correctly debit the shown balance.
-        // ALSO latches when an un-recovered abandoned band is the only thing
-        // withholding Synced: the scan itself HAS finished, so the native balance is
-        // authoritative, and without this a wallet with a surfaced band could never
-        // show a genuine spend-to-zero (the guard would pin the stale higher value
-        // forever — the original "4 DGB shown but all spent" symptom).
-        if (frontier.stage == SyncStage.Synced || frontier.abandonedBandHolding) {
-            hasReachedSyncedOnce = true
-        }
 
         // ETA and blocks-remaining from the SAME frontier the bar uses (the CF scan
         // frontier under the convoy), so "% · N remaining" can't be three different
