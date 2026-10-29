@@ -7,10 +7,9 @@ import org.junit.Test
 import java.io.File
 
 /**
- * Source gate: the sync service never resolves the own-node host name itself. Both places that
- * need the node's address (pinning it, and the health poll) ask [OwnNodeAddress] with the user's
- * Tor setting, which refuses a host name while Tor is on rather than handing it to the device's
- * resolver. What [OwnNodeAddress] answers is covered by `OwnNodeAddressTest`.
+ * Source gate: the sync service never resolves the own-node host name itself. The pin asks
+ * [OwnNodeAddress] with the user's Tor setting, which refuses a host name while Tor is on rather
+ * than handing it to the device's resolver; the health poll reads the address the pin used. What [OwnNodeAddress] answers is covered by `OwnNodeAddressTest`.
  */
 class OwnNodeLookupGateTest {
 
@@ -28,12 +27,19 @@ class OwnNodeLookupGateTest {
         }
     }
 
-    @Test fun `both own-node sites ask for the address with the Tor setting`() {
-        for (site in listOf("injectCustomNode", "refreshOwnNodeHealth")) {
-            val asks = sync.calls("OwnNodeAddress.resolve", body(site))
-            assertEquals("$site does not ask OwnNodeAddress exactly once", 1, asks.size)
-            assertEquals("$site does not pass the user's Tor setting",
-                "torManager.isEnabled", asks.single().named["torEnabled"])
-        }
+    @Test fun `the pin asks for the address with the Tor setting`() {
+        val asks = sync.calls("OwnNodeAddress.resolve", body("injectCustomNode"))
+        assertEquals("injectCustomNode does not ask OwnNodeAddress exactly once", 1, asks.size)
+        assertEquals("injectCustomNode does not pass the user's Tor setting",
+            "torManager.isEnabled", asks.single().named["torEnabled"])
+    }
+
+    // The health poll reads the address the pin used, as iOS does: a second lookup could land on
+    // another address of the same host name and reset the core's health record each poll.
+    @Test fun `the health poll makes no lookup and reads the pinned address`() {
+        val poll = body("refreshOwnNodeHealth")
+        assertTrue("refreshOwnNodeHealth looks the node up itself", sync.calls("OwnNodeAddress.resolve", poll).isEmpty())
+        assertTrue("refreshOwnNodeHealth does not read ownNodePinnedAddr",
+            Regex("""(?<!\w)ownNodePinnedAddr(?!\w)""").containsMatchIn(sync.code.substring(poll)))
     }
 }
