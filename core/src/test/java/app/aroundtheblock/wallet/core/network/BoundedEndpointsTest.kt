@@ -9,6 +9,8 @@ import app.aroundtheblock.wallet.core.asset.network.DigistampAssetClient
 import app.aroundtheblock.wallet.core.asset.send.StackEntry
 import app.aroundtheblock.wallet.core.asset.send.StackLookup
 import app.aroundtheblock.wallet.core.digiscope.DigiScopeClient
+import app.aroundtheblock.wallet.core.digiscope.HubImageUpload
+import app.aroundtheblock.wallet.core.digiscope.HubReportResult
 import app.aroundtheblock.wallet.core.digistamp.DigistampClient
 import app.aroundtheblock.wallet.core.ipfs.CidVerifier
 import app.aroundtheblock.wallet.core.ipfs.IpfsClient
@@ -108,6 +110,11 @@ class BoundedEndpointsTest {
         // The score is accepted on the status; its answer is read only for the log.
         Case("hub game score answer", HUB_SMALL, true) { hub(it).submitDigiRunnerScore(1, 1, 1, 1) },
         Case("hub messages", HUB_LIST, emptyList<Any>()) { hub(it).getMessages(1) },
+        // The upload's answer is { id, url, width, height }; one over the cap is no upload.
+        Case("hub image upload", HUB_SMALL, HubImageUpload.Failed(status = 200)) {
+            hub(it).uploadImage(byteArrayOf(1, 2, 3), "image/png")
+        },
+        Case("hub report", HUB_SMALL, HubReportResult.FAILED) { hub(it).reportMessage(1) },
         // Releases (sideload builds)
         Case("update check, latest release", RELEASES, null) { UpdateChecker(it, REPO).checkForUpdate("0.0.1") },
         Case("update check, release list", RELEASES, null) {

@@ -48,7 +48,7 @@ class ChatReconnectWaitTest {
         val dao = mockk<CachedMessageDao>(relaxed = true)
         every { dao.getMessagesForChannel(any()) } returns flowOf(emptyList())
         val identity = mockk<HubIdentity>(relaxed = true)
-        chat = ChatViewModel(client, socket, dao, identity)
+        chat = ChatViewModel(client, socket, dao, identity, mockk(relaxed = true))
     }
 
     @After fun tearDown() {

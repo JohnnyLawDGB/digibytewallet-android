@@ -33,7 +33,7 @@ class HubWebSocket(
 
         /**
          * The largest frame the Hub socket accepts, in bytes of payload: 64 KiB. A chat message is
-         * at most 2,000 characters (ChatView), far below this as JSON.
+         * at most 2,000 characters (ChatView), far below this as JSON, with its attachment and preview.
          */
         const val MAX_FRAME_BYTES = 64L * 1024
 
@@ -220,15 +220,19 @@ class HubWebSocket(
     private fun joinFrame(channelId: Int): String =
         JSONObject().put("type", "join").put("channelId", channelId).toString()
 
-    fun sendMessage(channelId: Int, content: String, signature: String) {
-        sendAuthorized(
-            JSONObject()
-                .put("type", "message")
-                .put("channelId", channelId)
-                .put("content", content)
-                .put("signature", signature)
-                .toString()
-        )
+    /**
+     * A chat post. [attachmentId] is the id `POST /hub/images` answered with, sent as `attachmentId`
+     * (hub-ws.js reads that name); with one, [content] may be empty. Without one the frame is
+     * exactly what it was before images.
+     */
+    fun sendMessage(channelId: Int, content: String, signature: String, attachmentId: Int? = null) {
+        val frame = JSONObject()
+            .put("type", "message")
+            .put("channelId", channelId)
+            .put("content", content)
+            .put("signature", signature)
+        if (attachmentId != null) frame.put("attachmentId", attachmentId)
+        sendAuthorized(frame.toString())
     }
 
     fun sendTyping(channelId: Int) {
@@ -243,16 +247,28 @@ class HubWebSocket(
                     channelId = json.getInt("channelId"),
                     message = ChatMessage(
                         id = json.optInt("id"),
-                        content = json.getString("content"),
+                        // An image-only post carries empty text.
+                        content = HubJson.text(json, "content") ?: "",
                         from = UserInfo(
                             handle = from?.optString("handle"),
-                            address = from?.optString("address") ?: ""
+                            address = from?.optString("address") ?: "",
+                            userId = from?.let { HubJson.intOrNull(it, "userId") },
                         ),
                         timestamp = json.optLong("timestamp", System.currentTimeMillis()),
-                        signature = json.optString("signature", "")
+                        signature = json.optString("signature", ""),
+                        attachment = HubJson.attachment(json),
+                        preview = HubJson.preview(json),
                     )
                 )
             }
+            // hub-ws.js broadcastPreview: { type, channelId, messageId, preview }
+            "preview" -> WebSocketEvent.Preview(
+                channelId = json.getInt("channelId"),
+                messageId = json.getInt("messageId"),
+                preview = HubJson.previewObject(json.optJSONObject("preview")),
+            )
+            // hub-ws.js broadcastDeleted: { type, channelId, id }
+            "deleted" -> WebSocketEvent.Deleted(channelId = json.getInt("channelId"), id = json.getInt("id"))
             "typing" -> {
                 val from = json.optJSONObject("from")
                 WebSocketEvent.Typing(
@@ -267,7 +283,10 @@ class HubWebSocket(
                 channelId = json.getInt("channelId"),
                 count = json.getInt("count")
             )
-            "error" -> WebSocketEvent.Error(json.optString("message", "Unknown error"))
+            "error" -> WebSocketEvent.Error(
+                message = HubJson.text(json, "message") ?: "Unknown error",
+                code = HubJson.text(json, "code"),
+            )
             else -> null
         }
     }

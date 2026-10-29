@@ -46,7 +46,8 @@ class HubPostSigningTest {
         every { identity.sign(any()) } answers { signed += firstArg<String>(); signature }
         every { client.isLoggedIn() } returns false
         coEvery { client.getMessages(any(), any(), any()) } returns emptyList()
-        every { socket.connectionState } returns MutableStateFlow(ConnectionState.DISCONNECTED)
+        // Connected: a post is sent only while the socket is up.
+        every { socket.connectionState } returns MutableStateFlow(ConnectionState.CONNECTED)
         every { socket.messages } returns MutableSharedFlow<WebSocketEvent>()
         every { socket.reconnectDelayMs() } returns 5_000L
     }
@@ -59,7 +60,7 @@ class HubPostSigningTest {
     private fun chat(): ChatViewModel {
         val dao = mockk<CachedMessageDao>(relaxed = true)
         every { dao.getMessagesForChannel(any()) } returns flowOf(emptyList())
-        return ChatViewModel(client, socket, dao, identity).also { opened += it }
+        return ChatViewModel(client, socket, dao, identity, mockk(relaxed = true)).also { opened += it }
     }
 
     @Test fun `a chat message with spaces around it is signed exactly as it is sent`() {

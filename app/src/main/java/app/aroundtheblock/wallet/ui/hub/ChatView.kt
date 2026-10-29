@@ -1,6 +1,10 @@
 package app.aroundtheblock.wallet.ui.hub
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -31,6 +35,7 @@ import androidx.compose.ui.res.stringResource
 import app.aroundtheblock.wallet.R
 import app.aroundtheblock.wallet.ui.components.rememberSpendAuth
 import kotlinx.coroutines.launch
+import app.aroundtheblock.wallet.core.hub.ChatAttachment
 import app.aroundtheblock.wallet.core.hub.ChatMessage
 import app.aroundtheblock.wallet.core.hub.ConnectionState
 import app.aroundtheblock.wallet.ui.theme.DigiByteAccent
@@ -68,6 +73,18 @@ fun ChatScreen(
     val typingUsers by viewModel.typingUsers.collectAsStateWithLifecycle()
     val onlineCount by viewModel.onlineCount.collectAsStateWithLifecycle()
     val sendError by viewModel.sendError.collectAsStateWithLifecycle()
+    val notice by viewModel.notice.collectAsStateWithLifecycle()
+    val canPost by viewModel.canPost.collectAsStateWithLifecycle()
+    val pendingImage by viewModel.pendingImage.collectAsStateWithLifecycle()
+    val uploading by viewModel.uploading.collectAsStateWithLifecycle()
+    val myUserId by viewModel.myUserId.collectAsStateWithLifecycle()
+    var fullImage by remember { mutableStateOf<ChatAttachment?>(null) }
+
+    // The system photo picker: the app gets a read grant for the one image picked, and needs no
+    // storage permission.
+    val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        viewModel.attachImage(uri)
+    }
 
     // A message is signed with the wallet's identity, so it takes the same gate as a spend.
     val spendAuth = rememberSpendAuth()
@@ -100,10 +117,13 @@ fun ChatScreen(
         Box(modifier = Modifier.weight(1f)) {
             MessageList(
                 messages = messages,
-                myAddress = viewModel.myAddress,
-                onLoadMore = { viewModel.loadMoreHistory() }
+                isMine = { message -> isOwnMessage(message, myUserId, viewModel.myAddress) },
+                onLoadMore = { viewModel.loadMoreHistory() },
+                onReport = { id -> viewModel.report(id) },
+                onOpenImage = { attachment -> fullImage = attachment },
             )
         }
+        fullImage?.let { attachment -> HubImageViewer(attachment = attachment, onDismiss = { fullImage = null }) }
 
         // ── Typing indicator ──────────────────────────────────────────────
         if (typingUsers.isNotEmpty()) {
@@ -118,46 +138,48 @@ fun ChatScreen(
             )
         }
 
-        // ── Send error ────────────────────────────────────────────────────
-        sendError?.let { err ->
-            Surface(
-                color = MaterialTheme.colorScheme.errorContainer,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { viewModel.clearSendError() }
-            ) {
-                Text(
-                    text = err,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
-                )
-            }
-        }
+        // ── The server's words for a refused post, or a fixed notice ─────
+        ChatBanners(
+            sendError = sendError,
+            notice = notice?.let { stringResource(noticeText(it)) },
+            onClearError = { viewModel.clearSendError() },
+            onClearNotice = { viewModel.clearNotice() },
+        )
 
         // ── Account: sign in, or choose a handle ──────────────────────────
         accountStrip()
 
-        // ── Input bar ─────────────────────────────────────────────────────
-        MessageInputBar(
-            enabled = isLoggedIn,
-            onSend = { content, sent ->
-                if (!signing) {
-                    signing = true
-                    signScope.launch {
-                        try {
-                            if (spendAuth.authorize(context as? androidx.fragment.app.FragmentActivity, signTitle, signSubtitle)) {
-                                viewModel.sendMessage(content)
-                                sent()
+        // ── Input bar, or what to do to be able to post ───────────────────
+        // The server is the boundary (it refuses a post below Trust Level 2); this only spares
+        // the user a composer that cannot send.
+        if (isLoggedIn && canPost == false) {
+            PostGateNote()
+        } else {
+            MessageInputBar(
+                enabled = isLoggedIn,
+                pendingImage = pendingImage,
+                uploading = uploading,
+                onPickImage = {
+                    pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                },
+                onRemoveImage = { viewModel.removeImage() },
+                onSend = { content, sent ->
+                    if (!signing) {
+                        signing = true
+                        signScope.launch {
+                            try {
+                                if (spendAuth.authorize(context as? androidx.fragment.app.FragmentActivity, signTitle, signSubtitle)) {
+                                    viewModel.sendMessage(content, sent)
+                                }
+                            } finally {
+                                signing = false
                             }
-                        } finally {
-                            signing = false
                         }
                     }
-                }
-            },
-            onTyping = { viewModel.sendTypingIndicator() }
-        )
+                },
+                onTyping = { viewModel.sendTypingIndicator() }
+            )
+        }
     }
 }
 
@@ -247,8 +269,10 @@ private fun ConnectionDot(state: ConnectionState) {
 @Composable
 private fun MessageList(
     messages: List<ChatMessage>,
-    myAddress: String,
-    onLoadMore: () -> Unit
+    isMine: (ChatMessage) -> Boolean,
+    onLoadMore: () -> Unit,
+    onReport: (Int) -> Unit,
+    onOpenImage: (ChatAttachment) -> Unit,
 ) {
     val listState = rememberLazyListState()
 
@@ -299,7 +323,9 @@ private fun MessageList(
         items(messages, key = { it.id }) { message ->
             MessageBubble(
                 message = message,
-                isMe = message.from.address == myAddress
+                isMe = isMine(message),
+                onReport = { onReport(message.id) },
+                onOpenImage = onOpenImage,
             )
         }
     }
@@ -307,11 +333,15 @@ private fun MessageList(
 
 // ── Message bubble ────────────────────────────────────────────────────────
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun MessageBubble(
     message: ChatMessage,
-    isMe: Boolean = false
+    isMe: Boolean = false,
+    onReport: () -> Unit = {},
+    onOpenImage: (ChatAttachment) -> Unit = {},
 ) {
+    var menuOpen by remember { mutableStateOf(false) }
     val isEnigma = message.from.handle?.equals(ENIGMA_HANDLE, ignoreCase = true) == true
 
     val bubbleColor = when {
@@ -397,22 +427,26 @@ private fun MessageBubble(
             }
 
             // ── Content bubble ────────────────────────────────────────────
-            Surface(
-                color = bubbleColor,
-                shape = RoundedCornerShape(
-                    topStart = if (isEnigma) 0.dp else 8.dp,
-                    topEnd = 8.dp,
-                    bottomStart = 8.dp,
-                    bottomEnd = 8.dp
-                ),
-                modifier = Modifier.padding(top = 2.dp)
-            ) {
-                Text(
-                    text = message.content,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                )
+            // Long-press offers Report on anyone else's message.
+            Box {
+                Surface(
+                    color = bubbleColor,
+                    shape = RoundedCornerShape(
+                        topStart = if (isEnigma) 0.dp else 8.dp,
+                        topEnd = 8.dp,
+                        bottomStart = 8.dp,
+                        bottomEnd = 8.dp
+                    ),
+                    modifier = Modifier
+                        .padding(top = 2.dp)
+                        .combinedClickable(
+                            onClick = {},
+                            onLongClick = { if (!isMe) menuOpen = true },
+                        )
+                ) {
+                    BubbleContent(message, onOpenImage)
+                }
+                ReportMenu(expanded = menuOpen, onDismiss = { menuOpen = false }, onReport = onReport)
             }
         }
     }
@@ -423,13 +457,20 @@ private fun MessageBubble(
 @Composable
 private fun MessageInputBar(
     enabled: Boolean,
+    pendingImage: android.net.Uri?,
+    uploading: Boolean,
+    onPickImage: () -> Unit,
+    onRemoveImage: () -> Unit,
     onSend: (text: String, sent: () -> Unit) -> Unit,
     onTyping: () -> Unit
 ) {
     var text by remember { mutableStateOf("") }
-    // The field is emptied once the message has gone: one whose signing was declined stays, to send again.
+    // An image may go alone: a post needs text, an image, or both.
+    val canSend = enabled && !uploading && (text.isNotBlank() || pendingImage != null)
+    // The field is emptied once the message has gone: one whose signing was declined, or whose
+    // image did not upload, stays, to send again.
     val send = {
-        if (text.isNotBlank() && enabled) {
+        if (canSend) {
             val typed = text
             onSend(typed) { if (text == typed) text = "" }
         }
@@ -457,6 +498,10 @@ private fun MessageInputBar(
                 )
             }
 
+            if (pendingImage != null) {
+                PendingImageRow(pendingImage = pendingImage, uploading = uploading, onRemove = onRemoveImage)
+            }
+
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -464,6 +509,8 @@ private fun MessageInputBar(
                 verticalAlignment = Alignment.Bottom,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                AttachImageButton(enabled = enabled && !uploading, onClick = onPickImage)
+
                 OutlinedTextField(
                     value = text,
                     onValueChange = { newVal ->
@@ -490,28 +537,25 @@ private fun MessageInputBar(
                     shape = RoundedCornerShape(20.dp)
                 )
 
-                IconButton(
-                    onClick = { send() },
-                    enabled = enabled && text.isNotBlank(),
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(CircleShape)
-                        .background(
-                            if (enabled && text.isNotBlank()) DigiByteBlue
-                            else MaterialTheme.colorScheme.surfaceVariant
-                        )
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.Send,
-                        contentDescription = "Send",
-                        tint = if (enabled && text.isNotBlank()) Color.White
-                               else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
+                SendButton(enabled = canSend, onClick = { send() })
             }
         }
     }
+}
+
+/** The words for a fixed chat notice. */
+private fun noticeText(notice: ChatNotice): Int = when (notice) {
+    ChatNotice.REPORTED -> R.string.hub_report_sent
+    ChatNotice.REPORT_GONE -> R.string.hub_report_gone
+    ChatNotice.REPORT_LIMITED -> R.string.hub_report_limited
+    ChatNotice.REPORT_FAILED -> R.string.hub_report_failed
+    ChatNotice.IMAGE_UNREADABLE -> R.string.hub_image_unreadable
+    ChatNotice.IMAGE_WRONG_TYPE -> R.string.hub_image_wrong_type
+    ChatNotice.IMAGE_TOO_LARGE -> R.string.hub_image_too_large
+    ChatNotice.IMAGE_NOT_PREPARED -> R.string.hub_image_not_prepared
+    ChatNotice.IMAGE_TOO_MANY_PIXELS -> R.string.hub_image_too_many_pixels
+    ChatNotice.NOT_CONNECTED -> R.string.hub_not_connected
+    ChatNotice.UPLOAD_FAILED -> R.string.hub_upload_failed
 }
 
 // ── Time-ago helper ───────────────────────────────────────────────────────
