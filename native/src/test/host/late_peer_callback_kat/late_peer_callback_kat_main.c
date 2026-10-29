@@ -18,7 +18,9 @@
  * _peerDisconnected called directly, as the thread calls it after its drain.
  *
  * RED ARM: -DPEER_LATE_CALLBACK_UNFIXED compiles the answer out of _peerDisconnected. Every
- * "answered" check then fails, and on Linux LeakSanitizer reports the publish path's lost context.
+ * "answered" check then fails, the publish path's included (counted through a wrapper in front of its
+ * _publishTxInvDone pong, so it fails on every platform), and on Linux LeakSanitizer also reports
+ * the publish path's lost context.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -129,6 +131,22 @@ static void answered(void *info, int success)
     else a->lockFree = 0;
 }
 
+// Stands in front of the publish path's own pong callback so the scenario can count its answer on
+// every platform (LeakSanitizer reports the lost context only on Linux).
+typedef struct {
+    void (*cb)(void *, int);
+    void *info;
+    int calls, lastSuccess;
+} Wrapped;
+
+static void wrappedPong(void *info, int success)
+{
+    Wrapped *w = info;
+    w->calls++;
+    w->lastSuccess = success;
+    w->cb(w->info, success);   // _publishTxInvDone: frees its BRPeerCallbackInfo
+}
+
 int main(void)
 {
     // Unbuffered: LeakSanitizer ends a leaking run with _exit, which would drop buffered output, and
@@ -199,9 +217,15 @@ int main(void)
         BRPeerManagerPublishTx(m, makeSend(w, 0x11), NULL, NULL);
         size_t queued = _BRPeerPongPending((BRPeerContext *)p);
         check(queued == 1, "(fixture) the publish queued one pong on the peer");
+        Wrapped pub = { NULL, NULL, 0, -1 };
+        if (! _BRPeerPongPop((BRPeerContext *)p, &pub.cb, &pub.info)) pub.cb = NULL;
+        check(pub.cb == _publishTxInvDone && pub.info != NULL, "(fixture) it is the publish's _publishTxInvDone pong");
+        if (pub.cb) _BRPeerPongPush((BRPeerContext *)p, &pub, wrappedPong);
         ((BRPeerContext *)p)->status = BRPeerStatusDisconnected;
         peerThreadExit(m, p, ECONNRESET);
         check(array_count(m->connectedPeers) == 0, "(fixture) the peer is gone");
+        check(pub.calls == 1, "the publish's pong was answered");
+        check(pub.lastSuccess == 0, "the publish's pong was answered with success 0");
 
         BRPeerManagerFree(m);
         BRWalletFree(w);

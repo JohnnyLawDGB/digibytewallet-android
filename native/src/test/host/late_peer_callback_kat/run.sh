@@ -9,7 +9,8 @@
 # ==== RED-BEFORE-GREEN GATE ==================================================
 # Both arms compile IDENTICAL assertions.
 #   * RED (-DPEER_LATE_CALLBACK_UNFIXED): the answer in _peerDisconnected is compiled out, so the
-#     late callback is dropped with the peer. MUST FAIL, on "the late pong was answered".
+#     late callback is dropped with the peer. MUST FAIL, on "the late pong was answered",
+#     "the late mempool request was answered" and "the publish's pong was answered".
 #   * GREEN: MUST PASS.
 # LeakSanitizer stays on where the platform has it (Linux): the publish scenario's lost context is
 # a leak and nothing else, and this suite frees everything it allocates.
@@ -81,7 +82,8 @@ fi
 grep -E "^   (PASS|FAIL)|^--|ARM:" "$RED_OUT" | sed 's/^/  red: /'
 # A red arm that fails for another reason (a crash, a sanitizer fault) proves nothing.
 if ! grep -q "FAIL: the late pong was answered$" "$RED_OUT" ||
-   ! grep -q "FAIL: the late mempool request was answered$" "$RED_OUT"; then
+   ! grep -q "FAIL: the late mempool request was answered$" "$RED_OUT" ||
+   ! grep -q "FAIL: the publish's pong was answered$" "$RED_OUT"; then
     echo
     echo "GATE FAILURE: the red arm failed, but NOT on the late-callback assertions."
     exit 1
