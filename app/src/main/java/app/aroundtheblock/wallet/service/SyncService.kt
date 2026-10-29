@@ -190,6 +190,16 @@ class SyncService : Service() {
      */
     @Volatile private var ownNodeAdditiveSessionOverride = false
 
+    /** True while injectCustomNode has the own node in the peer manager's pin slot. The sync
+     *  watchdogs ask the core (BROwnNodeWatchdogMayPin) before they pin a canon peer or clear
+     *  the slot, so an own node (exclusive or not) keeps its pin for the session. */
+    @Volatile private var ownNodePinned = false
+
+    /** The core's run record for the own-node health poll (BROwnNodeHealthTrack: runStart,
+     *  lastPoll, inRun), zeroed whenever the polled node changes. Guarded by itself. */
+    private val ownNodeHealthTrack = LongArray(3)
+    private var ownNodeHealthTrackKey: String? = null
+
     /** Set true when an onSyncComplete fires IN THIS PROCESS. Distinct from the
      *  persisted has_synced flag (which is true at startup before this session
      *  verifies the tx set) — the asset prune must gate on this, not that. */
@@ -366,6 +376,8 @@ class SyncService : Service() {
             // prior "Use public peers" tap so it doesn't linger past the
             // user's explicit save.
             ownNodeAdditiveSessionOverride = false
+            // A saved change is a fresh pairing: its dials get the full connecting grace.
+            synchronized(ownNodeHealthTrack) { ownNodeHealthTrack.fill(0L); ownNodeHealthTrackKey = null }
             serviceScope.launch {
                 recreatePeerManagerResumingNearTip("own-node settings change")
             }
@@ -1544,8 +1556,11 @@ class SyncService : Service() {
                     // Recovered (or legitimately re-initialised at a new floor) — release
                     // any pinned canon peer so the pool re-diversifies. The tier-1 latch
                     // is cleared inside [TipStallState.step].
+                    // Never over an own node (BROwnNodeWatchdogMayPin): the slot holds its pin now.
                     if (pinnedThisStall) {
-                        runCatching { NativeBridge.clearPinnedPeer() }
+                        if (NativeBridge.ownNodeWatchdogMayPin(ownNodePinned)) {
+                            runCatching { NativeBridge.clearPinnedPeer() }
+                        }
                         pinnedThisStall = false
                     }
                 }
@@ -1607,7 +1622,9 @@ class SyncService : Service() {
                     // on instead of churning the junk pool. The pin is released on advance above.
                     lastFastMs = nowMs
                     runCatching { NativeBridge.rerequestHeadersFromTip() }
-                    val fp = nextValidatedFilterPeer(pinRotation++)
+                    // An own node keeps the pin slot (BROwnNodeWatchdogMayPin): pinning a canon
+                    // peer over it would drop an exclusive node to public peers for the session.
+                    val fp = if (NativeBridge.ownNodeWatchdogMayPin(ownNodePinned)) nextValidatedFilterPeer(pinRotation++) else null
                     if (fp != null) {
                         android.util.Log.i(
                             "SyncService",
@@ -1620,7 +1637,7 @@ class SyncService : Service() {
                         android.util.Log.i(
                             "SyncService",
                             "tip-stall FAST: scan frozen ${scanStalledMs / 1000}s, $peers peers — re-request " +
-                                "headers (no validated filter peer in pool to pin)"
+                                "headers (" + (if (ownNodePinned) "own node keeps the pin" else "no validated filter peer in pool to pin") + ")"
                         )
                     }
                 }
@@ -1928,7 +1945,8 @@ class SyncService : Service() {
                 ) {
                     corruptHeals++
                     lastCorruptHealMs = nowMs
-                    val fp = nextValidatedFilterPeer(corruptHealRotation++)
+                    // No canon pin over an own node (BROwnNodeWatchdogMayPin); the heal still runs.
+                    val fp = if (NativeBridge.ownNodeWatchdogMayPin(ownNodePinned)) nextValidatedFilterPeer(corruptHealRotation++) else null
                     android.util.Log.w("SyncService",
                         "BIP158 watchdog: filter chain WEDGED at $cfTipNow after re-anchor " +
                         "(heal $corruptHeals/$MAX_CF_CORRUPT_HEALS) — persisted chain looks corrupt; " +
@@ -1951,6 +1969,7 @@ class SyncService : Service() {
                     recreatePeerManagerResumingNearTip("recovery")
                     // Prefer a fully-synced canon peer for the clean re-fetch (best-effort;
                     // injectPeers already re-seeds the 16 canon nodes into the pool).
+                    // fp is null while an own node is pinned (above): the recreate re-applies its pin.
                     if (fp != null) runCatching { NativeBridge.setPinnedPeer(fp.first, fp.second, false) }
                     // Reset the frozen tracker: the clean re-fetch is a LEGITIMATE slow
                     // re-climb from the floor. Without this, cfNetMax stays pinned at the
@@ -3315,6 +3334,7 @@ class SyncService : Service() {
     private suspend fun injectCustomNode() {
         if (!CustomNodePrefs.isEnabled(this@SyncService)) {
             NativeBridge.clearPinnedPeer()
+            ownNodePinned = false
             return
         }
         // On any enabled-but-can't-pin early return below, clear the pin: the pin
@@ -3322,6 +3342,7 @@ class SyncService : Service() {
         // so a stale one would otherwise linger and be re-applied to future managers.
         val raw = CustomNodePrefs.hostPort(this@SyncService) ?: run {
             NativeBridge.clearPinnedPeer()
+            ownNodePinned = false
             return
         }
         val defaultPort = if (isTestnet(this@SyncService)) CustomNode.TESTNET_DEFAULT_PORT
@@ -3329,6 +3350,7 @@ class SyncService : Service() {
         val node = CustomNode.parse(raw, defaultPort) ?: run {
             android.util.Log.w("SyncService", "custom node enabled but address unparseable: '$raw'")
             NativeBridge.clearPinnedPeer()
+            ownNodePinned = false
             return
         }
         // While the user's Tor setting is on, a host name is refused rather than resolved: the
@@ -3343,11 +3365,13 @@ class SyncService : Service() {
                     "own node is given by host name and Tor is on — not resolved (the lookup would " +
                         "leave Tor), not pinned; an IPv4 address is needed while Tor is on")
                 NativeBridge.clearPinnedPeer()
+                ownNodePinned = false
                 return
             }
             is OwnNodeAddress.Result.Unresolved -> {
                 android.util.Log.w("SyncService", "custom node DNS resolve failed: ${node.host} (${found.reason})")
                 NativeBridge.clearPinnedPeer()
+                ownNodePinned = false
                 return
             }
         }
@@ -3361,6 +3385,7 @@ class SyncService : Service() {
         val effectiveExclusive = CustomNodePrefs.isExclusive(this@SyncService) && !ownNodeAdditiveSessionOverride
         NativeBridge.injectPeerByIp(ip, node.port, 0x41L)
         NativeBridge.setPinnedPeer(ip, node.port, effectiveExclusive)
+        ownNodePinned = true
         android.util.Log.i(
             "SyncService",
             "own node injected + pinned as priority CF peer: $ip:${node.port} (${node.host}) " +
@@ -3380,6 +3405,7 @@ class SyncService : Service() {
      */
     private fun refreshOwnNodeHealth() {
         if (!CustomNodePrefs.isEnabled(this@SyncService)) {
+            synchronized(ownNodeHealthTrack) { ownNodeHealthTrack.fill(0L); ownNodeHealthTrackKey = null }
             _ownNodeHealth.value = OwnNodeHealth.UNPAIRED
             return
         }
@@ -3401,13 +3427,22 @@ class SyncService : Service() {
                     return@launch
                 }
             }
-            _ownNodeHealth.value = when (NativeBridge.compactFilterPeerStatus(ip, node.port)) {
-                3 -> OwnNodeHealth.SERVING             // connected + answered cfheaders
-                1 -> OwnNodeHealth.CONNECTING          // in pool, socket not yet up
-                // 0 UNKNOWN (not in pool) OR 2 CONNECTED_NOT_SERVING both map to DARK.
-                // The 2 case is deliberate: a node running WITHOUT peerblockfilters=1
-                // connects but never serves filters — surfacing that as dark/⚠ is
-                // exactly the misconfiguration this status exists to catch.
+            val status = NativeBridge.compactFilterPeerStatus(ip, node.port)
+            // The decision is the core's (BROwnNodeHealthObserve, shared with iOS): 3 SERVING;
+            // 1 (in the pool, not connected) CONNECTING until the node has gone 60 s without a
+            // connection, then DARK, so an exclusive node that never answers no longer reads
+            // "Connecting…" forever; 0 and 2 DARK (2 is a node without peerblockfilters=1).
+            // elapsedRealtime: monotonic and counts deep sleep; the core starts a new run after
+            // a gap of more than 120 s between polls, so a frozen loop is not counted as dialling.
+            val key = "$ip:${node.port}"
+            val health = synchronized(ownNodeHealthTrack) {
+                if (key != ownNodeHealthTrackKey) { ownNodeHealthTrack.fill(0L); ownNodeHealthTrackKey = key }
+                NativeBridge.ownNodeHealthObserve(
+                    ownNodeHealthTrack, status, android.os.SystemClock.elapsedRealtime() / 1000L)
+            }
+            _ownNodeHealth.value = when (health) {
+                2 -> OwnNodeHealth.SERVING
+                1 -> OwnNodeHealth.CONNECTING
                 else -> OwnNodeHealth.DARK
             }
         }
