@@ -19,10 +19,28 @@
 //                           same pointer).
 //   money_range_refused     a held record out of the money range stays as it was. Registration never holds such
 //                           a record, so the KAT sets the amount on the held record directly.
+//   trusted_fresh_copy      a fresh copy registered through the trusted route (as a block delivers it): the held
+//                           record is moved and credited once, txAdded is handed the wallet's record, it is not
+//                           marked WALLET_SIG_ALWAYS, and a second trusted copy is a no-op. For a held, validly
+//                           signed spend of a wallet coin, the coin becomes spent and the record is accepted for
+//                           its one wallet-owned input.
+//   signed_spend_promotes   a held, validly signed spend of a wallet coin is moved by each route that checks it:
+//                           a checked fresh copy, the wallet's own record passed back, and an Unproven fresh copy.
+//                           The coin becomes spent and the balance is debited.
+//   witness_copy_held_checked  the wallet matches records by txid (BRTransactionEq), so a copy with the same txid
+//                           and different witness data (wtxid) finds the held record. The second copy is
+//                           registered through the checked route only, and the case covers that route: the held
+//                           record is the one checked and kept, a copy with other witness data does not replace
+//                           it, and a spend of a wallet coin the checked registration leaves as the wallet's own
+//                           carries the validly signed witness. Held valid record, copy with altered witness: the
+//                           valid record is moved and kept. Held altered record, valid copy: any record left as
+//                           the wallet's own carries the valid witness (the run prints what happened).
 //
 // ARMS (run.sh): -DWALLET_FOREIGN_PROMOTE_UNFIXED must fail promote_fresh_copy, txadded_wallet_record,
-// unproven_route and same_record_promotes; -DWALLET_PROMOTE_SAME_RECORD_UNFIXED must fail same_record_checked.
-// Every other case passes in each arm; the shipped build passes all. One case per process:
+// unproven_route, same_record_promotes, trusted_fresh_copy, signed_spend_promotes and witness_copy_held_checked;
+// -DWALLET_PROMOTE_SAME_RECORD_UNFIXED must fail same_record_checked; the copy-checked arm (run.sh edits a copy
+// of BRWallet.c so the re-registration checks the caller's copy instead of the held record) must fail
+// witness_copy_held_checked. Every other case passes in each arm; the shipped build passes all. One case per process:
 // `wallet_held_record_promote_kat <case>` prints "RESULT <case> pass|fail". Host-only, not compiled into the
 // Android NDK build.
 
@@ -101,6 +119,36 @@ static BRTransaction *unsignedSpend(const BRTransaction *coin)
     setHashes(tx);
     tx->blockHeight = TX_UNCONFIRMED;
     return tx;
+}
+
+// spends coin:0 (paid to spk) in full to a script no wallet key has, signed by the wallet's key
+static BRTransaction *signedSpend(const BRTransaction *coin, const uint8_t *spk, size_t len)
+{
+    BRTransaction *tx = BRTransactionNew();
+    BRTransactionAddInput(tx, coin->txHash, 0, coin->outputs[0].amount, spk, len, NULL, 0, NULL, 0, 0xffffffff);
+    BRTransactionAddOutput(tx, 99000000ULL, kOther, sizeof(kOther));
+    BRWallet *signer = BRWalletNew(NULL, 0, g_mpk);   // same keys; registers nothing
+    int ok = BRWalletSignTransaction(signer, tx, 0, g_seed, sizeof(g_seed)) == 1;
+    BRWalletFree(signer);
+    if (! ok || ! tx->inputs[0].witness || tx->inputs[0].witLen < 12) { BRTransactionFree(tx); return NULL; }
+    setHashes(tx);
+    tx->blockHeight = TX_UNCONFIRMED;
+    return tx;
+}
+
+// the same transaction (same txid) with one byte of its witness signature changed (another wtxid)
+static BRTransaction *otherWitness(const BRTransaction *tx)
+{
+    BRTransaction *t = BRTransactionCopy(tx);
+    size_t n = t->inputs[0].witLen;
+    uint8_t *w = malloc(n);
+    memcpy(w, t->inputs[0].witness, n);
+    w[10] ^= 0x01;   // inside the signature's r value
+    BRTxInputSetWitness(&t->inputs[0], w, n);
+    free(w);
+    setHashes(t);
+    t->blockHeight = TX_UNCONFIRMED;
+    return t;
 }
 
 // registers a caller-owned object and releases it as _peerRelayedTx does when the wallet did not take it
@@ -329,14 +377,144 @@ static int case_money_range_refused(void)
     return g_fail == 0;
 }
 
+static int case_trusted_fresh_copy(void)
+{
+    {
+        BRWallet *w = newWallet();
+        UInt256 h = holdFarPayment(w, 0x71);
+        BRTransaction *rec = BRWalletTransactionForHash(w, h);
+
+        g_added = 0; g_addedTx = NULL;
+        int r = relay(w, parsed(rec), 0);
+        check(r == 1 && isWalletTx(w, h), "CRUX: a trusted fresh copy moves the held record into the wallet's transactions");
+        check(BRWalletBalance(w) == 100000000ULL && g_added == 1, "CRUX: it is credited once and txAdded fires once");
+        check(g_addedTx == rec && BRWalletTransactionForHash(w, h) == rec, "txAdded is handed the wallet's record, which it keeps");
+        check(! (rec->walletSigCheck & SIG_ALWAYS), "the trusted route does not mark it WALLET_SIG_ALWAYS");
+
+        g_added = 0;
+        r = relay(w, parsed(rec), 0);
+        check(r == 1 && g_added == 0 && BRWalletTransactions(w, NULL, 0) == 1 && BRWalletBalance(w) == 100000000ULL,
+              "a second trusted copy is a no-op");
+        BRWalletFree(w);
+    }
+    {
+        uint8_t spk[64];
+        BRWallet *w = newWallet();
+        size_t len = walletScript(w, spk);
+        BRTransaction *coin = payTo(spk, len, 0x72, TX_UNCONFIRMED), *spend = signedSpend(coin, spk, len);
+        check(spend != NULL, "setup: the wallet's key signs the spend");
+        if (! spend) { BRTransactionFree(coin); BRWalletFree(w); return 0; }
+        UInt256 ch = coin->txHash, sh = spend->txHash;
+
+        relay(w, spend, 1);   // arrives before the coin is known: held as non-wallet
+        check(isHeld(w, sh) && ! isWalletTx(w, sh), "setup: the signed spend is held as non-wallet");
+        relay(w, coin, 1);
+        check(BRWalletBalance(w) == 100000000ULL && ! BRWalletOutpointSpent(w, ch, 0), "setup: the coin is credited and unspent");
+
+        g_added = 0;
+        BRTransaction *rec = BRWalletTransactionForHash(w, sh);
+        check(rec != NULL, "setup: the held spend is in the wallet's records");
+        if (! rec) { BRWalletFree(w); return 0; }
+        int r = relay(w, parsed(rec), 0);
+        check(r == 1 && isWalletTx(w, sh) && BRWalletTransactionForHash(w, sh) == rec && g_added == 1,
+              "CRUX: a trusted fresh copy moves the held spend, and the wallet keeps its record");
+        check(BRWalletOutpointSpent(w, ch, 0) && BRWalletBalance(w) == 0, "CRUX: the coin is spent and the balance debited");
+        check(rec->walletSigOwned == 2, "the record is accepted for its one wallet-owned input");
+        BRWalletFree(w);
+    }
+    return g_fail == 0;
+}
+
+static int case_signed_spend_promotes(void)
+{
+    uint8_t spk[64];
+    const char *names[3] = { "a checked fresh copy", "the wallet's own record passed back", "an Unproven fresh copy" };
+
+    for (int how = 0; how < 3; how++) {
+        BRWallet *w = newWallet();
+        size_t len = walletScript(w, spk);
+        BRTransaction *coin = payTo(spk, len, (uint8_t)(0x81 + how), TX_UNCONFIRMED), *spend = signedSpend(coin, spk, len);
+        check(spend != NULL, "setup: the wallet's key signs the spend");
+        if (! spend) { BRTransactionFree(coin); BRWalletFree(w); return 0; }
+        UInt256 ch = coin->txHash, sh = spend->txHash;
+        char d[160];
+
+        relay(w, spend, 1);
+        check(isHeld(w, sh) && ! isWalletTx(w, sh), "setup: the signed spend is held as non-wallet");
+        relay(w, coin, 1);
+        check(BRWalletBalance(w) == 100000000ULL && ! BRWalletOutpointSpent(w, ch, 0), "setup: the coin is credited and unspent");
+
+        g_added = 0;
+        BRTransaction *rec = BRWalletTransactionForHash(w, sh);
+        check(rec != NULL, "setup: the held spend is in the wallet's records");
+        if (! rec) { BRWalletFree(w); return 0; }
+        int r = how == 0 ? relay(w, parsed(rec), 1) : how == 1 ? handBack(w, sh) : relay(w, parsed(rec), 2);
+        snprintf(d, sizeof(d), "CRUX: %s moves the held signed spend into the wallet's transactions", names[how]);
+        check(r == 1 && isWalletTx(w, sh) && BRWalletTransactionForHash(w, sh) == rec && g_added == 1, d);
+        snprintf(d, sizeof(d), "CRUX: %s: the coin is spent and the balance debited", names[how]);
+        check(BRWalletOutpointSpent(w, ch, 0) && BRWalletBalance(w) == 0, d);
+        if (how == 2) check((rec->walletSigCheck & SIG_ALWAYS) != 0, "the Unproven route marks it WALLET_SIG_ALWAYS");
+        BRWalletFree(w);
+    }
+    return g_fail == 0;
+}
+
+static int case_witness_copy_held_checked(void)
+{
+    uint8_t spk[64];
+
+    for (int heldValid = 1; heldValid >= 0; heldValid--) {
+        BRWallet *w = newWallet();
+        size_t len = walletScript(w, spk);
+        BRTransaction *coin = payTo(spk, len, (uint8_t)(0x91 + heldValid), TX_UNCONFIRMED), *valid = signedSpend(coin, spk, len);
+        check(valid != NULL, "setup: the wallet's key signs the spend");
+        if (! valid) { BRTransactionFree(coin); BRWalletFree(w); return 0; }
+        BRTransaction *altered = otherWitness(valid);
+        UInt256 ch = coin->txHash, sh = valid->txHash, validW = valid->wtxHash, alteredW = altered->wtxHash;
+        check(UInt256Eq(altered->txHash, sh) && ! UInt256Eq(alteredW, validW),
+              "setup: the two copies share a txid and differ in wtxid");
+
+        BRTransaction *first = heldValid ? valid : altered, *second = heldValid ? altered : valid;
+        relay(w, first, 1);   // arrives before the coin is known: held as non-wallet
+        check(isHeld(w, sh) && ! isWalletTx(w, sh), "setup: the first copy is held as non-wallet");
+        check(isHeld(w, sh) && UInt256Eq(BRWalletTransactionForHash(w, sh)->wtxHash, heldValid ? validW : alteredW),
+              "setup: the held record carries the first copy's witness");
+        relay(w, coin, 1);
+        check(BRWalletBalance(w) == 100000000ULL && ! BRWalletOutpointSpent(w, ch, 0), "setup: the coin is credited and unspent");
+
+        g_added = 0;
+        int r = relay(w, second, 1);
+        BRTransaction *rec = BRWalletTransactionForHash(w, sh);
+        int mine = isWalletTx(w, sh), keptValid = rec && UInt256Eq(rec->wtxHash, validW);
+        printf("NOTE: held %s copy, then the %s copy (checked route): r=%d wallet's=%d stored witness %s balance %llu spent=%d\n",
+               heldValid ? "valid" : "altered", heldValid ? "altered" : "valid", r, mine,
+               keptValid ? "valid" : "altered", (unsigned long long)BRWalletBalance(w), BRWalletOutpointSpent(w, ch, 0));
+        check(! mine || keptValid, "CRUX: after the checked registration, a record the wallet holds as its own carries the validly signed witness");
+        check(mine ? (BRWalletOutpointSpent(w, ch, 0) && BRWalletBalance(w) == 0)
+                   : (! BRWalletOutpointSpent(w, ch, 0) && BRWalletBalance(w) == 100000000ULL && g_added == 0),
+              "CRUX: the balance and the coin's spent state agree with whether the spend is the wallet's");
+        if (heldValid) {
+            check(mine && keptValid && r == 1 && g_added == 1,
+                  "CRUX: the held valid record is moved and kept; the altered copy does not replace it");
+        }
+        BRWalletUnusedAddrs(w, NULL, 10, 0, 1);   // and after the address set changes again
+        rec = BRWalletTransactionForHash(w, sh);
+        check(! isWalletTx(w, sh) || (rec && UInt256Eq(rec->wtxHash, validW)), "and still afterwards");
+        BRWalletFree(w);
+    }
+    return g_fail == 0;
+}
+
 int main(int argc, char *argv[])
 {
     setvbuf(stdout, NULL, _IOLBF, 0);
     const char *cases[] = { "promote_fresh_copy", "txadded_wallet_record", "unproven_route", "same_record_promotes",
-                            "same_record_checked", "still_foreign_stays", "money_range_refused" };
+                            "same_record_checked", "still_foreign_stays", "money_range_refused", "trusted_fresh_copy",
+                            "signed_spend_promotes", "witness_copy_held_checked" };
     int (*fns[])(void) = { case_promote_fresh_copy, case_txadded_wallet_record, case_unproven_route,
                            case_same_record_promotes, case_same_record_checked, case_still_foreign_stays,
-                           case_money_range_refused };
+                           case_money_range_refused, case_trusted_fresh_copy, case_signed_spend_promotes,
+                           case_witness_copy_held_checked };
     const size_t n = sizeof(cases)/sizeof(cases[0]);
 
     if (argc < 2) { fprintf(stderr, "usage: %s <case>|list\n", argv[0]); return 2; }

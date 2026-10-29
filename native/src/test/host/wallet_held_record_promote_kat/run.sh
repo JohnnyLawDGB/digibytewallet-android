@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Host KAT runner: a record the wallet holds as non-wallet is moved into the wallet's transactions, with the same
-# money-range and signature checks a new tx takes, once the address set grows to cover it. See
+# money-range and signature checks a new tx takes, once the address set grows to cover it. Covers the checked,
+# trusted and Unproven routes, the wallet's own record passed back, and copies that differ only in witness data. See
 # wallet_held_record_promote_kat_main.c.
 #
 # Compiles the REAL submodule sources with AddressSanitizer and UndefinedBehaviorSanitizer. CORE_DIR may be set in the
@@ -9,9 +10,10 @@
 # ARMS:
 #   red   -DWALLET_FOREIGN_PROMOTE_UNFIXED       no promotion
 #   red2  -DWALLET_PROMOTE_SAME_RECORD_UNFIXED   the wallet's own record passed back keeps the caller's route
+#   red3  a copy of BRWallet.c, edited here      re-registration checks the caller's copy, not the held record
 #   green no seam flag (shipped)
-# RED cases must FAIL in the red arm, RED2 in red2; every other case must PASS in each comparison arm; every case
-# must PASS in the green arm; no sanitizer report anywhere.
+# RED cases must FAIL in the red arm, RED2 in red2, RED3 in red3; every other case must PASS in each comparison arm;
+# every case must PASS in the green arm; no sanitizer report anywhere.
 #
 # Exit code 0 = every expectation held, 1 = otherwise (a build error is never evidence).
 set -uo pipefail   # not -e: the red arms' nonzero exits must be captured
@@ -29,27 +31,36 @@ RED_CASES=(
     txadded_wallet_record
     unproven_route
     same_record_promotes
+    trusted_fresh_copy
+    signed_spend_promotes
+    witness_copy_held_checked
 )
 RED2_CASES=(
     same_record_checked
+)
+RED3_CASES=(
+    witness_copy_held_checked
 )
 GUARD_CASES=(
     still_foreign_stays
     money_range_refused
 )
-ALL_CASES=("${RED_CASES[@]}" "${RED2_CASES[@]}" "${GUARD_CASES[@]}")
+# every case once (witness_copy_held_checked is in RED and RED3)
+ALL_CASES=(promote_fresh_copy txadded_wallet_record unproven_route same_record_promotes same_record_checked
+           still_foreign_stays money_range_refused trusted_fresh_copy signed_spend_promotes witness_copy_held_checked)
 
 shopt -s nullglob
 SHA3_SRCS=("$CORE_DIR"/crypto/sha3/*.c)
 shopt -u nullglob
 
+WALLET_SRC="$CORE_DIR/BRWallet.c"
 build() {
     local out="$1"; shift
     clang -w -include stdint.h -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer \
         "$@" \
         -I "$CORE_DIR" -I "$CORE_DIR/secp256k1/include" \
         "$SCRIPT_DIR/wallet_held_record_promote_kat_main.c" \
-        "$CORE_DIR/BRWallet.c" "$CORE_DIR/BRTransaction.c" "$CORE_DIR/BRDigiDollar.c" "$CORE_DIR/BRDigiAsset.c" \
+        "$WALLET_SRC" "$CORE_DIR/BRTransaction.c" "$CORE_DIR/BRDigiDollar.c" "$CORE_DIR/BRDigiAsset.c" \
         "$CORE_DIR/BRKey.c" "$CORE_DIR/BRNetwork.c" "$CORE_DIR/BRAddress.c" "$CORE_DIR/BRSet.c" "$CORE_DIR/BRBase58.c" \
         "$CORE_DIR/BRBech32.c" "$CORE_DIR/BRCrypto.c" "$CORE_DIR/BRBIP32Sequence.c" "$CORE_DIR/BRBIP39Mnemonic.c" \
         "$CORE_DIR/crypto/groestl.c" "$CORE_DIR/crypto/skein.c" "$CORE_DIR/crypto/qubit.c" "$CORE_DIR/crypto/odocrypt.c" \
@@ -62,6 +73,20 @@ for seam in WALLET_FOREIGN_PROMOTE_UNFIXED WALLET_PROMOTE_SAME_RECORD_UNFIXED; d
         echo "GATE FAILURE: BRWallet.c has no $seam seam; -D would be inert."; exit 1
     fi
 done
+
+# red3 edits a copy of BRWallet.c (the core keeps no seam for it): the held-record branch's signature check is
+# handed the caller's copy (tx) instead of the held record (rec). Exactly one site must change.
+RED3_FROM='_BRWalletSpendsSigned(wallet, rec, checkInputs == 2)'
+RED3_TO='_BRWalletSpendsSigned(wallet, tx, checkInputs == 2)'
+if [ "$(grep -cF "$RED3_FROM" "$CORE_DIR/BRWallet.c")" -ne 1 ]; then
+    echo "GATE FAILURE: BRWallet.c does not have exactly one '$RED3_FROM'; red3 would be inert."; exit 1
+fi
+mkdir -p "$BUILD_DIR/red3src"
+sed "s/_BRWalletSpendsSigned(wallet, rec, checkInputs == 2)/$RED3_TO/" "$CORE_DIR/BRWallet.c" > "$BUILD_DIR/red3src/BRWallet.c"
+if [ "$(grep -cF "$RED3_TO" "$BUILD_DIR/red3src/BRWallet.c")" -ne "$(( $(grep -cF "$RED3_TO" "$CORE_DIR/BRWallet.c") + 1 ))" ] ||
+   [ "$(grep -cF "$RED3_FROM" "$BUILD_DIR/red3src/BRWallet.c")" -ne 0 ]; then
+    echo "GATE FAILURE: the red3 edit did not apply to exactly one site"; exit 1
+fi
 
 FAIL=0
 
@@ -96,6 +121,9 @@ comparison_arm() {
 
 build "$BUILD_DIR/red" -DWALLET_FOREIGN_PROMOTE_UNFIXED || { echo "GATE FAILURE: red did not build"; exit 1; }
 build "$BUILD_DIR/red2" -DWALLET_PROMOTE_SAME_RECORD_UNFIXED || { echo "GATE FAILURE: red2 did not build"; exit 1; }
+WALLET_SRC="$BUILD_DIR/red3src/BRWallet.c"
+build "$BUILD_DIR/red3" || { echo "GATE FAILURE: red3 did not build"; exit 1; }
+WALLET_SRC="$CORE_DIR/BRWallet.c"
 build "$BUILD_DIR/green" || { echo "GATE FAILURE: green did not build"; exit 1; }
 
 known="$("$BUILD_DIR/green" list | sort | tr '\n' ' ')"
@@ -106,6 +134,7 @@ fi
 
 comparison_arm red -DWALLET_FOREIGN_PROMOTE_UNFIXED "${RED_CASES[*]}"
 comparison_arm red2 -DWALLET_PROMOTE_SAME_RECORD_UNFIXED "${RED2_CASES[*]}"
+comparison_arm red3 "checks the caller's copy" "${RED3_CASES[*]}"
 
 echo "--- GREEN ARM (shipped): every case MUST pass, no sanitizer report ---"
 for c in "${ALL_CASES[@]}"; do
@@ -120,7 +149,7 @@ done
 
 echo
 if [ "$FAIL" -eq 0 ]; then
-    echo "PASS: wallet_held_record_promote_kat (${#RED_CASES[@]} red-then-green, ${#RED2_CASES[@]} red2-then-green, ${#GUARD_CASES[@]} guards; ASan+UBSan)"
+    echo "PASS: wallet_held_record_promote_kat (${#RED_CASES[@]} red-then-green, ${#RED2_CASES[@]} red2-then-green, ${#RED3_CASES[@]} red3-then-green, ${#GUARD_CASES[@]} guards, ${#ALL_CASES[@]} cases; ASan+UBSan)"
     exit 0
 fi
 echo "FAIL: wallet_held_record_promote_kat"; exit 1
