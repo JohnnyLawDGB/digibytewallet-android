@@ -230,6 +230,17 @@ object NativeBridge {
     /** 0=UNKNOWN, 1=CONNECTING, 2=CONNECTED_NOT_SERVING, 3=SERVING (BRComputeCFPeerStatus). */
     external fun compactFilterPeerStatus(ip: String, port: Int): Int
 
+    /** One own-node health poll through the core (BROwnNodeHealthObserve): [cfPeerStatus] from
+     *  [compactFilterPeerStatus], [track] the caller's LongArray(3) run record (all zero for a
+     *  newly paired node; the core updates it), [nowSecs] a monotonic clock in seconds. Returns
+     *  1 CONNECTING, 2 SERVING, 3 DARK, or -1 if [track] is not 3 longs. A node that has not
+     *  connected for 60 s reads DARK, not CONNECTING. */
+    external fun ownNodeHealthObserve(track: LongArray, cfPeerStatus: Int, nowSecs: Long): Int
+
+    /** BROwnNodeWatchdogMayPin: false while an own node is pinned, so the sync watchdogs neither
+     *  pin a canon peer over it nor clear its pin slot. */
+    external fun ownNodeWatchdogMayPin(ownNodePinned: Boolean): Boolean
+
     /** Start SPV sync — connects to peers and begins header/transaction sync. */
     external fun startSync()
     /** Flag the peer manager for a clean recreate on the next startSync() — recovers

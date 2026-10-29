@@ -113,6 +113,8 @@ void JNICALL NativeBridge_markInitialSyncDone(JNIEnv *env, jobject thiz);  /* jn
 void JNICALL NativeBridge_markSavedBlocksLoadComplete(JNIEnv *env, jobject thiz);  /* jni_peer.c */
 jbyteArray JNICALL NativeBridge_mnemonicToSeed(JNIEnv *env, jobject thiz, jbyteArray phraseBytes, jbyteArray passphrase);  /* jni_derive.c */
 jint JNICALL NativeBridge_outpointSpentState(JNIEnv *env, jobject thiz, jstring txHashHex, jint vout);  /* jni_wallet.c */
+jint JNICALL NativeBridge_ownNodeHealthObserve(JNIEnv *env, jobject thiz, jlongArray track, jint cfPeerStatus, jlong nowSecs);  /* jni_own_node.c */
+jboolean JNICALL NativeBridge_ownNodeWatchdogMayPin(JNIEnv *env, jobject thiz, jboolean ownNodePinned);  /* jni_own_node.c */
 jlong JNICALL NativeBridge_peerManagerGeneration(JNIEnv *env, jobject thiz);  /* jni_peer.c */
 jint JNICALL NativeBridge_peerPenaltyDecide(JNIEnv *env, jobject thiz, jbyteArray blob);  /* jni_peer_penalty_persist.c */
 jint JNICALL NativeBridge_peerPenaltyDecideLength(JNIEnv *env, jobject thiz, jint length);  /* jni_peer_penalty_persist.c */
@@ -273,6 +275,8 @@ jboolean JNICALL NativeBridge_walletContainsAddress(JNIEnv *env, jobject thiz, j
     { "markSavedBlocksLoadComplete", "()V", (void *) NativeBridge_markSavedBlocksLoadComplete }, \
     { "mnemonicToSeed", "([B[B)[B", (void *) NativeBridge_mnemonicToSeed }, \
     { "outpointSpentState", "(Ljava/lang/String;I)I", (void *) NativeBridge_outpointSpentState }, \
+    { "ownNodeHealthObserve", "([JIJ)I", (void *) NativeBridge_ownNodeHealthObserve }, \
+    { "ownNodeWatchdogMayPin", "(Z)Z", (void *) NativeBridge_ownNodeWatchdogMayPin }, \
     { "peerManagerGeneration", "()J", (void *) NativeBridge_peerManagerGeneration }, \
     { "peerPenaltyDecide", "([B)I", (void *) NativeBridge_peerPenaltyDecide }, \
     { "peerPenaltyDecideLength", "(I)I", (void *) NativeBridge_peerPenaltyDecideLength }, \
@@ -326,6 +330,6 @@ jboolean JNICALL NativeBridge_walletContainsAddress(JNIEnv *env, jobject thiz, j
     { "strandedSendIsPlainDgb", "(ZZI)Z", (void *) NativeBridge_strandedSendIsPlainDgb }, \
     { "walletContainsAddress", "(Ljava/lang/String;)Z", (void *) NativeBridge_walletContainsAddress }, \
 
-#define DGB_JNI_NATIVEBRIDGE_METHOD_COUNT 158
+#define DGB_JNI_NATIVEBRIDGE_METHOD_COUNT 160
 
 #endif
