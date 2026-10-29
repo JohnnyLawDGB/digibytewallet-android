@@ -28,12 +28,13 @@
 //                           a checked fresh copy, the wallet's own record passed back, and an Unproven fresh copy.
 //                           The coin becomes spent and the balance is debited.
 //   witness_copy_held_checked  the wallet matches records by txid (BRTransactionEq), so a copy with the same txid
-//                           and different witness data (wtxid) finds the held record. The held record is the one
-//                           checked and kept: a copy with other witness data never replaces it, and the wallet
-//                           never holds as its own a spend of its coin carrying witness data other than the
-//                           validly signed one. Held valid record, copy with altered witness: the valid record is
-//                           moved and kept. Held altered record, valid copy: whatever the outcome, any record the
-//                           wallet holds as its own carries the valid witness (the run prints what happened).
+//                           and different witness data (wtxid) finds the held record. The second copy is
+//                           registered through the checked route only, and the case covers that route: the held
+//                           record is the one checked and kept, a copy with other witness data does not replace
+//                           it, and a spend of a wallet coin the checked registration leaves as the wallet's own
+//                           carries the validly signed witness. Held valid record, copy with altered witness: the
+//                           valid record is moved and kept. Held altered record, valid copy: any record left as
+//                           the wallet's own carries the valid witness (the run prints what happened).
 //
 // ARMS (run.sh): -DWALLET_FOREIGN_PROMOTE_UNFIXED must fail promote_fresh_copy, txadded_wallet_record,
 // unproven_route, same_record_promotes, trusted_fresh_copy, signed_spend_promotes and witness_copy_held_checked;
@@ -412,6 +413,7 @@ static int case_trusted_fresh_copy(void)
 
         g_added = 0;
         BRTransaction *rec = BRWalletTransactionForHash(w, sh);
+        check(rec != NULL, "setup: the held spend is in the wallet's records");
         if (! rec) { BRWalletFree(w); return 0; }
         int r = relay(w, parsed(rec), 0);
         check(r == 1 && isWalletTx(w, sh) && BRWalletTransactionForHash(w, sh) == rec && g_added == 1,
@@ -444,6 +446,7 @@ static int case_signed_spend_promotes(void)
 
         g_added = 0;
         BRTransaction *rec = BRWalletTransactionForHash(w, sh);
+        check(rec != NULL, "setup: the held spend is in the wallet's records");
         if (! rec) { BRWalletFree(w); return 0; }
         int r = how == 0 ? relay(w, parsed(rec), 1) : how == 1 ? handBack(w, sh) : relay(w, parsed(rec), 2);
         snprintf(d, sizeof(d), "CRUX: %s moves the held signed spend into the wallet's transactions", names[how]);
@@ -486,7 +489,7 @@ static int case_witness_copy_held_checked(void)
         printf("NOTE: held %s copy, then the %s copy (checked route): r=%d wallet's=%d stored witness %s balance %llu spent=%d\n",
                heldValid ? "valid" : "altered", heldValid ? "altered" : "valid", r, mine,
                keptValid ? "valid" : "altered", (unsigned long long)BRWalletBalance(w), BRWalletOutpointSpent(w, ch, 0));
-        check(! mine || keptValid, "CRUX: a record the wallet holds as its own carries the validly signed witness");
+        check(! mine || keptValid, "CRUX: after the checked registration, a record the wallet holds as its own carries the validly signed witness");
         check(mine ? (BRWalletOutpointSpent(w, ch, 0) && BRWalletBalance(w) == 0)
                    : (! BRWalletOutpointSpent(w, ch, 0) && BRWalletBalance(w) == 100000000ULL && g_added == 0),
               "CRUX: the balance and the coin's spent state agree with whether the spend is the wallet's");
