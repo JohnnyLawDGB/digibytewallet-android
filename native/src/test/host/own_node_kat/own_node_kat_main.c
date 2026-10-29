@@ -5,9 +5,13 @@
 // URLDecoder cases follow Android's libcore (a non-hex char after '%' throws, so the raw value
 // is used), not desktop Java, which the Kotlin unit tests run on.
 //
-// Built twice by run.sh:
-//   -DOWN_NODE_RED  a host name is looked up even with Tor on; every RED case fails
-//   (default)       the shipped rule; every case passes
+// Built five times by run.sh:
+//   -DOWN_NODE_RED         a host name is looked up even with Tor on
+//   -DOWN_NODE_RED_HEALTH  status 1 reads connecting with no time limit (the "Connecting..." forever bug)
+//   -DOWN_NODE_RED_GAP     a gap between polls (a suspension) is counted as time spent dialling
+//   -DOWN_NODE_RED_PIN     the watchdogs pin over the own node
+//   (default)              the shipped rules; every case passes
+// In each red arm exactly that arm's cases fail and every other case passes.
 
 #include "BROwnNode.h"
 #include <stdio.h>
@@ -128,6 +132,68 @@ int main(void)
     result("health_mapping", BROwnNodeHealthFor(3) == BROwnNodeHealthServing && BROwnNodeHealthFor(1) == BROwnNodeHealthConnecting &&
            BROwnNodeHealthFor(2) == BROwnNodeHealthDark && BROwnNodeHealthFor(0) == BROwnNodeHealthDark &&
            BROwnNodeHealthFor(-1) == BROwnNodeHealthDark);
+
+    {   // An exclusive own node that never answers: polled every 30 s, the pool shows it mid-dial
+        // (1) or just dropped (0). Connecting until the run is 60 s old, dark from then on, and it
+        // stays dark through later dials.
+        BROwnNodeHealthTrack t = {0, 0, 0};
+        result("health_connecting_has_a_time_limit",
+               BROwnNodeHealthObserve(&t, 1, 1000) == BROwnNodeHealthConnecting &&
+               BROwnNodeHealthObserve(&t, 0, 1030) == BROwnNodeHealthDark &&
+               BROwnNodeHealthObserve(&t, 1, 1059) == BROwnNodeHealthConnecting &&
+               BROwnNodeHealthObserve(&t, 1, 1060) == BROwnNodeHealthDark &&
+               BROwnNodeHealthObserve(&t, 1, 1090) == BROwnNodeHealthDark &&
+               BROwnNodeHealthObserve(&t, 1, 1150) == BROwnNodeHealthDark);
+    }
+    {   // A gap of exactly 120 s still belongs to the run (only a longer one restarts it).
+        BROwnNodeHealthTrack t = {0, 0, 0};
+        result("health_gap_edge_continues_the_run",
+               BROwnNodeHealthObserve(&t, 1, 0) == BROwnNodeHealthConnecting &&
+               BROwnNodeHealthObserve(&t, 1, 120) == BROwnNodeHealthDark);
+    }
+    {   // After a suspension (a poll more than 120 s after the last) the node is dialling again on
+        // resume: a new run, connecting, not dark at once. A clock that went back restarts it too.
+        BROwnNodeHealthTrack t = {0, 0, 0}, u = {0, 0, 0};
+        result("health_gap_starts_a_new_run",
+               BROwnNodeHealthObserve(&t, 1, 0) == BROwnNodeHealthConnecting &&
+               BROwnNodeHealthObserve(&t, 1, 30) == BROwnNodeHealthConnecting &&
+               BROwnNodeHealthObserve(&t, 1, 151) == BROwnNodeHealthConnecting &&
+               BROwnNodeHealthObserve(&u, 1, 1000) == BROwnNodeHealthConnecting &&
+               BROwnNodeHealthObserve(&u, 1, 1050) == BROwnNodeHealthConnecting &&
+               BROwnNodeHealthObserve(&u, 1, 990) == BROwnNodeHealthConnecting);
+    }
+    {   // A clock that went back (1001 after 1059) starts a new run: without that check the run
+        // from 1000 would read dark at 1060, 59 s after the restart.
+        BROwnNodeHealthTrack t = {0, 0, 0};
+        result("health_clock_back_starts_a_new_run",
+               BROwnNodeHealthObserve(&t, 1, 1000) == BROwnNodeHealthConnecting &&
+               BROwnNodeHealthObserve(&t, 1, 1059) == BROwnNodeHealthConnecting &&
+               BROwnNodeHealthObserve(&t, 1, 1001) == BROwnNodeHealthConnecting &&
+               BROwnNodeHealthObserve(&t, 1, 1060) == BROwnNodeHealthConnecting &&
+               t.runStart == 1001);
+    }
+    {   // A connection (2 or 3) ends the run: the next dial gets the full grace again. Status 2
+        // and 3 read as BROwnNodeHealthFor reads them.
+        BROwnNodeHealthTrack t = {0, 0, 0};
+        result("health_connection_ends_the_run",
+               BROwnNodeHealthObserve(&t, 1, 0) == BROwnNodeHealthConnecting &&
+               BROwnNodeHealthObserve(&t, 3, 50) == BROwnNodeHealthServing &&
+               BROwnNodeHealthObserve(&t, 1, 80) == BROwnNodeHealthConnecting &&
+               BROwnNodeHealthObserve(&t, 2, 110) == BROwnNodeHealthDark &&
+               BROwnNodeHealthObserve(&t, 1, 140) == BROwnNodeHealthConnecting &&
+               BROwnNodeHealthObserve(&t, 1, 170) == BROwnNodeHealthConnecting &&
+               t.inRun == 1 && t.runStart == 140);
+    }
+    {   // A zeroed track is a fresh pairing; no track is the bare mapping.
+        BROwnNodeHealthTrack t = {0, 0, 0};
+        result("health_fresh_track_and_no_track",
+               BROwnNodeHealthObserve(&t, 0, 5000) == BROwnNodeHealthDark && t.inRun == 1 && t.runStart == 5000 &&
+               BROwnNodeHealthObserve(NULL, 1, 1000000) == BROwnNodeHealthConnecting &&
+               BROwnNodeHealthObserve(NULL, 3, 0) == BROwnNodeHealthServing &&
+               BROwnNodeHealthObserve(NULL, 0, 0) == BROwnNodeHealthDark);
+    }
+
+    result("watchdog_pin_yields_to_own_node", BROwnNodeWatchdogMayPin(1) == 0 && BROwnNodeWatchdogMayPin(0) == 1);
 
     if (! g_failed) printf("ALL PASS\n");
     return g_failed;
