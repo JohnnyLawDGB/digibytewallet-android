@@ -1,13 +1,9 @@
 package app.aroundtheblock.wallet.core.digiscope
 
 import android.content.Context
-import app.aroundtheblock.wallet.core.hub.Channel
 import app.aroundtheblock.wallet.core.hub.ChatMessage
 import app.aroundtheblock.wallet.core.hub.DigiRunnerStats
-import app.aroundtheblock.wallet.core.hub.ForumThread
 import app.aroundtheblock.wallet.core.hub.LeaderboardEntry
-import app.aroundtheblock.wallet.core.hub.Reply
-import app.aroundtheblock.wallet.core.hub.ThreadDetail
 import app.aroundtheblock.wallet.core.hub.UserInfo
 import app.aroundtheblock.wallet.core.network.BoundedBody
 import kotlinx.coroutines.Dispatchers
@@ -47,7 +43,7 @@ class DigiScopeClient(
         internal const val SMALL_BODY_BYTES = 64L * 1024
 
         /**
-         * The most a Hub list may be: 4 MiB — the channels, a page of messages or threads, a thread
+         * The most a Hub list may be: 4 MiB — a page of messages or threads, a thread
          * with its replies. A message is at most 2,000 characters and a thread 5,000.
          */
         internal const val LIST_BODY_BYTES = 4L * 1024 * 1024
@@ -254,37 +250,6 @@ class DigiScopeClient(
         }
     }
 
-    // ── Hub REST: channels ────────────────────────────────────────────────────
-
-    /**
-     * Fetch all available hub channels.
-     */
-    suspend fun getChannels(): List<Channel> = withContext(Dispatchers.IO) {
-        val token = jwtToken ?: return@withContext emptyList()
-        try {
-            val request = Request.Builder()
-                .url("$BASE_URL/hub/channels")
-                .header("Authorization", "Bearer $token")
-                .build()
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@withContext emptyList()
-
-                val array = JSONArray(BoundedBody.text(response.body, LIST_BODY_BYTES) ?: return@withContext emptyList())
-                (0 until array.length()).map { i ->
-                    val obj = array.getJSONObject(i)
-                    Channel(
-                        id = obj.getInt("id"),
-                        name = obj.getString("name"),
-                        description = obj.optString("description", ""),
-                        type = obj.optString("type", "text")
-                    )
-                }
-            }
-        } catch (e: Exception) {
-            emptyList()
-        }
-    }
-
     // ── Hub REST: messages ────────────────────────────────────────────────────
 
     /**
@@ -313,162 +278,6 @@ class DigiScopeClient(
                 emptyList()
             }
         }
-
-    // ── Hub REST: threads ─────────────────────────────────────────────────────
-
-    /**
-     * Fetch paginated forum thread list for a channel.
-     */
-    suspend fun getThreads(channelId: Int, page: Int = 1): List<ForumThread> =
-        withContext(Dispatchers.IO) {
-            val token = jwtToken ?: return@withContext emptyList()
-            try {
-                val request = Request.Builder()
-                    .url("$BASE_URL/hub/threads?channelId=$channelId&page=$page")
-                    .header("Authorization", "Bearer $token")
-                    .build()
-                client.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) return@withContext emptyList()
-
-                    val bodyStr = BoundedBody.text(response.body, LIST_BODY_BYTES) ?: return@withContext emptyList()
-                    val json = JSONObject(bodyStr)
-                    val array = json.optJSONArray("threads") ?: JSONArray(bodyStr)
-                    parseForumThreads(array)
-                }
-            } catch (e: Exception) {
-                emptyList()
-            }
-        }
-
-    /**
-     * Fetch a single thread with all its replies.
-     */
-    suspend fun getThread(threadId: Int): ThreadDetail? = withContext(Dispatchers.IO) {
-        val token = jwtToken ?: return@withContext null
-        try {
-            val request = Request.Builder()
-                .url("$BASE_URL/hub/threads/$threadId")
-                .header("Authorization", "Bearer $token")
-                .build()
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@withContext null
-
-                val json = JSONObject(BoundedBody.text(response.body, LIST_BODY_BYTES) ?: return@withContext null)
-                val thread = parseForumThread(json.getJSONObject("thread"))
-                val repliesArray = json.optJSONArray("replies") ?: JSONArray()
-                val replies = (0 until repliesArray.length()).map { i ->
-                    parseReply(repliesArray.getJSONObject(i))
-                }
-                ThreadDetail(thread = thread, replies = replies)
-            }
-        } catch (e: Exception) {
-            null
-        }
-    }
-
-    /**
-     * Create a new forum thread in a channel.
-     */
-    suspend fun createThread(
-        channelId: Int,
-        title: String,
-        content: String,
-        signature: String
-    ): ForumThread? = withContext(Dispatchers.IO) {
-        val token = jwtToken ?: return@withContext null
-        try {
-            val json = JSONObject().apply {
-                put("channelId", channelId)
-                put("title", title)
-                put("content", content)
-                put("signature", signature)
-            }
-            val body = json.toString().toRequestBody("application/json".toMediaType())
-            val request = Request.Builder()
-                .url("$BASE_URL/hub/threads")
-                .header("Authorization", "Bearer $token")
-                .post(body)
-                .build()
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@withContext null
-
-                val respJson = JSONObject(BoundedBody.text(response.body, SMALL_BODY_BYTES) ?: return@withContext null)
-                parseForumThread(respJson.optJSONObject("thread") ?: respJson)
-            }
-        } catch (e: Exception) {
-            null
-        }
-    }
-
-    /**
-     * Post a reply to an existing thread.
-     */
-    suspend fun replyToThread(threadId: Int, content: String, signature: String): Reply? =
-        withContext(Dispatchers.IO) {
-            val token = jwtToken ?: return@withContext null
-            try {
-                val json = JSONObject().apply {
-                    put("content", content)
-                    put("signature", signature)
-                }
-                val body = json.toString().toRequestBody("application/json".toMediaType())
-                val request = Request.Builder()
-                    .url("$BASE_URL/hub/threads/$threadId/reply")
-                    .header("Authorization", "Bearer $token")
-                    .post(body)
-                    .build()
-                client.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) return@withContext null
-
-                    val respJson = JSONObject(BoundedBody.text(response.body, SMALL_BODY_BYTES) ?: return@withContext null)
-                    parseReply(respJson.optJSONObject("reply") ?: respJson)
-                }
-            } catch (e: Exception) {
-                null
-            }
-        }
-
-    /**
-     * Upvote a thread. Returns true if the upvote was accepted.
-     */
-    suspend fun upvoteThread(threadId: Int): Boolean = withContext(Dispatchers.IO) {
-        val token = jwtToken ?: return@withContext false
-        try {
-            val body = "{}".toRequestBody("application/json".toMediaType())
-            val request = Request.Builder()
-                .url("$BASE_URL/hub/threads/$threadId/upvote")
-                .header("Authorization", "Bearer $token")
-                .post(body)
-                .build()
-            client.newCall(request).execute().use { it.isSuccessful }
-        } catch (e: Exception) {
-            false
-        }
-    }
-
-    // ── Hub REST: tipping ─────────────────────────────────────────────────────
-
-    /**
-     * Send a tip to another user by their handle. [amount] is in DGB satoshis.
-     */
-    suspend fun sendTip(toHandle: String, amount: Long): Boolean = withContext(Dispatchers.IO) {
-        val token = jwtToken ?: return@withContext false
-        try {
-            val json = JSONObject().apply {
-                put("toHandle", toHandle)
-                put("amount", amount)
-            }
-            val body = json.toString().toRequestBody("application/json".toMediaType())
-            val request = Request.Builder()
-                .url("$BASE_URL/hub/tip")
-                .header("Authorization", "Bearer $token")
-                .post(body)
-                .build()
-            client.newCall(request).execute().use { it.isSuccessful }
-        } catch (e: Exception) {
-            false
-        }
-    }
 
     // ── Hub REST: moderation ──────────────────────────────────────────────────
 
@@ -671,28 +480,6 @@ class DigiScopeClient(
         from = parseUserInfo(obj.optJSONObject("from")),
         timestamp = parseDatetimeToMs(obj.optString("created_at", obj.optString("timestamp", ""))),
         signature = obj.optString("signature", "")
-    )
-
-    private fun parseForumThreads(array: JSONArray): List<ForumThread> =
-        (0 until array.length()).map { i -> parseForumThread(array.getJSONObject(i)) }
-
-    private fun parseForumThread(obj: JSONObject): ForumThread = ForumThread(
-        id = obj.getInt("id"),
-        title = obj.getString("title"),
-        content = obj.optString("content", ""),
-        author = parseUserInfo(obj.optJSONObject("author")),
-        replyCount = obj.optInt("reply_count", obj.optInt("replyCount", 0)),
-        upvotes = obj.optInt("upvotes", 0),
-        createdAt = parseDatetimeToMs(obj.optString("created_at", obj.optString("createdAt", ""))),
-        updatedAt = parseDatetimeToMs(obj.optString("updated_at", obj.optString("updatedAt", "")))
-    )
-
-    private fun parseReply(obj: JSONObject): Reply = Reply(
-        id = obj.getInt("id"),
-        content = obj.getString("content"),
-        author = parseUserInfo(obj.optJSONObject("author")),
-        upvotes = obj.optInt("upvotes", 0),
-        createdAt = parseDatetimeToMs(obj.optString("created_at", obj.optString("createdAt", "")))
     )
 
     /** Parse SQLite DATETIME string ("2026-03-28 00:38:46") or Unix ms to epoch ms. */

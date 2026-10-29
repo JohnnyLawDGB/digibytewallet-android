@@ -115,8 +115,8 @@ NativeBridge_loadSerializedTransactions(JNIEnv *env, jobject thiz,
 }
 
 /* ---------- saved_transactions_release_after_build ----------
- * Called by restoreWalletFromBytes right after BRWalletNewDual has built `wallet` from the loaded records,
- * before anything else uses the wallet. BRWalletNewDual takes the records it keeps -- the wallet owns them
+ * Called by restoreWalletFromBytes right after BRWalletOpenWithKeys (BRWalletOpen.h) has built `wallet` from
+ * the loaded records, before anything else uses the wallet. It takes the records it keeps -- the wallet owns them
  * from then on, and BRWalletFree releases them -- and skips the rest (an unsigned record, a repeated hash,
  * one outside the money range). From here the bridge names none of them: a record the wallet did not take
  * is released, then the array, and the array is cleared. So a later load or drop frees nothing the wallet

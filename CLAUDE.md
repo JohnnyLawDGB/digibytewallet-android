@@ -11,6 +11,11 @@ Full Kotlin rewrite of the DigiByte Android SPV wallet. Jetpack Compose UI, C na
 > built in CI: `scripts/build-release.sh` builds and signs them on the owner's machine, because the
 > release key is also Play's app-signing key. Until 2026-10-11 `develop` still built io.digibyte
 > while the shipping app lived only on release branches; `RELEASING.md` §0 says how not to repeat it.
+
+> **Merging and subagents: read [`docs/development-process.md`](docs/development-process.md).**
+> Since 2026-10-26 an independent agent review plus green CI stand in for Mark's review of a PR
+> into `develop` (core, Android, iOS). Releases, force-pushes, security decisions and private
+> advisories stay his. That file is the one copy of the rule; do not restate it here.
 **Version:** v4.1.2 (versionCode 40102)  _(source of truth: `app/build.gradle.kts` `versionName`/`versionCode` — bump there on release and mirror here)_
 **Test devices:** Samsung SM-N950U (Galaxy Note 8, Android 9, API 28); Galaxy S25 Ultra (Android 15, API 35) for 16 KB page-size / modern-API coverage
 
@@ -108,12 +113,13 @@ Any user-facing string ships in **every language in `AppLocale.SUPPORTED` in the
 ### Community Hub
 - Backend: `/opt/digiscope-backend/` on `digiscope.me` (PM2 id=5, port 3001)
 - REST at `/api/hub/*`, WebSocket at `/api/hub/ws`
-- Forum timestamps parsed from SQLite DATETIME strings (snake_case field names)
+- Hub tabs: Chat and DigiRunner only (Forum and Profile removed; Hub sign-in, handle, logout and the Play-required delete-account link live in the Chat tab: `HubAccountStrip` / `HubAccountMenu` in `ProfileView.kt`)
+- One chat room, `HubWebSocket.CHAT_CHANNEL_ID` (1); the server closed the other channels (website migration 141). The server delivers nothing to a socket until it sends `join`, so `HubWebSocket.onOpen` joins on every open (connect and reconnect). No channel chooser and no in-chat tipping (`POST /hub/tip` answers 501)
 
 ### DigiRunner Game
 - 4 files: GameState.kt, GamePhysics.kt, GameRenderer.kt, DigiRunnerGame.kt
 - Game module has ZERO dependency on `:core` or `:native`
-- Launches from the Hub → Games tab (v3.10.28+). Removed from the sync overlay: rendering it during a fresh full sync could exhaust process memory on long-history wallets.
+- Launches from the Hub → DigiRunner tab (v3.10.28+). Removed from the sync overlay: rendering it during a fresh full sync could exhaust process memory on long-history wallets.
 
 ### DigiAsset balance accounting (settled v4.0.39 — do NOT re-derive)
 The counting rule is one line: **a row counts if and only if the native wallet still holds

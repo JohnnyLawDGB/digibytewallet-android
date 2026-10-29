@@ -9,7 +9,7 @@
 # (BRWalletTxHasOwnedTokenOutput: a DigiDollar output bound to an amount slot, or DigiAsset units).
 #
 # The _main.c #includes BRPeerManager.c and BRPeer.c and drives the REAL path: the wallet's saver,
-# the bridge's own JNI-free loader, BRWalletNewDual + BRWalletSetTaprootKey, the completion's
+# the bridge's own JNI-free loader, BRWalletOpenWithKeys (BRWalletOpen.h), the completion's
 # mempool step in compact-filter mode, _postSyncDone, the getdata/ping of the cleanup, BRPeer.c's own
 # notfound / tx / pong handlers, the cleanup, and the reconcile's promotion. Neither .c is on the link
 # line below -- every symbol would be defined twice. Same pattern as publish_list_ownership_kat.
@@ -52,14 +52,14 @@ flat() { tr -s '[:space:]' ' ' < "$1"; }
 fn_body() { awk -v start="$2" '$0 ~ start {on=1} on {print} on && /^\}/ {exit}' "$1" | tr -s '[:space:]' ' '; }
 
 # 1. The relaunch (restoreWalletFromBytes, the restore from disk) builds the wallet from the saved records
-#    first and installs the taproot key after, which is the order openWallet() uses.
+#    with the shared recipe (BRWalletOpen.h: BRWalletNewDual, then the taproot key), which is what
+#    openWallet() calls.
 RESTORE="$(fn_body "$BRIDGE_DIR/jni_wallet.c" '^NativeBridge_restoreWalletFromBytes')"
 [ -n "$RESTORE" ] || gate_fail "restoreWalletFromBytes was not found in jni_wallet.c. Re-anchor the gate."
-AFTER_NEW="${RESTORE#*BRWalletNewDual(g_savedTransactions, g_savedTransactionCount, mpkBIP84, mpkLegacy)}"
-[ "$AFTER_NEW" != "$RESTORE" ] ||
-    gate_fail "restoreWalletFromBytes no longer builds the wallet with BRWalletNewDual over g_savedTransactions."
-<<<"$AFTER_NEW" grep -qF "BRWalletSetTaprootKey(g_wallet, mpkBIP86)" ||
-    gate_fail "restoreWalletFromBytes no longer installs the taproot key after the saved records are loaded."
+<<<"$RESTORE" grep -qF "BRWalletMasterKeys keys = BRWalletMasterKeysFromSeed(seed, sizeof(seed));" ||
+    gate_fail "restoreWalletFromBytes no longer derives its keys with BRWalletMasterKeysFromSeed."
+<<<"$RESTORE" grep -qF "BRWalletOpenWithKeys(g_savedTransactions, g_savedTransactionCount, keys)" ||
+    gate_fail "restoreWalletFromBytes no longer builds the wallet with BRWalletOpenWithKeys over g_savedTransactions."
 
 # 2. The saved records are written by BRWalletSerializeTransactions and read back by the guarded
 #    loader this suite compiles directly.

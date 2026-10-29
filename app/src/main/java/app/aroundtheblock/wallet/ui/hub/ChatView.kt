@@ -2,9 +2,7 @@ package app.aroundtheblock.wallet.ui.hub
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -34,9 +32,7 @@ import app.aroundtheblock.wallet.R
 import app.aroundtheblock.wallet.ui.components.rememberSpendAuth
 import kotlinx.coroutines.launch
 import app.aroundtheblock.wallet.core.hub.ChatMessage
-import app.aroundtheblock.wallet.core.hub.Channel
 import app.aroundtheblock.wallet.core.hub.ConnectionState
-import app.aroundtheblock.wallet.core.hub.UserInfo
 import app.aroundtheblock.wallet.ui.theme.DigiByteAccent
 import app.aroundtheblock.wallet.ui.theme.DigiByteBlue
 import app.aroundtheblock.wallet.ui.theme.DigiByteGreen
@@ -52,17 +48,22 @@ private const val ENIGMA_HANDLE = "Enigma"
 private val EnigmaPurple = Color(0xFF7B2FBE)
 private val EnigmaPurpleLight = Color(0xFF9C27B0).copy(alpha = 0.18f)
 
+// ── The one chat room, as the header names it (the server's name for channel 1) ──
+private const val CHAT_ROOM_NAME = "chat"
+
 // ── Max message length (matches backend limit) ────────────────────────────
 private const val MAX_MESSAGE_LENGTH = 2000
 
 @Composable
 fun ChatScreen(
-    viewModel: ChatViewModel = hiltViewModel()
+    viewModel: ChatViewModel = hiltViewModel(),
+    /** The Hub account controls above the input bar: sign in, or choose a handle (HubAccountStrip). */
+    accountStrip: @Composable () -> Unit = {},
+    /** Actions in the header while signed in: the account menu (HubAccountMenu). */
+    headerActions: @Composable () -> Unit = {},
 ) {
-    val channels by viewModel.channels.collectAsStateWithLifecycle()
     val messages by viewModel.currentMessages.collectAsStateWithLifecycle()
     val connectionState by viewModel.connectionState.collectAsStateWithLifecycle()
-    val selectedChannelId by viewModel.selectedChannel.collectAsStateWithLifecycle()
     val isLoggedIn by viewModel.isLoggedIn.collectAsStateWithLifecycle()
     val typingUsers by viewModel.typingUsers.collectAsStateWithLifecycle()
     val onlineCount by viewModel.onlineCount.collectAsStateWithLifecycle()
@@ -77,9 +78,6 @@ fun ChatScreen(
     val signSubtitle = stringResource(R.string.hub_sign_subtitle)
     var signing by remember { mutableStateOf(false) }
 
-    // Tip sheet state
-    var tipTarget by remember { mutableStateOf<UserInfo?>(null) }
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -90,15 +88,7 @@ fun ChatScreen(
         ChatHeader(
             connectionState = connectionState,
             onlineCount = onlineCount,
-            selectedChannelId = selectedChannelId,
-            channels = channels
-        )
-
-        // ── Channel chips ─────────────────────────────────────────────────
-        ChannelChipRow(
-            channels = channels,
-            selectedChannelId = selectedChannelId,
-            onChannelSelected = { viewModel.selectChannel(it) }
+            actions = headerActions
         )
 
         HorizontalDivider(
@@ -111,29 +101,8 @@ fun ChatScreen(
             MessageList(
                 messages = messages,
                 myAddress = viewModel.myAddress,
-                onLoadMore = { viewModel.loadMoreHistory() },
-                onTapHandle = { userInfo -> tipTarget = userInfo }
+                onLoadMore = { viewModel.loadMoreHistory() }
             )
-
-            // Not logged in overlay
-            if (!isLoggedIn) {
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .align(Alignment.BottomCenter)
-                        .padding(16.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    shape = MaterialTheme.shapes.medium,
-                    tonalElevation = 2.dp
-                ) {
-                    Text(
-                        text = "Log in with Digi-ID to join the conversation",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
-                    )
-                }
-            }
         }
 
         // ── Typing indicator ──────────────────────────────────────────────
@@ -166,6 +135,9 @@ fun ChatScreen(
             }
         }
 
+        // ── Account: sign in, or choose a handle ──────────────────────────
+        accountStrip()
+
         // ── Input bar ─────────────────────────────────────────────────────
         MessageInputBar(
             enabled = isLoggedIn,
@@ -187,15 +159,6 @@ fun ChatScreen(
             onTyping = { viewModel.sendTypingIndicator() }
         )
     }
-
-    // ── Tip bottom sheet ──────────────────────────────────────────────────
-    tipTarget?.let { target ->
-        TipBottomSheet(
-            target = target,
-            digiScopeClient = viewModel.digiScopeClientExposed,
-            onDismiss = { tipTarget = null }
-        )
-    }
 }
 
 // ── Header ────────────────────────────────────────────────────────────────
@@ -204,11 +167,8 @@ fun ChatScreen(
 private fun ChatHeader(
     connectionState: ConnectionState,
     onlineCount: Int,
-    selectedChannelId: Int,
-    channels: List<Channel>
+    actions: @Composable () -> Unit = {}
 ) {
-    val channelName = channels.find { it.id == selectedChannelId }?.name ?: "Chat"
-
     Surface(
         color = MaterialTheme.colorScheme.surface,
         tonalElevation = 2.dp
@@ -229,21 +189,24 @@ private fun ChatHeader(
                 )
                 if (onlineCount > 0) {
                     Text(
-                        text = "#$channelName · $onlineCount online",
+                        text = "#$CHAT_ROOM_NAME · $onlineCount online",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 } else {
                     Text(
-                        text = "#$channelName",
+                        text = "#$CHAT_ROOM_NAME",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
 
-            // Connection indicator dot
-            ConnectionDot(state = connectionState)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // Connection indicator dot
+                ConnectionDot(state = connectionState)
+                actions()
+            }
         }
     }
 }
@@ -279,52 +242,13 @@ private fun ConnectionDot(state: ConnectionState) {
     }
 }
 
-// ── Channel chips ─────────────────────────────────────────────────────────
-
-@Composable
-private fun ChannelChipRow(
-    channels: List<Channel>,
-    selectedChannelId: Int,
-    onChannelSelected: (Int) -> Unit
-) {
-    val scrollState = androidx.compose.foundation.rememberScrollState()
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(scrollState)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        channels.forEach { channel ->
-            val selected = channel.id == selectedChannelId
-            FilterChip(
-                selected = selected,
-                onClick = { onChannelSelected(channel.id) },
-                label = {
-                    Text(
-                        text = if (channel.type == "bot") "✨ ${channel.name}" else channel.name,
-                        style = MaterialTheme.typography.labelMedium
-                    )
-                },
-                colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = DigiByteBlue,
-                    selectedLabelColor = Color.White,
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    labelColor = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            )
-        }
-    }
-}
-
 // ── Message list ──────────────────────────────────────────────────────────
 
 @Composable
 private fun MessageList(
     messages: List<ChatMessage>,
     myAddress: String,
-    onLoadMore: () -> Unit,
-    onTapHandle: (UserInfo) -> Unit
+    onLoadMore: () -> Unit
 ) {
     val listState = rememberLazyListState()
 
@@ -375,8 +299,7 @@ private fun MessageList(
         items(messages, key = { it.id }) { message ->
             MessageBubble(
                 message = message,
-                isMe = message.from.address == myAddress,
-                onTapHandle = onTapHandle
+                isMe = message.from.address == myAddress
             )
         }
     }
@@ -387,8 +310,7 @@ private fun MessageList(
 @Composable
 private fun MessageBubble(
     message: ChatMessage,
-    isMe: Boolean = false,
-    onTapHandle: (UserInfo) -> Unit
+    isMe: Boolean = false
 ) {
     val isEnigma = message.from.handle?.equals(ENIGMA_HANDLE, ignoreCase = true) == true
 
@@ -448,8 +370,7 @@ private fun MessageBubble(
                     fontWeight = FontWeight.SemiBold,
                     color = handleColor,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.clickable { onTapHandle(message.from) }
+                    overflow = TextOverflow.Ellipsis
                 )
 
                 if (isEnigma) {

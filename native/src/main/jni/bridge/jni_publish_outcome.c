@@ -62,3 +62,22 @@ NativeBridge_publishErrnoValue(JNIEnv *env, jobject thiz,
     (void)thiz;
     return (jint)BRPublishErrnoValue((int)index);
 }
+
+/*
+ * BR_PUBLISH_AWAIT_POLL_MS and BR_PUBLISH_AWAIT_TIMEOUT_MS: how often a send screen reads the
+ * publish result ring for its verdict, and for how long, before it may say anything. The parity
+ * test runs PublishOutcome.await on virtual time and holds its default wait to these.
+ */
+jint JNICALL
+NativeBridge_publishAwaitPollMs(JNIEnv *env, jobject thiz) {
+    (void)env;
+    (void)thiz;
+    return (jint)BR_PUBLISH_AWAIT_POLL_MS;
+}
+
+jint JNICALL
+NativeBridge_publishAwaitTimeoutMs(JNIEnv *env, jobject thiz) {
+    (void)env;
+    (void)thiz;
+    return (jint)BR_PUBLISH_AWAIT_TIMEOUT_MS;
+}

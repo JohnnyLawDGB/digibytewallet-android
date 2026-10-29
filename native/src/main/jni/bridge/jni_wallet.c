@@ -14,6 +14,7 @@
 #include "BRNetwork.h"
 #include "BRDigiDollar.h"
 #include "BRWalletFilterElements.h"
+#include "BRWalletOpen.h"
 #include "tx_details_format.h"
 
 /* ---------- Global state definitions ---------- */
@@ -296,9 +297,11 @@ NativeBridge_createWalletFromBytes(JNIEnv *env, jobject thiz,
     secure_zero(phraseChars, sizeof(phraseChars));
     secure_zero(passBuf, sizeof(passBuf));
 
-    BRMasterPubKey mpk = BRBIP32MasterPubKeyBIP84(seed, sizeof(seed));
-    /* Taproot (BIP86: m/86'/20'/0') twin from the SAME seed — installed after BRWalletNew. */
-    BRMasterPubKey mpkBIP86 = BRBIP32MasterPubKeyBIP86(seed, sizeof(seed));
+    /* The one wallet recipe, shared with iOS (BRWalletOpen.h): BIP84 + legacy m/0H + BIP86,
+     * all from the SAME seed. A new wallet used to get BRWalletNew here (no legacy tree) while
+     * every later unlock went through restoreWalletFromBytes (BRWalletNewDual); both now open
+     * the same three trees. */
+    BRWalletMasterKeys keys = BRWalletMasterKeysFromSeed(seed, sizeof(seed));
 
     if (g_wallet) {
         LOGW("createWalletFromBytes: wallet already exists, freeing old one");
@@ -313,20 +316,17 @@ NativeBridge_createWalletFromBytes(JNIEnv *env, jobject thiz,
     /* The swap excludes every WALLET_READ_GUARD reader, from the free to the new wallet's assignment. */
     pthread_rwlock_wrlock(&g_walletRwLock);
     if (g_wallet) BRWalletFree(g_wallet);
-    g_wallet = BRWalletNew(NULL, 0, mpk);
+    g_wallet = BRWalletOpenWithKeys(NULL, 0, keys);
     pthread_rwlock_unlock(&g_walletRwLock);
     if (!g_wallet) {
-        LOGE("createWalletFromBytes: BRWalletNew failed");
+        LOGE("createWalletFromBytes: BRWalletOpenWithKeys failed");
         secure_zero(seed, sizeof(seed));
         return JNI_FALSE;
     }
 
-    /* Install the BIP86 Taproot key + pre-gen the P2TR gap windows (m/86', same seed) */
-    BRWalletSetTaprootKey(g_wallet, mpkBIP86);
-
     memcpy(g_seed, seed, sizeof(seed));
     g_seedValid = 1;
-    g_mpk = mpk;
+    g_mpk = keys.bip84;
     g_mpkValid = 1;
     /* A freshly-created wallet has no history before now, so stamp the real
      * creation time. getWalletBirthCheckpointHeight / BRPeerManagerNewEx then
@@ -426,11 +426,8 @@ NativeBridge_restoreWalletFromBytes(JNIEnv *env, jobject thiz,
     secure_zero(phraseChars, sizeof(phraseChars));
     secure_zero(passBuf, sizeof(passBuf));
 
-    BRMasterPubKey mpkBIP84  = BRBIP32MasterPubKeyBIP84(seed, sizeof(seed));
-    BRMasterPubKey mpkLegacy = BRBIP32MasterPubKeyLegacy(seed, sizeof(seed));
-    /* Taproot (BIP86: m/86'/20'/0') twin from the SAME seed — installed after the wallet
-     * is built so the P2TR receive chain shares the wallet's seed. */
-    BRMasterPubKey mpkBIP86  = BRBIP32MasterPubKeyBIP86(seed, sizeof(seed));
+    /* The one wallet recipe, shared with iOS (BRWalletOpen.h): BIP84 + legacy m/0H + BIP86. */
+    BRWalletMasterKeys keys = BRWalletMasterKeysFromSeed(seed, sizeof(seed));
 
     if (g_wallet) {
         /* Marked before the swap begins — see createWalletFromBytes. */
@@ -446,9 +443,9 @@ NativeBridge_restoreWalletFromBytes(JNIEnv *env, jobject thiz,
     if (g_wallet) BRWalletFree(g_wallet);
     if (g_savedTransactions && g_savedTransactionCount > 0) {
         LOGI("restoreWalletFromBytes: restoring with %zu saved transactions", g_savedTransactionCount);
-        g_wallet = BRWalletNewDual(g_savedTransactions, g_savedTransactionCount, mpkBIP84, mpkLegacy);
+        g_wallet = BRWalletOpenWithKeys(g_savedTransactions, g_savedTransactionCount, keys);
     } else {
-        g_wallet = BRWalletNewDual(NULL, 0, mpkBIP84, mpkLegacy);
+        g_wallet = BRWalletOpenWithKeys(NULL, 0, keys);
     }
     pthread_rwlock_unlock(&g_walletRwLock);
     /* The wallet owns the records it took, and the bridge keeps none of them (jni_transaction_persist.c).
@@ -459,17 +456,14 @@ NativeBridge_restoreWalletFromBytes(JNIEnv *env, jobject thiz,
     saved_transactions_release_after_build(g_wallet);
 #endif
     if (!g_wallet) {
-        LOGE("restoreWalletFromBytes: BRWalletNewDual failed");
+        LOGE("restoreWalletFromBytes: BRWalletOpenWithKeys failed");
         secure_zero(seed, sizeof(seed));
         return JNI_FALSE;
     }
 
-    /* Install the BIP86 Taproot key + pre-gen the P2TR gap windows (m/86', same seed) */
-    BRWalletSetTaprootKey(g_wallet, mpkBIP86);
-
     memcpy(g_seed, seed, sizeof(seed));
     g_seedValid = 1;
-    g_mpk = mpkBIP84;
+    g_mpk = keys.bip84;
     g_mpkValid = 1;
 
     secure_zero(seed, sizeof(seed));
