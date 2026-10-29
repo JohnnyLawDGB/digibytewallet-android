@@ -6,6 +6,7 @@ import app.aroundtheblock.wallet.core.asset.AssetManager
 import app.aroundtheblock.wallet.core.asset.DeadSendPredicate
 import app.aroundtheblock.wallet.core.asset.OrphanSendPredicate
 import app.aroundtheblock.wallet.core.bridge.NativeBridge
+import app.aroundtheblock.wallet.core.model.SyncFrontierSession
 import app.aroundtheblock.wallet.core.model.SyncState
 import app.aroundtheblock.wallet.core.sync.FilterHeaderStore
 import app.aroundtheblock.wallet.core.sync.HistoryRebuildOnUpgrade
@@ -156,6 +157,10 @@ class WalletManager @Suppress("LongParameterList") constructor(
 
     private val _syncState = MutableStateFlow<SyncState>(SyncState.Idle)
     val syncState: StateFlow<SyncState> = _syncState.asStateFlow()
+
+    /** The process-wide "reached Synced this session" latch every sync-status screen derives
+     *  through, so the main card and Network Info cannot disagree. Reset by [wipeWallet]. */
+    val syncFrontierSession = SyncFrontierSession()
 
     private val prefs: SharedPreferences =
         context.getSharedPreferences("dgb_wallet_seed", Context.MODE_PRIVATE)
@@ -831,6 +836,7 @@ class WalletManager @Suppress("LongParameterList") constructor(
         // the wallet still exists behind its PIN and its session has been stopped — Locked.
         _walletState.value = if (seedGone) WalletState.NoWallet else WalletState.Locked
         _syncState.value = SyncState.Idle
+        syncFrontierSession.reset()
         val report = WipeReport(
             seedGone = seedGone,
             everythingCleared = sessionsStopped && quiesced && storesCleared,
