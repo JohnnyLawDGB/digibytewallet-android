@@ -162,6 +162,16 @@ int main(void)
                BROwnNodeHealthObserve(&u, 1, 1050) == BROwnNodeHealthConnecting &&
                BROwnNodeHealthObserve(&u, 1, 990) == BROwnNodeHealthConnecting);
     }
+    {   // A clock that went back (1001 after 1059) starts a new run: without that check the run
+        // from 1000 would read dark at 1060, 59 s after the restart.
+        BROwnNodeHealthTrack t = {0, 0, 0};
+        result("health_clock_back_starts_a_new_run",
+               BROwnNodeHealthObserve(&t, 1, 1000) == BROwnNodeHealthConnecting &&
+               BROwnNodeHealthObserve(&t, 1, 1059) == BROwnNodeHealthConnecting &&
+               BROwnNodeHealthObserve(&t, 1, 1001) == BROwnNodeHealthConnecting &&
+               BROwnNodeHealthObserve(&t, 1, 1060) == BROwnNodeHealthConnecting &&
+               t.runStart == 1001);
+    }
     {   // A connection (2 or 3) ends the run: the next dial gets the full grace again. Status 2
         // and 3 read as BROwnNodeHealthFor reads them.
         BROwnNodeHealthTrack t = {0, 0, 0};

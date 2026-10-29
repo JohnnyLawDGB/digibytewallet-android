@@ -194,6 +194,8 @@ class SyncService : Service() {
      *  watchdogs ask the core (BROwnNodeWatchdogMayPin) before they pin a canon peer or clear
      *  the slot, so an own node (exclusive or not) keeps its pin for the session. */
     @Volatile private var ownNodePinned = false
+    /** The (ip, port) injectCustomNode pinned, or null: what the health poll asks the core about. */
+    @Volatile private var ownNodePinnedAddr: Pair<String, Int>? = null
 
     /** The core's run record for the own-node health poll (BROwnNodeHealthTrack: runStart,
      *  lastPoll, inRun), zeroed whenever the polled node changes. Guarded by itself. */
@@ -3338,7 +3340,7 @@ class SyncService : Service() {
     private suspend fun injectCustomNode() {
         if (!CustomNodePrefs.isEnabled(this@SyncService)) {
             NativeBridge.clearPinnedPeer()
-            ownNodePinned = false
+            ownNodePinned = false; ownNodePinnedAddr = null
             return
         }
         // On any enabled-but-can't-pin early return below, clear the pin: the pin
@@ -3346,7 +3348,7 @@ class SyncService : Service() {
         // so a stale one would otherwise linger and be re-applied to future managers.
         val raw = CustomNodePrefs.hostPort(this@SyncService) ?: run {
             NativeBridge.clearPinnedPeer()
-            ownNodePinned = false
+            ownNodePinned = false; ownNodePinnedAddr = null
             return
         }
         val defaultPort = if (isTestnet(this@SyncService)) CustomNode.TESTNET_DEFAULT_PORT
@@ -3354,7 +3356,7 @@ class SyncService : Service() {
         val node = CustomNode.parse(raw, defaultPort) ?: run {
             android.util.Log.w("SyncService", "custom node enabled but address unparseable: '$raw'")
             NativeBridge.clearPinnedPeer()
-            ownNodePinned = false
+            ownNodePinned = false; ownNodePinnedAddr = null
             return
         }
         // While the user's Tor setting is on, a host name is refused rather than resolved: the
@@ -3369,13 +3371,13 @@ class SyncService : Service() {
                     "own node is given by host name and Tor is on — not resolved (the lookup would " +
                         "leave Tor), not pinned; an IPv4 address is needed while Tor is on")
                 NativeBridge.clearPinnedPeer()
-                ownNodePinned = false
+                ownNodePinned = false; ownNodePinnedAddr = null
                 return
             }
             is OwnNodeAddress.Result.Unresolved -> {
                 android.util.Log.w("SyncService", "custom node DNS resolve failed: ${node.host} (${found.reason})")
                 NativeBridge.clearPinnedPeer()
-                ownNodePinned = false
+                ownNodePinned = false; ownNodePinnedAddr = null
                 return
             }
         }
@@ -3389,7 +3391,7 @@ class SyncService : Service() {
         val effectiveExclusive = CustomNodePrefs.isExclusive(this@SyncService) && !ownNodeAdditiveSessionOverride
         NativeBridge.injectPeerByIp(ip, node.port, 0x41L)
         NativeBridge.setPinnedPeer(ip, node.port, effectiveExclusive)
-        ownNodePinned = true
+        ownNodePinned = true; ownNodePinnedAddr = ip to node.port
         android.util.Log.i(
             "SyncService",
             "own node injected + pinned as priority CF peer: $ip:${node.port} (${node.host}) " +
@@ -3400,12 +3402,11 @@ class SyncService : Service() {
 
     /**
      * Own-node health poll (own-node-pairing track). Called from the existing
-     * runPeerKeepalive tick (~every 30s) — does NOT start its own timer. Resolves the
-     * configured host to an IPv4 literal and queries native status off the main
-     * thread: compactFilterPeerStatus takes PEER_GUARD (manager->lock) in the C core,
-     * same constraint as injectCustomNode's resolve above, so this must never run on
-     * Dispatchers.Main. A host name with Tor on is not resolved (OwnNodeAddress) and
-     * reads as DARK: the node is not pinned and not in use.
+     * runPeerKeepalive tick (~every 30s) — does NOT start its own timer. Queries the
+     * native status of the address injectCustomNode pinned, off the main thread:
+     * compactFilterPeerStatus takes PEER_GUARD (manager->lock) in the C core, so this must
+     * never run on Dispatchers.Main. Makes no lookup of its own. An own node that is not
+     * pinned (unparseable, unresolved, or a host name while Tor is on) reads as DARK.
      */
     private fun refreshOwnNodeHealth() {
         if (!CustomNodePrefs.isEnabled(this@SyncService)) {
@@ -3413,32 +3414,20 @@ class SyncService : Service() {
             _ownNodeHealth.value = OwnNodeHealth.UNPAIRED
             return
         }
-        val raw = CustomNodePrefs.hostPort(this@SyncService) ?: return
-        val defaultPort = if (isTestnet(this@SyncService)) CustomNode.TESTNET_DEFAULT_PORT
-                          else CustomNode.MAINNET_DEFAULT_PORT
-        val node = CustomNode.parse(raw, defaultPort) ?: return
+        // The address injectCustomNode pinned, as iOS polls its pinned address: never a fresh
+        // lookup here, so a host name with several addresses cannot flip the record between them.
+        // No pin (the address did not parse, did not resolve, or is a host name while Tor is on)
+        // is status 0, which the core reads as dark, the same on both platforms.
+        val pinned = ownNodePinnedAddr
         serviceScope.launch(Dispatchers.IO) {
-            val ip = when (val found = OwnNodeAddress.resolve(node.host, torEnabled = torManager.isEnabled)) {
-                is OwnNodeAddress.Result.Address -> found.ipv4
-                // Tor on and a host name: not resolved and not pinned (injectCustomNode), so the
-                // node is not in use — say so rather than leave a stale state up.
-                OwnNodeAddress.Result.RefusedUnderTor -> {
-                    _ownNodeHealth.value = OwnNodeHealth.DARK
-                    return@launch
-                }
-                is OwnNodeAddress.Result.Unresolved -> {
-                    android.util.Log.w("SyncService", "own-node health: DNS resolve failed: ${node.host} (${found.reason})")
-                    return@launch
-                }
-            }
-            val status = NativeBridge.compactFilterPeerStatus(ip, node.port)
+            val status = if (pinned != null) NativeBridge.compactFilterPeerStatus(pinned.first, pinned.second) else 0
             // The decision is the core's (BROwnNodeHealthObserve, shared with iOS): 3 SERVING;
             // 1 (in the pool, not connected) CONNECTING until the node has gone 60 s without a
             // connection, then DARK, so an exclusive node that never answers no longer reads
             // "Connecting…" forever; 0 and 2 DARK (2 is a node without peerblockfilters=1).
             // elapsedRealtime: monotonic and counts deep sleep; the core starts a new run after
             // a gap of more than 120 s between polls, so a frozen loop is not counted as dialling.
-            val key = "$ip:${node.port}"
+            val key = pinned?.let { "${it.first}:${it.second}" } ?: ""
             val health = synchronized(ownNodeHealthTrack) {
                 if (key != ownNodeHealthTrackKey) { ownNodeHealthTrack.fill(0L); ownNodeHealthTrackKey = key }
                 NativeBridge.ownNodeHealthObserve(

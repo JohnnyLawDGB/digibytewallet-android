@@ -8,7 +8,8 @@
 #   every other case pass:
 #     -DOWN_NODE_RED         ignores the Tor setting, so a host name is looked up beside Tor.
 #     -DOWN_NODE_RED_HEALTH  status 1 reads connecting with no time limit ("Connecting..." forever).
-#     -DOWN_NODE_RED_GAP     a gap between polls (a suspension) counts as time spent dialling.
+#     -DOWN_NODE_RED_GAP     a gap between polls (a suspension), or a clock that went back, does not
+#                            start a new run.
 #     -DOWN_NODE_RED_PIN     the sync watchdogs pin over the own node.
 #   GREEN  the shipped rules: every case passes, ALL PASS, exit 0. Every arm under ASan + UBSan.
 #
@@ -35,7 +36,7 @@ ALL_CASES=(bare_host_gets_default_port host_with_port_parses blank_is_null empty
            typed_host_accepts_any_other_bytes host_longer_than_the_buffer_refused link_host_ascii_only
            url_decoder_quirks net_last_valid_wins label_last_wins_and_absence onion_case_insensitive_before_the_port
            health_mapping health_connecting_has_a_time_limit health_gap_edge_continues_the_run
-           health_gap_starts_a_new_run health_connection_ends_the_run health_fresh_track_and_no_track
+           health_gap_starts_a_new_run health_clock_back_starts_a_new_run health_connection_ends_the_run health_fresh_track_and_no_track
            watchdog_pin_yields_to_own_node)
 # arm macro -> its RED cases (space-separated)
 ARMS=(OWN_NODE_RED OWN_NODE_RED_HEALTH OWN_NODE_RED_GAP OWN_NODE_RED_PIN)
@@ -43,7 +44,7 @@ red_cases_for() {
     case "$1" in
         OWN_NODE_RED)        echo "tor_on_host_name_refused_not_looked_up" ;;
         OWN_NODE_RED_HEALTH) echo "health_connecting_has_a_time_limit health_gap_edge_continues_the_run" ;;
-        OWN_NODE_RED_GAP)    echo "health_gap_starts_a_new_run" ;;
+        OWN_NODE_RED_GAP)    echo "health_gap_starts_a_new_run health_clock_back_starts_a_new_run" ;;
         OWN_NODE_RED_PIN)    echo "watchdog_pin_yields_to_own_node" ;;
     esac
 }
