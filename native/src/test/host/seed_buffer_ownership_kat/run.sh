@@ -37,7 +37,7 @@ build() { # $1=output  $2...=extra clang flags
         -o "$out"
 }
 
-export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 detect_leaks=0 symbolize=0"
+export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 symbolize=0"
 
 # ---------------------------------------------------------------- [1] RED ----
 echo "=== red-before-green [1/3]: UNFIXED (v4.0.58 shape) must FAIL ==="

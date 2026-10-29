@@ -60,7 +60,7 @@ build() { # $1=TXSERIALIZE_FIXED  $2=output
 
 # symbolize=0: the slow per-invocation llvm-symbolizer otherwise stalls the UAF
 # report for tens of seconds; we only need to DETECT the fault, not name frames.
-export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 detect_leaks=0 symbolize=0"
+export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 symbolize=0"
 
 echo "=== red-before-green [1/2]: UNFIXED pattern must FAULT ==="
 if ! build 0 "$BUILD_DIR/unfixed"; then echo "FAIL: unfixed build error"; exit 1; fi

@@ -38,6 +38,6 @@ clang -w -include stdint.h -g -fsanitize=address -fno-omit-frame-pointer \
     -lpthread -lm \
     -o "$BUILD_DIR/money_range_kat" || { echo "FAIL: build error"; exit 1; }
 
-# LeakSanitizer OFF: BRWalletFree does not free the non-wallet unconfirmed transactions the wallet
-# keeps in allTx (an out-of-range one is no longer kept: the main frees what was not taken).
-ASAN_OPTIONS="abort_on_error=1 detect_leaks=0" "$BUILD_DIR/money_range_kat"
+# LeakSanitizer stays on where the platform has it (Linux): BRWalletFree releases the non-wallet records
+# it keeps (an out-of-range one is not kept: the main frees what was not taken).
+ASAN_OPTIONS="abort_on_error=1" "$BUILD_DIR/money_range_kat"

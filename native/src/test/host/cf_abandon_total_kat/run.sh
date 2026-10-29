@@ -69,10 +69,7 @@ build() {
         -o "$out"
 }
 
-# LeakSanitizer OFF for both arms, matching the sibling KATs: a manager built without a full
-# network teardown reports leaks and exits nonzero on its own, which would mask the arm result
-# entirely (the red arm would "fail" for the wrong reason and the gate would reject it).
-export ASAN_OPTIONS=detect_leaks=0
+# LeakSanitizer stays on where the platform has it (Linux), in both arms: the suite is leak-clean.
 
 echo "=== building UNFIXED (red arm: accumulation compiled out) ==="
 if ! build "$BUILD_DIR/kat_unfixed" -DABANDON_TOTAL_UNFIXED; then

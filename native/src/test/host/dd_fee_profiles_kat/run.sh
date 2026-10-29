@@ -25,8 +25,8 @@ BRIDGE_DIR="$REPO_ROOT/native/src/main/jni/bridge"
 HEADER="$BRIDGE_DIR/digidollar_fee_keys.h"
 JNI="${DD_FEE_GATE_FILE:-$BRIDGE_DIR/jni_derive.c}"
 BUILD_DIR="$(mktemp -d)"; trap 'rm -rf "$BUILD_DIR"' EXIT
-export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 detect_leaks=0 symbolize=0"
-SAN_RE='ERROR: AddressSanitizer|runtime error:'
+export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 symbolize=0"
+SAN_RE='ERROR: AddressSanitizer|ERROR: LeakSanitizer|runtime error:'
 LIMIT_S=60
 
 CASES=(

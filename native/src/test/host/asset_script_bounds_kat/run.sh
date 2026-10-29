@@ -24,7 +24,7 @@ CORE_DIR="$REPO_ROOT/native/src/main/jni/digibytewallet-core"
 BUILD_DIR="$(mktemp -d)"
 trap 'rm -rf "$BUILD_DIR"' EXIT
 
-export ASAN_OPTIONS="abort_on_error=1:detect_leaks=0:symbolize=0"
+export ASAN_OPTIONS="abort_on_error=1:symbolize=0"
 
 CASES="amount7-truncated amount7-complete short-metadata flags-last-byte"
 
@@ -65,14 +65,14 @@ for c in $CASES; do
     echo "--- [$c] GREEN, asserts on: must pass clean ---"
     out="$("$BUILD_DIR/green" "$c" 2>&1)"; rc=$?
     echo "$out"
-    if [ $rc -ne 0 ] || grep -q "ERROR: AddressSanitizer" <<<"$out"; then
+    if [ $rc -ne 0 ] || grep -qE "ERROR: (AddressSanitizer|LeakSanitizer)" <<<"$out"; then
         echo "FAIL: [$c] green arm"; exit 1
     fi
 
     echo "--- [$c] GREEN, asserts off: must pass clean ---"
     out="$("$BUILD_DIR/green_ndebug" "$c" 2>&1)"; rc=$?
     echo "$out"
-    if [ $rc -ne 0 ] || grep -q "ERROR: AddressSanitizer" <<<"$out"; then
+    if [ $rc -ne 0 ] || grep -qE "ERROR: (AddressSanitizer|LeakSanitizer)" <<<"$out"; then
         echo "FAIL: [$c] green -DNDEBUG arm"; exit 1
     fi
 done

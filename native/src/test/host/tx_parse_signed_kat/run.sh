@@ -32,10 +32,10 @@ build() {
         "$CORE_DIR/BRDigiDollar.c" "$CORE_DIR/BRDigiAsset.c" "$CORE_DIR/crypto/groestl.c" "$CORE_DIR/crypto/skein.c" \
         "$CORE_DIR/crypto/qubit.c" "$CORE_DIR/crypto/odocrypt.c" "${SHA3_SRCS[@]}" -lm -lpthread -o "$out"
 }
-export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 detect_leaks=0"
+export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1"
 build "$BUILD_DIR/red" -DTX_PARSE_SIGNED_UNFIXED || { echo "GATE FAILURE: red did not build"; exit 1; }
 OUT="$(timeout 60 "$BUILD_DIR/red" 2>&1)"; RC=$?
-if [ "$RC" -ne 0 ] && ! <<<"$OUT" grep -q "ERROR: AddressSanitizer" && <<<"$OUT" grep -q "^FAIL: A:" && <<<"$OUT" grep -q "^FAIL: B:" && <<<"$OUT" grep -q "^FAIL: C:"; then
+if [ "$RC" -ne 0 ] && ! <<<"$OUT" grep -qE "ERROR: (AddressSanitizer|LeakSanitizer)" && <<<"$OUT" grep -q "^FAIL: A:" && <<<"$OUT" grep -q "^FAIL: B:" && <<<"$OUT" grep -q "^FAIL: C:"; then
     echo "  [red] A, B and C misparse, as required"
 else echo "GATE FAILURE: the red arm (rc=$RC)"; <<<"$OUT" grep -E "FAIL|ERROR" | head -5; FAIL=1; fi
 build "$BUILD_DIR/green" || { echo "GATE FAILURE: green did not build"; exit 1; }

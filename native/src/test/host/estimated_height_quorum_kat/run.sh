@@ -28,7 +28,7 @@ BUILD_DIR="$(mktemp -d)"
 trap 'rm -rf "$BUILD_DIR"' EXIT
 
 export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 detect_leaks=0 symbolize=0"
-BANNER='ERROR: AddressSanitizer|runtime error:'
+BANNER='ERROR: AddressSanitizer|ERROR: LeakSanitizer|runtime error:'
 SCENARIOS=(quorum_adopt outlier_leaves median_and_bound downward_landing single_peer growth_bound)
 
 # ---- seam self-check: a -D that names nothing silently builds the shipped path -----------------

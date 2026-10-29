@@ -37,7 +37,7 @@ build() {
         "$CORE_DIR/BRBIP39Mnemonic.c" "$CORE_DIR/crypto/groestl.c" "$CORE_DIR/crypto/skein.c" "$CORE_DIR/crypto/qubit.c" \
         "$CORE_DIR/crypto/odocrypt.c" "${SHA3_SRCS[@]}" -lm -lpthread -o "$out"
 }
-export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 detect_leaks=0"
+export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1"
 
 build "$BUILD_DIR/red" -DBIP39_NUL_UNFIXED || { echo "GATE FAILURE: the red arm did not compile"; exit 1; }
 RED_OUT="$(timeout -k 5 120 "$BUILD_DIR/red" 2>&1)"; RED_RC=$?
@@ -45,7 +45,7 @@ if [ "$RED_RC" -ne 0 ] && <<<"$RED_OUT" grep -q "^FAIL: A: a passphrase with an 
 else echo "GATE FAILURE: the red arm did not fail case A (rc=$RED_RC)"; <<<"$RED_OUT" tail -3; FAIL=1; fi
 build "$BUILD_DIR/green" || { echo "GATE FAILURE: the green arm did not compile"; exit 1; }
 GREEN_OUT="$(timeout -k 5 120 "$BUILD_DIR/green" 2>&1)"; GREEN_RC=$?
-if [ "$GREEN_RC" -eq 0 ] && <<<"$GREEN_OUT" grep -q "^PASS: bip39_nul_kat" && ! <<<"$GREEN_OUT" grep -q "ERROR: AddressSanitizer"; then echo "  [green] all cases pass"
+if [ "$GREEN_RC" -eq 0 ] && <<<"$GREEN_OUT" grep -q "^PASS: bip39_nul_kat" && ! <<<"$GREEN_OUT" grep -qE "ERROR: (AddressSanitizer|LeakSanitizer)"; then echo "  [green] all cases pass"
 else echo "GATE FAILURE: the green arm (rc=$GREEN_RC)"; <<<"$GREEN_OUT" grep -E "FAIL|ERROR" | head -4; FAIL=1; fi
 
 if [ "$FAIL" -eq 0 ]; then echo "PASS: bip39_nul_kat (A red-then-green, B guard, seam gates; ASan)"; exit 0; fi

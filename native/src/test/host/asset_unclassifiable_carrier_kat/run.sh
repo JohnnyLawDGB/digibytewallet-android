@@ -22,7 +22,7 @@ CORE_DIR="$REPO_ROOT/native/src/main/jni/digibytewallet-core"
 BUILD_DIR="$(mktemp -d)"
 trap 'rm -rf "$BUILD_DIR"' EXIT
 
-export ASAN_OPTIONS="abort_on_error=1:detect_leaks=0:symbolize=0"
+export ASAN_OPTIONS="abort_on_error=1:symbolize=0"
 
 shopt -s nullglob
 SHA3_SRCS=("$CORE_DIR"/crypto/sha3/*.c)
@@ -66,7 +66,7 @@ echo "$out"
 if [ $rc -eq 0 ]; then
     echo "FAIL: red arm did not fault (a test that cannot go red proves nothing)"; exit 1
 fi
-if grep -q "ERROR: AddressSanitizer" <<<"$out"; then
+if grep -qE "ERROR: (AddressSanitizer|LeakSanitizer)" <<<"$out"; then
     echo "FAIL: red arm faulted for the wrong reason (a sanitizer report, not the expected check)"; exit 1
 fi
 while IFS= read -r want; do
@@ -96,7 +96,7 @@ CHECKS
 echo "--- GREEN: must pass clean ---"
 out="$("$BUILD_DIR/green" 2>&1)"; rc=$?
 echo "$out"
-if [ $rc -ne 0 ] || grep -q "ERROR: AddressSanitizer" <<<"$out"; then
+if [ $rc -ne 0 ] || grep -qE "ERROR: (AddressSanitizer|LeakSanitizer)" <<<"$out"; then
     echo "FAIL: green arm"; exit 1
 fi
 

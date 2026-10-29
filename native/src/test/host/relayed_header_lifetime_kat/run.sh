@@ -19,7 +19,7 @@
 #      reference arm. The scanner first shows it is not blind: with the reference arm's
 #      lines left in, it must find one.
 #
-# ASan, leak detection off (this gate is about a lifetime, not about ownership at exit).
+# ASan, with LeakSanitizer on where the platform has it (Linux): the suite is leak-clean.
 # Value-macro convention: -D...=1 / -D...=0, tested with #if.
 # Each arm compiles BRPeerManager.c under ASan; allow about a minute per arm on a busy host.
 set -uo pipefail   # NOT -e: the reference arm's non-zero exit must be captured
@@ -104,7 +104,7 @@ echo "source gate OK ($(wc -l < "$BUILD_DIR/tail_live.txt") code lines after the
 
 # ---- 1. BEHAVIOUR GATE --------------------------------------------------------------------
 # symbolize=0 for speed: the gate detects the report, it does not name its frames.
-export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 detect_leaks=0 symbolize=0"
+export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 symbolize=0"
 
 echo "=== reference arm [1/2]: must be reported by AddressSanitizer ==="
 if ! build 1 "$BUILD_DIR/reference"; then echo "FAIL: reference arm did not build"; exit 1; fi

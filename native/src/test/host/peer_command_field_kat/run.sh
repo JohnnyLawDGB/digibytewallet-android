@@ -45,4 +45,4 @@ clang -w -include stdint.h -g -fsanitize=address -fno-omit-frame-pointer -DDEBUG
     -lpthread -lm \
     -o "$BUILD_DIR/peer_command_field_kat"
 
-ASAN_OPTIONS="abort_on_error=1 detect_leaks=0" timeout 120 "$BUILD_DIR/peer_command_field_kat"
+ASAN_OPTIONS="abort_on_error=1" timeout 120 "$BUILD_DIR/peer_command_field_kat"

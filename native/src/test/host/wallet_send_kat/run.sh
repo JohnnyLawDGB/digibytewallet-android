@@ -21,8 +21,8 @@ BUILD_DIR="$(mktemp -d)"
 trap 'rm -rf "$BUILD_DIR"' EXIT
 
 CC="${CC:-clang}"
-export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 detect_leaks=0 symbolize=0"
-SAN_RE='ERROR: AddressSanitizer|runtime error:'
+export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 symbolize=0"
+SAN_RE='ERROR: AddressSanitizer|ERROR: LeakSanitizer|runtime error:'
 
 RED_CASES=(copy_not_same_object ealready_never_overwrites nonwallet_copy_released)
 GUARD_CASES=(copy_registered timestamp_set_before_register original_free_is_safe

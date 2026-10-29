@@ -88,7 +88,7 @@ if ! grep -q "FAIL: the late pong was answered$" "$RED_OUT" ||
     echo "GATE FAILURE: the red arm failed, but NOT on the late-callback assertions."
     exit 1
 fi
-if grep -q "ERROR: AddressSanitizer" "$RED_OUT"; then
+if grep -qE "ERROR: (AddressSanitizer|LeakSanitizer)" "$RED_OUT"; then
     cat "$RED_OUT"
     echo "GATE FAILURE: the red arm faulted; a fault is not the failure this gate asserts."
     exit 1

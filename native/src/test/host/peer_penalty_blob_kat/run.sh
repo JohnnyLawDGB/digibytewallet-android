@@ -15,7 +15,7 @@ CORE_DIR="$REPO_ROOT/native/src/main/jni/digibytewallet-core"
 BRIDGE="$REPO_ROOT/native/src/main/jni/bridge/jni_peer.c"
 BUILD_DIR="$(mktemp -d)"
 trap 'rm -rf "$BUILD_DIR"' EXIT
-export ASAN_OPTIONS="abort_on_error=1 detect_leaks=0 symbolize=0"
+export ASAN_OPTIONS="abort_on_error=1 symbolize=0"
 
 if ! grep -q 'PEER_PENALTY_BLOB_UNFIXED' "$CORE_DIR/BRPeerPenalty.h"; then
     echo "GATE FAILURE: the PEER_PENALTY_BLOB_UNFIXED comparison seam is not in BRPeerPenalty.h"; exit 1
@@ -78,7 +78,7 @@ for bits in 64 32; do
     timeout 120 "$BUILD_DIR/red$bits" > "$BUILD_DIR/red$bits.out" 2>&1; rc=$?
     cat "$BUILD_DIR/red$bits.out"
     fails_red="$(grep -c '^  \[FAIL\]' "$BUILD_DIR/red$bits.out")"
-    if [ "$rc" -ne 0 ] && [ "$fails_red" -eq 4 ] && ! grep -q 'ERROR: AddressSanitizer' "$BUILD_DIR/red$bits.out" \
+    if [ "$rc" -ne 0 ] && [ "$fails_red" -eq 4 ] && ! grep -qE 'ERROR: (AddressSanitizer|LeakSanitizer)' "$BUILD_DIR/red$bits.out" \
        && [ "$(sed -n '/^\[3\]/,$p' "$BUILD_DIR/red$bits.out" | grep -c '^  \[FAIL\]')" -eq 0 ]; then
         echo "  ok   comparison arm: [1] and [2] serialize nothing, [3] holds"
     else

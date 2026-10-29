@@ -22,16 +22,16 @@ build() {
         "$CORE_DIR/BRBIP39Mnemonic.c" "$CORE_DIR/crypto/groestl.c" "$CORE_DIR/crypto/skein.c" "$CORE_DIR/crypto/qubit.c" \
         "$CORE_DIR/crypto/odocrypt.c" "${SHA3_SRCS[@]}" -lm -lpthread -o "$out"
 }
-export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 detect_leaks=0"
+export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1"
 FAIL=0
 build "$BUILD_DIR/red" -DDD_COINBASE_UNFIXED || { echo "GATE FAILURE: red did not build"; exit 1; }
 OUT="$(timeout -k 5 300 "$BUILD_DIR/red" 2>&1)"; RC=$?
-if [ "$RC" -ne 0 ] && ! <<<"$OUT" grep -q "ERROR: AddressSanitizer" && <<<"$OUT" grep -q "^FAIL: A: a coinbase.s DigiDollar was credited" \
+if [ "$RC" -ne 0 ] && ! <<<"$OUT" grep -qE "ERROR: (AddressSanitizer|LeakSanitizer)" && <<<"$OUT" grep -q "^FAIL: A: a coinbase.s DigiDollar was credited" \
    && ! <<<"$OUT" grep -q "FAIL setup\|FAIL control"; then echo "  [red] case A failed, as required: $(<<<"$OUT" grep -m1 '^FAIL: A:')"
 else echo "GATE FAILURE: the red arm (rc=$RC)"; <<<"$OUT" grep -E "FAIL|ERROR" | head -5; FAIL=1; fi
 build "$BUILD_DIR/green" || { echo "GATE FAILURE: green did not build"; exit 1; }
 OUT="$(timeout -k 5 300 "$BUILD_DIR/green" 2>&1)"; RC=$?
-if [ "$RC" -eq 0 ] && ! <<<"$OUT" grep -q "ERROR: AddressSanitizer" && <<<"$OUT" grep -q "^PASS: dd_coinbase_kat"; then echo "  [green] all checks pass"
+if [ "$RC" -eq 0 ] && ! <<<"$OUT" grep -qE "ERROR: (AddressSanitizer|LeakSanitizer)" && <<<"$OUT" grep -q "^PASS: dd_coinbase_kat"; then echo "  [green] all checks pass"
 else echo "GATE FAILURE: the green arm (rc=$RC)"; <<<"$OUT" grep -E "FAIL|ERROR" | head -5; FAIL=1; fi
 [ "$FAIL" -eq 0 ] && { echo "PASS: dd_coinbase_kat (A red-then-green, B guard; ASan)"; exit 0; }
 echo "FAIL: dd_coinbase_kat"; exit 1

@@ -39,5 +39,6 @@ clang -w -include stdint.h -g -fsanitize=address -fno-omit-frame-pointer -DWALLE
     -lpthread -lm \
     -o "$BUILD_DIR/unconfirmed_spend_sig_kat" || { echo "FAIL: build error"; exit 1; }
 
-# LeakSanitizer OFF: unconfirmed non-wallet txs the wallet keeps in allTx are not freed by BRWalletFree.
-ASAN_OPTIONS="abort_on_error=1 detect_leaks=0" "$BUILD_DIR/unconfirmed_spend_sig_kat"
+# LeakSanitizer stays on where the platform has it (Linux): BRWalletFree releases the non-wallet
+# records it keeps, so the suite is leak-clean.
+ASAN_OPTIONS="abort_on_error=1" "$BUILD_DIR/unconfirmed_spend_sig_kat"

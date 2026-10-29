@@ -52,7 +52,7 @@ build_and_run() {
         -I "$CORE_DIR" -I "$CORE_DIR/secp256k1/include" -I "$CORE_DIR/secp256k1" \
         "$BUILD_DIR/main${bits}.o" "${UNITS[@]}" -lpthread -lm \
         -o "$BUILD_DIR/parent_txid_binding_kat${bits}"
-    ASAN_OPTIONS=abort_on_error=1:detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 \
+    ASAN_OPTIONS=abort_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
         "$BUILD_DIR/parent_txid_binding_kat${bits}"
 }
 

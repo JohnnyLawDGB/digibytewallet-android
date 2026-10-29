@@ -19,8 +19,8 @@ BUILD_DIR="$(mktemp -d)"
 trap 'rm -rf "$BUILD_DIR"' EXIT
 
 CC="${CC:-clang}"
-export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 detect_leaks=0 symbolize=0"
-SAN_RE='ERROR: AddressSanitizer|runtime error:'
+export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 symbolize=0"
+SAN_RE='ERROR: AddressSanitizer|ERROR: LeakSanitizer|runtime error:'
 
 RED_CASES=(a_lower_tip_is_rejected)
 GUARD_CASES=(a_higher_tip_is_persisted an_equal_tip_is_persisted the_first_save_is_persisted an_unreadable_top_fails_open

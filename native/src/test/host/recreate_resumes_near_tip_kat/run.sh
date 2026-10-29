@@ -52,11 +52,8 @@
 # the OBSERVED collapse, not some other failure); and ALL PASS is absent.
 #
 # Compiler: clang, NOT gcc, and `-include stdint.h` -- same crypto/odocrypt.h
-# reasons documented in bip340_kat/run.sh. -fsanitize=address with
-# detect_leaks=0: this gate is about heights, and BRPeerManagerFree's known
-# residual (blocks resident at teardown are not all freed -- see the
-# "KNOWN RESIDUAL" note at jni_peer.c:885-889) would otherwise report a leak
-# that has nothing to do with the property under test.
+# reasons documented in bip340_kat/run.sh. -fsanitize=address, with
+# LeakSanitizer on where the platform has it (Linux): the suite is leak-clean.
 set -uo pipefail   # deliberately NOT -e: the RED arm's non-zero exit is expected
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -103,7 +100,7 @@ build() { # $1=output  $2...=extra clang flags (e.g. -DRECREATE_NEARTIP_UNFIXED)
         -o "$out"
 }
 
-export ASAN_OPTIONS="detect_leaks=0 symbolize=0"
+export ASAN_OPTIONS="symbolize=0"
 
 RED_BLOCK_FAIL="FAIL: block side: recreate resumed at the near-tip snapshot's top (lastBlockHeight == H)"
 RED_CF_FAIL="FAIL: CF side: scan frontier resumed at the persisted near-tip frontier"

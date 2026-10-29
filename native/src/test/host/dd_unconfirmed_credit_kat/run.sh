@@ -45,4 +45,4 @@ clang -w -include stdint.h -g -fsanitize=address -fno-omit-frame-pointer \
     -lm \
     -o "$BUILD_DIR/dd_unconfirmed_credit_kat"
 
-ASAN_OPTIONS=abort_on_error=1:detect_leaks=0 "$BUILD_DIR/dd_unconfirmed_credit_kat"
+ASAN_OPTIONS=abort_on_error=1 "$BUILD_DIR/dd_unconfirmed_credit_kat"

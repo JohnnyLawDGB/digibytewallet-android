@@ -20,4 +20,4 @@ clang -w -include stdint.h -g -fsanitize=address -fno-omit-frame-pointer \
     "$CORE_DIR/crypto/groestl.c" "$CORE_DIR/crypto/skein.c" "$CORE_DIR/crypto/qubit.c" \
     "$CORE_DIR/crypto/odocrypt.c" "${SHA3_SRCS[@]}" -lm \
     -o "$BUILD_DIR/foreign_taproot_sign_kat"
-ASAN_OPTIONS=abort_on_error=1:detect_leaks=0 "$BUILD_DIR/foreign_taproot_sign_kat"
+ASAN_OPTIONS=abort_on_error=1 "$BUILD_DIR/foreign_taproot_sign_kat"

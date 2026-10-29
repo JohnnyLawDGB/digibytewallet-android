@@ -20,8 +20,8 @@ BUILD_DIR="$(mktemp -d)"
 trap 'rm -rf "$BUILD_DIR"' EXIT
 
 CC="${CC:-clang}"
-export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 detect_leaks=0 symbolize=0"
-SAN_RE='ERROR: AddressSanitizer|runtime error:'
+export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 symbolize=0"
+SAN_RE='ERROR: AddressSanitizer|ERROR: LeakSanitizer|runtime error:'
 
 RED_CASES=(loop_valve_holds_recovery_until_ceiling released_past_ceiling c2b_heal_rearms c2b_frozen_rearms c2b_tier2_rearms
            c2b_post_timeout_rearms c2d_corrupt_chain_heals c2_tier2_live_gate

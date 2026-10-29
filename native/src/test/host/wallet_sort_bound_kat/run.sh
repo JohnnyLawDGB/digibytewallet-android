@@ -32,8 +32,8 @@ BUILD_DIR="$(mktemp -d)"
 trap 'rm -rf "$BUILD_DIR"' EXIT
 CC="${CC:-clang}"
 
-export ASAN_OPTIONS="abort_on_error=1 detect_leaks=0 symbolize=0"
-SAN_RE='ERROR: AddressSanitizer|runtime error:'
+export ASAN_OPTIONS="abort_on_error=1 symbolize=0"
+SAN_RE='ERROR: AddressSanitizer|ERROR: LeakSanitizer|runtime error:'
 
 # The per-comparison bound the shipped source holds, plus the one top node each comparison
 # counts: WALLET_MAX_ASCENDING_STEPS (256) + 1. Read from the source so the two cannot drift.
