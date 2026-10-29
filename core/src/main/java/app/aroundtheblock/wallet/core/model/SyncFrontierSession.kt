@@ -21,7 +21,6 @@ class SyncFrontierSession {
         private set
 
     /** [deriveSyncFrontier] with this session's latch, then latch from the result. */
-    @Synchronized
     @Suppress("LongParameterList")
     fun derive(
         state: SyncState,
@@ -32,8 +31,8 @@ class SyncFrontierSession {
         cfTip: Long,
         scanFrontier: Long = 0L,
         abandonedBandUnrecovered: Boolean = false,
-    ): SyncFrontier {
-        val frontier = deriveSyncFrontier(
+    ): SyncFrontier = step { reached ->
+        deriveSyncFrontier(
             state = state,
             peerCount = peerCount,
             currentHeight = currentHeight,
@@ -42,15 +41,25 @@ class SyncFrontierSession {
             cfTip = cfTip,
             scanFrontier = scanFrontier,
             abandonedBandUnrecovered = abandonedBandUnrecovered,
-            reachedSyncedThisSession = reachedSynced,
+            reachedSyncedThisSession = reached,
         )
+    }
+
+    /** One derivation: [compute] is handed the latch as it stood BEFORE this derivation, and the
+     *  latch is then set from its result. `internal` so a test can watch what each one is handed. */
+    @Synchronized
+    internal fun step(compute: (reachedSyncedThisSession: Boolean) -> SyncFrontier): SyncFrontier {
+        val frontier = compute(reachedSynced)
         if (frontier.stage == SyncStage.Synced || frontier.abandonedBandHolding) {
             reachedSynced = true
         }
         return frontier
     }
 
-    /** Back to a fresh process's state. Called by a wallet wipe: the next wallet starts cold. */
+    /** Back to a fresh process's state. The latch means "this session STAYED synced", so it is
+     *  cleared whenever that stops being known: the app going to the background or locking
+     *  (iOS `WalletCore.enterBackground` clears `BRSyncFrontierSession.reachedSynced` at the same
+     *  point), a new wallet (create, recover) and a wipe. */
     @Synchronized
     fun reset() {
         reachedSynced = false

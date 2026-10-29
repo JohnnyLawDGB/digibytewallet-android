@@ -49,12 +49,19 @@ class SyncFrontierSessionTest {
         assertFalse(session.reachedSynced)
     }
 
-    @Test fun `the latch is read before the derivation and set after it`() {
+    @Test fun `each derivation is handed the latch as it stood before it, and sets it after`() {
+        // What each derivation is handed, watched directly: the one that first reaches Synced is
+        // computed with false (read BEFORE set), the next one with true. Setting first would hand
+        // the first one true; never setting would hand the second one false.
         val session = SyncFrontierSession()
-        // The first Synced derivation sees the previous (false) latch, and only then sets it.
-        val first = session.atTip()
-        assertEquals(SyncStage.Synced, first.stage)
-        assertTrue(session.reachedSynced)
+        val handed = mutableListOf<Boolean>()
+        val synced = SyncFrontier(SyncStage.Synced, tip, tip, 1f)
+        val syncing = SyncFrontier(SyncStage.Syncing, tip, outlier, 0.5f)
+        session.step { handed += it; syncing }
+        session.step { handed += it; synced }
+        session.step { handed += it; syncing }
+        assertEquals(listOf(false, false, true), handed)
+        assertTrue("a Syncing result does not clear the latch; only reset does", session.reachedSynced)
     }
 
     @Test fun `the abandoned band hold latches as Synced does`() {

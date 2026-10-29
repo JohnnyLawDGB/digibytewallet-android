@@ -159,7 +159,8 @@ class WalletManager @Suppress("LongParameterList") constructor(
     val syncState: StateFlow<SyncState> = _syncState.asStateFlow()
 
     /** The process-wide "reached Synced this session" latch every sync-status screen derives
-     *  through, so the main card and Network Info cannot disagree. Reset by [wipeWallet]. */
+     *  through, so the main card and Network Info cannot disagree. Reset by [enterBackground],
+     *  [lock], [lockUi], [clearSyncData] (a new wallet) and [wipeWallet]. */
     val syncFrontierSession = SyncFrontierSession()
 
     private val prefs: SharedPreferences =
@@ -450,8 +451,20 @@ class WalletManager @Suppress("LongParameterList") constructor(
      * Lock the wallet — zeros keys from C core memory.
      */
     fun lock() {
+        syncFrontierSession.reset()
         NativeBridge.lockSession()
         _walletState.value = WalletState.Locked
+    }
+
+    /**
+     * The app has gone to the background (MainActivity.onStop), with or without a PIN. Clears the
+     * "reached Synced this session" latch, as iOS `WalletCore.enterBackground` does: after a resume
+     * the wallet must show it is synced again before a far-ahead peer target is treated as an
+     * outlier (SYNC_TARGET_MAX_LEAD) and Send is enabled on it. Until the latch was shared, it lived in
+     * the wallet screen's view model, which a backgrounded PIN wallet's unlock route cleared.
+     */
+    fun enterBackground() {
+        syncFrontierSession.reset()
     }
 
     /**
@@ -460,6 +473,7 @@ class WalletManager @Suppress("LongParameterList") constructor(
      * in the background with full signing capability.
      */
     fun lockUi() {
+        syncFrontierSession.reset()
         _walletState.value = WalletState.Locked
     }
 
@@ -1327,6 +1341,8 @@ class WalletManager @Suppress("LongParameterList") constructor(
     /** `internal` (not `private`) so [WalletManagerClearSyncDataTest] can call it
      *  directly without instantiating createWallet/recoverWallet's native path. */
     internal fun clearSyncData() {
+        // A new wallet (create, recover, seed change) has not reached Synced in this session.
+        syncFrontierSession.reset()
         // commit(), not apply(): the one-time history rebuild is stamped not needed below, and
         // that stamp must not reach disk before the clear it relies on — nor at all if the
         // clear did not land.

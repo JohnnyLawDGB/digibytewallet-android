@@ -390,6 +390,9 @@ class MainActivity : FragmentActivity() {
 
     override fun onStop() {
         super.onStop()
+        // Every wallet, PIN or not, as iOS's enterBackground: the "reached Synced this session"
+        // latch must be earned again after a resume.
+        walletManager.enterBackground()
         // UI-only lock — requires PIN/biometric to re-enter the app.
         // Does NOT call NativeBridge.lockSession() — the native seed stays
         // in memory so SyncService can continue syncing in the background.

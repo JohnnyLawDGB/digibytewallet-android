@@ -51,6 +51,22 @@ class SyncFrontierSessionSignalGateTest {
         )
     }
 
+    @Test fun `going to the background clears the latch, for every wallet`() {
+        // The reset itself is behaviour (core WalletManagerSyncSessionResetTest); this is the one
+        // call no JVM test can reach: onStop hands it over before, and outside, the PIN-only lock.
+        val activity = File("src/main/java/app/aroundtheblock/wallet/MainActivity.kt").let {
+            assertTrue("MainActivity.kt is missing — this gate is watching a file that moved", it.exists())
+            KotlinSourceGate.of(it.readText())
+        }
+        val onStop = activity.range("override fun onStop()", "override fun ")
+        assertTrue("MainActivity.onStop is missing", onStop != null)
+        val reset = activity.calls("walletManager.enterBackground", onStop!!)
+        assertEquals("onStop calls walletManager.enterBackground() ${reset.size} times; it has to be once", 1, reset.size)
+        val lock = activity.calls("walletManager.lockUi", onStop)
+        assertTrue("enterBackground must come before, and outside, the Unlocked-only lockUi branch",
+            lock.isEmpty() || reset.single().range.first < lock.first().range.first)
+    }
+
     @Test fun `the main card's balance guard reads the shared latch`() {
         val vm = gate("wallet/WalletViewModel.kt")
         assertTrue(
