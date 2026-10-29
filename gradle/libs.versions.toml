@@ -53,7 +53,7 @@ kmpTorResource = "408.16.4"
 
 # --- Test --------------------------------------------------------------------
 junit = "4.13.2"
-mockk = "1.13.12"
+mockk = "1.14.11"
 orgJson = "20240303"
 androidxTestRunner = "1.6.2"
 androidxTestRules = "1.6.1"
