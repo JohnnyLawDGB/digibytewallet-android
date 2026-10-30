@@ -19,6 +19,10 @@
 #                                       to catch. The BIP84-only fixture still matches.
 # Every case, every arm, both word sizes: no sanitizer report. A build error is never evidence.
 #
+# Every arm builds with -DBR_PEER_MESSAGE_TAP, the core's test-only message tap (BRPeer.h). Before the
+# arms, a gate checks the tap cannot ship: BRPeer.c built without the flag has no tap symbol, and the
+# flag with NDEBUG does not compile.
+#
 # CORE_DIR may be set to run this against another core checkout. bash 3.2 compatible (no associative
 # arrays), so it runs on a Mac too.
 set -uo pipefail   # not -e: the red arms' nonzero exits must be captured
@@ -41,7 +45,8 @@ red_cases() {   # the cases that must fail in arm $1
         WALLET_OPEN_SINGLE_TREE_UNFIXED) echo "fixture_23924600_matches" ;;
     esac
 }
-CASES="fixture_24460800_matches fixture_23924600_matches recording_round_trip recording_rejects_malformed"
+CASES="fixture_24460800_matches fixture_23924600_matches recording_round_trip recording_rejects_malformed
+       relay_attempts_counted unknown_wallet_refused"
 
 if [ ! -f "$CORE_DIR/replay/BRReplay.c" ] || [ ! -f "$FIXTURES/test-abandon-24460800.rec" ]; then
     echo "GATE FAILURE: $CORE_DIR has no replay harness (replay/BRReplay.c and its fixtures)"; exit 1
@@ -66,13 +71,42 @@ build() {
     local out="$1"; local bits="$2"; shift 2
     local m=()
     [ "$bits" = "32" ] && m=(-m32)
-    "${CC:-clang}" -w -include stdint.h -g -fsanitize=address -fno-omit-frame-pointer ${m[@]+"${m[@]}"} "$@" \
+    # -DBR_PEER_MESSAGE_TAP: the test-only build of the core's message tap (BRPeer.h), for the round trip.
+    "${CC:-clang}" -w -include stdint.h -g -fsanitize=address -fno-omit-frame-pointer ${m[@]+"${m[@]}"} \
+        -DBR_PEER_MESSAGE_TAP "$@" \
         -I "$CORE_DIR" -I "$CORE_DIR/replay" -I "$CORE_DIR/secp256k1/include" -I "$CORE_DIR/secp256k1" \
         "$SCRIPT_DIR/replay_snapshot_kat_main.c" "$CORE_DIR/replay/BRReplay.c" "${UNITS[@]}" \
         -lm -lpthread -o "$out"
 }
 
 FAIL=0
+
+# ---- the tap never ships ------------------------------------------------------------------------
+# A core built as the apps build it (no BR_PEER_MESSAGE_TAP) has no tap code: no symbol for it in
+# BRPeer.o, optimised or not. And the flag together with NDEBUG, which every release build defines,
+# does not compile.
+tap_gate() {
+    local o="$BUILD_DIR/brpeer.o" opt syms
+    for opt in -O0 -O2 "-O2 -DNDEBUG"; do
+        # shellcheck disable=SC2086
+        if ! "${CC:-clang}" -c -w -include stdint.h $opt -I "$CORE_DIR" -I "$CORE_DIR/secp256k1/include" \
+                "$CORE_DIR/BRPeer.c" -o "$o"; then
+            echo "GATE FAILURE: BRPeer.c without the tap flag did not compile ($opt)"; FAIL=1; continue
+        fi
+        syms="$(nm "$o" | grep -i 'MessageTap\|TapMessage' || true)"
+        if [ -n "$syms" ]; then echo "GATE FAILURE: a build without BR_PEER_MESSAGE_TAP ($opt) has tap symbols:"; echo "$syms"; FAIL=1
+        else echo "  [tap] no tap symbol in BRPeer.o built without the flag ($opt)"; fi
+    done
+    local err
+    err="$("${CC:-clang}" -c -w -include stdint.h -DBR_PEER_MESSAGE_TAP -DNDEBUG -I "$CORE_DIR" \
+            -I "$CORE_DIR/secp256k1/include" "$CORE_DIR/BRPeer.c" -o "$o" 2>&1)" && {
+        echo "GATE FAILURE: BR_PEER_MESSAGE_TAP with NDEBUG compiled"; FAIL=1; return; }
+    if <<<"$err" grep -q "must not reach a release"; then echo "  [tap] the flag with NDEBUG is a compile error, as required"
+    else echo "GATE FAILURE: the flag with NDEBUG failed to compile for another reason:"; <<<"$err" head -5; FAIL=1; fi
+}
+echo "--- the tap is test-only ---"
+tap_gate
+
 run_case() {   # run_case <bin> <case> -> OUT, RC
     local tmp; tmp="$(mktemp -d "$BUILD_DIR/case.XXXXXX")"
     OUT="$("$1" "$2" "$FIXTURES" "$tmp" 2>&1)"; RC=$?
