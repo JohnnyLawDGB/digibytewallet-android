@@ -107,21 +107,7 @@ static void peerAsksFor(BRPeerManager *m, BRPeer *p, UInt256 hash)
  * BRPeerManagerFree frees them as they are, so each callback's context would leak. */
 static void drainPeers(BRPeerManager *m)
 {
-    for (size_t i = 0; i < array_count(m->connectedPeers); i++) {
-        BRPeerContext *ctx = (BRPeerContext *)m->connectedPeers[i];
-        void (*cb)(void *, int) = NULL;
-        void *cbInfo = NULL;
-
-        while (_BRPeerPongPop(ctx, &cb, &cbInfo)) {
-            if (cb) cb(cbInfo, 0);
-            cb = NULL; cbInfo = NULL;
-        }
-        if (ctx->mempoolCallback) {
-            cb = ctx->mempoolCallback; cbInfo = ctx->mempoolInfo;
-            ctx->mempoolCallback = NULL; ctx->mempoolInfo = NULL;
-            cb(cbInfo, 0);
-        }
-    }
+    for (size_t i = 0; i < array_count(m->connectedPeers); i++) BRPeerCancelPendingCallbacks(m->connectedPeers[i]);
 }
 
 int main(void)
