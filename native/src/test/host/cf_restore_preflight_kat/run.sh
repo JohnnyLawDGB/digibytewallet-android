@@ -29,8 +29,8 @@ trap 'rm -rf "$BUILD_DIR"' EXIT
 
 CC="${CC:-clang}"
 VECTORS="$CORE_DIR/vectors/cf-restore-preflight/vectors.txt"
-export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 detect_leaks=0 symbolize=0"
-SAN_RE='ERROR: AddressSanitizer|runtime error:'
+export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 symbolize=0"
+SAN_RE='ERROR: AddressSanitizer|ERROR: LeakSanitizer|runtime error:'
 
 ALL_CASES=(kt_healthy_frontier_keeps_window kt_abandoned_covered_resumes kt_abandoned_not_covered_rebuilds
            kt_frontier_below_floor_rebuilds kt_ledger_without_blocks_rebuilds kt_synced_without_ledger_rescans

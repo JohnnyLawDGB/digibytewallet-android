@@ -22,8 +22,8 @@
 # Built with AddressSanitizer: BRTransactionAddOutput stores every script in a
 # heap buffer of exactly scriptLen bytes, so the tool itself checks that the
 # reader stays inside each script -- the "(bounded)" assertions are then more
-# than a -1 return. Leak detection is off (this KAT is not about leaks);
-# symbol resolution is off for speed.
+# than a -1 return. LeakSanitizer stays on where the
+# platform has it (Linux); symbol resolution is off for speed.
 #
 # ARMS. The shipped arm (no -D at all) must pass every check, in a 64-bit and a
 # 32-bit build. Two comparison arms, presence convention, pin the reader properties
@@ -48,7 +48,7 @@ shopt -s nullglob
 SHA3_SRCS=("$CORE_DIR"/crypto/sha3/*.c)
 shopt -u nullglob
 
-export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 detect_leaks=0 symbolize=0"
+export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 symbolize=0"
 
 # Seam self-check: a -D that names nothing silently builds the shipped path.
 for tok in DD_TYPE_WIDTH_UNFIXED DD_PUSH_LIST_OPCODE_UNFIXED; do

@@ -34,7 +34,7 @@ BUILD_DIR="$(mktemp -d)"
 trap 'rm -rf "$BUILD_DIR"' EXIT
 
 SAN_RE='ERROR: AddressSanitizer|ERROR: LeakSanitizer|runtime error:'
-export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 detect_leaks=0 symbolize=0 allocator_may_return_null=1 max_allocation_size_mb=256"
+export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 symbolize=0 allocator_may_return_null=1 max_allocation_size_mb=256"
 
 WRAP_CASES=(penalty_wrap blocks_wrap core_blocks_wrap txs_wrap)   # red at 32 bits; 64-bit control
 ALLOC_CASES=(peers_count_huge peers_calloc_null)                  # red at both word sizes

@@ -21,8 +21,8 @@ BUILD_DIR="$(mktemp -d)"
 trap 'rm -rf "$BUILD_DIR"' EXIT
 CC="${CC:-clang}"
 
-export ASAN_OPTIONS="abort_on_error=1 detect_leaks=0 symbolize=0"
-SAN_RE='ERROR: AddressSanitizer|runtime error:'
+export ASAN_OPTIONS="abort_on_error=1 symbolize=0"
+SAN_RE='ERROR: AddressSanitizer|ERROR: LeakSanitizer|runtime error:'
 
 if ! grep -q 'PEER_KNOWN_TX_CAP_UNFIXED' "$CORE_DIR/BRPeer.c"; then
     echo "GATE FAILURE: BRPeer.c has no PEER_KNOWN_TX_CAP_UNFIXED seam; -D would be inert."

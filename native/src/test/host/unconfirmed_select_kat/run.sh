@@ -38,5 +38,6 @@ clang -w -include stdint.h -g -fsanitize=address -fno-omit-frame-pointer \
     -lpthread -lm \
     -o "$BUILD_DIR/unconfirmed_select_kat" || { echo "FAIL: build error"; exit 1; }
 
-# LeakSanitizer OFF: BRWalletCreateTransaction leaks its output script (a core leak of its own).
-ASAN_OPTIONS="abort_on_error=1 detect_leaks=0" "$BUILD_DIR/unconfirmed_select_kat"
+# LeakSanitizer stays on where the platform has it (Linux): BRWalletCreateTransaction frees its output
+# script, so the suite is leak-clean.
+ASAN_OPTIONS="abort_on_error=1" "$BUILD_DIR/unconfirmed_select_kat"

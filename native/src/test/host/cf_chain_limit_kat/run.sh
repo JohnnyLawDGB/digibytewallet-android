@@ -22,8 +22,8 @@ CORE_DIR="$REPO_ROOT/native/src/main/jni/digibytewallet-core"
 BUILD_DIR="$(mktemp -d)"
 trap 'rm -rf "$BUILD_DIR"' EXIT
 
-SAN_RE='ERROR: AddressSanitizer|runtime error:'
-export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 detect_leaks=0 symbolize=0"
+SAN_RE='ERROR: AddressSanitizer|ERROR: LeakSanitizer|runtime error:'
+export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 symbolize=0"
 
 RED_SMALL=(append_limit_distinct limit_crossing_continues limit_held_while_scan_needs_all)
 GUARD_SMALL=(chain_unit_truncate_drop)

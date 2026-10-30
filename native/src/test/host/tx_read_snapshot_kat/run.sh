@@ -36,7 +36,7 @@ shopt -s nullglob
 SHA3_SRCS=("$CORE_DIR"/crypto/sha3/*.c)
 shopt -u nullglob
 
-export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 detect_leaks=0 symbolize=0"
+export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 symbolize=0"
 SAN_RE="ERROR: AddressSanitizer|runtime error:|ERROR: LeakSanitizer"
 LIMIT="${TX_READ_LIMIT:-120}"
 FAIL=0

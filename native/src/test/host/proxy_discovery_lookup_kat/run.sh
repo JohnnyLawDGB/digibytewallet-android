@@ -21,8 +21,8 @@ CORE_DIR="$REPO_ROOT/native/src/main/jni/digibytewallet-core"
 BUILD_DIR="$(mktemp -d)"
 trap 'rm -rf "$BUILD_DIR"' EXIT
 
-export ASAN_OPTIONS="detect_leaks=0 halt_on_error=1"
-SAN_RE='ERROR: AddressSanitizer|runtime error:'
+export ASAN_OPTIONS="halt_on_error=1"
+SAN_RE='ERROR: AddressSanitizer|ERROR: LeakSanitizer|runtime error:'
 
 # Seam self-check: a -D that names nothing silently builds the shipped path, so the comparison arm
 # would run the shipped code and (wrongly) pass.

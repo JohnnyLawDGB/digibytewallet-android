@@ -34,8 +34,8 @@ HEADER="$BRIDGE_DIR/prepared_send.h"
 JNI="${FEE_QUOTE_GATE_FILE:-$BRIDGE_DIR/jni_transaction.c}"
 BUILD_DIR="$(mktemp -d)"
 trap 'rm -rf "$BUILD_DIR"' EXIT
-export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 detect_leaks=0 symbolize=0"
-SAN_RE='ERROR: AddressSanitizer|runtime error:'
+export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 symbolize=0"
+SAN_RE='ERROR: AddressSanitizer|ERROR: LeakSanitizer|runtime error:'
 LIMIT_S=60
 
 # <case>:<comparison-arm expectation>

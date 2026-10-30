@@ -36,8 +36,8 @@ build() {
         -I "$CORE_DIR" -I "$BRIDGE_DIR" \
         "$SCRIPT_DIR/coin_reservation_kat_main.c" "$BRIDGE_DIR/coin_reservation.c" -lpthread -o "$out"
 }
-SAN_RE='ERROR: AddressSanitizer|runtime error:'
-export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 detect_leaks=0"
+SAN_RE='ERROR: AddressSanitizer|ERROR: LeakSanitizer|runtime error:'
+export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1"
 
 build "$BUILD_DIR/red" -DCOIN_RESERVATION_UNFIXED=1 || { echo "GATE FAILURE: the red arm did not compile"; exit 1; }
 set +e; RED_OUT="$(timeout 60 "$BUILD_DIR/red" 2>&1)"; RED_RC=$?; set -e

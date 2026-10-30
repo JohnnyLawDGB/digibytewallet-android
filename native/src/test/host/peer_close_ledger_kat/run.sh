@@ -63,9 +63,7 @@ build() {
         -o "$out"
 }
 
-# LeakSanitizer OFF for both arms, matching the sibling KATs — an unrelated leak would exit
-# nonzero on its own and mask the arm result entirely.
-export ASAN_OPTIONS=detect_leaks=0
+# LeakSanitizer stays on where the platform has it (Linux), in both arms: the suite is leak-clean.
 
 echo "=== building UNFIXED-CMD12 (red arm: 12-char command names rejected) ==="
 if ! build "$BUILD_DIR/kat_unfixed_cmd" -DPEER_CMD12_UNFIXED; then

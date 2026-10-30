@@ -27,16 +27,16 @@ build() {
         -I "$CORE_DIR" -I "$CORE_DIR/secp256k1/include" -I "$CORE_DIR/secp256k1" \
         "$SCRIPT_DIR/cf_empty_batch_kat_main.c" "${UNITS[@]}" -lm -lpthread -o "$out"
 }
-export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 detect_leaks=0"
+export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1"
 FAIL=0
 build "$BUILD_DIR/red" -DCF_EMPTY_BATCH_UNFIXED || { echo "GATE FAILURE: red did not build"; exit 1; }
 OUT="$(timeout -k 5 120 "$BUILD_DIR/red" 2>&1)"; RC=$?
-if [ "$RC" -ne 0 ] && ! <<<"$OUT" grep -q "ERROR: AddressSanitizer" && <<<"$OUT" grep -q "^FAIL: A: the empty batch counted"; then
+if [ "$RC" -ne 0 ] && ! <<<"$OUT" grep -qE "ERROR: (AddressSanitizer|LeakSanitizer)" && <<<"$OUT" grep -q "^FAIL: A: the empty batch counted"; then
     echo "  [red] case A failed, as required: $(<<<"$OUT" grep -m1 '^FAIL: A:')"
 else echo "GATE FAILURE: the red arm (rc=$RC)"; <<<"$OUT" grep -E "FAIL|ERROR" | head -4; FAIL=1; fi
 build "$BUILD_DIR/green" || { echo "GATE FAILURE: green did not build"; exit 1; }
 OUT="$(timeout -k 5 120 "$BUILD_DIR/green" 2>&1)"; RC=$?
-if [ "$RC" -eq 0 ] && ! <<<"$OUT" grep -q "ERROR: AddressSanitizer" && <<<"$OUT" grep -q "^PASS: cf_empty_batch_kat" \
+if [ "$RC" -eq 0 ] && ! <<<"$OUT" grep -qE "ERROR: (AddressSanitizer|LeakSanitizer)" && <<<"$OUT" grep -q "^PASS: cf_empty_batch_kat" \
    && <<<"$OUT" grep -q "cfheaders: empty batch -- not progress, dropping peer"; then echo "  [green] all cases pass; the gate's log line seen"
 else echo "GATE FAILURE: the green arm (rc=$RC)"; <<<"$OUT" grep -E "FAIL|ERROR" | head -4; FAIL=1; fi
 [ "$FAIL" -eq 0 ] && { echo "PASS: cf_empty_batch_kat (A red-then-green, B guard; ASan)"; exit 0; }

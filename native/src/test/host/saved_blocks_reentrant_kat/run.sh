@@ -68,10 +68,9 @@ build() { # $1=output  $2...=extra clang flags (e.g. -DSAVED_BLOCKS_REENTRANT_UN
 
 # symbolize=0: skip the slow per-invocation llvm-symbolizer -- we only need to
 # DETECT the fault ("attempting double-free" prints without symbolization),
-# not name the frames. abort_on_error kills fast. detect_leaks=0: this KAT is
-# about double-free/UAF, not leaks (test1's blocks are intentionally freed via
-# the simulated transfer, not by the caller).
-export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 detect_leaks=0 symbolize=0"
+# not name the frames. abort_on_error kills fast. LeakSanitizer stays on
+# where the platform has it (Linux): the suite is leak-clean.
+export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 symbolize=0"
 
 echo "=== red-before-green [1/2]: UNFIXED (dangling g_savedBlocks) must FAULT ==="
 if ! build "$BUILD_DIR/unfixed" -DSAVED_BLOCKS_REENTRANT_UNFIXED; then

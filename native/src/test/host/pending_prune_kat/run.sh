@@ -31,17 +31,17 @@ build() {
         "$CORE_DIR/BRBIP39Mnemonic.c" "$CORE_DIR/crypto/groestl.c" "$CORE_DIR/crypto/skein.c" "$CORE_DIR/crypto/qubit.c" \
         "$CORE_DIR/crypto/odocrypt.c" "${SHA3_SRCS[@]}" -lm -lpthread -o "$out"
 }
-export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 detect_leaks=0"
+export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1"
 ARMS="valid pending verified asset"
 
 build "$BUILD_DIR/red" -DPENDING_PRUNE_UNFIXED || { echo "GATE FAILURE: the red arm did not compile"; exit 1; }
 set +e; OUT="$(timeout -k 5 60 "$BUILD_DIR/red" 2>&1)"; RC=$?; set -e
-if [ "$RC" -ne 0 ] && ! <<<"$OUT" grep -q "ERROR: AddressSanitizer" && <<<"$OUT" grep -q "^FAIL: A: the coin the pending send spends is still counted"; then
+if [ "$RC" -ne 0 ] && ! <<<"$OUT" grep -qE "ERROR: (AddressSanitizer|LeakSanitizer)" && <<<"$OUT" grep -q "^FAIL: A: the coin the pending send spends is still counted"; then
     echo "  [red] case A failed, as required: $(<<<"$OUT" grep -m1 '^FAIL: A:')"
 else echo "GATE FAILURE: the red arm (rc=$RC)"; <<<"$OUT" grep -E "FAIL|ERROR" | head -4; FAIL=1; fi
 build "$BUILD_DIR/green" || { echo "GATE FAILURE: the green arm did not compile"; exit 1; }
 set +e; OUT="$(timeout -k 5 60 "$BUILD_DIR/green" 2>&1)"; RC=$?; set -e
-if [ "$RC" -eq 0 ] && ! <<<"$OUT" grep -q "ERROR: AddressSanitizer" && <<<"$OUT" grep -q "^PASS: pending_prune_kat"; then echo "  [green] all cases pass"
+if [ "$RC" -eq 0 ] && ! <<<"$OUT" grep -qE "ERROR: (AddressSanitizer|LeakSanitizer)" && <<<"$OUT" grep -q "^PASS: pending_prune_kat"; then echo "  [green] all cases pass"
 else echo "GATE FAILURE: the green arm (rc=$RC)"; <<<"$OUT" grep -E "FAIL|ERROR" | head -4; FAIL=1; fi
 
 if [ "$FAIL" -eq 0 ]; then echo "PASS: pending_prune_kat (A red-then-green, B guard; ASan)"; exit 0; fi

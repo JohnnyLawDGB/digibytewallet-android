@@ -32,9 +32,9 @@ HEADER="$BRIDGE_DIR/tx_details_format.h"
 WALLET_C="$BRIDGE_DIR/jni_wallet.c"
 BUILD_DIR="$(mktemp -d)"
 trap 'rm -rf "$BUILD_DIR"' EXIT
-export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 detect_leaks=0 symbolize=0"
+export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 symbolize=0"
 export UBSAN_OPTIONS="halt_on_error=1 print_stacktrace=0"
-SAN_RE='ERROR: AddressSanitizer|runtime error:'
+SAN_RE='ERROR: AddressSanitizer|ERROR: LeakSanitizer|runtime error:'
 LIMIT_S=30
 
 # <case>:<comparison-arm expectation>

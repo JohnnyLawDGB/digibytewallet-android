@@ -91,7 +91,7 @@ fi
 FAIL=0
 
 run_case() {
-    OUT="$(ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 detect_leaks=0" "$1" "$2" 2>&1)"
+    OUT="$(ASAN_OPTIONS="halt_on_error=1 abort_on_error=1" "$1" "$2" 2>&1)"
     RC=$?
 }
 

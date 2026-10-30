@@ -124,7 +124,7 @@ echo "levels: proof of work $POW_LEVEL, difficulty target $DIFF_LEVEL (shipped, 
 FAIL=0
 
 run_case() {
-    OUT="$(ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 detect_leaks=0 symbolize=0" timeout 300 "$1" "$2" 2>&1)"
+    OUT="$(ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 symbolize=0" timeout 300 "$1" "$2" 2>&1)"
     RC=$?
 }
 

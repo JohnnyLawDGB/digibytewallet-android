@@ -49,7 +49,7 @@ build() {
 
 SAN_RE='ERROR: AddressSanitizer|ERROR: LeakSanitizer|runtime error:'
 FAIL=0
-export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 detect_leaks=0"
+export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1"
 
 # ── RED ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 build "$BUILD_DIR/red" -DSERVER_HEIGHT_HINT_UNFIXED || { echo "GATE FAILURE: the red arm did not compile"; exit 1; }

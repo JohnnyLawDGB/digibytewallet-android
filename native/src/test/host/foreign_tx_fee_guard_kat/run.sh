@@ -23,4 +23,4 @@ clang -Wall -Wextra -Werror -g -fsanitize=address,undefined -fno-omit-frame-poin
     "$SCRIPT_DIR/foreign_tx_fee_guard_kat_main.c" \
     -o "$BUILD_DIR/foreign_tx_fee_guard_kat"
 
-ASAN_OPTIONS=abort_on_error=1:detect_leaks=0 "$BUILD_DIR/foreign_tx_fee_guard_kat"
+ASAN_OPTIONS=abort_on_error=1 "$BUILD_DIR/foreign_tx_fee_guard_kat"

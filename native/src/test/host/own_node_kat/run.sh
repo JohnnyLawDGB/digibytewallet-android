@@ -24,8 +24,8 @@ BUILD_DIR="$(mktemp -d)"
 trap 'rm -rf "$BUILD_DIR"' EXIT
 
 CC="${CC:-clang}"
-export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 detect_leaks=0 symbolize=0"
-SAN_RE='ERROR: AddressSanitizer|runtime error:'
+export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 symbolize=0"
+SAN_RE='ERROR: AddressSanitizer|ERROR: LeakSanitizer|runtime error:'
 
 ALL_CASES=(bare_host_gets_default_port host_with_port_parses blank_is_null empty_host_is_null bad_port_is_null
            out_of_range_port_is_null scheme_prefix_rejected ipv6_rejected uri_parses_scheme_host_port

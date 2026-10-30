@@ -41,7 +41,7 @@ build() {
         "$CORE_DIR/BRBIP39Mnemonic.c" "$CORE_DIR/crypto/groestl.c" "$CORE_DIR/crypto/skein.c" "$CORE_DIR/crypto/qubit.c" \
         "$CORE_DIR/crypto/odocrypt.c" "${SHA3_SRCS[@]}" -lm -lpthread -o "$out"
 }
-export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 detect_leaks=0"
+export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1"
 ARMS="valid pending verified asset"
 
 build "$BUILD_DIR/red" -DWALLET_TX_WALK_UNFIXED || { echo "GATE FAILURE: the red arm did not compile"; exit 1; }
@@ -54,7 +54,7 @@ for arm in $ARMS; do
         echo "GATE FAILURE: red arm $arm did not read the freed parent (rc=$RC)"; <<<"$OUT" grep -E "FAIL|ERROR|answered" | head -3; FAIL=1
     fi
     set +e; OUT="$(timeout -k 5 60 "$BUILD_DIR/green" "$arm" 2>&1)"; RC=$?; set -e
-    if [ "$RC" -eq 0 ] && ! <<<"$OUT" grep -q "ERROR: AddressSanitizer" && <<<"$OUT" grep -q "answered .* with the parent removed mid-walk"; then
+    if [ "$RC" -eq 0 ] && ! <<<"$OUT" grep -qE "ERROR: (AddressSanitizer|LeakSanitizer)" && <<<"$OUT" grep -q "answered .* with the parent removed mid-walk"; then
         echo "  [green] $arm: $(<<<"$OUT" grep -o 'answered .*')"
     else
         echo "GATE FAILURE: green arm $arm (rc=$RC)"; <<<"$OUT" grep -E "FAIL|ERROR" | head -3; FAIL=1
