@@ -33,6 +33,7 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/time.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "BRReplay.h"
@@ -248,6 +249,15 @@ static void case_relay_attempts_counted(const char *dir, const char *tmp)
     }
     check(got == sizeof(reply) && strncmp((const char *)&reply[4], "pong", 12) == 0 && memcmp(&reply[24], ping, 8) == 0,
           "the first and only answer is the pong (nothing was relayed or answered for tx, inv, dandeliontx)");
+    // The server counts a message as served after its last byte is written, so the pong can reach this
+    // thread before the count does: wait (up to 2 s) for it to settle.
+    for (int i = 0; i < 200; i++) {
+        struct timespec ts = { 0, 10*1000*1000 };
+
+        st = BRReplayServerGetStats(server);
+        if (st.served >= 1) break;
+        nanosleep(&ts, NULL);
+    }
     st = BRReplayServerGetStats(server);
     printf("  stats: %zu requests, %zu served, %zu relay attempts\n", st.requests, st.served, st.relayAttempts);
     check(st.relayAttempts == 3, "tx, inv and dandeliontx are three relay attempts");
