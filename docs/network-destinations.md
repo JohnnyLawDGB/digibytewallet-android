@@ -7,22 +7,43 @@ same list for its app in its own `docs/network-destinations.md`. The divergence 
 shared with it.
 
 **The gate.** `app/src/test/java/app/aroundtheblock/wallet/network/NetworkDestinationsGateTest.kt`
-reads the two tables between the `gate:` markers below and checks them against the code. It fails when:
+(an app unit test, so CI's Unit Tests step runs it) reads the two tables between the `gate:` markers
+below and checks them against the code. It fails when:
 
-- a host name, URL host or IPv4 literal appears in shipped code or in a default-locale string resource
-  and is not in the destinations table (a new destination), or a listed host is no longer found (a
-  stale row);
-- a file starts using a network API (an OkHttp call, a WebSocket, a socket, a name lookup, a
-  WebView load, a Coil image load, the Tor runtime, a C `connect`/`getaddrinfo`) and is not in the
-  call-site table, or a listed file no longer does;
-- the JNI bridge's hardcoded mainnet peers stop matching the core's canon (`BRPeerCanon.h`).
+- a host name, URL host or IPv4 address appears in shipped code, a default-locale string resource,
+  `res/xml` or a manifest, and is not in the destinations table (a new destination), or a listed
+  host is no longer found. **Stale entries are checked per host, not per row:** `api.digiscope.me`
+  stands in five rows, and removing one of its uses (say the reconcile client) leaves that row
+  stale with no failure. Remove such a row by hand;
+- the destinations rows that name `BRMainNetDNSSeeds` and `BRTestNetDNSSeeds` differ from the core's
+  arrays (an exact compare, so a seed under any top-level domain is caught), or the JNI bridge's
+  hardcoded mainnet peers stop matching the core's canon (`BRPeerCanon.h`);
+- a file starts using a network API and is not in the call-site table, or a listed file no longer
+  does. The APIs: an OkHttp call or WebSocket, `Dns.SYSTEM`, a socket (`Socket`, `ServerSocket`,
+  `createSocket`, `DatagramSocket`), `URL`/`openConnection`/`openStream`, `HttpURLConnection` and
+  `HttpsURLConnection`, a name lookup, a WebView `loadUrl`/`postUrl`, a Coil load (`AsyncImage`,
+  `SubcomposeAsyncImage`, `rememberAsyncImagePainter`, `ImageLoader`, `imageLoader`), the Tor
+  runtime, and in C `connect`, `socket`, `getaddrinfo`, `gethostbyname`;
+- cleartext traffic is permitted in a manifest or `res/xml`;
+- a module's source set holds a directory the gate does not know how to scan.
 
-Comments are not scanned. String templates (`$x`, `${x}`) are blanked first, so `"$txid.to"` is not
-read as a host. Reserved example names (`example.com`), `localhost` and loopback are ignored. The
-scan covers `app/src/{main,play,sideload}/java`, `core/src/main/java`, `game/src/main/java`, the JNI
-bridge, and the top-level C sources of the core submodule (test files excluded), plus the
-`<string>`/`<item>` bodies in `app/src/main/res/values/*.xml` (the default locale only: a
-translation carries the same hosts).
+**What counts as a host.** A URL's host, under any top-level domain. A name with a common
+top-level domain anywhere in a literal ("see api.x.me"). A literal that is a name under any
+alphabetic top-level domain, with an optional `:port`, unless its last label is a file extension
+(`peers.json`) or its first label starts a reverse-DNS identifier (`app.aroundtheblock.wallet`). An
+IPv4 address anywhere in a literal, port or not (`"1.2.3.4:12024"`). Comments are not scanned.
+String templates (`$x`, `${x}`) are blanked first, so `"$txid.to"` is not read as a host. Reserved
+example names (`example.com`), `localhost`, loopback and private (RFC 1918, link-local) addresses
+are ignored: those can only be the user's own node.
+
+**What is scanned.** The roots are derived, never listed. The gate reads every module that
+`settings.gradle.kts` includes, and every source set under `<module>/src/` except `test*` and
+`androidTest*`. In each source set it scans `java/` and `kotlin/` (Kotlin and Java), `jni/`
+(the JNI bridge and the core submodule's top-level C, test files excluded), `res/values/*.xml`
+(`<string>`/`<item>` bodies, default locale only: a translation carries the same hosts),
+`res/xml/*.xml` and `AndroidManifest.xml` (every attribute value and text node, so a new
+`<domain-config>` counts). `assets/` holds word lists, fonts and an animation, so it is not scanned.
+Any other directory fails the gate until it is taught about it.
 
 **Adding a destination:** add a row with the host in backticks in the first column, say whether it
 is required, and say what the user sees when it is unreachable. A destination that is required for
@@ -40,7 +61,7 @@ unless it is a DigiByte P2P node.
 | `164.68.98.125` (and `95.111.238.51`, `129.212.182.152`, port 12033) | `jni_peer.c` `TESTNET_PRIORITY_PEER_IPS`, `SyncService.injectTestnetPeers`; core `BRPeerCanon.h` | Testnet26 canon (testnet builds only) | P2P | Testnet DNS seeds |
 | `digiscope.me` `seed.diginode.tools` `seed.digibyte.link` `seed.quakeguy.com` `seed.aroundtheblock.app` `seed.digibyte.io` | core `BRChainParams.h` `BRMainNetDNSSeeds` (`BRPeerManager.c` resolves them) | DNS seeds: name lookups that return P2P node addresses | No | Used only while the pool is short of peers; the canon and the cached seeder list still work. `digiscope.me` is also a web page (rows below) |
 | `testnetseed.digibyte.io` `testnetseed.digibyte.link` `testnetseed.digibyte.services` | core `BRChainParams.h` `BRTestNetDNSSeeds` | Testnet DNS seeds | No | As above |
-| `api.digiscope.me` | `SyncService` / `SyncWorker` `SEEDER_URL` through `SeederClient`; `core/network/DigiScopePins.kt`; core `BRDigiScopePins.h` | **Seeder:** `/api/peers?capability=filter` (and `=dandelion` when Dandelion is on), hourly, certificate-pinned | No | The cached list is used; with no cache, the canon and the DNS seeds. **Gap G1:** a stale cache makes the sync start wait for the fetch (below) |
+| `api.digiscope.me` | `SyncService` / `SyncWorker` `SEEDER_URL` through `SeederClient`; `core/network/DigiScopePins.kt`; core `BRDigiScopePins.h` | **Seeder:** `/api/peers?capability=filter` (and `=dandelion` when Dandelion is on), hourly, certificate-pinned | No | The cached list is used; with no cache, the canon and the DNS seeds. **Gap G1:** a stale cache makes the sync start wait for the fetch (below; fix in #187) |
 | `api.digiscope.me` | `DigiScopeAssetClient`, `MultiEndpointAssetClient` | DigiAsset indexer: metadata, address history, the stack on an output | No (assets only) | Metadata reads "offline". An asset **send** refuses (`Outcome.Unverified`) and a received asset stays unchecked (not credited) until the indexer answers. Fails closed; DGB is not affected. **Gap G2** |
 | `assets.digistamp.co` | `DigistampAssetClient`, `DigistampClient`, `DigistampUris`, `DigistampPins`, `network_security_config.xml` | Second asset indexer; the DigiStamp section (WebView) and its Digi-ID sign-in | No | The DigiScope indexer answers alone; the DigiStamp page does not load |
 | `api.digiscope.me` | `core/ipfs/IpfsClient.kt` `DEFAULT_GATEWAYS[0]` | IPFS pin proxy for asset images and metadata | No | The next gateway |
@@ -68,7 +89,9 @@ Destinations with no literal in the code (the gate cannot list them; they are li
 | Loopback `127.0.0.1` | `NetworkModule` (Tor SOCKS), `RootDetector` (a local port probe) | On the device only | — | — |
 
 **Third-party SDKs.** No analytics, crash reporting or advertising SDK is linked (`gradle/libs.versions.toml`:
-OkHttp, Coil, ZXing, CameraX, Room, SQLCipher, Argon2, kmp-tor, AndroidX). Coil loads only what
+OkHttp, Coil, ZXing, CameraX, Room, SQLCipher, Argon2, kmp-tor, AndroidX). `androidx.browser` opens
+links in a Custom Tab. The app makes no `mayLaunchUrl` or warm-up call, so it adds no traffic of its
+own, and a link opens only when it is tapped. Coil loads only what
 `AssetImageResolver` gives it: `ipfs://` URIs fetched through `IpfsClient`, never an arbitrary URL from
 asset metadata. ZXing and CameraX decode on the device. kmp-tor contacts the Tor network only when the
 user turns Tor on. The Play flavor makes no Play-services calls.
@@ -77,6 +100,7 @@ user turns Tor on. The Play flavor makes no Play-services calls.
 | Call site | Network API | Destinations |
 |---|---|---|
 | `app/src/main/java/app/aroundtheblock/wallet/DigiByteApp.kt` | Coil image loader (IPFS fetcher) | IPFS gateways |
+| `app/src/main/java/app/aroundtheblock/wallet/di/NetworkModule.kt` | `Dns.SYSTEM` (the shared client's name lookups, local only when Tor is off) | Every OkHttp destination |
 | `app/src/main/java/app/aroundtheblock/wallet/service/OwnNodeAddress.kt` | `InetAddress` name lookup | The user's own node |
 | `app/src/main/java/app/aroundtheblock/wallet/service/SeederClient.kt` | OkHttp | `api.digiscope.me` seeder |
 | `app/src/main/java/app/aroundtheblock/wallet/ui/asset/AssetIcon.kt` | Coil `AsyncImage` | IPFS gateways |
@@ -103,16 +127,18 @@ user turns Tor on. The Play flavor makes no Play-services calls.
 
 ## Degradation gaps
 
-- **G1. The sync start waits for a stale seeder.** `SyncService.injectPeers` runs before
-  `NativeBridge.startSync()` on every start path. When the cached peer list is over an hour old (or
-  empty), it fetches `api.digiscope.me/api/peers` synchronously, and does so twice (once for the
-  filter pool, once for the general pool, both `capability=filter`), three times with Dandelion on.
-  The fetch is bounded by the shared client's 45 s call timeout. If the server fails fast (offline,
-  DNS failure, refused), there is no delay. If it drops packets, the first P2P dial waits about
-  30–90 s, and the canon, which needs no server, is dialled only after that. The wallet still syncs, from the canon and the stale cache, but late. iOS adds the cached list at once and fetches in
-  the background (`WalletCore.addSeederPeers`). Fix (not done here; `SyncService` is the canonical
-  peer-discovery design and wants its own reviewed PR): inject the cached list, start the sync, and
-  run one fetch in the background that injects what it gets.
+- **G1. The sync start waits for a stale seeder. Fix in #187.** `SyncService.injectPeers` runs
+  before `NativeBridge.startSync()` on every start path: the cold start, network regained, the
+  zero-peer watchdog, the Tor fallback and the recreate sequence. When the cached peer list is over
+  an hour old (or empty), it fetches `api.digiscope.me/api/peers` synchronously. It does so twice
+  (once for the filter pool, once for the general pool, both `capability=filter`), and three times
+  with Dandelion on. Each fetch is bounded by the shared client's 45 s call timeout. If the server
+  fails fast (offline, DNS failure, refused), there is no delay. If it answers slowly or not at
+  all, `startSync()` and the first P2P dial wait for it, the canon included, which needs no server.
+  A failed fetch leaves the cache stale, so the next start waits again. iOS adds the cached list at
+  once and fetches in the background (`WalletCore.addSeederPeers`). #187 does the same on Android:
+  it injects the cached list, starts the sync, and runs one background refresh with a retry
+  back-off.
 - **G2. DigiAsset sends and asset receipt need the indexer.** An asset send verifies each input's
   stack with `api.digiscope.me` and refuses when it cannot (fails closed, correctly). A received asset
   is credited only once the indexer confirms it. With the server gone, asset balances freeze and
@@ -124,13 +150,15 @@ user turns Tor on. The Play flavor makes no Play-services calls.
 
 ## Divergence between the apps
 
-Kept the same in both repos' copies of this document.
+<!-- divergence:begin -->
+This section is byte-identical in `digibytewallet-android/docs/network-destinations.md` and `digibytewallet-ios/docs/network-destinations.md`; `diff` the two between the `divergence` markers to check.
 
 | Destination | Android | iOS | Verdict |
 |---|---|---|---|
-| Canon peers, DNS seeds | `jni_peer.c` list (the gate checks it equals core `BRPeerCanon.h`) + core seeds | Core `BRPeerCanon.h` + core seeds | Same |
-| Seeder `api.digiscope.me/api/peers` | Fetched on the sync-start path when stale (G1); twice per stale start | Cached list at once, one background fetch | **Timing differs** (G1); the peers that end up in the pool are the same. Align Android to iOS |
-| Saved peers | Restored | Not restored (absent until the push-down, plan §19.3) | Absent |
+| Mainnet canon peers, mainnet DNS seeds | `jni_peer.c` list (gated equal to core `BRPeerCanon.h`) + core `BRMainNetDNSSeeds` | Core `BRPeerCanon.h` + core `BRMainNetDNSSeeds` | Same |
+| Testnet26 canon, testnet DNS seeds | Testnet builds dial them | Mainnet only (`BRSetNetwork(0)`): compiled in, never dialled | Absent |
+| Seeder `api.digiscope.me/api/peers` | Fetched on the sync-start path when the cache is stale, before `startSync()` (Android G1) | Cached list at once, one background fetch | **Open severity-1 divergence**, tracked by digibytewallet-android#187 (Android moves the fetch to the background, as iOS) |
+| Saved peers | Restored | Not restored (absent until the push-down, iOS plan §19.3) | Absent |
 | Explorer, own-node guide, About links to DigiScope, Around The Block, digibyte.org | Same URLs | Same URLs | Same |
 | GitHub About links (source, licence, issues), bug-report page | Present | Absent | Absent |
 | Price (CoinGecko, Binance) | Present | Absent | Absent |
@@ -140,5 +168,6 @@ Kept the same in both repos' copies of this document.
 | Reconcile / Recover funds | Present | Absent (M9) | Absent |
 | Update check (GitHub) | Sideload flavor only | Absent (the App Store updates) | Absent |
 | Tor, Dandelion | Opt-in | Absent (M10) | Absent |
-| iOS Local Network probe | — | `LocalNetworkAccess` opens a connection to the own node's address to read the permission state; sends no byte | iOS-only platform need, no Android counterpart |
+| Local Network permission probe | None (Android has no Local Network permission) | `LocalNetworkAccess` opens a connection to the own node's address to read the permission state; sends no byte | iOS-only platform need, no Android counterpart |
 | Analytics, crash reporting | None | None | Same |
+<!-- divergence:end -->
