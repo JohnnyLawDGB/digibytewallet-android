@@ -3153,9 +3153,9 @@ class SyncService : Service() {
     // lockstep — out of scope for this stage; see the bloom-removal spec.)
 
     /**
-     * Fetch filter-capable peers from the seeder API and inject them into the
-     * C core's peer list. Uses a cached response (SharedPreferences) and
-     * refreshes from the network at most once per hour.
+     * Inject filter-capable peers from the cached seeder answer into the C
+     * core's peer list (SharedPreferences). The cache is refreshed in the
+     * background at most once per hour ([requestSeederRefresh]), never here.
      */
     /**
      * Inject a batch of filter-capable peers into the native peer manager.
@@ -3173,35 +3173,27 @@ class SyncService : Service() {
      *      [BLOOM_BATCH_SIZE] peers starting at that cursor. The native
      *      core dedupes by (ip, port) so re-injecting the same peer is a
      *      no-op there.
-     *   3. Fetch fresh from the seeder ONLY when the pool is stale
-     *      (> 1 hour old), empty, or we've fully rotated through it
-     *      without connecting. This keeps SyncService usable even if
+     *   3. Refresh from the seeder, in the background, ONLY when the pool is
+     *      stale (> 1 hour old) or empty ([requestSeederRefresh]); this function
+     *      never waits for the seeder. This keeps SyncService usable even if
      *      api.digiscope.me is briefly down — the pool from any previous
      *      session is still usable.
      */
-    /** CF-first: fetch the dedicated validated filter-peer list (capability=filter) and inject
+    /** CF-first: inject the cached dedicated validated filter-peer list (capability=filter), and
      *  ALL of them (no BLOOM_BATCH_SIZE rotation — the validated set is only ~16) so the native
      *  filter-first pre-pass always has its primary set in manager->peers. Caches the last good
      *  list in its own bucket so an offline launch still primes the native set. Injected services
      *  carry the 0x40 (NODE_COMPACT_FILTERS) bit, which is what the native CF-first dialer keys on. */
     private fun injectFilterPeers() {
         val prefs = getSharedPreferences("dgb_filter_peers" + networkSuffix(this@SyncService), MODE_PRIVATE)
-        val now = System.currentTimeMillis()
-        val lastFetch = prefs.getLong("last_fetch", 0L)
-
-        var pool: List<Triple<String, Int, Long>> =
+        val pool: List<Triple<String, Int, Long>> =
             prefs.getString("peer_pool", null)?.let { parsePool(it) } ?: emptyList()
 
-        if (now - lastFetch > BLOOM_REFRESH_INTERVAL_MS || pool.isEmpty()) {
-            val fresh = fetchFromSeeder("filter")
-            if (fresh != null && fresh.isNotEmpty()) {
-                pool = fresh
-                prefs.edit()
-                    .putString("peer_pool", serializePool(pool))
-                    .putLong("last_fetch", now)
-                    .apply()
-                android.util.Log.i("SyncService", "Filter peers fetched: ${fresh.size}")
-            }
+        // The cached list only: a stale or empty one is refreshed in the background
+        // ([requestSeederRefresh]), so the seeder never sits between a start path and startSync().
+        if (SeederRefreshPolicy.isStale(prefs.getLong("last_fetch", 0L), System.currentTimeMillis(),
+                pool.isEmpty(), BLOOM_REFRESH_INTERVAL_MS)) {
+            requestSeederRefresh()
         }
 
         if (pool.isEmpty()) {
@@ -3263,37 +3255,18 @@ class SyncService : Service() {
             if (existing != null) parsePool(existing) else mutableListOf()
         val lastFetch = prefs.getLong("last_fetch", 0L)
 
-        val stale = now - lastFetch > BLOOM_REFRESH_INTERVAL_MS
-        if (stale || pool.isEmpty()) {
-            // capability=filter: the wallet is CF-only end to end, so this
-            // secondary/general pool must never source a bloom-only peer either —
-            // it's supplementary dial diversity on top of injectFilterPeers'
-            // small validated set, not a mixed-capability fallback.
-            val fresh = fetchFromSeeder("filter")
-            if (fresh != null && fresh.isNotEmpty()) {
-                // Merge: add any peer we haven't seen before (dedup on ip:port,
-                // ignoring services so a re-fetch doesn't duplicate an entry
-                // whose capability bits changed).
-                val seen = pool.mapTo(HashSet()) { it.first to it.second }
-                for (p in fresh) if (seen.add(p.first to p.second)) pool.add(p)
-                prefs.edit()
-                    .putString("peer_pool", serializePool(pool))
-                    .putLong("last_fetch", now)
-                    .apply()
-                android.util.Log.i(
-                    "SyncService",
-                    "Fetched filter peers: ${fresh.size} new, pool now ${pool.size}"
-                )
-            } else if (pool.isEmpty()) {
-                android.util.Log.w(
-                    "SyncService",
-                    "Filter-peer seeder empty and no cached pool — wallet may struggle to connect"
-                )
-                return
-            }
+        // Cached pool only; [refreshSeederPools] merges a fresh list into it in the background.
+        if (SeederRefreshPolicy.isStale(lastFetch, now, pool.isEmpty(), BLOOM_REFRESH_INTERVAL_MS)) {
+            requestSeederRefresh()
         }
 
-        if (pool.isEmpty()) return
+        if (pool.isEmpty()) {
+            android.util.Log.w(
+                "SyncService",
+                "No cached general filter-peer pool yet — the canon and DNS seeds carry this start"
+            )
+            return
+        }
 
         // Rotate cursor; inject a contiguous slice starting there.
         val cursor = prefs.getInt("pool_cursor", 0).coerceAtLeast(0) % pool.size
@@ -3455,20 +3428,15 @@ class SyncService : Service() {
         if (!enabled) return
 
         val prefs = getSharedPreferences("dgb_dandelion_peers" + networkSuffix(this@SyncService), MODE_PRIVATE)
-        val now = System.currentTimeMillis()
-        val cached = prefs.getString("peer_pool", null)?.let { parsePool(it) } ?: mutableListOf()
-        val lastFetch = prefs.getLong("last_fetch", 0L)
         // Triple = (ip, port, servicesHex) — Dandelion peers are also filter-
         // capable per the seeder, so carry their services_hex through too.
+        // Cached list only; a stale one is refreshed in the background ([refreshSeederPools]).
         val pool: List<Triple<String, Int, Long>> =
-            if (now - lastFetch > BLOOM_REFRESH_INTERVAL_MS || cached.isEmpty()) {
-                val fresh = fetchFromSeeder("dandelion")
-                if (!fresh.isNullOrEmpty()) {
-                    prefs.edit().putString("peer_pool", serializePool(fresh))
-                        .putLong("last_fetch", now).apply()
-                    fresh
-                } else cached
-            } else cached
+            prefs.getString("peer_pool", null)?.let { parsePool(it) } ?: emptyList()
+        if (SeederRefreshPolicy.isStale(prefs.getLong("last_fetch", 0L), System.currentTimeMillis(),
+                pool.isEmpty(), BLOOM_REFRESH_INTERVAL_MS)) {
+            requestSeederRefresh()
+        }
 
         if (pool.isEmpty()) {
             android.util.Log.i("SyncService", "Dandelion: no capable peers advertised — sends will flood")
@@ -3479,6 +3447,86 @@ class SyncService : Service() {
             NativeBridge.addDandelionPeer(ip)                // mark it Dandelion-capable
         }
         android.util.Log.i("SyncService", "Dandelion: injected + marked ${pool.size} capable peer(s)")
+    }
+
+    /** One background seeder refresh at a time ([requestSeederRefresh]). */
+    private val seederRefreshInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /** When the last background refresh started (wall clock, this process); 0 = never. */
+    @Volatile private var lastSeederAttemptMs = 0L
+
+    /**
+     * Refresh the cached seeder lists off the start path, as iOS does (`WalletCore.addSeederPeers`):
+     * the start paths inject what is cached and call startSync() at once, and this fetches in the
+     * background and injects what it gets into the running manager. At most one refresh runs at a
+     * time, and a failed one is not retried for [SeederRefreshPolicy.RETRY_BACKOFF_MS]
+     * ([SeederRefreshPolicy.mayAttempt]), so an unanswering seeder costs one background request per
+     * back-off window and nothing on the start paths. Never on testnet (the seeder is mainnet-only).
+     */
+    private fun requestSeederRefresh() {
+        if (isTestnet(this@SyncService)) return
+        val now = System.currentTimeMillis()
+        if (!SeederRefreshPolicy.mayAttempt(lastSeederAttemptMs, now)) return
+        if (!seederRefreshInFlight.compareAndSet(false, true)) return
+        lastSeederAttemptMs = now
+        recoveryScope.launch {
+            try {
+                refreshSeederPools()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                android.util.Log.w("SyncService", "seeder refresh failed: ${t.javaClass.simpleName}")
+            } finally {
+                seederRefreshInFlight.set(false)
+            }
+        }
+    }
+
+    /** The background half of [requestSeederRefresh]: fetch, cache, inject. Runs on [recoveryScope]. */
+    private fun refreshSeederPools() {
+        val suffix = networkSuffix(this@SyncService)
+        val filterPrefs = getSharedPreferences("dgb_filter_peers$suffix", MODE_PRIVATE)
+        val generalPrefs = getSharedPreferences("dgb_bloom_peers$suffix", MODE_PRIVATE)
+        val now = System.currentTimeMillis()
+
+        // One capability=filter fetch serves both pools (they used to fetch it once each).
+        val fresh = fetchFromSeeder("filter")
+        if (!fresh.isNullOrEmpty()) {
+            filterPrefs.edit()
+                .putString("peer_pool", serializePool(fresh))
+                .putLong("last_fetch", now)
+                .apply()
+            // The general pool merges: add any peer not seen before (dedup on ip:port, ignoring
+            // services so a re-fetch doesn't duplicate an entry whose capability bits changed).
+            val pool = generalPrefs.getString("peer_pool", null)?.let { parsePool(it) } ?: mutableListOf()
+            val seen = pool.mapTo(HashSet()) { it.first to it.second }
+            for (p in fresh) if (seen.add(p.first to p.second)) pool.add(p)
+            generalPrefs.edit()
+                .putString("peer_pool", serializePool(pool))
+                .putLong("last_fetch", now)
+                .apply()
+            for ((ip, port, services) in fresh) NativeBridge.injectPeerByIp(ip, port, services)
+            android.util.Log.i("SyncService",
+                "Seeder refresh: ${fresh.size} filter peers injected, general pool now ${pool.size}")
+        } else {
+            android.util.Log.w("SyncService", "Seeder refresh: no fresh list; the cached peers stay")
+        }
+
+        if (getSharedPreferences("dgb_dandelion", MODE_PRIVATE).getBoolean("enabled", false)) {
+            val dPrefs = getSharedPreferences("dgb_dandelion_peers$suffix", MODE_PRIVATE)
+            val cached = dPrefs.getString("peer_pool", null)?.let { parsePool(it) } ?: emptyList()
+            if (SeederRefreshPolicy.isStale(dPrefs.getLong("last_fetch", 0L), now, cached.isEmpty(), BLOOM_REFRESH_INTERVAL_MS)) {
+                val dandelion = fetchFromSeeder("dandelion")
+                if (!dandelion.isNullOrEmpty()) {
+                    dPrefs.edit().putString("peer_pool", serializePool(dandelion)).putLong("last_fetch", now).apply()
+                    for ((ip, port, services) in dandelion) {
+                        NativeBridge.injectPeerByIp(ip, port, services)
+                        NativeBridge.addDandelionPeer(ip)
+                    }
+                    android.util.Log.i("SyncService", "Seeder refresh: ${dandelion.size} Dandelion peer(s) marked")
+                }
+            }
+        }
     }
 
     /** Try the seeder once. Returns the parsed peer list or null on failure.
