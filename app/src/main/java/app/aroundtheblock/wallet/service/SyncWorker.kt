@@ -162,19 +162,17 @@ class SyncWorker @AssistedInject constructor(
     }
 
     private fun injectPeersJson(json: String) {
-        run {
-            try {
-                val peers = org.json.JSONObject(json).getJSONArray("peers")
-                for (i in 0 until peers.length()) {
-                    val p = peers.getJSONObject(i)
-                    // services_hex (e.g. "0x44d") carries the compact-filter bit
-                    // (0x40) so filter peers are tagged; absent → 0 → native
-                    // CF-tagged default (INJECT_DEFAULT_SERVICES, jni_peer.c).
-                    val services = parseSeederServicesHex(p.optString("services_hex", ""))
-                    NativeBridge.injectPeerByIp(p.getString("ip"), p.optInt("port", 12024), services)
-                }
-            } catch (_: Exception) {}
-        }
+        try {
+            val peers = org.json.JSONObject(json).getJSONArray("peers")
+            for (i in 0 until peers.length()) {
+                val p = peers.getJSONObject(i)
+                // services_hex (e.g. "0x44d") carries the compact-filter bit
+                // (0x40) so filter peers are tagged; absent → 0 → native
+                // CF-tagged default (INJECT_DEFAULT_SERVICES, jni_peer.c).
+                val services = parseSeederServicesHex(p.optString("services_hex", ""))
+                NativeBridge.injectPeerByIp(p.getString("ip"), p.optInt("port", 12024), services)
+            }
+        } catch (_: Exception) {}
     }
 
     companion object {

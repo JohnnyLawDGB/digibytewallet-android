@@ -14,13 +14,4 @@ class SeederRefreshPolicyTest {
         assertFalse(SeederRefreshPolicy.isStale(now - hour, now, poolEmpty = false, intervalMs = hour))
         assertTrue("never fetched", SeederRefreshPolicy.isStale(0L, now, poolEmpty = false, intervalMs = hour))
     }
-
-    @Test fun `a failed refresh is not retried inside the back-off`() {
-        val b = SeederRefreshPolicy.RETRY_BACKOFF_MS
-        assertTrue("never attempted", SeederRefreshPolicy.mayAttempt(0L, now))
-        assertFalse(SeederRefreshPolicy.mayAttempt(now - 1, now))
-        assertFalse(SeederRefreshPolicy.mayAttempt(now - b + 1, now))
-        assertTrue(SeederRefreshPolicy.mayAttempt(now - b, now))
-        assertTrue("clock went backwards", SeederRefreshPolicy.mayAttempt(now + 10_000, now))
-    }
 }

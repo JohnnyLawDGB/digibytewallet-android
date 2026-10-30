@@ -60,9 +60,23 @@ class SeederRefreshOrderGateTest {
         assertEquals("requestSeederRefresh must launch the refresh on recoveryScope", 1, launches.size)
         val launched = sync.blockAt(launches.single().range.last)
         assertTrue("refreshSeederPools is not inside the launched block", launched != null && calls.single().range.first in launched)
-        // And it is guarded: one at a time, with a back-off.
-        assertEquals(1, sync.calls("SeederRefreshPolicy.mayAttempt", request).size)
+        // Guarded as on iOS: one at a time, and nothing else. A retry back-off would make a failed
+        // refresh wait longer here than there (iOS: seederFetchInFlight + BRSeederShouldRefresh).
         assertEquals(1, sync.calls("seederRefreshInFlight.compareAndSet", request).size)
+        assertTrue("an Android-only retry back-off is back", !Regex("""\bmayAttempt\b""").containsMatchIn(sync.code))
+    }
+
+    @Test fun `the refresh fetches only the lists that are stale`() {
+        val sync = gate("service/SyncService.kt")
+        val refresh = body(sync, "refreshSeederPools")
+        val code = sync.code.substring(refresh)
+        assertTrue("the filter list is fetched without checking it is stale",
+            Regex("""if\s*\(\s*filterStale\s*\)\s*fetchFromSeeder\s*\(""").containsMatchIn(code))
+        val dandelion = sync.calls("fetchFromSeeder", refresh).filter { "dandelion" in sync.written.substring(it.range) }
+        assertEquals("one Dandelion fetch", 1, dandelion.size)
+        val guard = sync.enclosingBlock(dandelion.single().range.first)
+        assertTrue("the Dandelion fetch is not inside its staleness check", guard != null &&
+            sync.code.substring(0, guard.first).trimEnd().let { Regex("""isStale\([^{]*\)\s*\)$""").containsMatchIn(it) })
     }
 
     @Test fun `the background worker fetches only after its startSync`() {

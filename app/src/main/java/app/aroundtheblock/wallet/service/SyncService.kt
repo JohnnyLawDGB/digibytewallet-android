@@ -1132,8 +1132,8 @@ class SyncService : Service() {
             // the native pool after the fleet churns them out (a peer is removed from the pool on
             // connect failure). injectPeerByIp dedups, so this only re-adds ones that dropped —
             // without it, a churn burst can leave the native filter-first pre-pass with nothing
-            // to dial and the wallet stops catching cfheaders up. Network fetch is throttled
-            // hourly inside injectFilterPeers; the 30s cadence just re-injects the cached set.
+            // to dial and the wallet stops catching cfheaders up. injectFilterPeers injects the cached
+            // set and, when it is stale, asks for one background refresh (requestSeederRefresh).
             if (tickCount % 3L == 0L && !isTestnet(this@SyncService)) {
                 launch(kotlinx.coroutines.Dispatchers.IO) { runCatching { injectFilterPeers() } }
             }
@@ -2332,9 +2332,9 @@ class SyncService : Service() {
             NativeBridge.markInitialSyncDone()
         }
 
-        // Inject filter-capable peers from the seeder API before starting sync.
-        // This ensures the wallet has multiple compact-filter peers to try, not
-        // just digiscope.me.
+        // Inject the cached filter-capable seeder peers before starting sync (a stale
+        // list is refreshed in the background, never waited for here), so the wallet
+        // has multiple compact-filter peers to try beside the canon.
         injectPeers()
         // Inject the user's own node (if configured) as a priority compact-filter
         // peer. No-op unless the toggle is on; resolves DNS off the native peer lock.
@@ -3242,7 +3242,7 @@ class SyncService : Service() {
         injectFilterPeers()
         // Dandelion peers piggyback here so they're injected at every sync-start
         // path (all of them call injectPeers). Runs first so the early
-        // returns below can't skip it; self-throttled by its own last_fetch timer.
+        // returns below can't skip it; its cached list is refreshed in the background when stale.
         injectDandelionPeers()
         val prefs = getSharedPreferences("dgb_bloom_peers" + networkSuffix(this@SyncService), MODE_PRIVATE)
         val now = System.currentTimeMillis()
@@ -3414,8 +3414,9 @@ class SyncService : Service() {
         }
     }
 
-    /** Fetch the seeder's Dandelion-capable peers, connect them, and mark each
-     *  Dandelion-capable in the core so a broadcast can stem to one. The VPS
+    /** Inject the cached Dandelion-capable seeder peers, connect them, and mark each
+     *  Dandelion-capable in the core so a broadcast can stem to one (a stale list is
+     *  refreshed in the background, [requestSeederRefresh]). The VPS
      *  priority peer is covered because the seeder tags it (see the dandelion spec).
      *  No capable peer → sends transparently flood (no privacy, still delivered). */
     private fun injectDandelionPeers() {
@@ -3452,23 +3453,16 @@ class SyncService : Service() {
     /** One background seeder refresh at a time ([requestSeederRefresh]). */
     private val seederRefreshInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
 
-    /** When the last background refresh started (wall clock, this process); 0 = never. */
-    @Volatile private var lastSeederAttemptMs = 0L
-
     /**
      * Refresh the cached seeder lists off the start path, as iOS does (`WalletCore.addSeederPeers`):
      * the start paths inject what is cached and call startSync() at once, and this fetches in the
      * background and injects what it gets into the running manager. At most one refresh runs at a
-     * time, and a failed one is not retried for [SeederRefreshPolicy.RETRY_BACKOFF_MS]
-     * ([SeederRefreshPolicy.mayAttempt]), so an unanswering seeder costs one background request per
-     * back-off window and nothing on the start paths. Never on testnet (the seeder is mainnet-only).
+     * time (iOS's `seederFetchInFlight`); a failed one is tried again at the next start path or 30 s
+     * tick that finds the list still stale, as on iOS. Never on testnet (the seeder is mainnet-only).
      */
     private fun requestSeederRefresh() {
         if (isTestnet(this@SyncService)) return
-        val now = System.currentTimeMillis()
-        if (!SeederRefreshPolicy.mayAttempt(lastSeederAttemptMs, now)) return
         if (!seederRefreshInFlight.compareAndSet(false, true)) return
-        lastSeederAttemptMs = now
         recoveryScope.launch {
             try {
                 refreshSeederPools()
@@ -3489,8 +3483,18 @@ class SyncService : Service() {
         val generalPrefs = getSharedPreferences("dgb_bloom_peers$suffix", MODE_PRIVATE)
         val now = System.currentTimeMillis()
 
-        // One capability=filter fetch serves both pools (they used to fetch it once each).
-        val fresh = fetchFromSeeder("filter")
+        // Only the lists that are stale. One capability=filter fetch serves both filter pools (they
+        // used to fetch it once each).
+        //
+        // Intended difference from iOS: iOS adds a fetched list only to the manager the fetch started
+        // for (`managerGeneration == startedFor`). Here the peers go to whichever manager exists when
+        // the fetch returns: injectPeerByIp only adds candidates (deduplicated, under PEER_GUARD), and
+        // with no manager they are kept for the next one, so a recreate in between loses nothing.
+        val filterStale = SeederRefreshPolicy.isStale(filterPrefs.getLong("last_fetch", 0L), now,
+            filterPrefs.getString("peer_pool", null)?.let { parsePool(it) }.isNullOrEmpty(), BLOOM_REFRESH_INTERVAL_MS) ||
+            SeederRefreshPolicy.isStale(generalPrefs.getLong("last_fetch", 0L), now,
+                generalPrefs.getString("peer_pool", null)?.let { parsePool(it) }.isNullOrEmpty(), BLOOM_REFRESH_INTERVAL_MS)
+        val fresh = if (filterStale) fetchFromSeeder("filter") else null
         if (!fresh.isNullOrEmpty()) {
             filterPrefs.edit()
                 .putString("peer_pool", serializePool(fresh))
@@ -3508,7 +3512,7 @@ class SyncService : Service() {
             for ((ip, port, services) in fresh) NativeBridge.injectPeerByIp(ip, port, services)
             android.util.Log.i("SyncService",
                 "Seeder refresh: ${fresh.size} filter peers injected, general pool now ${pool.size}")
-        } else {
+        } else if (filterStale) {
             android.util.Log.w("SyncService", "Seeder refresh: no fresh list; the cached peers stay")
         }
 
