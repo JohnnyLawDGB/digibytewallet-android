@@ -14,7 +14,10 @@ import app.aroundtheblock.wallet.core.bridge.NativeBridge
 import app.aroundtheblock.wallet.core.isTestnet
 import app.aroundtheblock.wallet.core.networkSuffix
 import app.aroundtheblock.wallet.core.tor.TorManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runInterruptible
 import okhttp3.OkHttpClient
 
 /**
@@ -89,14 +92,21 @@ class SyncWorker @AssistedInject constructor(
                 return Result.retry()
             }
 
-            // Refresh filter-capable peers from the seeder API (cached hourly)
-            fetchBloomPeers()
+            // The cached seeder peers go in now; a stale list is refreshed only after startSync(),
+            // beside the catch-up, so the seeder never delays it (as SyncService and iOS).
+            val refreshWanted = injectCachedPeers()
             if (route is WorkerPeerRoute.ViaSocks) {
                 NativeBridge.setSocksProxy("127.0.0.1", route.port)
             }
             NativeBridge.startSync()
-            // Allow 30 seconds for header catch-up.
-            delay(SYNC_DURATION_MS)
+            // Allow 30 seconds for header catch-up; a refresh still running at the end is dropped.
+            kotlinx.coroutines.coroutineScope {
+                val refresh = if (refreshWanted) {
+                    launch(Dispatchers.IO) { runCatching { runInterruptible { fetchBloomPeers() } } }
+                } else null
+                delay(SYNC_DURATION_MS)
+                refresh?.cancel()
+            }
             // Persist transactions so balance is current on next app open
             val txData = NativeBridge.getSerializedTransactions()
             if (txData != null) {
@@ -116,6 +126,17 @@ class SyncWorker @AssistedInject constructor(
         }
     }
 
+    /** Inject the cached seeder list; true when it is stale or missing and should be refreshed. */
+    private fun injectCachedPeers(): Boolean {
+        if (isTestnet(applicationContext)) return false   // see fetchBloomPeers
+        val prefs = applicationContext.getSharedPreferences("dgb_bloom_peers" + networkSuffix(applicationContext), 0)
+        val cachedJson = prefs.getString("peers_json", null)
+        if (cachedJson != null) injectPeersJson(cachedJson)
+        return SeederRefreshPolicy.isStale(prefs.getLong("last_fetch", 0L), System.currentTimeMillis(),
+            cachedJson == null, 60 * 60 * 1000L)
+    }
+
+    /** Fetch the seeder list, cache it and inject it (after startSync(); see doWork). */
     private fun fetchBloomPeers() {
         if (isTestnet(applicationContext)) {
             // Testnet26 has no mainnet-shaped seeder infra — api.digiscope.me
@@ -127,40 +148,31 @@ class SyncWorker @AssistedInject constructor(
             return
         }
         val prefs = applicationContext.getSharedPreferences("dgb_bloom_peers" + networkSuffix(applicationContext), 0)
-        val cachedJson = prefs.getString("peers_json", null)
-        val lastFetch = prefs.getLong("last_fetch", 0L)
         val now = System.currentTimeMillis()
+        // capability=filter: the wallet is CF-only end to end, so the
+        // background catch-up worker must never source a bloom-only peer.
+        val okHttpClient = EntryPointAccessors
+            .fromApplication(applicationContext, SyncWorkerEntryPoint::class.java)
+            .okHttpClient()
+        val body = SeederClient(okHttpClient).fetch("$SEEDER_URL?capability=filter") {
+            android.util.Log.w("SyncWorker", it)
+        } ?: return
+        prefs.edit().putString("peers_json", body).putLong("last_fetch", now).apply()
+        injectPeersJson(body)
+    }
 
-        val json: String? = if (now - lastFetch < 60 * 60 * 1000L && cachedJson != null) {
-            cachedJson
-        } else {
-            // capability=filter: the wallet is CF-only end to end, so the
-            // background catch-up worker must never source a bloom-only peer.
-            val okHttpClient = EntryPointAccessors
-                .fromApplication(applicationContext, SyncWorkerEntryPoint::class.java)
-                .okHttpClient()
-            val body = SeederClient(okHttpClient).fetch("$SEEDER_URL?capability=filter") {
-                android.util.Log.w("SyncWorker", it)
+    private fun injectPeersJson(json: String) {
+        try {
+            val peers = org.json.JSONObject(json).getJSONArray("peers")
+            for (i in 0 until peers.length()) {
+                val p = peers.getJSONObject(i)
+                // services_hex (e.g. "0x44d") carries the compact-filter bit
+                // (0x40) so filter peers are tagged; absent → 0 → native
+                // CF-tagged default (INJECT_DEFAULT_SERVICES, jni_peer.c).
+                val services = parseSeederServicesHex(p.optString("services_hex", ""))
+                NativeBridge.injectPeerByIp(p.getString("ip"), p.optInt("port", 12024), services)
             }
-            if (body != null) {
-                prefs.edit().putString("peers_json", body).putLong("last_fetch", now).apply()
-                body
-            } else cachedJson
-        }
-
-        if (json != null) {
-            try {
-                val peers = org.json.JSONObject(json).getJSONArray("peers")
-                for (i in 0 until peers.length()) {
-                    val p = peers.getJSONObject(i)
-                    // services_hex (e.g. "0x44d") carries the compact-filter bit
-                    // (0x40) so filter peers are tagged; absent → 0 → native
-                    // CF-tagged default (INJECT_DEFAULT_SERVICES, jni_peer.c).
-                    val services = parseSeederServicesHex(p.optString("services_hex", ""))
-                    NativeBridge.injectPeerByIp(p.getString("ip"), p.optInt("port", 12024), services)
-                }
-            } catch (_: Exception) {}
-        }
+        } catch (_: Exception) {}
     }
 
     companion object {
