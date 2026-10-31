@@ -2,7 +2,9 @@
  * jni_derive.c — JNI entry points for Universal Restore key derivation.
  *
  * These functions are stateless — they do NOT touch g_wallet or any other
- * native global. They exist so the Kotlin RecoveryScanService can probe
+ * native global directly. The one wallet question the signers ask -- may this
+ * signed transaction leave (no coin of it spent or held by another send) -- goes
+ * through jni_wallet.c's wallet_signed_spend_gate (4.1.3, review R3). They exist so the Kotlin RecoveryScanService can probe
  * arbitrary derivation paths with arbitrary HMAC seed keys ("Bitcoin seed"
  * vs "DigiByte seed") to surface funds on non-native paths (BIP44 DGB,
  * BIP44-with-wrong-coin, BIP49 DGB, legacy m/0H with either HMAC) during
@@ -34,6 +36,7 @@
 #include "../digibytewallet-core/BRTransaction.h"
 #include "../digibytewallet-core/BRInt.h"
 #include "jni_seed_buffer.h"
+#include "wallet_spend_gate.h"  /* the one wallet question these signers ask */
 #include "foreign_tx_fee_guard.h"
 #include "BRDigiDollar.h"
 #include "BRNetwork.h"
@@ -646,6 +649,8 @@ NativeBridge_buildAndSignLegacySweep(
         BRTransactionFree(tx);
         return NULL;
     }
+    /* No coin of it is spent or held by another signed send (signed_spend_gate.h; 4.1.3, review R3). */
+    if (!wallet_signed_spend_gate(tx, "buildAndSignLegacySweep")) { BRTransactionFree(tx); return NULL; }
 
     /* ── Serialize and return hex. ── */
     size_t serLen = BRTransactionSerialize(tx, NULL, 0);
@@ -968,6 +973,8 @@ NativeBridge_buildAndSignForeignAssetTransfer(
         BRTransactionFree(tx);
         return NULL;
     }
+    /* No coin of it is spent or held by another signed send (signed_spend_gate.h; 4.1.3, review R3). */
+    if (!wallet_signed_spend_gate(tx, "buildAndSignForeignAssetTransfer")) { BRTransactionFree(tx); return NULL; }
 
     size_t len = BRTransactionSerialize(tx, NULL, 0);
     uint8_t *ser = (uint8_t *)malloc(len);
@@ -1243,6 +1250,8 @@ NativeBridge_buildAndSignForeignDigiDollarTransfer(
         BRTransactionFree(tx);
         return NULL;
     }
+    /* No coin of it is spent or held by another signed send (signed_spend_gate.h; 4.1.3, review R3). */
+    if (!wallet_signed_spend_gate(tx, "buildAndSignForeignDigiDollarTransfer")) { BRTransactionFree(tx); return NULL; }
 
     size_t len = BRTransactionSerialize(tx, NULL, 0);
     uint8_t *ser = (uint8_t *)malloc(len);

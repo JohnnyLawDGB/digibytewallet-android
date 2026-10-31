@@ -15,7 +15,10 @@
 //     a stop block we do not hold, is refused whole;
 //   * NOTHING ELSE MOVES: the chain, its anchor, the re-anchor counter, the
 //     disagreer set, the peer's connect status and the misbehaving count are all
-//     untouched by any of the above.
+//     untouched by any of the above -- EXCEPT (4.1.3 G5) when a strict majority of
+//     connected filter peers, at least two and none the source, report the same value
+//     at the same height: then the source is banned and the chain rebuilt
+//     (test_majority_disagrees; -DCF_CORROBORATE_ACT_UNFIXED keeps it observe-only).
 //
 // Rig: same "#include a .c for its statics" idiom as cf_checkpoint_quorum_kat --
 // BRPeer.c (for the private BRPeerContext: connect status, and the real
@@ -453,6 +456,58 @@ static void test_disagree(void)
     printf("test_disagree: done\n");
 }
 
+// RED/GREEN (4.1.3 G5): two of three connected filter peers -- neither the source -- report the same value at the
+// same height where our chain differs. Our chain is the outlier: the source is marked misbehaving, the chain is
+// dropped for a rebuild from below the disagreement, the re-anchor budget is charged, and the window is cleared.
+static void test_majority_disagrees(void)
+{
+    Rig r; rigInit(&r, 3000);
+    BRPeer *third = addConnectedFilterPeer(r.manager, 0x03, 10003, r.tip);
+    uint8_t reanchorsBefore = r.manager->cfReanchorCount;
+    unsigned misbehavinBefore = r.manager->misbehavinCount;
+    size_t n; UInt256 *reply = buildReply(&r, r.tip, &n);
+    uint32_t wrongAt = r.topCompiled + 2000;
+    reply[wrongAt / 1000u - 1] = u256_fill(0xEE);
+
+    relay(&r, r.other, FILTER_TYPE_BASIC, r.tipBlock->blockHash, reply, n);
+    check(r.manager->compactFilterChain != NULL && r.manager->cfReanchorCount == reanchorsBefore,
+          "majority: one disagreeing peer of three changes nothing");
+    relay(&r, third, FILTER_TYPE_BASIC, r.tipBlock->blockHash, reply, n);
+
+    check(r.manager->cfReanchorCount == reanchorsBefore + 1, "majority: the re-anchor budget is charged once");
+    check(r.manager->compactFilterChain == NULL, "majority: the chain is rebuilt (the source's chain is dropped)");
+    check(r.manager->misbehavinCount == misbehavinBefore + 1, "majority: the cfheaders source is marked misbehaving");
+    check(r.manager->autoFetchCFiltersStart <= wrongAt && r.manager->autoFetchCFiltersStart >= r.start,
+          "majority: the rebuild starts at or below the disagreeing height, never below the old chain's start");
+    check(r.manager->cfCkDisCount == 0, "majority: the disagreement window is cleared");
+    assertLockNotHeld(r.manager, "majority: manager->lock released");
+
+    free(reply);
+    rigFree(&r);
+    printf("test_majority_disagrees: done\n");
+}
+
+// GUARD: two peers disagree with us but not with each other (different values): no majority, nothing moves.
+static void test_split_disagreement(void)
+{
+    Rig r; rigInit(&r, 3000);
+    BRPeer *third = addConnectedFilterPeer(r.manager, 0x03, 10003, r.tip);
+    uint8_t reanchorsBefore = r.manager->cfReanchorCount;
+    size_t n; UInt256 *a = buildReply(&r, r.tip, &n), *b = buildReply(&r, r.tip, &n);
+    uint32_t wrongAt = r.topCompiled + 2000;
+    a[wrongAt / 1000u - 1] = u256_fill(0xEE);
+    b[wrongAt / 1000u - 1] = u256_fill(0xDD);
+
+    relay(&r, r.other, FILTER_TYPE_BASIC, r.tipBlock->blockHash, a, n);
+    relay(&r, third, FILTER_TYPE_BASIC, r.tipBlock->blockHash, b, n);
+
+    check(r.manager->compactFilterChain != NULL && r.manager->cfReanchorCount == reanchorsBefore,
+          "split: disagreers that do not agree with each other change nothing");
+    free(a); free(b);
+    rigFree(&r);
+    printf("test_split_disagreement: done\n");
+}
+
 // GUARD: no reply ever arrives -- both fields stay at their start values.
 static void test_never(void)
 {
@@ -528,6 +583,8 @@ int main(void)
     test_request_gated_at_reply_cap();
     test_agree();
     test_disagree();
+    test_majority_disagrees();
+    test_split_disagreement();
     test_never();
     test_same_address();
     test_bounded();

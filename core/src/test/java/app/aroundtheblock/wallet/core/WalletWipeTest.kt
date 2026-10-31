@@ -350,7 +350,7 @@ class WalletWipeTest {
             "dgb_sync_data", "dgb_bloom_peers", "dgb_filter_peers", "dgb_dandelion_peers",
             "dgb_reconcile", "dgb_cf_abandonment", "dgb_history_rebuild",
         )
-        val sharedStores = listOf("dgb_watched_addrs", "dgb_outgoing_tx", "dgb_asset_backfill", "dgb_asset_heal", "dgb_db_key")
+        val sharedStores = listOf("dgb_watched_addrs", "dgb_outgoing_tx", "dgb_asset_backfill", "dgb_asset_heal", "dgb_db_key", "dgb_diag", "dgb_log_tag")
 
         fun files(): List<File> = networks.flatMap { net ->
             listOf(

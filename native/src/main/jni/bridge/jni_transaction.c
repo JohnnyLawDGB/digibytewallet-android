@@ -102,17 +102,18 @@ static void _publishResult(void *info, int error)
         /* This publish duplicated one still pending. The ring stays keyed by txid with the first
          * publish's slot, whose callback carries the verdict; recording here would overwrite a
          * pending or delivered verdict with a non-verdict. Consume the context and nothing else. */
-        LOGD("publishTransaction: already pending txid=%.12s (earlier publish carries the verdict)", ctx->txid);
+        char tag[9];
+        LOGD("publishTransaction: already pending tx %s (earlier publish carries the verdict)", BRLogTxTagHex(ctx->txid, tag));
         free(ctx);
         return;
     }
     _publishResultRecord(ctx->txid, error);
     if (error) {
-        LOGE("publishTransaction: REJECTED txid=%.12s error=%d (%s) — the network did not "
+        LOGE("publishTransaction: REJECTED tx %s error=%d (%s) — the network did not "
              "accept this transaction; the wallet still holds it locally",
-             ctx->txid, error, strerror(error));
+             BRLogTxTagHex(ctx->txid, (char[9]){0}), error, strerror(error));
     } else {
-        LOGI("publishTransaction: accepted txid=%.12s (relayed back by a peer)", ctx->txid);
+        LOGI("publishTransaction: accepted tx %s (relayed back by a peer)", BRLogTxTagHex(ctx->txid, (char[9]){0}));
     }
     free(ctx);
 }
@@ -531,7 +532,7 @@ NativeBridge_publishTransaction(JNIEnv *env, jobject thiz,
     if (ctx) memcpy(ctx->txid, txidHex, sizeof(ctx->txid));
     BRPeerManagerPublishTx(g_peerManager, tx, ctx, ctx ? _publishResult : NULL);
 
-    LOGD("publishTransaction: submitted txid=%.12s", txidHex);
+    LOGD("publishTransaction: submitted tx %s", BRLogTxTagHex(txidHex, (char[9]){0}));
     return (*env)->NewStringUTF(env, txidHex);
 }
 
@@ -591,9 +592,9 @@ NativeBridge_publishTransactionStem(JNIEnv *env, jobject thiz,
         PublishCtx *floodCtx = calloc(1, sizeof(*floodCtx));
         if (floodCtx) memcpy(floodCtx->txid, txidHex, sizeof(floodCtx->txid));
         BRPeerManagerPublishTx(g_peerManager, tx, floodCtx, floodCtx ? _publishResult : NULL);
-        LOGW("publishTransactionStem: no stem peer at submit — flooded instead (txid=%.12s)", txidHex);
+        LOGW("publishTransactionStem: no stem peer at submit — flooded instead (tx %s)", BRLogTxTagHex(txidHex, (char[9]){0}));
     } else {
-        LOGD("publishTransactionStem: stemmed txid=%.12s", txidHex);
+        LOGD("publishTransactionStem: stemmed tx %s", BRLogTxTagHex(txidHex, (char[9]){0}));
     }
     return (*env)->NewStringUTF(env, txidHex);
 }
@@ -683,8 +684,8 @@ NativeBridge_removeTransaction(JNIEnv *env, jobject thiz, jstring jtxid) {
             }
             /* Report on what g_wallet holds now, not on which path ran. */
             removed = BRWalletTransactionForHash(g_wallet, h) ? JNI_FALSE : JNI_TRUE;
-            if (removed) LOGI("removeTransaction: dropped %.12s", txid);
-            else LOGW("removeTransaction: %.12s is still held by the wallet — reporting not dropped", txid);
+            if (removed) LOGI("removeTransaction: dropped tx %s", BRLogTxTagHex(txid, (char[9]){0}));
+            else LOGW("removeTransaction: tx %s is still held by the wallet — reporting not dropped", BRLogTxTagHex(txid, (char[9]){0}));
         }
     }
     (*env)->ReleaseStringUTFChars(env, jtxid, txid);
@@ -713,20 +714,39 @@ NativeBridge_isTransactionValid(JNIEnv *env, jobject thiz, jstring jtxid) {
     return valid;
 }
 
+/* The lowest server-reported height since the last takeUnprovableServerHeight that nothing the wallet holds could
+ * check (BR_SERVER_HEIGHT_UNPROVABLE), 0 = none. The reconcile offers a scan from it: that scan is the proof. */
+static uint32_t g_unprovableServerHeight = 0;
+
+static void _noteUnprovableServerHeight(uint32_t height)
+{
+    uint32_t cur = __atomic_load_n(&g_unprovableServerHeight, __ATOMIC_RELAXED);
+    while ((cur == 0 || height < cur) &&
+           ! __atomic_compare_exchange_n(&g_unprovableServerHeight, &cur, height, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {}
+}
+
 /* A confirmation height a server reported never confirms by itself (N1/K4): BRPeerManagerApplyServerHeight
  * refuses a height the wallet's chain does not vouch for, re-checks a block it holds over the peer-to-peer
- * path (the tx stays pending until a peer's block confirms it), and takes only a checkpoint-pinned height
- * below everything it holds. Returns 1 only when the tx was confirmed here. Caller holds PEER_GUARD. */
-static int _applyServerHeight(UInt256 txHash, jlong blockHeight, jlong blockTimestamp, const char *who)
+ * path (the tx stays pending until a peer's block confirms it), and answers UNPROVABLE for a height nothing
+ * it holds can check (4.1.3 row 1), which is noted for the reconcile. Caller holds PEER_GUARD. */
+static BRServerHeightResult _applyServerHeight(UInt256 txHash, jlong blockHeight, jlong blockTimestamp, const char *who)
 {
-    if (!g_peerManager || blockHeight <= 0 || blockHeight >= (jlong)TX_UNCONFIRMED) return 0;
+    if (!g_peerManager || blockHeight <= 0 || blockHeight >= (jlong)TX_UNCONFIRMED) return BR_SERVER_HEIGHT_REFUSED;
     BRServerHeightResult r = BRPeerManagerApplyServerHeight(g_peerManager, txHash, (uint32_t)blockHeight,
                                                             (uint32_t)blockTimestamp);
     LOGI("%s: server height %ld -> %s", who, (long)blockHeight,
-         r == BR_SERVER_HEIGHT_TAKEN ? "taken (checkpoint-pinned, below the headers held)" :
+         r == BR_SERVER_HEIGHT_TAKEN ? "taken" :
          r == BR_SERVER_HEIGHT_RECHECKING ? "re-checking the block over P2P; stays pending" :
+         r == BR_SERVER_HEIGHT_UNPROVABLE ? "unprovable: nothing the wallet holds can check it; a scan from it can" :
          "refused: the wallet's chain does not vouch for it; stays pending");
-    return r == BR_SERVER_HEIGHT_TAKEN;
+    if (r == BR_SERVER_HEIGHT_UNPROVABLE) _noteUnprovableServerHeight((uint32_t)blockHeight);
+    return r;
+}
+
+jlong JNICALL
+NativeBridge_takeUnprovableServerHeight(JNIEnv *env, jobject thiz) {
+    (void)env; (void)thiz;
+    return (jlong)__atomic_exchange_n(&g_unprovableServerHeight, 0, __ATOMIC_RELAXED);
 }
 
 /* ---------- registerRawTransaction ----------
@@ -783,7 +803,7 @@ NativeBridge_registerRawTransaction(JNIEnv *env, jobject thiz,
         int promoted = JNI_FALSE;
         if (existing->blockHeight == TX_UNCONFIRMED) {
             promoted = _applyServerHeight(existing->txHash, blockHeight, blockTimestamp, "registerRawTransaction")
-                       ? JNI_TRUE : JNI_FALSE;
+                       == BR_SERVER_HEIGHT_TAKEN ? JNI_TRUE : JNI_FALSE;
         } else {
             LOGD("registerRawTransaction: duplicate (already confirmed), skipping");
         }
@@ -810,7 +830,14 @@ NativeBridge_registerRawTransaction(JNIEnv *env, jobject thiz,
         return JNI_FALSE;
     }
     LOGI("registerRawTransaction: registered tx (server height %ld)", (long)blockHeight);
-    _applyServerHeight(txHash, blockHeight, blockTimestamp, "registerRawTransaction");
+    if (_applyServerHeight(txHash, blockHeight, blockTimestamp, "registerRawTransaction") == BR_SERVER_HEIGHT_UNPROVABLE) {
+        /* Nothing the wallet holds can check where it was mined, so it is not kept on the server's word -- as a
+         * pending receive it would be credited and later swept, and the next reconcile would add it again. The
+         * height is noted; a scan from it finds a real transaction through the peer-to-peer path (4.1.3 row 1). */
+        BRWalletRemoveTransaction(g_wallet, txHash);
+        LOGI("registerRawTransaction: not kept (unprovable height %ld)", (long)blockHeight);
+        return JNI_FALSE;
+    }
     return JNI_TRUE;
 }
 
@@ -846,7 +873,8 @@ NativeBridge_confirmTransaction(JNIEnv *env, jobject thiz,
         int pending = existing && existing->blockHeight == TX_UNCONFIRMED;
         if (existing) BRTransactionFree(existing);
         if (pending) {
-            promoted = _applyServerHeight(h, blockHeight, blockTimestamp, "confirmTransaction") ? JNI_TRUE : JNI_FALSE;
+            promoted = _applyServerHeight(h, blockHeight, blockTimestamp, "confirmTransaction") == BR_SERVER_HEIGHT_TAKEN
+                       ? JNI_TRUE : JNI_FALSE;
         }
     }
     (*env)->ReleaseStringUTFChars(env, txHashHex, hashStr);

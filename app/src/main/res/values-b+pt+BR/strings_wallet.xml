@@ -722,4 +722,9 @@
     <string name="pinstore_title">Seu PIN não pode ser verificado agora</string>
     <string name="pinstore_body">O armazenamento seguro de chaves do celular não abriu, então a carteira continua bloqueada. Nada foi apagado. Feche o app e abra de novo. Se continuar acontecendo, reinicie o celular; sua frase de recuperação ainda restaura a carteira em qualquer aparelho.</string>
     <string name="pinstore_close">Fechar o app</string>
+    <string name="reconcile_unprovable_body">O nó informou transações do bloco %1$s ou anteriores que esta carteira não consegue verificar com sua própria cópia da cadeia, por isso elas não foram adicionadas. Uma nova varredura a partir desse bloco as verifica pela rede DigiByte.</string>
+    <string name="reconcile_unprovable_rescan">Varrer novamente a partir do bloco %1$s</string>
+    <string name="reconcile_unprovable_confirm">Toque de novo para confirmar — limpa o cache e reinicia</string>
+    <string name="rf_capped_body">A varredura chegou ao limite em %1$s enquanto esse caminho ainda estava em uso, então pode haver mais fundos lá do que o mostrado. O que não aparece continua seguro na cadeia.</string>
+    <string name="reconcile_stuck_stale_cleared">, %1$d delas nunca foram retransmitidas (após um dia a rede não tinha nem elas nem nada gastando suas moedas). Se algum desses pagamentos chegou ao destinatário, ele ainda pode ser confirmado: confirme com ele antes de pagar de novo</string>
 </resources>

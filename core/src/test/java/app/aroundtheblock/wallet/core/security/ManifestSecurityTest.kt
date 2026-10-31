@@ -49,8 +49,11 @@ class ManifestSecurityTest {
 
     @Test
     fun `no content providers declared`() {
-        assertFalse("Wallet should not export content providers — attack surface for data theft",
-            manifest.contains("<provider"))
+        // The one <provider> element is androidx.startup's, merged in by libraries anyway and declared here only
+        // to remove WorkManager's default initializer (4.1.3 carry): not exported, and it serves no data.
+        val providers = Regex("""<provider\b[^>]*>""").findAll(manifest).map { it.value }.toList()
+        assertTrue("Wallet should not declare content providers — attack surface for data theft: $providers",
+            providers.all { it.contains("androidx.startup.InitializationProvider") && it.contains("android:exported=\"false\"") })
     }
 
     @Test

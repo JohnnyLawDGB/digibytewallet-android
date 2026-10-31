@@ -3,8 +3,8 @@
 # native_log_txid_kat — no bridge log line prints a full txid (4.1.2 row 7, K1).
 #
 # LOGD/LOGI/LOGW/LOGE are __android_log_print in every build, release included, so a txid printed whole
-# ties the device's logcat to the user's on-chain transactions. The bridge prints the first 12 characters
-# (%.12s), as the Kotlin side does (LogRedactionSourceGateTest). This gate reads every bridge source: a log
+# ties the device's logcat to the user's on-chain transactions. Since 4.1.3 (review R7) the bridge prints a
+# keyed tag instead (BRLogTxTagHex; log_tag_kat holds no prefix either), as the Kotlin side does (LogTag). This gate reads every bridge source: a log
 # call whose format names a txid or hash must not format it with a bare %s.
 #   RED   the committed 4.1.1-line jni_transaction.c (checked by the gate itself below, when git is present).
 #   GREEN no such line.
@@ -13,7 +13,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../../.." && pwd)"
 BRIDGE_DIR="$REPO_ROOT/native/src/main/jni/bridge"
 check() {   # $1: directory -> prints offending lines: a txid formatted whole (txid=%s, dropped %s, %s is still held)
-    grep -nE 'LOG[DIWE]\(.*(txid=%s|dropped %s|%s is still held)' "$1"/*.c || true
+    grep -nE 'LOG[DIWE]\(.*(txid=%s|dropped %s|%s is still held)' "$1"/*.c | grep -v 'BRLogTxTag' || true
 }
 BAD="$(check "$BRIDGE_DIR")"
 if [ -n "$BAD" ]; then echo "GATE FAILURE: a bridge log line prints a full txid:"; echo "$BAD"; echo "FAIL: native_log_txid_kat"; exit 1; fi

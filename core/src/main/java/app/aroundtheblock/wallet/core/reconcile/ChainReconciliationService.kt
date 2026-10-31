@@ -1,5 +1,7 @@
 package app.aroundtheblock.wallet.core.reconcile
 
+import app.aroundtheblock.wallet.core.LogTag
+
 import app.aroundtheblock.wallet.core.bridge.NativeBridge
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -70,6 +72,10 @@ class ChainReconciliationService(
             /** The node's outputs by the wallet's own classes; null when the wallet could not
              *  be asked (not loaded). */
             val partition: ScanPartition? = null,
+            /** The lowest height the node reported that nothing the wallet holds can check
+             *  (below its headers, or below where its scan starts), 0 = none. Transactions first
+             *  seen there were not added: a rescan from this height proves them (4.1.3 row 1). */
+            val unprovableFromHeight: Long = 0L,
         ) : State()
         data class Failed(val reason: String) : State()
     }
@@ -86,6 +92,9 @@ class ChainReconciliationService(
             // height. Recovers a stuck-"Pending" tx the UTXO reconcile can't
             // surface — e.g. a 0-value DigiDollar token output a dust filter
             // omits from scantxoutset. Non-fatal.
+            // Forget heights an earlier scan (or the automatic confirmation pass) left behind: the
+            // answer below is this scan's own.
+            runCatching { NativeBridge.takeUnprovableServerHeight() }
             _state.value = State.Scanning("Checking pending transactions…")
             val promotedPending = runCatching { confirmPendingTransactions() }.getOrDefault(0)
             if (promotedPending > 0) {
@@ -163,6 +172,7 @@ class ChainReconciliationService(
                     totalChainBalanceSat = 0L,
                     historyTxsImported = historyImported,
                     partition = classify(utxos),
+                    unprovableFromHeight = takeUnprovableHeight(),
                 )
                 _state.value = done
                 return@withContext done
@@ -220,7 +230,7 @@ class ChainReconciliationService(
                     record = { txid -> assetManager.recordRemainderProof(txid) },
                     onVerdict = { u, verdict ->
                         android.util.Log.i("ChainReconciliation",
-                            "remainder of ${u.txid.take(12)}:${u.vout}: $verdict")
+                            "remainder of ${LogTag.tx(u.txid)}:${u.vout}: $verdict")
                     },
                 )
             }
@@ -234,6 +244,7 @@ class ChainReconciliationService(
                 historyTxsImported = historyImported,
                 txsNotAdded = notAdded,
                 partition = partition,
+                unprovableFromHeight = takeUnprovableHeight(),
             )
             _state.value = done
             done
@@ -243,6 +254,9 @@ class ChainReconciliationService(
             failed
         }
     }
+
+    private fun takeUnprovableHeight(): Long =
+        runCatching { NativeBridge.takeUnprovableServerHeight() }.getOrDefault(0L).coerceAtLeast(0L)
 
     /**
      * The node's outputs by the wallet's own partition; null when the wallet cannot answer.
@@ -390,7 +404,7 @@ class ChainReconciliationService(
                 )
             },
             onImported = { tx ->
-                android.util.Log.i("ChainReconciliation", "history-recovered ${tx.txid.take(12)} @${tx.height}")
+                android.util.Log.i("ChainReconciliation", "history-recovered ${LogTag.tx(tx.txid)} @${tx.height}")
             },
         )
         // Coverage means: the node answered for the whole owned address set AND every
@@ -525,12 +539,13 @@ internal suspend fun importPlannedHistory(
             // only BECAUSE of a coupling that is easy to break, so read this before
             // changing either side.
             //
-            // registerRawTransaction returns JNI_FALSE for five reasons
-            // (jni_transaction.c:372-434): null wallet, BRTransactionParse failure,
+            // registerRawTransaction returns JNI_FALSE for six reasons
+            // (jni_transaction.c): null wallet, BRTransactionParse failure,
             // unsigned tx, BRWalletRegisterTransaction rejecting it as not
-            // associated with the wallet — and a DUPLICATE that has nothing to
-            // promote (:418). The first four mean the tx did not land, so the pass
-            // has not covered the band and must not clear the surfacing.
+            // associated with the wallet, a height nothing the wallet holds can
+            // check (not kept on the server's word, 4.1.3 row 1) — and a DUPLICATE
+            // that has nothing to promote. The first five mean the tx did not land,
+            // so the pass has not covered the band and must not clear the surfacing.
             //
             // The duplicate branch is unreachable HERE, and only here, because the
             // caller planned this list against the UNCAPPED known set built by

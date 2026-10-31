@@ -562,7 +562,10 @@ fun AppNavigation(
                 // Spent once per visit; saveable so a rotation does not spend it twice, and bound to
                 // this process so state restored after a process death never shows it (LOCK-PD).
                 val passToken = rememberSaveable { SeedViewGate.spend() }
-                val passed = SeedViewGate.isLive(passToken)
+                // And only while the wallet is unlocked (the collected state: it is current at the first composition
+                // and recomposes this on a lock): a recreate while locked restores this route, and the lock's
+                // reroute comes a frame later (4.1.3, review R18).
+                val passed = SeedViewGate.mayShow(passToken, walletState is WalletState.Unlocked)
                 if (passed) {
                     SeedViewScreen(
                         navController = navController,

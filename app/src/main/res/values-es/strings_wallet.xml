@@ -724,4 +724,9 @@
     <string name="pinstore_title">Ahora no se puede comprobar tu PIN</string>
     <string name="pinstore_body">El almacén seguro de claves del teléfono no se abrió, así que la billetera sigue bloqueada. No se ha borrado nada. Cierra la app y vuelve a abrirla. Si sigue pasando, reinicia el teléfono; tu frase de recuperación sigue restaurando la billetera en cualquier dispositivo.</string>
     <string name="pinstore_close">Cerrar la app</string>
+    <string name="reconcile_unprovable_body">El nodo informó transacciones del bloque %1$s o anteriores que esta billetera no puede comprobar con su propia copia de la cadena, así que no se añadieron. Un reescaneo desde ese bloque las comprueba a través de la red DigiByte.</string>
+    <string name="reconcile_unprovable_rescan">Reescanear desde el bloque %1$s</string>
+    <string name="reconcile_unprovable_confirm">Toca de nuevo para confirmar: borra la caché y reinicia</string>
+    <string name="rf_capped_body">El escaneo llegó a su límite en %1$s mientras esa ruta seguía en uso, así que puede haber más fondos allí de los que se muestran. Lo que no se muestra sigue a salvo en la cadena.</string>
+    <string name="reconcile_stuck_stale_cleared">, %1$d de ellas nunca se retransmitieron (tras un día la red no tenía ni ellas ni nada que gastara sus monedas). Si alguno de esos pagos llegó a su destinatario, todavía puede confirmarse: consúltalo con él antes de volver a pagar</string>
 </resources>

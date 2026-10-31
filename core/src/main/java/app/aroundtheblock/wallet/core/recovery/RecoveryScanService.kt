@@ -81,6 +81,11 @@ class RecoveryScanService(
             val unreachableProfileLabels: List<String> =
                 results.filter { it.addresses.isNotEmpty() && !it.reachableBackend }
                     .map { it.profile.label }
+
+            /** Paths whose window the scan's cap stopped while the far end was still in use
+             *  ([RecoveryGapWindow]): there may be more on them than this answer shows. */
+            val cappedProfileLabels: List<String> =
+                results.filter { it.capped }.map { it.profile.label }
         }
         data class Failed(val reason: String) : State()
     }
@@ -99,6 +104,9 @@ class RecoveryScanService(
          *  Distinguishes "we asked and got nothing" from "we never got an
          *  answer" — critical for honest UX during backend outages. */
         val reachableBackend: Boolean = true,
+        /** The window reached its cap with the far end still in use ([RecoveryGapWindow]): not a
+         *  finished answer for this path. */
+        val capped: Boolean = false,
     ) {
         val totalSat: Long = utxos.sumOf { it.amountSatoshi }
     }
@@ -156,6 +164,84 @@ class RecoveryScanService(
             external = nextExternal
             internal = nextInternal
         }
+    }
+
+    /**
+     * [classifyDerived] with each path's window widened while its far end is in use (4.1.3 G1). A
+     * fixed window lost every coin past it and the scan still said it was done. [derive] derives the
+     * given profiles at their own gaps; [outputScripts] lists the output scripts (hex) of the
+     * transactions a lookup returned, which is how an address paid but since emptied counts as used.
+     * Each round asks again only while some window grew; a window the cap stopped is marked capped.
+     */
+    internal suspend fun classifyWidening(
+        derive: (List<DerivationProfile>) -> Map<DerivationProfile, List<DerivedAddress>>,
+        outputScripts: (ProfileResult) -> Set<String>,
+        scriptOf: (String) -> String? = ::scriptHexOf,
+    ): State.Done {
+        // Each round asks again only for the paths whose window grew; the others keep their answer.
+        val answer = arrayOfNulls<ProfileResult>(profiles.size)
+        var pending = profiles.indices.associateWith { profiles[it] }
+        val bound = maxOf(
+            RecoveryGapWindow.roundBound(profiles.minOfOrNull { it.gapExternal } ?: 0, RecoveryGapWindow.GAP_EXTERNAL, RecoveryGapWindow.MAX_EXTERNAL),
+            RecoveryGapWindow.roundBound(profiles.minOfOrNull { it.gapInternal } ?: 0, RecoveryGapWindow.GAP_INTERNAL, RecoveryGapWindow.MAX_INTERNAL),
+        )
+        var round = 0
+        var last: State.Done? = null
+        while (pending.isNotEmpty()) {
+            val order = pending.keys.toList()
+            val done = classifyDerived(derive(order.map { pending.getValue(it) }))
+            last = done
+            val next = LinkedHashMap<Int, DerivationProfile>()
+            round++
+            for ((k, r) in done.results.withIndex()) {
+                val idx = order[k]
+                val p = pending.getValue(idx)
+                if (!r.reachableBackend || r.derivedAddresses.isEmpty()) { answer[idx] = r; continue }
+                val scripts = outputScripts(r)
+                val used = r.utxos.mapTo(HashSet()) { it.address }
+                if (scripts.isNotEmpty()) {
+                    for (d in r.derivedAddresses) if (d.address !in used && scriptOf(d.address) in scripts) used += d.address
+                }
+                val usedExt = RecoveryGapWindow.highestUsed(r.derivedAddresses, used, 0)
+                val usedInt = RecoveryGapWindow.highestUsed(r.derivedAddresses, used, 1)
+                val ext = RecoveryGapWindow.next(p.gapExternal, usedExt, RecoveryGapWindow.GAP_EXTERNAL, RecoveryGapWindow.MAX_EXTERNAL)
+                val int = RecoveryGapWindow.next(p.gapInternal, usedInt, RecoveryGapWindow.GAP_INTERNAL, RecoveryGapWindow.MAX_INTERNAL)
+                val grew = ext != p.gapExternal || int != p.gapInternal
+                if (grew && round < bound) {
+                    next[idx] = p.copy(gapExternal = ext, gapInternal = int)
+                } else {
+                    val capped = grew ||
+                        RecoveryGapWindow.capped(usedExt, RecoveryGapWindow.GAP_EXTERNAL, RecoveryGapWindow.MAX_EXTERNAL) ||
+                        RecoveryGapWindow.capped(usedInt, RecoveryGapWindow.GAP_INTERNAL, RecoveryGapWindow.MAX_INTERNAL)
+                    answer[idx] = if (capped) r.copy(capped = true) else r
+                }
+            }
+            pending = next
+        }
+        val results = answer.filterNotNull()
+        val merged = (last ?: State.Done(emptyList())).copy(results = results)
+        _state.value = merged
+        return merged
+    }
+
+    /** Output scripts (hex, lowercase) of every transaction a lookup returned for [r]. Parsed natively. */
+    private fun outputScriptsOf(r: ProfileResult): Set<String> {
+        val out = HashSet<String>()
+        for (raw in r.rawTxs.values) {
+            val bytes = runCatching { hexToBytes(raw.hex) }.getOrNull() ?: continue
+            val lines = runCatching { NativeBridge.getRawTransactionOutputs(bytes) }.getOrNull() ?: continue
+            for (l in lines) l.split('|').getOrNull(2)?.lowercase()?.let { out += it }
+        }
+        return out
+    }
+
+    private fun scriptHexOf(address: String): String? =
+        runCatching { NativeBridge.addressToScriptPubKey(address) }.getOrNull()
+            ?.joinToString("") { "%02x".format(it) }
+
+    private fun hexToBytes(hex: String): ByteArray {
+        require(hex.length % 2 == 0)
+        return ByteArray(hex.length / 2) { i -> hex.substring(2 * i, 2 * i + 2).toInt(16).toByte() }
     }
 
     private val _state = MutableStateFlow<State>(State.Idle)
@@ -258,8 +344,10 @@ class RecoveryScanService(
             _state.value = State.Scanning(
                 "Deriving addresses across ${profiles.size} paths…", 0.1f
             )
-            val derivedByProfile = deriveAllProfiles(seedBytes)
-            val done = classifyDerived(derivedByProfile)
+            val done = classifyWidening(
+                derive = { ps -> deriveAllProfiles(seedBytes, ps) },
+                outputScripts = ::outputScriptsOf,
+            )
 
             // DigiDollar is looked up separately because it is invisible to the UTXO path: a
             // token output carries zero satoshis and reconcile filters those out of the set
@@ -298,18 +386,15 @@ class RecoveryScanService(
                 "Deriving addresses across ${profiles.size} paths…", 0.1f
             )
 
-            val derivedByProfile = deriveAllProfiles(capturedSeed)
+            _state.value = State.Scanning("Querying node for UTXOs…", 0.4f)
 
-            // Seed has been consumed by all derivations — zero the Kotlin heap copy.
+            // The seed is needed while the windows widen; it is zeroed below and again in finally.
+            val done = classifyWidening(
+                derive = { ps -> deriveAllProfiles(capturedSeed, ps) },
+                outputScripts = ::outputScriptsOf,
+            )
             capturedSeed.fill(0)
             seed = null
-
-            _state.value = State.Scanning(
-                "Querying node for UTXOs on ${derivedByProfile.values.sumOf { it.size }} addresses…",
-                0.4f
-            )
-
-            val done = classifyDerived(derivedByProfile)
             _state.value = done
             done
         } catch (t: Throwable) {
@@ -329,9 +414,10 @@ class RecoveryScanService(
      */
     private fun deriveAllProfiles(
         seedBytes: ByteArray,
+        ps: List<DerivationProfile> = profiles,
     ): Map<DerivationProfile, List<DerivedAddress>> {
-        val result = LinkedHashMap<DerivationProfile, List<DerivedAddress>>(profiles.size)
-        for (profile in profiles) {
+        val result = LinkedHashMap<DerivationProfile, List<DerivedAddress>>(ps.size)
+        for (profile in ps) {
             // Every encoding this profile can appear as, not just its default. A format is a way
             // of writing a key, not a different key — coins at a non-default encoding were
             // invisible, and recovery reported "no funds found" rather than admitting it had not

@@ -292,6 +292,54 @@ class SeedRecordWriteTest {
         assertRecordError(wm, "says one, holds an empty one")
     }
 
+    // 4.1.3 (review R13): a release before 4.1.2 read the passphrase as a C string, so a record holding one with a
+    // NUL opened the wallet of the part before it -- where the funds are. 4.1.2 refused it, and the wallet stopped
+    // opening. The part before the NUL is what every reader now gets, and the record is rewritten once to hold it.
+    private fun Harness.recordWithStoredPassphrase(stored: ByteArray): WalletManager = recordAndStore(stored).first
+
+    /** The wallet manager over the edited record, and that record's store. */
+    private fun Harness.recordAndStore(stored: ByteArray): Pair<WalletManager, InMemoryPrefs> {
+        assertTrue(walletManager().createWallet(phrase, passphrase))
+        val onDisk = reopened(seedStore.inner)
+        val enc = vault.encrypt(BOUND_ALIAS, stored)
+        onDisk.edit().putString("encrypted_pass_v2", hex(enc.ciphertext)).putString("encrypted_pass_iv_v2", hex(enc.iv)).commit()
+        return walletManager(onDisk) to onDisk
+    }
+
+    @Test fun `a stored passphrase with a NUL derives the wallet of the part before it`() {
+        val h = Harness()
+        val wm = h.recordWithStoredPassphrase("abc\u0000evil".toByteArray())
+        h.derivedWith.clear()
+        assertNotNull(wm.loadBip39Seed())
+        assertArrayEquals("abc".toByteArray(), h.derivedWith.single())
+        assertArrayEquals("abc".toByteArray(), wm.decryptStoredPassphrase())
+    }
+
+    @Test fun `a stored passphrase that starts with a NUL derives the wallet of no passphrase`() {
+        val h = Harness()
+        val wm = h.recordWithStoredPassphrase("\u0000evil".toByteArray())
+        h.derivedWith.clear()
+        assertNotNull(wm.loadBip39Seed())
+        val used = h.derivedWith.single()
+        assertTrue("derived with ${used?.size} byte(s), not with no passphrase", used == null || used.isEmpty())
+    }
+
+    @Test fun `the one-time rewrite stores the part before the NUL and nothing after it`() {
+        val h = Harness()
+        val (wm, store) = h.recordAndStore("abc\u0000evil".toByteArray())
+        assertTrue(wm.migrateLegacyNulPassphrase())
+        val again = h.walletManager(reopened(store))
+        assertArrayEquals("abc".toByteArray(), again.decryptStoredPassphrase())
+        assertEquals(true, store.durable["seed_has_passphrase"])
+        assertFalse("a record with no NUL is rewritten again", again.migrateLegacyNulPassphrase())
+
+        val h2 = Harness()
+        val (wm2, store2) = h2.recordAndStore("\u0000evil".toByteArray())
+        assertTrue(wm2.migrateLegacyNulPassphrase())
+        assertEquals(false, store2.durable["seed_has_passphrase"])
+        assertNull(h2.walletManager(reopened(store2)).decryptStoredPassphrase())
+    }
+
     @Test fun `the passphrase a wallet was created with is the one its record reads back`() {
         val h = Harness()
         assertTrue(h.walletManager().createWallet(phrase, passphrase))

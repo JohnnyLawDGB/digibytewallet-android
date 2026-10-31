@@ -172,8 +172,10 @@ class AssetZeroQuantityInputTest {
 
         assertEquals("lines: $logged", 1, heldLines.size)
         val line = heldLines.single()
-        assertTrue(line, line.startsWith("held ${spend.take(12)}:3 "))
-        assertTrue(line, line.contains("input row ${carrier.take(12)}:1 qty=0"))
+        // transactions are named by their log tag (4.1.3, review R7); no key is loaded here, so "--------"
+        assertTrue(line, line.startsWith("held ${app.aroundtheblock.wallet.core.LogTag.tx(spend)}:3 "))
+        assertTrue(line, line.contains("input row ${app.aroundtheblock.wallet.core.LogTag.tx(carrier)}:1 qty=0"))
+        assertFalse("a line names a transaction by its id: $line", line.contains(spend.take(12)) || line.contains(carrier.take(12)))
         assertFalse("a line carries no script and no address: $line", line.contains(ours) || line.contains(theirs))
     }
 

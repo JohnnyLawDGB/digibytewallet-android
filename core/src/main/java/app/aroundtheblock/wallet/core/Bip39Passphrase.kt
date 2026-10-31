@@ -65,6 +65,16 @@ object Bip39Passphrase {
      */
     fun hasNul(prepared: ByteArray): Boolean = prepared.any { it == 0.toByte() }
 
+    /**
+     * The bytes before the first NUL: what a release before 4.1.2 derived from a passphrase holding one (it
+     * read the passphrase as a C string), and so the wallet such a record's funds are on (4.1.3, review R13).
+     * A new copy; the caller owns it.
+     */
+    fun beforeNul(prepared: ByteArray): ByteArray {
+        val at = prepared.indexOf(0.toByte())
+        return if (at < 0) prepared.copyOf() else prepared.copyOf(at)
+    }
+
     fun isValid(raw: String?): Boolean {
         val prepared = prepare(raw) ?: return true
         return try {

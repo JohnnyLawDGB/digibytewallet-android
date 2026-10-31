@@ -43,8 +43,7 @@ import java.util.Locale
 import java.util.concurrent.TimeUnit
 import app.aroundtheblock.wallet.ui.components.keyboardPadding
 
-// ── Enigma bot handle ─────────────────────────────────────────────────────
-private const val ENIGMA_HANDLE = "Enigma"
+// ── Enigma bot styling (the server marks the bot: UserInfo.isBot) ───────────
 private val EnigmaPurple = Color(0xFF7B2FBE)
 private val EnigmaPurpleLight = Color(0xFF9C27B0).copy(alpha = 0.18f)
 
@@ -312,7 +311,8 @@ private fun MessageBubble(
     message: ChatMessage,
     isMe: Boolean = false
 ) {
-    val isEnigma = message.from.handle?.equals(ENIGMA_HANDLE, ignoreCase = true) == true
+    // The server's flag, never the name: anyone can register a name that reads "Enigma" (4.1.3 row 3).
+    val isEnigma = message.from.isBot
 
     val bubbleColor = when {
         isMe     -> Color(0xFF1A3A5C) // darker blue for own messages

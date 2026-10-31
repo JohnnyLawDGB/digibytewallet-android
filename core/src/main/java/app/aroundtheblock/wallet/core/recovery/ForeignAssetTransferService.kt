@@ -1,5 +1,7 @@
 package app.aroundtheblock.wallet.core.recovery
 
+import app.aroundtheblock.wallet.core.LogTag
+
 import app.aroundtheblock.wallet.core.OutgoingTxStore
 import app.aroundtheblock.wallet.core.WalletTxPersister
 import app.aroundtheblock.wallet.core.asset.send.DA_MARKER_SATS
@@ -350,7 +352,7 @@ class ForeignAssetTransferService(
 
             log('i', "profile=${result.profile.label}: fee pool ${feePool.size} outpoint(s) / " +
                     "${feePool.sumOf { it.amountSat }} sats; units=" +
-                    assets.joinToString { "${it.spend.txid.take(8)}:${it.spend.vout}=${it.units}" },
+                    assets.joinToString { "${LogTag.tx(it.spend.txid)}:${it.spend.vout}=${it.units}" },
             )
 
             val planned = ForeignAssetTransferBatch.plan(assets, feePool, destAddress, feePerKb)
@@ -358,19 +360,19 @@ class ForeignAssetTransferService(
             for (item in planned) {
                 when (val r = item.result) {
                     is ForeignAssetTransferPlan.Result.Refused -> {
-                        log('w', "${item.outpoint}: refused — ${r.reason}: ${r.detail}")
+                        log('w', "${LogTag.outpoint(item.outpoint)}: refused — ${r.reason}: ${r.detail}")
                         // No plan, so no inputs to protect beyond the asset outpoint itself.
                         moves += Move(item.outpoint, 0L, null, "${r.reason}: ${r.detail}")
                     }
 
                     is ForeignAssetTransferPlan.Result.Ok -> {
-                        log('i', "${item.outpoint}: planned ${r.plan.assetUnits} unit(s), " +
+                        log('i', "${LogTag.outpoint(item.outpoint)}: planned ${r.plan.assetUnits} unit(s), " +
                                 "${r.plan.inputs.size} input(s), fee ${r.plan.feeSat} sats, " +
                                 "change ${r.plan.outputs.first().amountSat} sats -> $destAddress",
                         )
                         val signed = sign(r.plan, seedBytes, result.profile, feePerKb)
                         if (signed == null) {
-                            log('w', "${item.outpoint}: native refused to sign")
+                            log('w', "${LogTag.outpoint(item.outpoint)}: native refused to sign")
                             moves += Move(item.outpoint, r.plan.assetUnits, null,
                                 "native refused to sign — see log for the reason",
                                 spentInputs = r.plan.outpoints())
@@ -384,7 +386,7 @@ class ForeignAssetTransferService(
                         }
                         val txid = broadcast(bytes)
                         if (txid == null) {
-                            log('w', "${item.outpoint}: broadcast failed")
+                            log('w', "${LogTag.outpoint(item.outpoint)}: broadcast failed")
                             moves += Move(item.outpoint, r.plan.assetUnits, null,
                                 "broadcast failed — check peer connection",
                                 spentInputs = r.plan.outpoints())
@@ -405,7 +407,7 @@ class ForeignAssetTransferService(
                                 true,
                             )
                         }
-                        log('i', "${item.outpoint}: MOVED in $txid")
+                        log('i', "${LogTag.outpoint(item.outpoint)}: MOVED in ${LogTag.tx(txid)}")
                         moves += Move(item.outpoint, r.plan.assetUnits, txid, null,
                             spentInputs = r.plan.outpoints())
                     }
@@ -469,7 +471,7 @@ class ForeignAssetTransferService(
             ?: return FanOut.Failed("signed split hex malformed")
         val txid = broadcast(bytes)
             ?: return FanOut.Failed("could not broadcast the split — check peer connection")
-        log('i', "fan-out broadcast in $txid")
+        log('i', "fan-out broadcast in ${LogTag.tx(txid)}")
         return FanOut.Broadcast(txid, plan.outputs.count { it.isFeeOutput })
     }
 

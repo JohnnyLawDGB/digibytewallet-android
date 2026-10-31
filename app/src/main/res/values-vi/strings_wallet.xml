@@ -712,4 +712,9 @@
     <string name="pinstore_title">Hiện không thể kiểm tra mã PIN của bạn</string>
     <string name="pinstore_body">Kho khóa an toàn của điện thoại không mở được, nên ví vẫn bị khóa. Không có gì bị xóa. Hãy đóng ứng dụng rồi mở lại. Nếu vẫn xảy ra, hãy khởi động lại điện thoại; cụm từ khôi phục vẫn khôi phục được ví trên mọi thiết bị.</string>
     <string name="pinstore_close">Đóng ứng dụng</string>
+    <string name="reconcile_unprovable_body">Nút đã báo các giao dịch từ khối %1$s trở về trước mà ví này không thể kiểm tra bằng bản sao chuỗi của chính nó, nên chúng không được thêm. Quét lại từ khối đó sẽ kiểm tra chúng qua mạng DigiByte.</string>
+    <string name="reconcile_unprovable_rescan">Quét lại từ khối %1$s</string>
+    <string name="reconcile_unprovable_confirm">Chạm lần nữa để xác nhận — xóa bộ nhớ đệm và khởi động lại</string>
+    <string name="rf_capped_body">Quá trình quét đã dừng ở giới hạn trên %1$s khi đường dẫn đó vẫn đang được dùng, nên có thể còn nhiều tiền hơn số hiển thị. Phần không hiển thị vẫn an toàn trên chuỗi.</string>
+    <string name="reconcile_stuck_stale_cleared">, trong đó %1$d giao dịch chưa từng được chuyển tiếp (sau một ngày mạng không có chúng, cũng không có giao dịch nào tiêu số coin của chúng). Nếu một khoản thanh toán trong số đó đã đến người nhận, nó vẫn có thể được xác nhận: hãy hỏi người nhận trước khi trả lại</string>
 </resources>

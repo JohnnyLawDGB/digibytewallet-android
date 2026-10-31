@@ -276,6 +276,10 @@ class AndroidWalletDataEraser internal constructor(
         val reconcile = clearPrefsOnEveryNetwork("dgb_reconcile") and clearPrefsOnEveryNetwork("dgb_history_rebuild")
         val assetBackfill = clearPrefs("dgb_asset_backfill")
         val assetHeal = clearPrefs("dgb_asset_heal")
+        // The last compact-filter reset's reason, time and heights: this wallet's history (4.1.3).
+        val diag = clearPrefs("dgb_diag")
+        // The log-tag key: the next wallet's logs must not correlate with this one's (4.1.3, review R7).
+        val logTag = clearPrefs(LogTag.PREFS)
         // ONE key, not the file: dgb_settings also holds the language and the network selection.
         val scanFloor = step("scan floor") {
             val settings = context.getSharedPreferences("dgb_settings", Context.MODE_PRIVATE)
@@ -285,7 +289,7 @@ class AndroidWalletDataEraser internal constructor(
             if (!landed) readWhatTheFileHolds("dgb_settings", settings, held)
             landed
         }
-        return filterPeers && dandelionPeers && reconcile && assetBackfill && assetHeal && scanFloor
+        return filterPeers && dandelionPeers && reconcile && assetBackfill && assetHeal && diag && logTag && scanFloor
     }
 
     override fun eraseHubSession(): Boolean = step("hub session") { hubTokenStore().clearConfirmed() }

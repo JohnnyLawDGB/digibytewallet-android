@@ -190,6 +190,7 @@ fun RecoverFundsScreen(
                         },
                         onSweepExternal = if (s.isForeign) null else { addr -> gated { vm.sweep(SweepDestination.External(addr)) } },
                         partialFailurePaths = s.partialFailurePaths,
+                        cappedPaths = s.cappedPaths,
                         verdict = passphraseVerdict,
                         assetOutpointCount = s.assetOutpointCount,
                         digiDollar = s.digiDollar,
@@ -261,6 +262,8 @@ private fun FindingsBody(
     onSweepExternal: ((String) -> Unit)?,
     /** Paths the scan could not reach. Non-empty means these findings are incomplete. */
     partialFailurePaths: List<String> = emptyList(),
+    /** Paths whose window hit the scan's cap while still in use: these findings may be short. */
+    cappedPaths: List<String> = emptyList(),
     verdict: app.aroundtheblock.wallet.core.recovery.PassphraseScanVerdict.Outcome? = null,
     /** Outpoints whose parent transaction carries a DigiAsset marker. Non-zero means the
      *  recovery will move assets, which is irreversible — so it is said BEFORE the button. */
@@ -321,6 +324,19 @@ private fun FindingsBody(
             }
         }
 
+        // The scan stopped at its cap on a path still in use (4.1.3 G1): said whether or not it
+        // found anything, since a capped path is not a finished answer either way.
+        if (cappedPaths.isNotEmpty() && (findings.isNotEmpty() || hasValue)) {
+            item {
+                Text(
+                    text = stringResource(R.string.rf_capped_body, cappedPaths.joinToString(", ")),
+                    color = AMBER,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                )
+            }
+        }
+
         if (findings.isEmpty() && !hasValue) {
             // Clean empty state — no balance header, no section header
             item {
@@ -334,7 +350,7 @@ private fun FindingsBody(
                     // no funds. Showing a green tick and "no funds found" there is a confident
                     // answer to a question the wallet did not finish asking — and a user who
                     // reads it stops looking. Distinct outcome, distinct wording, distinct icon.
-                    val incomplete = partialFailurePaths.isNotEmpty()
+                    val incomplete = partialFailurePaths.isNotEmpty() || cappedPaths.isNotEmpty()
                     // A passphrase was supplied and a complete scan found nothing. A passphrase has no
                     // checksum, so a typo opens a different, empty wallet without any error; say so
                     // rather than a bare "no funds".
@@ -361,10 +377,11 @@ private fun FindingsBody(
                     Text(
                         text = when {
                             typo -> stringResource(R.string.pass_restore_typo)
-                            incomplete -> stringResource(
+                            partialFailurePaths.isNotEmpty() -> stringResource(
                                 R.string.rf_partial_body,
                                 partialFailurePaths.joinToString(", "),
                             )
+                            incomplete -> stringResource(R.string.rf_capped_body, cappedPaths.joinToString(", "))
                             else -> stringResource(R.string.rf_no_coins)
                         },
                         color = MUTED,

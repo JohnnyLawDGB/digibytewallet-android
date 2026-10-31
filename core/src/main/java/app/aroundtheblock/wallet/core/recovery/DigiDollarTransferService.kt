@@ -1,5 +1,7 @@
 package app.aroundtheblock.wallet.core.recovery
 
+import app.aroundtheblock.wallet.core.LogTag
+
 import app.aroundtheblock.wallet.core.OutgoingTxStore
 import app.aroundtheblock.wallet.core.WalletTxPersister
 import app.aroundtheblock.wallet.core.bridge.NativeBridge
@@ -185,7 +187,7 @@ class DigiDollarTransferService(
             recordOutgoing(txid, 0L, plan.feeSat, plan.changeAddress, true)
         }
 
-        log('i', "DigiDollar ${if (relayed) "MOVED" else "sent, not yet relayed,"} in ${txid.take(12)}")
+        log('i', "DigiDollar ${if (relayed) "MOVED" else "sent, not yet relayed,"} in ${LogTag.tx(txid)}")
         Result(
             cents = scan.cents,
             txid = txid,

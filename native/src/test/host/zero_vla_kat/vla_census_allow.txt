@@ -1,0 +1,31 @@
+# Every variable-length array in the core (clang -Wvla) must size itself with BR_VLA_LEN (BRInt.h) or appear
+# here, as  file|the declaration line, trimmed|why its bound is positive by construction.  4.1.3 row 4.
+# A new VLA anywhere fails the census; an entry that no longer matches anything fails it too.
+BRAddress.c|const uint8_t *elems[BRScriptElements(NULL, 0, script, scriptLen)], *r = NULL;|returns before it when the script has no elements (ZERO_VLA_UNFIXED seam; arm pkh)
+BRAddress.c|const uint8_t *elems[BRScriptElements(NULL, 0, script, scriptLen)];|returns before it when the script has no elements (arm spk)
+BRAddress.c|const uint8_t *d = NULL, *elems[BRScriptElements(NULL, 0, script, scriptLen)];|returns before it when the script has no elements (arm sig)
+BRBase58.c|uint8_t buf[(dataLen - zcount)*138/100 + 1]; // log(256)/log(58), rounded up|+ 1
+BRBIP32Sequence.c|uint8_t data[sizeof(index) + uriLen];|at least sizeof(index)
+BRBIP39Mnemonic.c|char salt[strlen("mnemonic") + (passphrase ? strlen(passphrase) : 0) + 1];|at least 9
+BRBIP39Mnemonic.c|uint8_t buf[dataLen + 32];|at least 32
+BRBIP39Mnemonic.c|uint8_t buf[(count*11 + 7)/8];|inside count > 0 (ZERO_VLA_UNFIXED seam; arm phrase)
+BRCrypto.c|uint8_t k[hashLen];|hashLen is the digest size of the hash passed in (20..64)
+BRCrypto.c|uint64_t kipad[(blockLen + dataLen)/sizeof(uint64_t) + 1], kopad[(blockLen + hashLen)/sizeof(uint64_t) + 1];|+ 1
+BRCrypto.c|uint8_t buf[bufLen];|bufLen = hashLen + 1 + ...
+BRCrypto.c|uint8_t s[saltLen + sizeof(uint32_t)];|at least 4
+BRCrypto.c|uint32_t i, j, U[hashLen/sizeof(uint32_t)], T[hashLen/sizeof(uint32_t)];|digest size / 4, at least 5
+BRCrypto.c|uint64_t x[16*r], y[16*r], z[8], *v = malloc(vLen), m;|scrypt r: every caller passes a constant >= 1
+BRCrypto.c|uint32_t b[32*r*p];|scrypt r, p: every caller passes constants >= 1
+BRKey.c|char s[strLen + 2];|+ 2
+BRPeer.c|char txHex[bufLen*2 + 1];|+ 1
+BRPeer.c|char type[(strLen < 0x1000) ? strLen + 1 : 0x1000];|at least 1
+BRPeer.c|char reason[(strLen < 0x1000) ? strLen + 1 : 0x1000];|at least 1
+BRPeer.c|uint8_t msg[80 + BRVarIntSize(userAgentLen) + userAgentLen + 5];|at least 86
+BRPeer.c|uint8_t msg[BRVarIntSize(0)];|1
+BRPeer.c|uint8_t msg[msgLen];|getheaders/getblocks: 4 + varint + 32 at least; inv: inside addedCount > 0
+BRPeerManager.c|int held[listed > 0 ? listed : 1];|at least 1
+BRPeerManager.c|UInt256 hashes[count > 0 ? count : 1];|at least 1
+BRPeerManager.c|uint32_t claims[total > 0 ? total : 1];|at least 1
+BRTransaction.c|uint8_t sig[73], script[1 + sizeof(sig) + 1 + sizeof(pubKey)];|at least 75
+BRWallet.c|uint8_t pubKey[BRBIP32PubKey(NULL, 0, mpk, chain, idx)];|33 (a compressed public key)
+BRWallet.c|uint8_t pubKey[BRBIP32PubKey(NULL, 0, mpk, chain, count)];|33 (a compressed public key)

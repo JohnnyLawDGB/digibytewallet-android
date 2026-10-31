@@ -19,14 +19,16 @@
 //   D  GUARD with no filter peer connected the transaction stays pending and nothing is sent (the reconcile asks again)
 //   F  RED   a payment the peers confirmed keeps its height when a server later reports another
 //            (-DSERVER_HEIGHT_OVERWRITE_UNFIXED replaces it: this case must fail there)
-//   E  GUARD a height below everything the wallet holds, pinned by a checkpoint at or below its tip, is taken as
-//            reported (the residual: there is no block the wallet could re-check there)
+//   E  RED   a height below everything the wallet holds is UNPROVABLE: nothing the wallet holds can check it, so it
+//            changes nothing -- the payment stays pending and its coin is never selectable (4.1.3 row 1; until 4.1.3
+//            this was taken as reported, and a forged receive there was co-selected and signed beside a real coin)
+//            (-DSERVER_HEIGHT_RESIDUAL_UNFIXED takes E and I on the server's word: E must fail there)
 //   G  RED   a height on a held header the filter-header chain has not reached yet (the chain trails the header tip,
 //            as during sync and for a moment after every block) stays pending: the scan reaches it and decides
 //   H  RED   a height on a held header before the filter-header chain exists stays pending the same way
-//   I  GUARD a height on a held header below the filter chain's start is taken as reported, like E: no filter can
-//            ever re-check it (a restore whose birth height came too late), and refusing it left a real receive
-//            pending for good
+//   I  RED   a height on a held header below the filter chain's start is UNPROVABLE, like E: no filter can re-check
+//            it (a restore whose birth height came too late). The answer says so, so the app can offer a scan from
+//            that height, which proves a real receive over P2P; the server's word never does
 //            (-DSERVER_HEIGHT_HELD_UNFIXED takes G and H on the server's word: G must fail there; review R2)
 #include <assert.h>
 #include <stdio.h>
@@ -337,17 +339,27 @@ static void test_D(void)
     fxFree(&f);
 }
 
+// 1 if the payment's output is in the set a send may select from.
+static int paymentSelectable(Fx *f)
+{
+    BRUTXO u[16];
+    size_t n = BRWalletSelectableUTXOs(f->w, u, sizeof(u) / sizeof(*u));
+    for (size_t i = 0; i < n; i++) if (UInt256Eq(u[i].hash, f->payment->txHash)) return 1;
+    return 0;
+}
+
 static void test_E(void)
 {
-    printf("\n=== E: a checkpoint-pinned height below everything held is taken as reported ===\n");
+    printf("\n=== E: a height below everything held is unprovable: the tx stays pending, its coin unselectable ===\n");
     Fx f;
     fxInit(&f, 1);
     uint32_t deep = H0 - 1000;
     BRServerHeightResult r = BRPeerManagerApplyServerHeight(f.m, f.payment->txHash, deep, 1700200000);
     printf("NOTE: apply(%u) -> %d, payment height %u\n", deep, r, paymentHeight(&f));
-    check(r == BR_SERVER_HEIGHT_TAKEN, "E: the result is TAKEN");
+    check(r == BR_SERVER_HEIGHT_UNPROVABLE, "E: the result is UNPROVABLE");
     check(g_getcfiltersCount == 0, "E: nothing is sent (there is no held block to re-check)");
-    check(paymentHeight(&f) == deep, "E: the payment is confirmed at the reported height (signature-checked)");
+    check(paymentHeight(&f) == TX_UNCONFIRMED, "E: the payment is still pending (the server's height is not the proof)");
+    check(! paymentSelectable(&f), "E: the payment's coin is not selectable for a send");
     fxFree(&f);
 }
 
@@ -392,15 +404,16 @@ static void test_H(void)
 
 static void test_I(void)
 {
-    printf("\n=== I: a held header below the filter chain's start is taken as reported (the residual) ===\n");
+    printf("\n=== I: a held header below the filter chain's start is unprovable, like E ===\n");
     Fx f;
     fxInit(&f, 1);
     fxChainOnly(&f, H, 1);                  // the filter chain starts at H; H0's header is held below it
     BRServerHeightResult r = BRPeerManagerApplyServerHeight(f.m, f.payment->txHash, H0, 1700300000);
     printf("NOTE: apply(H0) below the filter start %u -> %d, payment height %u\n",
            BRCompactFilterChainStartHeight(f.m->compactFilterChain), r, paymentHeight(&f));
-    check(r == BR_SERVER_HEIGHT_TAKEN, "I: the result is TAKEN");
-    check(paymentHeight(&f) == H0, "I: the payment is confirmed at the reported height (signature-checked)");
+    check(r == BR_SERVER_HEIGHT_UNPROVABLE, "I: the result is UNPROVABLE");
+    check(paymentHeight(&f) == TX_UNCONFIRMED, "I: the payment is still pending");
+    check(! paymentSelectable(&f), "I: the payment's coin is not selectable for a send");
     fxFree(&f);
 }
 

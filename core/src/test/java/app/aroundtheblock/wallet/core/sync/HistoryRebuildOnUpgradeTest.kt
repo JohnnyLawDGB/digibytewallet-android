@@ -339,6 +339,33 @@ class HistoryRebuildOnUpgradeTest {
         assertEquals(1_500_000_000L, HistoryRebuildOnUpgrade.readState(c).floorTime)
     }
 
+    // ── lowerFloorTo: a reconcile's unprovable height carried into the next rescan (4.1.3 row 1) ──
+
+    @Test fun lowerFloorTo_setsHintTimeAndPending() {
+        val c = ctx()
+        assertTrue(HistoryRebuildOnUpgrade.lowerFloorTo(c, 19_000_000L) { h -> if (h == 19_000_000L) 1_550_000_000L else 0L })
+        val st = HistoryRebuildOnUpgrade.readState(c)
+        assertEquals(19_000_000L, st.floorHint)
+        assertEquals(1_550_000_000L, st.floorTime)
+        assertTrue(HistoryRebuildOnUpgrade.floorPending(c))
+    }
+
+    @Test fun lowerFloorTo_neverRaisesAnExistingFloor() {
+        val c = ctx()
+        statePrefs(c).edit().putLong("floor_hint", 18_000_000L).putLong("floor_time", 1_500_000_000L).commit()
+        assertTrue(HistoryRebuildOnUpgrade.lowerFloorTo(c, 19_000_000L) { 1_550_000_000L })
+        val st = HistoryRebuildOnUpgrade.readState(c)
+        assertEquals(18_000_000L, st.floorHint)
+        assertEquals(1_500_000_000L, st.floorTime)
+    }
+
+    @Test fun lowerFloorTo_ignoresANonPositiveHeight() {
+        val c = ctx()
+        assertFalse(HistoryRebuildOnUpgrade.lowerFloorTo(c, 0L) { 1_550_000_000L })
+        assertEquals(0L, HistoryRebuildOnUpgrade.readState(c).floorHint)
+        assertFalse(HistoryRebuildOnUpgrade.floorPending(c))
+    }
+
     @Test fun emptyCache_stampsDone_andTouchesNothingElse() {
         val c = ctx()
         syncPrefs(c).edit().putBoolean("has_synced", true).commit()

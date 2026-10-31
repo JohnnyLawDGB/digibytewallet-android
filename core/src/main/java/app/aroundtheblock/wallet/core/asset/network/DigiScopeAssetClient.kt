@@ -1,5 +1,7 @@
 package app.aroundtheblock.wallet.core.asset.network
 
+import app.aroundtheblock.wallet.core.LogTag
+
 import app.aroundtheblock.wallet.core.network.BoundedBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -73,7 +75,7 @@ class DigiScopeAssetClient(
             }
         }
     } catch (t: Throwable) {
-        android.util.Log.w("DigiScopeAssetClient", "txout ${txid.take(12)}:$vout threw ${t::class.java.simpleName}")
+        android.util.Log.w("DigiScopeAssetClient", "txout ${LogTag.tx(txid)}:$vout threw ${t::class.java.simpleName}")
         app.aroundtheblock.wallet.core.asset.send.StackLookup.Unavailable
     }
 

@@ -717,4 +717,9 @@
     <string name="pinstore_title">PIN\'iniz şu anda doğrulanamıyor</string>
     <string name="pinstore_body">Telefonun güvenli anahtar deposu açılamadı, bu yüzden cüzdan kilitli kalıyor. Hiçbir şey silinmedi. Uygulamayı kapatıp yeniden açın. Bu tekrar olursa telefonu yeniden başlatın; kurtarma ifadeniz cüzdanı yine her cihazda geri yükler.</string>
     <string name="pinstore_close">Uygulamayı kapat</string>
+    <string name="reconcile_unprovable_body">Düğüm, bu cüzdanın kendi zincir kopyasıyla doğrulayamadığı %1$s numaralı blok veya öncesine ait işlemler bildirdi; bu yüzden eklenmediler. O bloktan yeniden tarama, onları DigiByte ağı üzerinden doğrular.</string>
+    <string name="reconcile_unprovable_rescan">%1$s numaralı bloktan yeniden tara</string>
+    <string name="reconcile_unprovable_confirm">Onaylamak için tekrar dokunun — önbelleği temizler ve yeniden başlatır</string>
+    <string name="rf_capped_body">Tarama, %1$s yolunda bu yol hâlâ kullanılırken sınırına ulaştı; orada gösterilenden fazla bakiye olabilir. Gösterilmeyenler zincirde güvende kalır.</string>
+    <string name="reconcile_stuck_stale_cleared">, bunlardan %1$d tanesi hiç iletilmedi (bir gün sonra ağda ne bunlar ne de coin\'lerini harcayan bir işlem vardı). Bu ödemelerden biri alıcısına ulaştıysa yine de onaylanabilir: yeniden ödemeden önce alıcıya danışın</string>
 </resources>

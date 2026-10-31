@@ -45,7 +45,25 @@ data class StuckSendResult(
      *  because it is a different failure from a merely-dead send, and a user who was told
      *  "nothing to clear" by an earlier version deserves to see that it found something. */
     val orphansCleared: Int = 0,
+    /** Of [dropped], how many were STALE ([StaleSendPredicate]): valid, unconfirmed a day or more,
+     *  and unknown to the network -- never relayed, so nothing would ever have released their coins. */
+    val staleCleared: Int = 0,
 )
+
+/**
+ * An own send that is valid but went nowhere (4.1.3, review R8): unconfirmed for [MIN_AGE_S] or more and,
+ * on the pinned node's evidence ([app.aroundtheblock.wallet.core.reconcile.DgbNodeClient.sendNeverRelayed]),
+ * never taken by the network -- the node does not know the txid and every input is still unspent. Every
+ * unconfirmed DigiDollar send is held pending, so one that never relayed kept its coins for good.
+ */
+object StaleSendPredicate {
+    const val MIN_AGE_S = 24L * 60 * 60
+
+    /** Old enough to ask the node about (a send with no timestamp is never old enough). */
+    fun oldEnough(timestampS: Long, nowS: Long): Boolean = timestampS > 0L && nowS - timestampS >= MIN_AGE_S
+
+    fun isStale(timestampS: Long, nowS: Long, neverRelayed: Boolean): Boolean = oldEnough(timestampS, nowS) && neverRelayed
+}
 
 /**
  * The `cf_birth_height` value to persist for a given native birth-checkpoint height,
@@ -438,6 +456,8 @@ class WalletManager @Suppress("LongParameterList") constructor(
             val success = NativeBridge.restoreWalletFromBytes(seedBytes, restoreTime, storedPass)
             if (success) {
                 _walletState.value = WalletState.Unlocked
+                // A passphrase stored with a NUL opened the wallet of the part before it; record that (R13).
+                if ((stored as? StoredPassphrase.Present)?.legacyNul == true) runCatching { migrateLegacyNulPassphrase() }
             }
             return success
         } finally {
@@ -558,7 +578,12 @@ class WalletManager @Suppress("LongParameterList") constructor(
      * cleanup is a Room/IO call; callers should invoke this off the main thread
      * (e.g. `withContext(Dispatchers.IO) { walletManager.clearStuckSends() }`).
      */
-    suspend fun clearStuckSends(): StuckSendResult {
+    suspend fun clearStuckSends(
+        /** Whether the network never took a send with these inputs ([StaleSendPredicate]); the default
+         *  cannot tell, so no send is cleared as stale. */
+        neverRelayed: suspend (txid: String, inputs: List<Pair<String, Int>>) -> Boolean = { _, _ -> false },
+        nowS: Long = System.currentTimeMillis() / 1000L,
+    ): StuckSendResult {
         val store = OutgoingTxStore(context)
 
         // Sovereign owned-address set, built ONCE for the whole pass (never a
@@ -585,6 +610,7 @@ class WalletManager @Suppress("LongParameterList") constructor(
         var kept = 0
         var assetRowsCleared = 0
         var orphansCleared = 0
+        var staleCleared = 0
         for (line in rows) {
             // Whole per-row body is guarded: a Room/JNI exception on one stuck tx
             // must not skip the remaining rows or the final persist() below.
@@ -629,11 +655,22 @@ class WalletManager @Suppress("LongParameterList") constructor(
                 if (orphan) {
                     android.util.Log.w(
                         "WalletManager",
-                        "clearStuckSends: ${txid.take(12)} is an ORPHAN — parent missing from the wallet, " +
+                        "clearStuckSends: ${LogTag.tx(txid)} is an ORPHAN — parent missing from the wallet, " +
                             "cannot ever confirm; clearing"
                     )
                 }
-                if (!dead && !orphan) { kept++; return@runCatching } // slow but still valid — spare it
+                // Valid and not orphaned, but a day old and unknown to the network: it never relayed, and
+                // nothing else would release its coins (R8). The node is asked only about such a send.
+                val ts = p[4].toLongOrNull() ?: 0L
+                val stale = !dead && !orphan && StaleSendPredicate.oldEnough(ts, nowS) &&
+                    StaleSendPredicate.isStale(ts, nowS, neverRelayed(txid,
+                        OrphanSendPredicate.parseInputs(runCatching { NativeBridge.getTransactionInputsForHash(txid) }.getOrNull())
+                            .map { it.prevTxid to it.prevVout }))
+                if (stale) {
+                    android.util.Log.w("WalletManager",
+                        "clearStuckSends: ${LogTag.tx(txid)} is STALE — a day unconfirmed, unknown to the node, inputs unspent; clearing")
+                }
+                if (!dead && !orphan && !stale) { kept++; return@runCatching } // slow but still valid — spare it
 
                 // Ordering is load-bearing (see dead-asset-send-clear design doc):
                 // remove the transaction from the wallet FIRST. Only once native
@@ -646,6 +683,7 @@ class WalletManager @Suppress("LongParameterList") constructor(
                     store.remove(txid)
                     dropped++
                     if (orphan) orphansCleared++
+                    if (stale) staleCleared++
                     // Removing a parent strands anything built on it — that is how the
                     // orphan we are fixing was most likely created in the first place.
                     // Dropping it from the known set means a later row spending it is
@@ -667,6 +705,7 @@ class WalletManager @Suppress("LongParameterList") constructor(
             kept = kept,
             assetRowsCleared = assetRowsCleared,
             orphansCleared = orphansCleared,
+            staleCleared = staleCleared,
         )
     }
 
@@ -715,6 +754,18 @@ class WalletManager @Suppress("LongParameterList") constructor(
         context.getSharedPreferences("dgb_settings", Context.MODE_PRIVATE).edit().apply {
             if (toPersist != null) putLong("cf_birth_height", toPersist) else remove("cf_birth_height")
         }.commit()
+    }
+
+    /**
+     * [rebuildFromChainRescan] with the scan floor carried down to [height] first, so the rescan
+     * reaches a block a reconcile reported but the wallet could not check (4.1.3 row 1). The caller
+     * restarts the app afterward, as for the plain rebuild.
+     */
+    fun rebuildFromChainRescanFrom(height: Long) {
+        if (!HistoryRebuildOnUpgrade.lowerFloorTo(context, height)) {
+            runCatching { android.util.Log.w(HistoryRebuildOnUpgrade.TAG, "rescan from $height: lowering the floor did not land") }
+        }
+        rebuildFromChainRescan()
     }
 
     /**
@@ -1137,8 +1188,9 @@ class WalletManager @Suppress("LongParameterList") constructor(
     private sealed class StoredPassphrase {
         data object None : StoredPassphrase()
 
-        /** NFKD UTF-8 bytes. **The caller owns them and must `fill(0)` them.** */
-        class Present(val bytes: ByteArray) : StoredPassphrase()
+        /** NFKD UTF-8 bytes. **The caller owns them and must `fill(0)` them.** [legacyNul]: the record holds
+         *  a passphrase with a NUL, and [bytes] are the part before it (see [openEnvelope]). */
+        class Present(val bytes: ByteArray, val legacyNul: Boolean = false) : StoredPassphrase()
 
         /** The record cannot say: an error, never "no passphrase" — that would be a different wallet. */
         class Unknown(val why: String) : StoredPassphrase()
@@ -1213,6 +1265,15 @@ class WalletManager @Suppress("LongParameterList") constructor(
             return StoredPassphrase.Unknown("envelope did not read (${e::class.java.simpleName})")
         }
         if (bytes.isEmpty()) return StoredPassphrase.None
+        // A release before 4.1.2 read the passphrase as a C string, so a record holding one with a NUL opened the
+        // wallet of the part before it -- where its funds are. 4.1.2 refused such a passphrase outright and the
+        // wallet stopped opening (review R13). Every reader gets the part before the NUL (possibly empty: the
+        // wallet of no passphrase); migrateLegacyNulPassphrase rewrites the record once to hold it.
+        if (Bip39Passphrase.hasNul(bytes)) {
+            val before = Bip39Passphrase.beforeNul(bytes)
+            bytes.fill(0)
+            return StoredPassphrase.Present(before, legacyNul = true)
+        }
         return StoredPassphrase.Present(bytes)
     }
 
@@ -1263,6 +1324,30 @@ class WalletManager @Suppress("LongParameterList") constructor(
         is StoredPassphrase.Present -> stored.bytes
         StoredPassphrase.None -> if (noPassphraseContradicted()) error("wallet record incomplete: its identity is another wallet's") else null
         is StoredPassphrase.Unknown -> error("wallet record incomplete: ${stored.why}")
+    }
+
+    /**
+     * Rewrite a record whose stored passphrase holds a NUL (see [openEnvelope]) to hold the part before it, the
+     * wallet it has always opened. One checked write ([writeSeedRecord]); true only when it landed. False, and
+     * nothing written, for any other record. Called after an unlock opened the wallet (4.1.3, review R13).
+     */
+    fun migrateLegacyNulPassphrase(): Boolean {
+        val stored = runCatching { storedPassphrase() }.getOrNull()
+        if (stored !is StoredPassphrase.Present || !stored.legacyNul) {
+            (stored as? StoredPassphrase.Present)?.bytes?.fill(0)
+            return false
+        }
+        val mnemonic = runCatching { loadSeed() }.getOrNull()
+        if (mnemonic == null) { stored.bytes.fill(0); return false }
+        return try {
+            val origin = prefs.getString(KEY_ORIGIN, null) ?: ORIGIN_RESTORED
+            writeSeedRecord(mnemonic, stored.bytes, prefs.getLong(KEY_CREATION_TIME, 0L), origin).also {
+                android.util.Log.i("WalletManager", "legacy wallet record rewritten to the wallet it opens (landed=$it)")
+            }
+        } finally {
+            stored.bytes.fill(0)
+            mnemonic.fill(0)
+        }
     }
 
     /** The record's own identity (fingerprint v2) is not the wallet [identitySeed] opens. */

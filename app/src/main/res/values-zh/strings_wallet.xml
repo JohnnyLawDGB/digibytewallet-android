@@ -712,4 +712,9 @@
     <string name="pinstore_title">暂时无法验证您的 PIN</string>
     <string name="pinstore_body">手机的安全密钥存储未能打开，因此钱包保持锁定。没有删除任何内容。请关闭应用后重新打开。如果仍然出现，请重启手机；您的恢复短语仍可在任何设备上恢复钱包。</string>
     <string name="pinstore_close">关闭应用</string>
+    <string name="reconcile_unprovable_body">节点报告了区块 %1$s 或更早的交易，本钱包无法用自己的区块链副本核实，因此没有添加。从该区块重新扫描，会通过 DigiByte 网络核实它们。</string>
+    <string name="reconcile_unprovable_rescan">从区块 %1$s 重新扫描</string>
+    <string name="reconcile_unprovable_confirm">再次点按以确认——将清除缓存并重启</string>
+    <string name="rf_capped_body">扫描在 %1$s 上达到上限时，该路径仍在使用中，因此那里的资金可能比显示的更多。未显示的部分仍安全地留在区块链上。</string>
+    <string name="reconcile_stuck_stale_cleared">，其中 %1$d 笔从未被转发（一天后网络中既没有它们，也没有花费其币的交易）。如果其中某笔付款其实已到达收款方，它仍可能被确认：再次付款前请先与对方核实</string>
 </resources>

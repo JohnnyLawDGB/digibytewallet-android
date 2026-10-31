@@ -22,18 +22,31 @@ build() {
 }
 build "$BUILD_DIR/red" -DZERO_VLA_UNFIXED || { echo "GATE FAILURE: red did not build"; exit 1; }
 build "$BUILD_DIR/green" || { echo "GATE FAILURE: green did not build"; exit 1; }
-# Review R9: the sites a host run cannot reach without a peer harness -- each VLA sized by a count that can be 0
-# takes BR_VLA_LEN (BRInt.h), and the macro keeps the bare length under the red seam.
+# The census (4.1.3 row 4, replacing the list of known sites): clang -Wvla names every variable-length array in the
+# core; each one sizes itself with BR_VLA_LEN or is on vla_census_allow.txt with the reason its bound is positive.
 grep -q '^#define BR_VLA_LEN(n) ((n) > 0 ? (n) : 1)$' "$CORE_DIR/BRInt.h" || { echo "GATE FAILURE: BR_VLA_LEN is missing from BRInt.h"; FAIL=1; }
-for site in "BRPeer.c:BRPeer peers\[BR_VLA_LEN(count)\]" \
-            "BRPeerManager.c:BRTransaction \*txs\[BR_VLA_LEN(" "BRPeerManager.c:UInt256 hashes\[BR_VLA_LEN(" \
-            "BRPeerManager.c:BRTransaction \*tx\[BR_VLA_LEN(txCount)\]" "BRPeerManager.c:UInt256 txHashes\[BR_VLA_LEN(txCount)\]" \
-            "BRPeerManager.c:BRPeer save\[BR_VLA_LEN(peersCount)\]" "BRPeer.c:UInt256 added\[BR_VLA_LEN(txCount)\]" \
-            "BRWallet.c:BRKey keys\[BR_VLA_LEN(totalKeys)\]"; do
-    f="${site%%:*}"; pat="${site#*:}"
-    grep -q "$pat" "$CORE_DIR/$f" || { echo "GATE FAILURE: $f no longer sizes a VLA with BR_VLA_LEN ($pat)"; FAIL=1; }
+ALLOW="$SCRIPT_DIR/vla_census_allow.txt"
+CENSUS="$BUILD_DIR/census.txt"; : > "$CENSUS"
+for f in $(cd "$CORE_DIR" && ls *.c | grep -vE '^test\.c$|Tests?\.c$'); do
+    clang -fsyntax-only -Wno-everything -Wvla -include stdint.h -I "$CORE_DIR" -I "$CORE_DIR/secp256k1/include" "$CORE_DIR/$f" 2>&1 |
+        grep -E "^[^:]+\.c:[0-9]+:[0-9]+: warning: variable length array" | cut -d: -f1,2 >> "$CENSUS" || true
 done
-for arm in pkh spk sig phrase verify wallet unconfirmed sign; do
+SEEN=0; USED="$BUILD_DIR/used.txt"; : > "$USED"
+while IFS=: read -r path line; do
+    f="$(basename "$path")"; text="$(sed -n "${line}p" "$CORE_DIR/$f" | sed 's/^[[:space:]]*//')"
+    SEEN=$((SEEN + 1))
+    case "$text" in *BR_VLA_LEN*) continue ;; esac
+    if grep -qF "$f|$text|" "$ALLOW"; then echo "$f|$text|" >> "$USED"
+    else echo "GATE FAILURE: $f:$line sizes a VLA without BR_VLA_LEN and is not on the allowlist: $text"; FAIL=1; fi
+done < <(sort -u "$CENSUS")
+[ "$SEEN" -ge 50 ] || { echo "GATE FAILURE: the census saw only $SEEN VLAs; clang -Wvla is not reporting (re-anchor)"; FAIL=1; }
+while IFS= read -r entry; do
+    case "$entry" in '#'*|'') continue ;; esac
+    key="${entry%|*}|"
+    grep -qF "$key" "$USED" || { echo "GATE FAILURE: stale allowlist entry (matches no VLA): $key"; FAIL=1; }
+done < "$ALLOW"
+echo "  [census] $SEEN VLAs in the core: each sized by BR_VLA_LEN or allowlisted with its reason"
+for arm in pkh spk sig phrase verify wallet unconfirmed sign signinput walletsign; do
     OUT="$(timeout 30 "$BUILD_DIR/red" "$arm" 2>&1)"; RC=$?
     if [ "$RC" -ne 0 ] && <<<"$OUT" grep -q "variable length array bound evaluates to non-positive value 0"; then
         echo "  [red]   $arm: zero-length VLA reported, as required"
@@ -42,5 +55,5 @@ for arm in pkh spk sig phrase verify wallet unconfirmed sign; do
     if [ "$RC" -eq 0 ] && ! <<<"$OUT" grep -q "runtime error"; then echo "  [green] $(<<<"$OUT" tail -1)"
     else echo "GATE FAILURE: green arm $arm (rc=$RC)"; <<<"$OUT" tail -2; FAIL=1; fi
 done
-[ "$FAIL" -eq 0 ] && { echo "PASS: zero_vla_kat (8 arms red-then-green under UBSan, peer and signing sites gated)"; exit 0; }
+[ "$FAIL" -eq 0 ] && { echo "PASS: zero_vla_kat (10 arms red-then-green under UBSan, whole-core VLA census)"; exit 0; }
 echo "FAIL: zero_vla_kat"; exit 1

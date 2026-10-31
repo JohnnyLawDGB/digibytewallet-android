@@ -7,11 +7,14 @@
 //   arm wallet   BRWalletUpdateTransactions with no hashes, on an empty wallet                  -> 0   (review R9)
 //   arm unconfirmed BRWalletSetTxUnconfirmedAfter with nothing above the height                 -> 0   (review R9)
 //   arm sign     BRTransactionSign with no keys                                                 -> 0   (repair review #6)
-// The peer and peer-manager sites (an addr message of 0 entries; no unconfirmed transaction) are gated in run.sh.
+//   arm signinput BRTransactionSign with a key, on an input whose script parses to no elements    -> 0   (4.1.3 row 4)
+//   arm walletsign BRWalletSignTransaction on a transaction with no inputs                       -> 0   (4.1.3 row 4)
+// Every other VLA in the core is held to BR_VLA_LEN or a reasoned allowlist by run.sh's census (4.1.3 row 4).
 // RED  -DZERO_VLA_UNFIXED: each arm declares a zero-length array and UBSan reports it.
 // GREEN each arm answers as above with no report.
 #include <stdio.h>
 #include <string.h>
+#include "BRKey.h"
 #include "BRAddress.h"
 #include "BRBIP39Mnemonic.h"
 #include "BRBIP39WordsEn.h"
@@ -62,6 +65,28 @@ int main(int argc, char **argv)
         BRTransaction *tx = BRTransactionNew();
         got = BRTransactionSign(tx, 0, NULL, 0); want = 0;
         BRTransactionFree(tx);
+    }
+    else if (! strcmp(arm, "signinput")) {
+        BRKey key;
+        UInt256 secret; memset(secret.u8, 0x42, 32);
+        BRKeySetSecret(&key, &secret, 1);
+        UInt256 prev; memset(prev.u8, 0x33, 32);
+        uint8_t pkh[25] = { 0x76, 0xa9, 20 };
+        pkh[23] = 0x88; pkh[24] = 0xac;
+        BRTransaction *tx = BRTransactionNew();
+        BRTransactionAddInput(tx, prev, 0, 1000, s, sizeof(s), NULL, 0, NULL, 0, 0xffffffff);
+        BRTransactionAddOutput(tx, 500, pkh, sizeof(pkh));
+        got = BRTransactionSign(tx, 0, &key, 1); want = 0;
+        BRTransactionFree(tx);
+    }
+    else if (! strcmp(arm, "walletsign")) {
+        BRWallet *w = emptyWallet();
+        uint8_t seed[64];
+        BRBIP39DeriveKey(seed, "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about", NULL);
+        BRTransaction *tx = BRTransactionNew();
+        got = BRWalletSignTransaction(w, tx, 0, seed, sizeof(seed)); want = 0;
+        BRTransactionFree(tx);
+        BRWalletFree(w);
     }
     else { printf("unknown arm %s\n", arm); return 2; }
     printf("zero_vla_kat %s: answered %ld\n", arm, got);
