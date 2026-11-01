@@ -854,4 +854,9 @@
     <string name="pinstore_title">Your PIN can\'t be checked right now</string>
     <string name="pinstore_body">The phone\'s secure key store did not open, so the wallet stays locked. Nothing has been deleted. Close the app and open it again. If this keeps happening, restart the phone; your recovery phrase still restores the wallet on any device.</string>
     <string name="pinstore_close">Close the app</string>
+    <string name="reconcile_unprovable_body">The node reported transactions from block %1$s or earlier that this wallet cannot check against its own copy of the chain, so they were not added. A rescan from that block checks them over the DigiByte network.</string>
+    <string name="reconcile_unprovable_rescan">Rescan from block %1$s</string>
+    <string name="reconcile_unprovable_confirm">Tap again to confirm — clears the cache and restarts</string>
+    <string name="rf_capped_body">The scan stopped at its limit on %1$s while that path was still in use, so there may be more funds there than shown. Anything not shown stays safe on the chain.</string>
+    <string name="reconcile_stuck_stale_cleared">, %1$d of them never relayed (after a day the network had neither them nor anything spending their coins). If one of those payments did reach its recipient it can still confirm: check with them before paying again</string>
 </resources>

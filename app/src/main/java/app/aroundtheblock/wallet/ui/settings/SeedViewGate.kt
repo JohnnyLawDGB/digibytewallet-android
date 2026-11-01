@@ -1,6 +1,7 @@
 package app.aroundtheblock.wallet.ui.settings
 
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * A one-time pass from Security settings' PIN + biometric check to the recovery phrase screen.
@@ -13,12 +14,24 @@ import java.util.concurrent.atomic.AtomicBoolean
 object SeedViewGate {
     private val granted = AtomicBoolean(false)
 
+    /** Bumped by every [revoke]: a pass spent before a lock is dead after it (4.1.3, review R18). */
+    private val epoch = AtomicInteger(0)
+
     fun grant() = granted.set(true)
 
     /** True once per [grant]. */
     fun consume(): Boolean = granted.getAndSet(false)
 
-    fun revoke() = granted.set(false)
+    /**
+     * A lock withdraws the pass: an unspent grant, and every pass already spent. Before 4.1.3 only the
+     * unspent grant went, so a same-process recreate restored the phrase screen with a live pass -- while
+     * locked for a frame or two, and after an unlock that took the PIN OR a biometric where the phrase takes
+     * both (review R18).
+     */
+    fun revoke() {
+        granted.set(false)
+        epoch.incrementAndGet()
+    }
 
     /**
      * Different in every process. The phrase screen saves the token of the pass it spent, not a
@@ -28,8 +41,11 @@ object SeedViewGate {
     val processToken: String = java.util.UUID.randomUUID().toString()
 
     /** The token to save for a pass spent now, or "" when there was no pass. */
-    fun spend(): String = if (consume()) processToken else ""
+    fun spend(): String = if (consume()) "$processToken:${epoch.get()}" else ""
 
-    /** Whether a saved [spend] token is a pass of this process. */
-    fun isLive(token: String): Boolean = token.isNotEmpty() && token == processToken
+    /** Whether a saved [spend] token is a pass of this process, spent since the last lock. */
+    fun isLive(token: String): Boolean = token.isNotEmpty() && token == "$processToken:${epoch.get()}"
+
+    /** Whether the phrase may be drawn now: a live pass, and the wallet unlocked at this moment. */
+    fun mayShow(token: String, unlocked: Boolean): Boolean = unlocked && isLive(token)
 }

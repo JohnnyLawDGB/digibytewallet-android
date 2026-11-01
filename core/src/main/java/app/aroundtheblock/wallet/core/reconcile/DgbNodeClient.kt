@@ -182,6 +182,58 @@ class DgbNodeClient(
     }
 
     /**
+     * What the node knows of [txid] (4.1.3, review R8): confirmed, in its mempool, or unknown to it --
+     * [TxNetworkStatus.UNKNOWN] only for the explorer's own "Transaction not found" 404, so a
+     * misrouted or foreign endpoint, a server error or no network reads as
+     * [TxNetworkStatus.UNAVAILABLE] and proves nothing.
+     */
+    suspend fun txNetworkStatus(txid: String): TxNetworkStatus = withContext(Dispatchers.IO) {
+        val url = "${endpoint()}/explorer/tx/$txid"
+        val req = Request.Builder().url(url).get().build()
+        try {
+            client(url).newCall(req).execute().use { resp ->
+                val body = BoundedBody.text(resp.body, EXPLORER_BODY_BYTES)
+                parseTxNetworkStatus(resp.code, body)
+            }
+        } catch (t: Throwable) {
+            android.util.Log.w("DgbNodeClient", "GET ${redactUrl(url)} threw ${t::class.java.simpleName}: ${t.message}")
+            TxNetworkStatus.UNAVAILABLE
+        }
+    }
+
+    /**
+     * Whether the pinned node shows an output still unspent ([parseSpendingAnswer]): true only for its
+     * explicit `{"spent": false}` -- its UTXO set, mempool included, holds the output. Null on any
+     * other answer.
+     */
+    suspend fun outputUnspent(txid: String, vout: Int): Boolean? = withContext(Dispatchers.IO) {
+        val url = "${endpoint()}/explorer/spending/$txid/$vout"
+        val req = Request.Builder().url(url).get().build()
+        try {
+            client(url).newCall(req).execute().use { resp ->
+                parseSpendingAnswer(resp.code, BoundedBody.text(resp.body, EXPLORER_BODY_BYTES))
+            }
+        } catch (t: Throwable) {
+            android.util.Log.w("DgbNodeClient", "GET ${redactUrl(url)} threw ${t::class.java.simpleName}: ${t.message}")
+            null
+        }
+    }
+
+    /**
+     * True only when the network never took [txid] (4.1.3, review R8), on the evidence of the PINNED node
+     * alone -- a custom endpoint may be blocksonly or keep no transaction index, so it is never asked: the
+     * node's own "Transaction not found" for the txid, AND every one of [inputs] still unspent in its UTXO
+     * set (mempool included). A send the network did take has its inputs spent there, confirmed or not,
+     * so the second half catches a node that merely failed to index it.
+     */
+    suspend fun sendNeverRelayed(txid: String, inputs: List<Pair<String, Int>>): Boolean {
+        if (endpoint() != DEFAULT_BASE_URL || inputs.isEmpty()) return false
+        if (txNetworkStatus(txid) != TxNetworkStatus.UNKNOWN) return false
+        for ((t, v) in inputs) if (outputUnspent(t, v) != true) return false
+        return true
+    }
+
+    /**
      * History of every confirmed tx touching [address], via the ElectrumX-backed
      * {endpoint}/rpc/address-history/:address endpoint. Unlike the UTXO-based
      * reconcile this returns 0-value (DigiDollar) and fully-spent (asset marker)
@@ -445,6 +497,29 @@ data class ReconcileResult(
 /** A transaction's confirming block height + block time, from
  *  [DgbNodeClient.txConfirmation]. */
 data class TxConfirmation(val height: Long, val time: Long)
+
+/** What a node knows of one txid ([DgbNodeClient.txNetworkStatus]). */
+enum class TxNetworkStatus { CONFIRMED, IN_MEMPOOL, UNKNOWN, UNAVAILABLE }
+
+/** Pure: an `/explorer/spending/:txid/:vout` answer -- true for `{"spent": false}`, false for `{"spent": true}`, else null. */
+internal fun parseSpendingAnswer(code: Int, body: String?): Boolean? {
+    if (code !in 200..299) return null
+    val json = body?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return null
+    val spent = json.opt("spent") as? Boolean ?: return null
+    return !spent
+}
+
+/** Pure: an `/explorer/tx/:txid` answer as a [TxNetworkStatus]. Unknown only for the explorer's own 404. */
+internal fun parseTxNetworkStatus(code: Int, body: String?): TxNetworkStatus {
+    val json = body?.let { runCatching { JSONObject(it) }.getOrNull() }
+    return when {
+        code == 404 && json?.optString("error", "") == "Transaction not found" -> TxNetworkStatus.UNKNOWN
+        code in 200..299 && json != null ->
+            if (json.optString("blockhash", "").isNotEmpty() && json.optLong("confirmations", 0L) > 0L)
+                TxNetworkStatus.CONFIRMED else TxNetworkStatus.IN_MEMPOOL
+        else -> TxNetworkStatus.UNAVAILABLE
+    }
+}
 
 /** One confirmed tx touching an address, from the node's address-history. */
 data class AddressTx(val txid: String, val height: Long)

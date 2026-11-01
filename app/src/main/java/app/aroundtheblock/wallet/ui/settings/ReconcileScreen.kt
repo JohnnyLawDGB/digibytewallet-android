@@ -302,7 +302,8 @@ fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
                 onClick = {
                     scope.launch {
                         val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                            walletManager.clearStuckSends()
+                            // A day-old send the node has never seen is cleared too (4.1.3, review R8).
+                            walletManager.clearStuckSends(neverRelayed = { txid, inputs -> client.sendNeverRelayed(txid, inputs) })
                         }
                         stuckResult = if (result.dropped == 0)
                             "No stuck sends to clear."
@@ -314,6 +315,9 @@ fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
                             if (result.orphansCleared > 0) {
                                 append(", ${result.orphansCleared} of them orphaned " +
                                     "(spending a parent this wallet no longer has)")
+                            }
+                            if (result.staleCleared > 0) {
+                                append(context.getString(R.string.reconcile_stuck_stale_cleared, result.staleCleared))
                             }
                             append("; corrected ${result.assetRowsCleared} asset row(s). ")
                             append("Balance updates shortly.")
@@ -512,6 +516,51 @@ fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
                                 color = Color(0xFFB0BEC5),
                                 fontSize = 12.sp
                             )
+                        }
+                        // The node named heights this wallet cannot check against its own chain:
+                        // those transactions were not added on its word. A rescan from that block
+                        // finds the real ones over the peer-to-peer network (4.1.3 row 1).
+                        if (s.unprovableFromHeight > 0L) {
+                            val height = NumberFormat.getIntegerInstance(Locale.US).format(s.unprovableFromHeight)
+                            var armRescanFrom by remember { mutableStateOf(false) }
+                            var rescanningFrom by remember { mutableStateOf(false) }
+                            Spacer(Modifier.height(12.dp))
+                            Text(
+                                stringResource(R.string.reconcile_unprovable_body, height),
+                                color = Color(0xFFFFC46B),
+                                fontSize = 13.sp
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            OutlinedButton(
+                                enabled = !rescanningFrom,
+                                onClick = {
+                                    if (!armRescanFrom) {
+                                        armRescanFrom = true
+                                    } else {
+                                        // Off the main thread, then restart: as for the full rebuild below.
+                                        rescanningFrom = true
+                                        scope.launch {
+                                            withContext(Dispatchers.IO) {
+                                                walletManager.rebuildFromChainRescanFrom(s.unprovableFromHeight)
+                                            }
+                                            val li = context.packageManager.getLaunchIntentForPackage(context.packageName)
+                                            li?.addFlags(
+                                                android.content.Intent.FLAG_ACTIVITY_NEW_TASK or
+                                                    android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK
+                                            )
+                                            context.startActivity(li)
+                                            Runtime.getRuntime().exit(0)
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp),
+                            ) {
+                                Text(
+                                    if (armRescanFrom) stringResource(R.string.reconcile_unprovable_confirm)
+                                    else stringResource(R.string.reconcile_unprovable_rescan, height)
+                                )
+                            }
                         }
                     }
                 }

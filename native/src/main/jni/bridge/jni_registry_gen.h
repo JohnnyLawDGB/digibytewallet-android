@@ -148,6 +148,7 @@ jbyteArray JNICALL NativeBridge_serializePeerPenalties(JNIEnv *env, jobject thiz
 void JNICALL NativeBridge_setCallbackHandler(JNIEnv *env, jobject thiz, jobject handler);  /* jni_peer.c */
 jboolean JNICALL NativeBridge_setCompactFilterChain(JNIEnv *env, jobject thiz, jbyteArray data);  /* jni_peer.c */
 void JNICALL NativeBridge_setDandelionEnabled(JNIEnv *env, jobject thiz, jboolean enabled);  /* jni_peer.c */
+void JNICALL NativeBridge_setLogTagKey(JNIEnv *env, jobject thiz, jbyteArray key);  /* jni_wallet.c */
 void JNICALL NativeBridge_setMaxPeerConnections(JNIEnv *env, jobject thiz, jint count);  /* jni_peer.c */
 void JNICALL NativeBridge_setNetwork(JNIEnv *env, jobject thiz, jboolean isTestnet);  /* jni_wallet.c */
 void JNICALL NativeBridge_setPinnedPeer(JNIEnv *env, jobject thiz, jstring ipStr, jint port, jboolean exclusive);  /* jni_peer.c */
@@ -166,6 +167,7 @@ jint JNICALL NativeBridge_strandedRefusalActionFor(JNIEnv *env, jobject thiz, ji
 jlong JNICALL NativeBridge_strandedRefusalHoldMs(JNIEnv *env, jobject thiz);  /* jni_stranded_refusal.c */
 jintArray JNICALL NativeBridge_strandedRefusalHoldRun(JNIEnv *env, jobject thiz, jlong holdMs, jlongArray nowMs, jlongArray managerBefore, jlongArray managerAfter, jintArray flags);  /* jni_stranded_refusal.c */
 jboolean JNICALL NativeBridge_strandedSendIsPlainDgb(JNIEnv *env, jobject thiz, jboolean held, jboolean containsAsset, jint digiDollarType);  /* jni_stranded_refusal.c */
+jlong JNICALL NativeBridge_takeUnprovableServerHeight(JNIEnv *env, jobject thiz);  /* jni_transaction.c */
 jboolean JNICALL NativeBridge_walletContainsAddress(JNIEnv *env, jobject thiz, jstring address);  /* jni_wallet.c */
 
 #define DGB_JNI_NATIVEBRIDGE_METHODS \
@@ -310,6 +312,7 @@ jboolean JNICALL NativeBridge_walletContainsAddress(JNIEnv *env, jobject thiz, j
     { "setCallbackHandler", "(" DGB_JNI_NATIVECALLBACK_SIG ")V", (void *) NativeBridge_setCallbackHandler }, \
     { "setCompactFilterChain", "([B)Z", (void *) NativeBridge_setCompactFilterChain }, \
     { "setDandelionEnabled", "(Z)V", (void *) NativeBridge_setDandelionEnabled }, \
+    { "setLogTagKey", "([B)V", (void *) NativeBridge_setLogTagKey }, \
     { "setMaxPeerConnections", "(I)V", (void *) NativeBridge_setMaxPeerConnections }, \
     { "setNetwork", "(Z)V", (void *) NativeBridge_setNetwork }, \
     { "setPinnedPeer", "(Ljava/lang/String;IZ)V", (void *) NativeBridge_setPinnedPeer }, \
@@ -328,8 +331,9 @@ jboolean JNICALL NativeBridge_walletContainsAddress(JNIEnv *env, jobject thiz, j
     { "strandedRefusalHoldMs", "()J", (void *) NativeBridge_strandedRefusalHoldMs }, \
     { "strandedRefusalHoldRun", "(J[J[J[J[I)[I", (void *) NativeBridge_strandedRefusalHoldRun }, \
     { "strandedSendIsPlainDgb", "(ZZI)Z", (void *) NativeBridge_strandedSendIsPlainDgb }, \
+    { "takeUnprovableServerHeight", "()J", (void *) NativeBridge_takeUnprovableServerHeight }, \
     { "walletContainsAddress", "(Ljava/lang/String;)Z", (void *) NativeBridge_walletContainsAddress }, \
 
-#define DGB_JNI_NATIVEBRIDGE_METHOD_COUNT 160
+#define DGB_JNI_NATIVEBRIDGE_METHOD_COUNT 162
 
 #endif

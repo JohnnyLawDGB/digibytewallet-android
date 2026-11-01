@@ -264,6 +264,16 @@ private fun DoneBody(
                         fontSize = 12.sp,
                     )
                 }
+                // A path whose window hit the scan's cap while still in use is not a finished
+                // answer (4.1.3 G1).
+                if (state.cappedProfileLabels.isNotEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        stringResource(R.string.rf_capped_body, state.cappedProfileLabels.joinToString(", ")),
+                        color = Color(0xFFFFCC66),
+                        fontSize = 12.sp,
+                    )
+                }
             }
         }
         Spacer(Modifier.height(16.dp))

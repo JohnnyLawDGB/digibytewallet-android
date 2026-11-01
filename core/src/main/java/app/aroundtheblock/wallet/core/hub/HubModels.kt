@@ -8,7 +8,21 @@ data class ChatMessage(
     val signature: String
 )
 
-data class UserInfo(val handle: String?, val address: String)
+/**
+ * Who sent a Hub message. [isBot] is the server's word that this is the official bot's account
+ * (`from.is_bot`, a JSON boolean); a display name never is (4.1.3 row 3): any account can register a
+ * name, so a name that reads "Enigma" earns no badge.
+ */
+data class UserInfo(val handle: String?, val address: String, val isBot: Boolean = false) {
+    companion object {
+        /** The sender in a message's `from` object. Only a real JSON `true` marks the bot. */
+        fun fromJson(from: org.json.JSONObject?): UserInfo = UserInfo(
+            handle = from?.optString("handle", null),
+            address = from?.optString("address", "") ?: "",
+            isBot = from?.opt("is_bot") == true,
+        )
+    }
+}
 
 data class HubProfile(
     val handle: String?,

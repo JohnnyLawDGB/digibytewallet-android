@@ -86,13 +86,57 @@ object BootGuard {
     private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     /**
+     * Whether the process before this one ended in a way that can mean a crash loop (4.1.3). Before this, a start
+     * that never reached [markBootHealthy] counted as a dead boot whatever ended it -- and on Android 11+ most such
+     * starts are not crashes at all: WorkManager starts the app in the background, the job finishes in a fraction
+     * of a second, the process goes cached and is frozen before the 12-second timer runs, and the low-memory
+     * killer ends it later. Two of those in a row wiped the sync state, and the wallet re-synced from its birth
+     * height (reproduced on the API 35 emulator; seen twice on a Galaxy S25 Ultra).
+     *
+     * [lastExitReason] is the newest `ApplicationExitInfo.reason` for this app's main process, or null when the
+     * platform cannot say (below API 30, or no record): then the old rule holds and the death counts. A Java or
+     * native crash, an ANR or an initialization failure counts; anything else (low memory, the freezer, a user
+     * swipe, a background kill, an update) does not.
+     */
+    internal fun previousDeathCounts(lastExitReason: Int?): Boolean = when (lastExitReason) {
+        null -> true
+        REASON_CRASH, REASON_CRASH_NATIVE, REASON_ANR, REASON_INITIALIZATION_FAILURE -> true
+        else -> false
+    }
+
+    // android.app.ApplicationExitInfo.REASON_* (API 30), as values so the decision runs on a plain JVM.
+    internal const val REASON_CRASH = 4
+    internal const val REASON_CRASH_NATIVE = 5
+    internal const val REASON_ANR = 6
+    internal const val REASON_INITIALIZATION_FAILURE = 7
+
+    /** The newest exit reason of this app's main process, or null when the platform cannot say. */
+    private fun lastExitReason(context: Context): Int? {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R) return null
+        return runCatching {
+            val am = context.getSystemService(android.app.ActivityManager::class.java) ?: return null
+            am.getHistoricalProcessExitReasons(context.packageName, 0, 8)
+                .firstOrNull { it.processName == context.packageName }
+                ?.reason
+        }.getOrNull()
+    }
+
+    /**
      * Call FIRST in Application.onCreate. Recovers if prior boots died, then
      * records this boot attempt durably (commit, not apply) before any risky
      * init runs. Every wipe here preserves the seed + PIN.
      */
     fun beginBoot(context: Context) {
         val p = prefs(context)
-        val pending = p.getInt(KEY_PENDING, 0)
+        val counted = p.getInt(KEY_PENDING, 0)
+        // A start that never reached markBootHealthy is a dead boot only if its process crashed (see
+        // previousDeathCounts): a background start the system froze and then killed is not one, and the run of
+        // dead boots it would have extended starts over.
+        val reason = if (counted > 0) lastExitReason(context) else null
+        val pending = if (counted > 0 && !previousDeathCounts(reason)) {
+            android.util.Log.i("BootGuard", "previous start ended without a crash (exit reason $reason); not a dead boot")
+            0
+        } else counted
 
         if (pending >= THRESHOLD_DB) {
             android.util.Log.e("BootGuard",
@@ -168,6 +212,15 @@ object BootGuard {
     fun recoverFromCrashedRestoreIfNeeded(context: Context): RestoreRecovery {
         val p = prefs(context)
         if (!p.getBoolean(KEY_RESTORE_PENDING, false)) {
+            return RestoreRecovery.None
+        }
+        // A restore that never reached markRestoreHealthy crashed only if its process did (previousDeathCounts):
+        // one the system killed mid-restore (low memory, a swipe) is not a corrupt store, and wiping it costs a
+        // full re-sync from the wallet's birth.
+        val reason = lastExitReason(context)
+        if (!previousDeathCounts(reason)) {
+            android.util.Log.i("BootGuard", "restore did not finish, but its process did not crash (exit reason $reason); nothing wiped")
+            p.edit().putBoolean(KEY_RESTORE_PENDING, false).commit()
             return RestoreRecovery.None
         }
 

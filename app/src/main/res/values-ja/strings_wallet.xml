@@ -712,4 +712,9 @@
     <string name="pinstore_title">現在 PIN を確認できません</string>
     <string name="pinstore_body">端末の安全なキーストアを開けなかったため、ウォレットはロックされたままです。何も削除されていません。アプリを閉じてもう一度開いてください。繰り返し起きる場合は端末を再起動してください。リカバリーフレーズがあれば、どの端末でもウォレットを復元できます。</string>
     <string name="pinstore_close">アプリを閉じる</string>
+    <string name="reconcile_unprovable_body">ノードがブロック %1$s 以前の取引を報告しましたが、このウォレットは自身のチェーンのコピーで確認できないため、追加しませんでした。そのブロックから再スキャンすると、DigiByte ネットワーク経由で確認します。</string>
+    <string name="reconcile_unprovable_rescan">ブロック %1$s から再スキャン</string>
+    <string name="reconcile_unprovable_confirm">もう一度タップして確定 — キャッシュを消去して再起動します</string>
+    <string name="rf_capped_body">%1$s でスキャンが上限に達した時点で、そのパスはまだ使用中でした。表示以上の資金がある可能性があります。表示されていない分もチェーン上で安全です。</string>
+    <string name="reconcile_stuck_stale_cleared">、うち %1$d 件は一度も中継されていません（1 日後もネットワークにはそれらも、そのコインを使う取引もありませんでした）。そのうちの支払いが受取人に届いていた場合、まだ承認される可能性があります。再度支払う前に受取人に確認してください</string>
 </resources>

@@ -12,6 +12,9 @@
 #                                 "broken" (it resolved names with a proxy set); shipped "held".
 #   direct_mainnet, direct_testnet GUARD: with no proxy every seed name is resolved, in both arms.
 #   pinned_proxy                   GUARD: a pinned peer is the only peer, nothing resolved, both arms.
+#   tor_required                   RED-THEN-GREEN (4.1.3 G4): Tor required, no proxy yet. Both comparison
+#                                  arms (-DPROXY_DISCOVERY_LOOKUP_UNFIXED, -DTOR_REQUIRED_LOOKUP_UNFIXED) MUST
+#                                  report "broken"; shipped "held".
 # Detecting a sanitizer report matches "ERROR: AddressSanitizer" or UBSan's "runtime error:".
 set -uo pipefail   # NOT -e: the comparison arm's non-zero exit must be captured
 
@@ -26,6 +29,10 @@ SAN_RE='ERROR: AddressSanitizer|ERROR: LeakSanitizer|runtime error:'
 
 # Seam self-check: a -D that names nothing silently builds the shipped path, so the comparison arm
 # would run the shipped code and (wrongly) pass.
+if ! grep -q 'TOR_REQUIRED_LOOKUP_UNFIXED' "$CORE_DIR/BRPeerManager.c"; then
+    echo "GATE FAILURE: BRPeerManager.c has no TOR_REQUIRED_LOOKUP_UNFIXED seam; -D would be inert."
+    exit 1
+fi
 if ! grep -q 'PROXY_DISCOVERY_LOOKUP_UNFIXED' "$CORE_DIR/BRPeerManager.c"; then
     echo "GATE FAILURE: BRPeerManager.c has no PROXY_DISCOVERY_LOOKUP_UNFIXED seam; -D would be inert."
     exit 1
@@ -108,9 +115,18 @@ run_bits() {
     expect "$BUILD_DIR/red${bits}" direct_mainnet held "$bits red (guard)"
     expect "$BUILD_DIR/red${bits}" direct_testnet held "$bits red (guard)"
     expect "$BUILD_DIR/red${bits}" pinned_proxy held "$bits red (guard)"
+    expect "$BUILD_DIR/red${bits}" tor_required broken "$bits red"
+
+    if ! build "$BUILD_DIR/req${bits}" "$bits" -DTOR_REQUIRED_LOOKUP_UNFIXED; then
+        echo "GATE FAILURE: ${bits}-bit TOR_REQUIRED comparison arm did not compile."; FAIL=1; return
+    fi
+    echo "--- comparison arm (-DTOR_REQUIRED_LOOKUP_UNFIXED) ---"
+    expect "$BUILD_DIR/req${bits}" tor_required broken "$bits req"
+    expect "$BUILD_DIR/req${bits}" proxy_mainnet held "$bits req (guard)"
+    expect "$BUILD_DIR/req${bits}" direct_mainnet held "$bits req (guard)"
 
     echo "--- shipped arm ---"
-    for c in proxy_mainnet proxy_testnet direct_mainnet direct_testnet pinned_proxy; do
+    for c in proxy_mainnet proxy_testnet direct_mainnet direct_testnet pinned_proxy tor_required; do
         expect "$BUILD_DIR/green${bits}" "$c" held "$bits green"
     done
 }

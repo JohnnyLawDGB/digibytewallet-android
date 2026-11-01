@@ -87,7 +87,8 @@ class LogRedactionSourceGateTest {
         val chainId = Regex("""(txid|txhash)""", RegexOption.IGNORE_CASE)
         val bare = Regex("""\$(?!\{)([A-Za-z_]\w*)""")
         val braced = Regex("""\$\{([^{}]*)\}""")
-        val shortened = Regex("""\.(take|takeLast)\(|\.size\b|\.count\b|\.isEmpty|\.isNotEmpty""")
+        // A keyed log tag (LogTag.tx / LogTag.outpoint, 4.1.3 review R7) names no transaction on chain.
+        val shortened = Regex("""\.(take|takeLast)\(|\.size\b|\.count\b|\.isEmpty|\.isNotEmpty|LogTag\.(tx|outpoint)\(""")
         val violations = mutableListOf<String>()
         listOf("core/src/main/java", "app/src/main/java").forEach { root ->
             findSourceRoot(root).walkTopDown().filter { it.extension == "kt" }.forEach { file ->

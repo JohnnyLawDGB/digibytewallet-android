@@ -8,7 +8,8 @@
  * network beside the proxy, so with a proxy set discovery does no name lookup at all. The peers
  * the wallet already holds (the seeder list fetched through the proxy, the compiled-in priority
  * peers, saved peers) stay exactly as they were, and a pinned peer (the user's own node) is still
- * the only peer when it is set. With no proxy, discovery resolves every seed name, as before.
+ * the only peer when it is set. The same while Tor is required but its proxy is not set yet (4.1.3 G4).
+ * With no proxy and Tor not required, discovery resolves every seed name, as before.
  *
  * HOW
  * ---
@@ -155,6 +156,30 @@ static void scenarioProxy(const char *name, const BRChainParams *params)
     result(name, before);
 }
 
+/* Tor required, its proxy not wired yet (bootstrapping): no lookup either (4.1.3 G4). */
+static void scenarioRequired(const char *name)
+{
+    int before = g_fail;
+    printf("\n-- %s: Tor is required and its proxy is not set yet --\n", name);
+    BRWallet *w = makeWallet();
+    BRPeer known[2];
+    knownPeers(known);
+    BRPeerManager *m = BRPeerManagerNew(&BRMainNetParams, w, 0, NULL, 0, known, 2);
+
+    BRPeerClearSocksProxy();
+    BRPeerSetTorRequired(1);
+    resetLookups();
+    discover(m);
+    check(lookups() == 0, "discovery made no local name lookup");
+    check(m->dnsThreadCount == 0, "no lookup thread is left running");
+    check(holdsPeer(m, &known[0]) && holdsPeer(m, &known[1]), "the peers the wallet already knew are still there");
+    BRPeerSetTorRequired(0);
+
+    BRPeerManagerFree(m);
+    BRWalletFree(w);
+    result(name, before);
+}
+
 /* Control: with no proxy, discovery resolves every seed name, as before. */
 static void scenarioDirect(const char *name, const BRChainParams *params)
 {
@@ -213,6 +238,7 @@ int main(int argc, char *argv[])
     if (! only || ! strcmp(only, "direct_mainnet")) scenarioDirect("direct_mainnet", &BRMainNetParams);
     if (! only || ! strcmp(only, "direct_testnet")) scenarioDirect("direct_testnet", &BRTestNetParams);
     if (! only || ! strcmp(only, "pinned_proxy"))   scenarioPinned("pinned_proxy");
+    if (! only || ! strcmp(only, "tor_required"))   scenarioRequired("tor_required");
 
     printf("\n%s (%d failure%s)\n", g_fail ? "FAILED" : "PASSED", g_fail, g_fail == 1 ? "" : "s");
     return g_fail ? 1 : 0;

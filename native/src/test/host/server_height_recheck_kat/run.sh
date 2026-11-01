@@ -5,6 +5,8 @@
 #
 #   RED    -DSERVER_HEIGHT_HINT_UNFIXED: BRPeerManagerApplyServerHeight confirms a height the wallet could re-check,
 #          on the server's word (the 4.1.1 path behind step A). Case A must FAIL there, on what it asserts.
+#   RED    -DSERVER_HEIGHT_RESIDUAL_UNFIXED: a height nothing the wallet holds can check (below every held header, or
+#          below the filter chain's start) is taken as reported, and its coin becomes selectable (4.1.2). Case E fails.
 #   GREEN  the shipped core: every case passes, no AddressSanitizer report.
 #
 # Peer calls are intercepted the way cf_block_completion_gate_kat does it (a -D rename in this TU only), so the KAT
@@ -94,6 +96,21 @@ else
     echo "GATE FAILURE: the third red arm did not fail on case G (rc=$RED3_RC)"; <<<"$RED3_OUT" grep -E '^(FAIL|NOTE)' | head -8; FAIL=1
 fi
 
+# ── RED 4: a height nothing held can check is taken on the server's word (4.1.3 row 1, the 4.1.2 residual) ───────
+if [ "$(grep -c SERVER_HEIGHT_RESIDUAL_UNFIXED "$CORE_DIR/BRPeerManager.c")" -lt 1 ]; then
+    echo "GATE FAILURE: BRPeerManager.c has no SERVER_HEIGHT_RESIDUAL_UNFIXED seam; the fourth red arm would be inert."; exit 1
+fi
+build "$BUILD_DIR/red4" -DSERVER_HEIGHT_RESIDUAL_UNFIXED || { echo "GATE FAILURE: the fourth red arm did not compile"; exit 1; }
+set +e; RED4_OUT="$(timeout 120 "$BUILD_DIR/red4" 2>&1)"; RED4_RC=$?; set -e
+if <<<"$RED4_OUT" grep -Eq "$SAN_RE"; then
+    echo "GATE FAILURE: the fourth red arm faulted"; <<<"$RED4_OUT" grep -Em3 "$SAN_RE"; FAIL=1
+elif [ "$RED4_RC" -ne 0 ] && <<<"$RED4_OUT" grep -q "^FAIL: E: the payment's coin is not selectable" \
+                           && ! <<<"$RED4_OUT" grep -q "^FAIL: setup" && ! <<<"$RED4_OUT" grep -q "^FAIL: A:"; then
+    echo "  [red4] case E failed, as required: $(<<<"$RED4_OUT" grep -m1 '^NOTE: apply([0-9]*) ->')"
+else
+    echo "GATE FAILURE: the fourth red arm did not fail on case E (rc=$RED4_RC)"; <<<"$RED4_OUT" grep -E '^(FAIL|NOTE)' | head -8; FAIL=1
+fi
+
 # ── GREEN ────────────────────────────────────────────────────────────────────────────────────────────────────────
 build "$BUILD_DIR/green" || { echo "GATE FAILURE: the green arm did not compile"; exit 1; }
 set +e; GREEN_OUT="$(timeout 120 "$BUILD_DIR/green" 2>&1)"; GREEN_RC=$?; set -e
@@ -104,7 +121,7 @@ else
 fi
 
 if [ "$FAIL" -eq 0 ]; then
-    echo "PASS: server_height_recheck_kat (cases A, F and G red-then-green, H with G, B-E and I guards; ASan)"
+    echo "PASS: server_height_recheck_kat (cases A, F, G and E red-then-green, H with G, I with E, B-D guards; ASan)"
     exit 0
 fi
 echo "FAIL: server_height_recheck_kat"

@@ -1,5 +1,7 @@
 package app.aroundtheblock.wallet.ui.wallet
 
+import app.aroundtheblock.wallet.core.LogTag
+
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -305,11 +307,11 @@ class SendViewModel @Inject constructor(
                 val result = transactionBuilder.sendPrepared(prepared)
                 _sendState.value = when (result) {
                     is TxResult.Success -> if (result.delivery == Delivery.RELAYED) {
-                        android.util.Log.i(TAG, "send relayed: ${result.txid.take(12)}")
+                        android.util.Log.i(TAG, "send relayed: ${LogTag.tx(result.txid)}")
                         SendState.Success(result.txid)
                     } else {
                         // Not "Sent": no peer has taken it yet. The wallet holds it and keeps publishing it.
-                        android.util.Log.w(TAG, "send broadcast, no peer has taken it yet: ${result.txid.take(12)}")
+                        android.util.Log.w(TAG, "send broadcast, no peer has taken it yet: ${LogTag.tx(result.txid)}")
                         SendState.NotYetRelayed(result.txid)
                     }
                     is TxResult.Error -> {

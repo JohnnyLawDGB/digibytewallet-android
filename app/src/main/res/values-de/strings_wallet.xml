@@ -725,4 +725,9 @@
     <string name="pinstore_title">Deine PIN kann gerade nicht geprüft werden</string>
     <string name="pinstore_body">Der sichere Schlüsselspeicher des Telefons ließ sich nicht öffnen, daher bleibt die Wallet gesperrt. Es wurde nichts gelöscht. Schließe die App und öffne sie erneut. Wenn das wieder passiert, starte das Telefon neu; deine Wiederherstellungsphrase stellt die Wallet weiterhin auf jedem Gerät wieder her.</string>
     <string name="pinstore_close">App schließen</string>
+    <string name="reconcile_unprovable_body">Der Knoten hat Transaktionen ab Block %1$s oder früher gemeldet, die diese Wallet nicht mit ihrer eigenen Kopie der Blockchain prüfen kann. Sie wurden daher nicht hinzugefügt. Ein erneuter Scan ab diesem Block prüft sie über das DigiByte-Netzwerk.</string>
+    <string name="reconcile_unprovable_rescan">Erneut scannen ab Block %1$s</string>
+    <string name="reconcile_unprovable_confirm">Zum Bestätigen erneut tippen – leert den Cache und startet neu</string>
+    <string name="rf_capped_body">Der Scan hat auf %1$s sein Limit erreicht, während dieser Pfad noch genutzt wurde. Dort kann also mehr Guthaben liegen als angezeigt. Was nicht angezeigt wird, bleibt sicher auf der Blockchain.</string>
+    <string name="reconcile_stuck_stale_cleared">, davon %1$d nie weitergeleitet (nach einem Tag kannte das Netzwerk weder sie noch etwas, das ihre Coins ausgibt). Falls eine dieser Zahlungen den Empfänger doch erreicht hat, kann sie noch bestätigt werden: Frage beim Empfänger nach, bevor du erneut zahlst</string>
 </resources>

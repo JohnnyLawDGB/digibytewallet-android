@@ -10,6 +10,8 @@
 #include "jni_bridge.h"
 #include "coin_reservation.h"
 #include "spend_guard.h"
+#include "signed_spend_gate.h"
+#include "wallet_spend_gate.h"
 #include "slip13.h"
 #include "BRNetwork.h"
 #include "BRDigiDollar.h"
@@ -515,6 +517,29 @@ int seed_sign_transaction(BRWallet *wallet, BRTransaction *tx, int forkId) {
     if (!spend_guard_inputs_unspent(wallet, tx)) {
         coin_reservation_release(tx->txHash);
         LOGW("seed_sign_transaction: a coin it spends was spent by a send registered meanwhile; not signed");
+        return 0;
+    }
+    return 1;
+}
+
+/* ---------- setLogTagKey ---------- */
+/* This install's key for log tags (BRLogTxTag; 4.1.3, review R7). Not a secret of the wallet: it only makes a
+ * txid's log tag unlinkable to the chain. Fewer than 32 bytes are ignored and tags stay "--------". */
+void JNICALL
+NativeBridge_setLogTagKey(JNIEnv *env, jobject thiz, jbyteArray key) {
+    (void)thiz;
+    if (!key || (*env)->GetArrayLength(env, key) < 32) return;
+    uint8_t k[32];
+    (*env)->GetByteArrayRegion(env, key, 0, 32, (jbyte *)k);
+    BRLogTagSetKey(k);
+    secure_zero(k, sizeof(k));
+}
+
+int wallet_signed_spend_gate(BRTransaction *tx, const char *who) {
+    WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
+    if (!signed_spend_gate(g_wallet, tx, coin_reservation_now())) {
+        LOGW("%s: a coin it spends is spent by a registered send or held by another signed send; not signed",
+             who ? who : "signer");
         return 0;
     }
     return 1;

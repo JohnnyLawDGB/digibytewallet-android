@@ -714,12 +714,22 @@ object NativeBridge {
      *  scan misses a tx but we see it on-chain. Caller must merkle-proof
      *  verify against trusted headers first. Returns true if the tx was
      *  registered (new + belongs to wallet), false otherwise (dup, bad
-     *  parse, unsigned, or foreign). */
+     *  parse, unsigned, foreign, or first seen at a height nothing the
+     *  wallet holds can check: see [takeUnprovableServerHeight]). */
     external fun registerRawTransaction(
         rawTx: ByteArray,
         blockHeight: Long,
         blockTimestamp: Long
     ): Boolean
+
+    /** The lowest confirmation height a server reported, since the last call, that nothing the wallet
+     *  holds can check (below every header it holds, or below the filter chain's start); 0 = none. The
+     *  call clears it. A transaction first seen at such a height is not kept: a scan from that height
+     *  is what proves it (4.1.3 row 1). */
+    external fun takeUnprovableServerHeight(): Long
+
+    /** This install's key for transaction log tags ([app.aroundtheblock.wallet.core.LogTag]); 32 bytes. */
+    external fun setLogTagKey(key: ByteArray)
 
     /** Promote an already-registered, still-unconfirmed wallet tx to its real
      *  confirming height (txid-driven — no raw hex needed). Used by the txid-based

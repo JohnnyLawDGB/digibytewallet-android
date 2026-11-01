@@ -170,7 +170,7 @@ class OnboardingViewModel @Inject constructor(
                     app.aroundtheblock.wallet.core.recovery.PassphraseScanVerdict.of(
                         withPassphraseSat = result.totalBalanceSat,
                         withoutPassphraseSat = null,
-                        incomplete = result.anyBackendUnreachable,
+                        incomplete = result.anyBackendUnreachable || result.cappedProfileLabels.isNotEmpty(),
                     )
                 } else null
 

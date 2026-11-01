@@ -78,6 +78,9 @@ build() {
 }
 
 # The seam must exist at BOTH sites or the -D would be inert.
+if [ "$(grep -c 'CF_CORROBORATE_ACT_UNFIXED' "$CORE_DIR/BRPeerManager.c")" -lt 2 ]; then
+    echo "GATE FAILURE: BRPeerManager.c has no CF_CORROBORATE_ACT_UNFIXED seam; -D would be inert."; exit 1
+fi
 if [ "$(grep -c 'CF_CORROBORATION_UNFIXED' "$CORE_DIR/BRPeerManager.c")" -lt 2 ]; then
     echo "GATE FAILURE: BRPeerManager.c has fewer than two CF_CORROBORATION_UNFIXED seams; -D would be inert."
     exit 1
@@ -123,6 +126,18 @@ run_bits() {
     fi
     echo "  [$bits red] GUARD cases (same outcome in both arms): never / same-address / bounded / request_gated_at_reply_cap"
 
+    if ! build "$BUILD_DIR/act${bits}" "$bits" -DCF_CORROBORATE_ACT_UNFIXED; then
+        echo "GATE FAILURE: ${bits}-bit observe-only arm did not compile."; FAIL=1; return
+    fi
+    echo "--- RED ARM (-DCF_CORROBORATE_ACT_UNFIXED, observe-only): the majority case must fail ---"
+    "$BUILD_DIR/act${bits}" > "$BUILD_DIR/act${bits}.log" 2>&1; rc=$?
+    if [ "$rc" -ne 0 ] && grep -qF "FAIL: majority: the chain is rebuilt (the source's chain is dropped)" "$BUILD_DIR/act${bits}.log" \
+       && ! grep -qF "FAIL: setup" "$BUILD_DIR/act${bits}.log"; then
+        echo "  [$bits act] required failure seen: the observe-only build leaves the outlier chain in place"
+    else
+        echo "  [$bits act] GATE FAILURE: the observe-only arm did not fail the majority case (rc=$rc)"; FAIL=1
+    fi
+
     echo "--- GREEN ARM: every check must pass, one MISMATCH line per mismatching reply ---"
     "$BUILD_DIR/green${bits}" > "$BUILD_DIR/green${bits}.log" 2>&1; rc=$?
     grep -E "^(PASS|FAIL|test_|cf_corroboration_kat)" "$BUILD_DIR/green${bits}.log" | sed 's/^/  /'
@@ -133,10 +148,11 @@ run_bits() {
         echo "  [$bits green] GATE FAILURE: sanitizer report"; grep -E "$SAN_RE" "$BUILD_DIR/green${bits}.log" | head -3; FAIL=1
     fi
     local mm; mm="$(grep -c 'cf-corroborate: height [0-9]* MISMATCH' "$BUILD_DIR/green${bits}.log")"
-    if [ "$mm" -eq 2 ]; then
-        echo "  [$bits green] exactly one MISMATCH log line per mismatching reply (2 replies, $mm lines)"
+    # disagree + bounded (2), majority (2: the second triggers the rebuild), split (2) -- 4.1.3 G5 added four
+    if [ "$mm" -eq 6 ]; then
+        echo "  [$bits green] exactly one MISMATCH log line per mismatching reply (6 replies, $mm lines)"
     else
-        echo "  [$bits green] GATE FAILURE: expected 2 MISMATCH log lines (one per mismatching reply), saw $mm"; FAIL=1
+        echo "  [$bits green] GATE FAILURE: expected 6 MISMATCH log lines (one per mismatching reply), saw $mm"; FAIL=1
     fi
     if grep -q "calling getcfcheckpt" "$BUILD_DIR/green${bits}.log"; then
         echo "  [$bits green] the real sender was reached (request logged)"

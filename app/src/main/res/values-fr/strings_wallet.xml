@@ -702,4 +702,9 @@
     <string name="pinstore_title">Votre code PIN ne peut pas être vérifié pour l\'instant</string>
     <string name="pinstore_body">Le stockage sécurisé des clés du téléphone ne s\'est pas ouvert : le portefeuille reste verrouillé. Rien n\'a été supprimé. Fermez l\'application et rouvrez-la. Si cela se reproduit, redémarrez le téléphone ; votre phrase de récupération restaure toujours le portefeuille sur n\'importe quel appareil.</string>
     <string name="pinstore_close">Fermer l\'application</string>
+    <string name="reconcile_unprovable_body">Le nœud a signalé des transactions du bloc %1$s ou antérieures que ce portefeuille ne peut pas vérifier avec sa propre copie de la chaîne : elles n’ont donc pas été ajoutées. Un nouveau scan depuis ce bloc les vérifie via le réseau DigiByte.</string>
+    <string name="reconcile_unprovable_rescan">Rescanner depuis le bloc %1$s</string>
+    <string name="reconcile_unprovable_confirm">Touchez à nouveau pour confirmer : vide le cache et redémarre</string>
+    <string name="rf_capped_body">Le scan a atteint sa limite sur %1$s alors que ce chemin était encore utilisé : il peut donc y avoir plus de fonds que ce qui est affiché. Ce qui n’est pas affiché reste en sécurité sur la chaîne.</string>
+    <string name="reconcile_stuck_stale_cleared">, dont %1$d jamais relayées (après un jour, le réseau n’avait ni elles ni rien qui dépense leurs pièces). Si l’un de ces paiements a bien atteint son destinataire, il peut encore être confirmé : vérifiez auprès de lui avant de payer à nouveau</string>
 </resources>

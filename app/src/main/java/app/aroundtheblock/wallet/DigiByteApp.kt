@@ -50,6 +50,8 @@ class DigiByteApp : Application(), Configuration.Provider, ImageLoaderFactory {
         BootGuard.recoverFromCrashedRestoreIfNeeded(this)
         super.onCreate()
         applyNetworkSelection()
+        // This install's key for transaction log tags, before any log line names a transaction (4.1.3, review R7).
+        runCatching { app.aroundtheblock.wallet.core.LogTag.init(this) { NativeBridge.setLogTagKey(it) } }
         // Before any service or worker can dial a peer: with Tor on, the core reaches peers
         // through Tor or not at all (4.1.2 row 2). The library is loaded by the selection above.
         torManager.bindPeersRequireTor { NativeBridge.setTorRequired(it) }

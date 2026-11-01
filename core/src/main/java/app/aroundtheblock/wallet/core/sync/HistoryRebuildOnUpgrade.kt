@@ -353,6 +353,30 @@ object HistoryRebuildOnUpgrade {
     fun requestFloorAtAnchor(context: Context): Boolean =
         statePrefs(context).edit().putBoolean(KEY_FLOOR_PENDING, true).commit()
 
+    /**
+     * Carry the compact-filter floor down to [height] for the next rebuild: the floor height and time
+     * are only ever lowered ([lowerFloor]), and the floor is marked pending so the next sync start
+     * applies it. Used when a reconcile reported transactions at a height nothing the wallet holds can
+     * check: the scan from there proves them over the peer-to-peer path. Returns whether the write
+     * landed; nothing is written for a height of 0 or below.
+     */
+    fun lowerFloorTo(
+        context: Context,
+        height: Long,
+        checkpointTimeAtOrBelow: (Long) -> Long = ::nativeCheckpointTimeAtOrBelow,
+    ): Boolean {
+        if (height <= 0L) return false
+        val p = statePrefs(context)
+        val hint = lowerFloor(p.getLong(KEY_FLOOR_HINT, 0L), height)
+        val checkpointTime = runCatching { checkpointTimeAtOrBelow(hint) }.getOrDefault(0L)
+        val time = lowerFloor(p.getLong(KEY_FLOOR_TIME, 0L), checkpointTime)
+        return p.edit()
+            .putLong(KEY_FLOOR_HINT, hint)
+            .putLong(KEY_FLOOR_TIME, time)
+            .putBoolean(KEY_FLOOR_PENDING, true)
+            .commit()
+    }
+
     /** True while a rebuild has started clearing and not finished (the cache may be partial). */
     fun isInProgress(context: Context): Boolean = statePrefs(context).getBoolean(KEY_IN_PROGRESS, false)
 

@@ -71,5 +71,18 @@
                 <data android:scheme="digiscope" />
             </intent-filter>
         </activity>
+        <!-- WorkManager is configured by DigiByteApp (Configuration.Provider, HiltWorkerFactory): the
+             default startup initializer would initialise it first with a default configuration, so
+             the app's would never apply (lint RemoveWorkManagerInitializer; 4.1.3 carry). -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                android:value="androidx.startup"
+                tools:node="remove" />
+        </provider>
     </application>
 </manifest>

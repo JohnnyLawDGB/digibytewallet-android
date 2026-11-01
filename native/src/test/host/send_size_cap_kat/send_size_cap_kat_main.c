@@ -5,8 +5,10 @@
 //   small   3,000 confirmed 55,000-sat coins, then one 10 DGB coin; send 2 DGB. The coins that fit
 //           the size cap do not cover it. Shipped: refused. Comparison arm: a transaction comes back
 //           whose single output pays less than the 2 DGB asked for.
-//   tiny    3,000 confirmed 5,000-sat coins, then one 10 DGB coin; send 2 DGB. The coins that fit
-//           do not even cover the fee. Shipped: refused. Comparison arm: the build retries with no
+//   tiny    3,000 confirmed 6,802-sat coins, then one 10 DGB coin; send 2 DGB. The coins that fit
+//           do not even cover the fee. (6,802 sat: just above the 6,800 a P2WPKH input costs at
+//           100 sat/vbyte, so effective-value selection (4.1.3 G3) still takes them first; at
+//           5,000 sat it now skips them as uneconomic and the 10 DGB coin pays.) Shipped: refused. Comparison arm: the build retries with no
 //           outputs at all and then reads the output before the first one (a sanitizer report).
 //   fits    the same 55,000-sat wallet sends 0.5 DGB, which the coins inside the cap cover: the
 //           build succeeds in both arms and pays exactly 0.5 DGB to the destination (control).
@@ -97,8 +99,8 @@ static int runCase(const char *name) {
         ck(tx == NULL, "the build is refused (the coins that fit the size cap do not cover it)");
     }
     else if (strcmp(name, "tiny") == 0) {
-        printf("[tiny] 3,000 x 5,000 sat + 10 DGB; send 2 DGB\n");
-        w = walletWith(3000, 5000ULL, 1000000000ULL);
+        printf("[tiny] 3,000 x 6,802 sat + 10 DGB; send 2 DGB\n");
+        w = walletWith(3000, 6802ULL, 1000000000ULL);
         tx = BRWalletCreateTransaction(w, 200000000ULL, kDest);
         describe(tx);
         ck(tx == NULL || paysExactly(tx, 200000000ULL), "no transaction pays the destination anything but 2 DGB");

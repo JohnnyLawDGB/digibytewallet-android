@@ -712,4 +712,9 @@
     <string name="pinstore_title">PIN Anda tidak bisa diperiksa saat ini</string>
     <string name="pinstore_body">Penyimpanan kunci aman ponsel tidak terbuka, jadi dompet tetap terkunci. Tidak ada yang dihapus. Tutup aplikasi lalu buka lagi. Jika terus terjadi, mulai ulang ponsel; frasa pemulihan Anda tetap bisa memulihkan dompet di perangkat mana pun.</string>
     <string name="pinstore_close">Tutup aplikasi</string>
+    <string name="reconcile_unprovable_body">Node melaporkan transaksi dari blok %1$s atau sebelumnya yang tidak dapat diperiksa dompet ini dengan salinan rantainya sendiri, jadi transaksi itu tidak ditambahkan. Pindai ulang dari blok tersebut untuk memeriksanya melalui jaringan DigiByte.</string>
+    <string name="reconcile_unprovable_rescan">Pindai ulang dari blok %1$s</string>
+    <string name="reconcile_unprovable_confirm">Ketuk lagi untuk konfirmasi — menghapus cache dan memulai ulang</string>
+    <string name="rf_capped_body">Pemindaian berhenti di batasnya pada %1$s saat jalur itu masih dipakai, jadi mungkin ada dana lebih banyak di sana daripada yang ditampilkan. Yang tidak ditampilkan tetap aman di rantai.</string>
+    <string name="reconcile_stuck_stale_cleared">, %1$d di antaranya tidak pernah diteruskan (setelah sehari jaringan tidak memiliki transaksi itu maupun apa pun yang membelanjakan koinnya). Jika salah satu pembayaran itu ternyata sampai ke penerima, pembayaran itu masih bisa terkonfirmasi: tanyakan kepada penerima sebelum membayar lagi</string>
 </resources>

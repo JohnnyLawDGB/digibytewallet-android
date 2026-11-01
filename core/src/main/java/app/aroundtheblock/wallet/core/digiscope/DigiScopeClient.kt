@@ -466,10 +466,7 @@ class DigiScopeClient(
 
     // ── JSON helpers ──────────────────────────────────────────────────────────
 
-    private fun parseUserInfo(obj: JSONObject?): UserInfo = UserInfo(
-        handle = obj?.optString("handle", null),
-        address = obj?.optString("address", "") ?: ""
-    )
+    private fun parseUserInfo(obj: JSONObject?): UserInfo = UserInfo.fromJson(obj)
 
     private fun parseChatMessages(array: JSONArray): List<ChatMessage> =
         (0 until array.length()).map { i -> parseChatMessage(array.getJSONObject(i)) }
@@ -477,7 +474,8 @@ class DigiScopeClient(
     private fun parseChatMessage(obj: JSONObject): ChatMessage = ChatMessage(
         id = obj.optInt("id"),
         content = obj.getString("content"),
-        from = parseUserInfo(obj.optJSONObject("from")),
+        // A REST history row carries handle / address / is_bot on the row itself; a broadcast nests them in `from`.
+        from = parseUserInfo(obj.optJSONObject("from") ?: obj),
         timestamp = parseDatetimeToMs(obj.optString("created_at", obj.optString("timestamp", ""))),
         signature = obj.optString("signature", "")
     )

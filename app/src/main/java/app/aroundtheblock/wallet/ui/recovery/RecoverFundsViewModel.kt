@@ -61,6 +61,9 @@ class RecoverFundsViewModel @Inject constructor(
             /** Some derivation paths could not be checked. The findings below are therefore
              *  incomplete, and "no funds" must not be presented as a settled answer. */
             val partialFailurePaths: List<String> = emptyList(),
+            /** Paths whose scan window hit its cap with the far end still in use (4.1.3 G1): there
+             *  may be more on them than shown. */
+            val cappedPaths: List<String> = emptyList(),
             val isForeign: Boolean = false,
             /**
              * How many outpoints look asset-bearing, counted from the raw parent transactions the
@@ -293,6 +296,7 @@ class RecoverFundsViewModel @Inject constructor(
                                 totalSat = s.totalBalanceSat,
                                 backendUnreachable = false,
                                 partialFailurePaths = s.unreachableProfileLabels,
+                                cappedPaths = s.cappedProfileLabels,
                                 assetOutpointCount = countAssetOutpoints(s.nonNativeWithFunds),
                                 // Deliberately NOT carried on the own-wallet tab. DigiDollar
                                 // lives at m/86' of THIS seed, which this wallet already watches
@@ -633,7 +637,7 @@ class RecoverFundsViewModel @Inject constructor(
                             else app.aroundtheblock.wallet.core.recovery.PassphraseScanVerdict.of(
                                 withPassphraseSat = total,
                                 withoutPassphraseSat = null,
-                                incomplete = s.unreachableProfileLabels.isNotEmpty(),
+                                incomplete = s.unreachableProfileLabels.isNotEmpty() || s.cappedProfileLabels.isNotEmpty(),
                             )
 
                         if (s.allBackendUnreachable) {
@@ -652,6 +656,7 @@ class RecoverFundsViewModel @Inject constructor(
                                 findings = set, totalSat = total,
                                 backendUnreachable = false, isForeign = true,
                                 partialFailurePaths = s.unreachableProfileLabels,
+                                cappedPaths = s.cappedProfileLabels,
                                 assetOutpointCount = countAssetOutpoints(set),
                                 digiDollar = s.digiDollar,
                             )

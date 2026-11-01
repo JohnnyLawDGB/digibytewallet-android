@@ -1,0 +1,16 @@
+# Every pinned leaf and intermediate is still served by its host (4.1.3 row 2). A renewal on a new key
+# leaves a shipped pin matching nothing; this catches it before the next release ships it again.
+name: pin-live-check
+on:
+  schedule:
+    - cron: '41 5 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  pins:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pinned certificates are served
+        run: bash scripts/check-pins-live.sh

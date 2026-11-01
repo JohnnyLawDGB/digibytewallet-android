@@ -244,10 +244,7 @@ class HubWebSocket(
                     message = ChatMessage(
                         id = json.optInt("id"),
                         content = json.getString("content"),
-                        from = UserInfo(
-                            handle = from?.optString("handle"),
-                            address = from?.optString("address") ?: ""
-                        ),
+                        from = UserInfo.fromJson(from),
                         timestamp = json.optLong("timestamp", System.currentTimeMillis()),
                         signature = json.optString("signature", "")
                     )
@@ -257,10 +254,7 @@ class HubWebSocket(
                 val from = json.optJSONObject("from")
                 WebSocketEvent.Typing(
                     channelId = json.getInt("channelId"),
-                    from = UserInfo(
-                        handle = from?.optString("handle"),
-                        address = from?.optString("address") ?: ""
-                    )
+                    from = UserInfo.fromJson(from)
                 )
             }
             "online_count" -> WebSocketEvent.OnlineCount(

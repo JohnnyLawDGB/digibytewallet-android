@@ -1,5 +1,7 @@
 package app.aroundtheblock.wallet.service
 
+import app.aroundtheblock.wallet.core.LogTag
+
 import android.app.*
 import android.content.Intent
 import android.os.Binder
@@ -329,6 +331,17 @@ class SyncService : Service() {
         stopSelf()
     }
 
+    /**
+     * The callback Android 15 actually makes for a dataSync service at its 6-hour cap (4.1.3). The one-argument
+     * [onTimeout] above is Android 14's, for the shortService type only, so this service was never told: it kept
+     * running past the timeout and the system crashed it (ForegroundServiceDidNotStopInTimeException, seen on a
+     * Galaxy S25 Ultra five times in four days), skipping onDestroy and the state it flushes. stopSelf() runs
+     * onDestroy, which persists the block window, the filter headers and the scan ledger.
+     */
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        onTimeout(startId)
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // Must call startForeground within 5 seconds — do it first thing.
         // Android 15 caps dataSync FGS at 6h/24h and can deny the start once the
@@ -498,6 +511,11 @@ class SyncService : Service() {
         if (torManager.isEnabled) {
             serviceScope.launch { runTorFallbackWatchdog() }
         }
+
+        // Dandelion switched on while this sync runs: its stem peers are loaded now, not at the next sync
+        // start (4.1.3 carry). Until then every send would flood, though the setting reads on.
+        getSharedPreferences("dgb_dandelion", MODE_PRIVATE)
+            .registerOnSharedPreferenceChangeListener(dandelionToggleListener)
 
         // Reactively track live Tor state. Whenever Tor reaches Connected — the
         // initial bootstrap OR a user re-enabling it from Settings after a
@@ -2770,6 +2788,8 @@ class SyncService : Service() {
 
     override fun onDestroy() {
         foregroundSyncLive.set(false)
+        getSharedPreferences("dgb_dandelion", MODE_PRIVATE)
+            .unregisterOnSharedPreferenceChangeListener(dandelionToggleListener)
         walletManager.removeSessionStop(wipeStop)
         // After a wipe stood this service down, none of these is written: they hold the wiped
         // wallet, and the wipe has already erased the stores they would write.
@@ -2922,7 +2942,7 @@ class SyncService : Service() {
                     assetManager.processIncomingAssetTx(txHashHex = txHash, blockHeight = 0L,
                         isOutgoingUnconfirmed = !isReceive, persistAfterDetect = true)
                 }.onFailure {
-                    android.util.Log.w("SyncService", "native asset detect failed for ${txHash.take(12)}", it)
+                    android.util.Log.w("SyncService", "native asset detect failed for ${LogTag.tx(txHash)}", it)
                 }.getOrNull()
 
                 val entity = TransactionEntity(
@@ -3068,7 +3088,7 @@ class SyncService : Service() {
             // Called from a C JNI thread — serviceScope.launch transitions to Dispatchers.Default
             // and ensures all Room writes are serialised through the supervisor job.
             if (assetId.isBlank()) {
-                android.util.Log.w("SyncService", "onAssetDetected: blank assetId for txHash=${txHash.take(12)}, skipping insert")
+                android.util.Log.w("SyncService", "onAssetDetected: blank assetId for txHash=${LogTag.tx(txHash)}, skipping insert")
                 return
             }
             serviceScope.launch {
@@ -3414,6 +3434,17 @@ class SyncService : Service() {
         }
     }
 
+    /** Held as a field: SharedPreferences keeps listeners weakly, so a lambda would be collected. */
+    private val dandelionToggleListener =
+        android.content.SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
+            if (key == "enabled" && prefs.getBoolean("enabled", false)) {
+                serviceScope.launch(Dispatchers.IO) {
+                    runCatching { injectDandelionPeers() }
+                        .onFailure { android.util.Log.w("SyncService", "Dandelion: mid-session inject failed", it) }
+                }
+            }
+        }
+
     /** Inject the cached Dandelion-capable seeder peers, connect them, and mark each
      *  Dandelion-capable in the core so a broadcast can stem to one (a stale list is
      *  refreshed in the background, [requestSeederRefresh]). The VPS
@@ -3644,7 +3675,7 @@ class SyncService : Service() {
                 // record stays for the activity list.
                 store.markSettled(txid)
                 android.util.Log.i("SyncService",
-                    "stranded-send sweep: settled ${txid.take(12)} (${decision.action}" +
+                    "stranded-send sweep: settled ${LogTag.tx(txid)} (${decision.action}" +
                         (decision.height?.let { " at height $it" } ?: "") + ")")
                 continue
             }
@@ -3659,7 +3690,7 @@ class SyncService : Service() {
             if (outcome != null && outcome.kind != app.aroundtheblock.wallet.core.sync.PublishOutcome.Kind.ACCEPTED) {
                 android.util.Log.w(
                     "SyncService",
-                    "stranded send ${txid.take(12)}: last publish was ${outcome.kind} " +
+                    "stranded send ${LogTag.tx(txid)}: last publish was ${outcome.kind} " +
                         "(retry=${outcome.shouldRetry}, terminal=${outcome.isTerminal})"
                 )
             }
@@ -3684,10 +3715,10 @@ class SyncService : Service() {
                     refusalHold.forget(txid)
                     dropped = true
                     android.util.Log.i("SyncService",
-                        "stranded-send sweep: removed refused send ${txid.take(12)}; its coins are spendable again")
+                        "stranded-send sweep: removed refused send ${LogTag.tx(txid)}; its coins are spendable again")
                 } else {
                     android.util.Log.w("SyncService",
-                        "stranded-send sweep: refused send ${txid.take(12)} is still held by the wallet; kept")
+                        "stranded-send sweep: refused send ${LogTag.tx(txid)} is still held by the wallet; kept")
                 }
                 continue
             }
@@ -3696,9 +3727,13 @@ class SyncService : Service() {
             // to a block. So the verdict has to HOLD (the service's one hold, under its own key; 4.1.2
             // row 30) before the send is
             // dropped; a send that reads valid again starts over. Never acts on the relay guess.
-            val invalidNow = !runCatching { NativeBridge.isTransactionValid(txid) }.getOrDefault(true)
+            // Read INSIDE the hold's observation, between its two readings of the peer manager: a reading
+            // taken before a rebuilt manager must never count toward that manager's hold (4.1.3, review R14).
+            var invalidNow = false
             // Asked every sweep: a valid reading drops the send's sighting, so the hold starts over.
-            val invalidHeld = app.aroundtheblock.wallet.core.sync.InvalidSendRemoval.mayRemove(refusalHold, txid) { !invalidNow }
+            val invalidHeld = app.aroundtheblock.wallet.core.sync.InvalidSendRemoval.mayRemove(refusalHold, txid) {
+                runCatching { NativeBridge.isTransactionValid(txid) }.getOrDefault(true).also { invalidNow = !it }
+            }
             if (invalidNow && !invalidHeld) continue   // invalid, not yet for long enough: neither dropped nor re-published
             if (invalidNow) {
                 // Read the tx's own outputs BEFORE removal — once removed,
@@ -3722,7 +3757,7 @@ class SyncService : Service() {
                         }
                     }
                     android.util.Log.i("SyncService",
-                        "Dandelion recovery: dropped conflicted (double-spend) send ${txid.take(12)}")
+                        "Dandelion recovery: dropped conflicted (double-spend) send ${LogTag.tx(txid)}")
                 }
                 continue
             }
@@ -3741,7 +3776,7 @@ class SyncService : Service() {
             val raw = runCatching { NativeBridge.getSerializedTransactionForHash(txid) }.getOrNull()
             if (raw == null) {
                 android.util.Log.w("SyncService",
-                    "Dandelion recovery: ${txid.take(12)} not in wallet tx set — can't re-publish")
+                    "Dandelion recovery: ${LogTag.tx(txid)} not in wallet tx set — can't re-publish")
                 continue
             }
             // One publish per sweep. The retry is the next sweep, and the store's attempt count
@@ -3750,15 +3785,15 @@ class SyncService : Service() {
             // publish still awaits its verdict.
             val attempt = store.sweepAttempts(txid).count
             runCatching { NativeBridge.publishTransaction(raw) }
-                .onFailure { android.util.Log.w("SyncService", "re-publish ${txid.take(12)} threw", it) }
+                .onFailure { android.util.Log.w("SyncService", "re-publish ${LogTag.tx(txid)} threw", it) }
             delay(15_000L)
             val relays = runCatching { NativeBridge.getRelayCount(txid) }.getOrDefault(0)
             if (relays > 0) {
                 android.util.Log.i("SyncService",
-                    "Dandelion recovery: ${txid.take(12)} re-published & propagated (relays=$relays, attempt $attempt)")
+                    "Dandelion recovery: ${LogTag.tx(txid)} re-published & propagated (relays=$relays, attempt $attempt)")
             } else {
                 android.util.Log.w("SyncService",
-                    "Dandelion recovery: ${txid.take(12)} still un-relayed after re-publish (attempt $attempt)")
+                    "Dandelion recovery: ${LogTag.tx(txid)} still un-relayed after re-publish (attempt $attempt)")
             }
         }
         // Persist the wallet tx set so any drops survive a restart.
@@ -4266,7 +4301,7 @@ class SyncService : Service() {
          * Update this when a newer BRMainNetCheckpoints entry is added
          * to the submodule.
          */
-        private const val LATEST_CHECKPOINT_HEIGHT = 24_350_000L
+        private const val LATEST_CHECKPOINT_HEIGHT = 24_400_000L
 
         /** How far the compact-filter SCAN may trail the network tip and still count as
          *  caught up. The scan legitimately lags the header tip by a few blocks while the
