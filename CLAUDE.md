@@ -16,7 +16,7 @@ Full Kotlin rewrite of the DigiByte Android SPV wallet. Jetpack Compose UI, C na
 > Since 2026-10-26 an independent agent review plus green CI stand in for Mark's review of a PR
 > into `develop` (core, Android, iOS). Releases, force-pushes, security decisions and private
 > advisories stay his. That file is the one copy of the rule; do not restate it here.
-**Version:** v4.1.2 (versionCode 40102)  _(source of truth: `app/build.gradle.kts` `versionName`/`versionCode` — bump there on release and mirror here)_
+**Version:** v4.1.3 (versionCode 40103)  _(source of truth: `app/build.gradle.kts` `versionName`/`versionCode` — bump there on release and mirror here)_
 **Test devices:** Samsung SM-N950U (Galaxy Note 8, Android 9, API 28); Galaxy S25 Ultra (Android 15, API 35) for 16 KB page-size / modern-API coverage
 
 ## Module Structure
