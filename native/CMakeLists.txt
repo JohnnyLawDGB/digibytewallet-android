@@ -3,6 +3,14 @@ cmake_minimum_required(VERSION 3.18.1)
 project("core-lib")
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DANDROID_STL=gnustl_static -DANDROID_TOOLCHAIN=clang -fstack-protector-strong -fvisibility=hidden")
+# Stack-clash protection: a stack allocation larger than a page (a variable-length array sized by data) touches
+# every page on the way down, so it faults at the guard page instead of jumping it and writing into whatever is
+# mapped below the stack. Without it, a VLA larger than the thread's stack corrupts memory silently (shown by
+# native/src/test/host/unrelayed_tx_heap_kat, which builds its stack arms with this flag for exactly that reason).
+# arm64 and x86_64 only: clang ignores the flag for 32-bit ARM.
+if(ANDROID_ABI STREQUAL "arm64-v8a" OR ANDROID_ABI STREQUAL "x86_64")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fstack-clash-protection")
+endif()
 
 # Compact-filter diagnostics are COMPILED OUT by default and must stay that way in any
 # shipped build — they log per KeepAlive tick and per cfilter arrival. The instrumentation
