@@ -28,7 +28,7 @@ jobs:
       # The committed gradle-wrapper.jar must be one Gradle published (4.1.2 row 15, K7); the
       # distribution it downloads is pinned by distributionSha256Sum in gradle-wrapper.properties.
       - name: Gradle wrapper is an official release
-        uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        uses: gradle/actions/wrapper-validation@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
 
       - uses: actions/setup-java@v6
         with:
