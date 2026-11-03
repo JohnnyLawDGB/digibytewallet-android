@@ -144,14 +144,22 @@ class NetworkDestinationsGateTest {
         put("res/raw/nodes.txt", "seed.raw-text.cz:12024\n")
         put("res/layout/screen.xml", """<TextView android:text="https://layout.example-host.tools/help" />""")
         put("res/values-de/strings.xml", """<resources><string name="x">Siehe translation.example-host.tools</string></resources>""")
+        // A string body that is a host under an uncommon TLD; a package name in a string is not one.
+        put(
+            "res/values/strings.xml",
+            """<resources><string name="seed">seed.string-body.nl</string><string name="pkg">app.aroundtheblock.wallet</string></resources>""",
+        )
         put("res/drawable/icon.png", "https://png-metadata.example-host.tools")
         put("assets/config.json", """{"hub": "wss://asset.example-host.tools/ws"}""")
         put("assets/fonts/face.ttf", "https://font-metadata.example-host.tools")
         put("assets/words/en.txt", "abandon\nability\n")
+        // JSON escapes are decoded first: an escaped slash or a \u escape does not hide a host.
+        put("assets/escaped.json", """{"seeder": "https:\/\/api.x.nl\/peers", "seed": "seed.\u0065scaped.cz"}""")
         assertEquals(
             setOf(
                 "raw-json.example-host.tools", "seed.raw-text.cz", "layout.example-host.tools",
-                "translation.example-host.tools", "asset.example-host.tools",
+                "translation.example-host.tools", "asset.example-host.tools", "seed.string-body.nl",
+                "api.x.nl", "seed.escaped.cz",
             ),
             scanSets(listOf(set)).hosts.keys,
         )
@@ -162,7 +170,24 @@ class NetworkDestinationsGateTest {
     fun anUnknownResourceFileTypeFailsTheGate() {
         val set = tmp.newFolder("module", "src", "main")
         File(set, "assets/blob.unknownext").apply { parentFile!!.mkdirs(); writeText("https://hidden.example-host.tools") }
-        assertThrows(AssertionError::class.java) { scanSets(listOf(set)) }
+        val e = assertThrows(AssertionError::class.java) { scanSets(listOf(set)) }
+        assertTrue(
+            "the failure names the file and why: ${e.message}",
+            "assets/blob.unknownext is a resource or asset file type the gate does not scan" in e.message.orEmpty(),
+        )
+    }
+
+    /** Hidden and editor-backup files are not packaged (AAPT ignores `.*` and `*~`), so they are neither read nor failed on. */
+    @Test
+    fun hiddenAndBackupFilesAreSkipped() {
+        val set = tmp.newFolder("module", "src", "main")
+        fun put(path: String, text: String) = File(set, path).apply { parentFile!!.mkdirs(); writeText(text) }
+        put("res/raw/.DS_Store", "https://ds-store.example-host.tools")
+        put("res/values/.gitkeep", "")
+        put("res/values/strings.xml~", """<resources><string name="x">https://backup.example-host.tools</string></resources>""")
+        put("assets/.hidden/config.json", """{"x": "https://hidden-dir.example-host.tools"}""")
+        put("assets/config.json", """{"x": "https://shipped.example-host.tools"}""")
+        assertEquals(setOf("shipped.example-host.tools"), scanSets(listOf(set)).hosts.keys)
     }
 
     /**
@@ -171,7 +196,7 @@ class NetworkDestinationsGateTest {
      */
     @Test
     fun aHostIsNotMistakenForAReverseDnsIdentifier() {
-        for (h in listOf("app.mywallet.nl", "io.node.cz", "com.seed-node.wallet", "net.peers.nl:12024", "app.1node.xx")) {
+        for (h in listOf("app.mywallet.nl", "io.node.cz", "com.seed-node.wallet", "net.peers.nl:12024", "app.1node.xx", "app.1node.wallet")) {
             assertEquals("`$h` is a host", setOf(h.substringBefore(':')), hostsIn(h, wholeLiteral = true))
         }
         for (id in listOf("app.aroundtheblock.wallet", "com.google.android.gms", "androidx.startup", "io.github.wallet", "kern.ostype", "hw.machine")) {
@@ -456,6 +481,31 @@ class NetworkDestinationsGateTest {
             return hosts
         }
 
+        /** AAPT's default ignore pattern skips hidden (`.*`) and backup (`*~`) names: they are never packaged. */
+        fun isUnpackagedName(name: String) = name.startsWith(".") || name.endsWith("~")
+
+        /** The files under [dir] that AAPT would package: no hidden or backup file, nothing under a hidden directory. */
+        fun packagedFiles(dir: File): Sequence<File> =
+            dir.walkTopDown().onEnter { it == dir || !isUnpackagedName(it.name) }.filter { it.isFile && !isUnpackagedName(it.name) }
+
+        /** A JSON string's escapes decoded (`\/`, `\"`, `\uXXXX`); a control escape becomes a space. */
+        fun decodeJsonString(s: String): String {
+            val out = StringBuilder(s.length)
+            var i = 0
+            while (i < s.length) {
+                if (s[i] != '\\' || i + 1 >= s.length) { out.append(s[i]); i++; continue }
+                val e = s[i + 1]
+                when {
+                    e == 'u' && i + 6 <= s.length && s.substring(i + 2, i + 6).all { it in '0'..'9' || it.lowercaseChar() in 'a'..'f' } -> {
+                        out.append(s.substring(i + 2, i + 6).toInt(16).toChar()); i += 6
+                    }
+                    e in "bfnrtu" -> { out.append(' '); i += 2 }
+                    else -> { out.append(e); i += 2 }
+                }
+            }
+            return out.toString()
+        }
+
         fun stripXmlComments(xml: String) = xml.replace(Regex("<!--.*?-->", RegexOption.DOT_MATCHES_ALL), "")
     }
 
@@ -533,7 +583,8 @@ class NetworkDestinationsGateTest {
                     "res" -> for (dir in child.listFiles() ?: emptyArray()) {
                         // Every resource directory: values* (all locales), xml, raw, layout, drawable…
                         if (!dir.isDirectory) continue
-                        dir.walkTopDown().filter { it.isFile }.forEach { classify(it, inValues = dir.name.startsWith("values")) }
+                        if (isUnpackagedName(dir.name)) continue
+                        packagedFiles(dir).forEach { classify(it, inValues = dir.name.startsWith("values")) }
                     }
                     "jni" -> {
                         // The bridge, and the core submodule's shipped sources (its top level, no tests).
@@ -544,7 +595,7 @@ class NetworkDestinationsGateTest {
                         if (core.none { it.name == "BRChainParams.h" }) fail("source gate: the core submodule is not checked out at ${coreDir.path}")
                         c += core
                     }
-                    "assets" -> child.walkTopDown().filter { it.isFile }.forEach { classify(it, inValues = false) }
+                    "assets" -> packagedFiles(child).forEach { classify(it, inValues = false) }
                 }
             }
         }
@@ -564,7 +615,8 @@ class NetworkDestinationsGateTest {
         }
         val body = Regex("<(string|item)\\b[^>]*>(.*?)</\\1>", RegexOption.DOT_MATCHES_ALL)
         for (f in values) {
-            for (m in body.findAll(stripXmlComments(f.readText()))) add(hostsIn(m.groupValues[2], false), f)
+            // The whole-literal rule too: a body that is just a host ("seed.node.nl") is one; a package name is not.
+            for (m in body.findAll(stripXmlComments(f.readText()))) add(hostsIn(m.groupValues[2], true), f)
         }
         // res/xml and manifests: every attribute value and text node (a <domain-config> names its host).
         for (f in xml) {
@@ -576,7 +628,7 @@ class NetworkDestinationsGateTest {
         val jsonString = Regex(""""((?:[^"\\]|\\.)*)"""")
         for (f in text) {
             val content = f.readText()
-            val pieces = if (f.extension.lowercase() == "json") jsonString.findAll(content).map { it.groupValues[1] } else content.lineSequence()
+            val pieces = if (f.extension.lowercase() == "json") jsonString.findAll(content).map { decodeJsonString(it.groupValues[1]) } else content.lineSequence()
             for (p in pieces) add(hostsIn(p.trim(), true), f)
         }
         return Scan(hosts, calls, xml, codeRoots, kotlin.size + c.size + values.size + xml.size + text.size)

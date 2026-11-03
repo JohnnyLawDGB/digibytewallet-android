@@ -11,8 +11,8 @@ shared with it.
 below and checks them against the code. It fails when:
 
 - a host name, URL host or IPv4 address appears in shipped code, a string resource (any locale),
-  any other XML resource, a text file in `res/raw` or `assets`, or a manifest, and is not in the destinations table (a new destination), or a listed
-  host is no longer found. **Stale entries are checked per host, not per row:** `api.digiscope.me`
+  any other XML resource, a text file in `res/raw` or `assets`, or a manifest, and is not in the
+  destinations table (a new destination), or a listed host is no longer found. **Stale entries are checked per host, not per row:** `api.digiscope.me`
   stands in five rows, and removing one of its uses (say the reconcile client) leaves that row
   stale with no failure. Remove such a row by hand;
 - the destinations rows that name `BRMainNetDNSSeeds` and `BRTestNetDNSSeeds` differ from the core's
@@ -48,9 +48,12 @@ Java), `jni/` (the JNI bridge and the core submodule's top-level C, test files e
 `res/values*/*.xml` in every locale (`<string>`/`<item>` bodies), every other XML file under `res/`
 (`xml/`, layouts, drawables…) and `AndroidManifest.xml` (every attribute value and text node, so a
 new `<domain-config>` counts), and the text files under `res/` (`raw/`) and `assets/` (JSON string
-values, or each line of any other text file). Images, fonts and audio are binary data and not read
-(a font's metadata names its foundry's site, not a destination). Any other directory or file type
-fails the gate until it is taught about it.
+values with their escapes decoded, or each line of any other text file). A string body, a JSON
+string, a text line, an XML attribute value or text node is each a whole literal for the rule
+above, so `<string>seed.node.nl</string>` counts. Hidden (`.*`) and backup (`*~`) files and
+directories are skipped, as AAPT does not package them. Images, fonts and audio are binary data
+and not read (a font's metadata names its foundry's site, not a destination). Any other directory
+or file type fails the gate until it is taught about it.
 
 **Adding a destination:** add a row with the host in backticks in the first column, say whether it
 is required, and say what the user sees when it is unreachable. A destination that is required for
