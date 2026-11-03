@@ -2,9 +2,9 @@
 
 **Effective:** 2026-05-03
 **Maximum reward:** 100,000 DGB
-**Bounty target:** **HoldFast Wallet 4.1.2** (`app.aroundtheblock.wallet`), from its release date.
-4.1.1 stays in scope for **14 days** after that date under the overlap rule below. Before you
-start, read "Known issues being addressed for 4.1.3"
+**Bounty target:** **HoldFast Wallet 4.1.3** (`app.aroundtheblock.wallet`), from its release date.
+4.1.2 stays in scope for **14 days** after that date under the overlap rule below. Before you
+start, read "Known issues being addressed for 4.1.4"
 below: those are already on our list.
 
 This is a small, self-funded, open-source project. Rewards are the ceilings below and most
@@ -35,7 +35,7 @@ HoldFast Wallet release and name its exact version.
 | Asset | Where to get it |
 |-------|-----------------|
 | HoldFast Wallet from Google Play (`app.aroundtheblock.wallet`) | https://play.google.com/store/apps/details?id=app.aroundtheblock.wallet |
-| `aroundtheblock-wallet-v4.1.2.apk` (release signed, same key as Play) | https://github.com/JohnnyLawDGB/aroundtheblock-wallet-releases/releases/tag/v4.1.2 |
+| `aroundtheblock-wallet-v4.1.3.apk` (release signed, same key as Play) | https://github.com/JohnnyLawDGB/aroundtheblock-wallet-releases/releases/tag/v4.1.3 |
 | Source code | https://github.com/JohnnyLawDGB/digibytewallet-android at the latest release tag (`develop` follows it). The `phase1-modernization` branch is frozen at v3.9.2 and out of scope. |
 | C core (submodule) | https://github.com/JohnnyLawDGB/digibytewallet-core |
 
@@ -221,7 +221,7 @@ _The half-tier rule was applied from the 2026-10 waves but was not written here 
 after a reporter rightly pointed out that the published rules did not cover it. It was replaced on
 2026-10-13 as above._
 
-### Known issues being addressed for 4.1.3
+### Known issues being addressed for 4.1.4
 
 These are on our list for the next release. A report that only restates one of them is a
 duplicate: credit, no payment. A report that shows one of them reaching **DGB, DigiDollar or the
@@ -233,19 +233,16 @@ seed** in a way not described here is new, and is assessed as new.
   holding the affected outputs rather than spending them. The wallet fails closed: such an output
   can show as unspendable until a later release settles it. A report that the hold happens is known; a
   report that it can be avoided, or that it loses funds, is not.
-- **Chain trust.** Choosing between competing chains by accumulated work, and cross-checking the
-  data one peer serves against others, are scheduled structural changes.
+- **Chain trust.** Choosing between competing chains by accumulated work is a scheduled structural
+  change. (4.1.3 cross-checks the compact-filter chain against the other connected peers.)
 - **Wallets holding very many small coins.** A send whose coins would not fit in one transaction
   is refused, and the message reads as an insufficient balance; "send max" is refused the same way.
   A clearer message and a way to consolidate coins are planned.
 - **DigiDollar sends and Dandelion.** DigiDollar sends do not use Dandelion++ stem routing.
   Dandelion is off by default.
-- **Confirmation status from a server.** Confirmation status that a server reports, rather than
-  the wallet's own chain, is being taken out of the decision about when a payment counts as
-  confirmed and spendable.
-- **Tor coverage.** Some connections made while Tor is enabled or starting are not yet routed
-  through Tor.
-- **Release-build logging.** Some transaction details still reach the device log in release builds.
+- **Seed key and the device lock.** The Keystore key that protects the seed is bound to the device
+  lock only after a later unlock, and only on a device with a secure lock screen. Binding it from
+  creation, and saying when it cannot be bound, are planned.
 - **Confirmations and recovery screens.** A user-initiated way to cancel a send stuck
   unconfirmed; protected-screen and confirmation treatment for wallet wipe, Digi-ID and node
   pairing prompts; recovery of every DigiDollar and asset case from another wallet.
@@ -292,7 +289,7 @@ Reports without these elements are returned for missing information:
 
 - **Title** — one-line summary
 - **Severity claim** — your initial Critical/High/Medium/Low assessment
-- **Affected version** — the exact tag (e.g. `v4.1.2`) you tested against
+- **Affected version** — the exact tag (e.g. `v4.1.3`) you tested against
 - **Affected platform** — Android version, device model, ROM
 - **Repro steps** — numbered, deterministic; copy-pasteable commands where possible
 - **PoC** — minimal artifact that triggers the bug. For network bugs: a `curl` or
@@ -411,6 +408,9 @@ not listed. Anonymity, or no answer, never affects payment.*
   known-issues list now names what is being addressed for 4.1.2.
 - **4.1.2 — target moved.** Bounty target HoldFast Wallet 4.1.2 (4.1.1 overlaps for 14 days). What
   4.1.2 fixed is off the known-issues list, which now names what is being addressed for 4.1.3.
+- **4.1.3 — target moved.** Bounty target HoldFast Wallet 4.1.3 (4.1.2 overlaps for 14 days). What
+  4.1.3 fixed (server confirmation status, the remaining Tor case, transaction details in release
+  logs) is off the known-issues list, which now names what is being addressed for 4.1.4.
 - **2026-10-24 — one reporter, several addresses.** A person or team sending from several addresses
   counts as one reporter for the per-wave cap and duplicate decisions. Applied from the 2026-10-24
   intake on.
