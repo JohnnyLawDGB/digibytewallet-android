@@ -1,9 +1,12 @@
 package app.aroundtheblock.wallet.network
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TemporaryFolder
 import java.io.File
 
 /**
@@ -11,20 +14,22 @@ import java.io.File
  * is listed in `docs/network-destinations.md`, with what happens when it is unreachable. This gate
  * fails when the code and that list disagree:
  *
- *  - a host name, URL host or IPv4 address in shipped code, a default-locale string resource,
- *    `res/xml` or a manifest that the destinations table does not list, or a listed host the code
- *    no longer has (checked per host, not per row);
+ *  - a host name, URL host or IPv4 address in shipped code, a string resource (any locale), any
+ *    other XML resource (`res/xml`, layouts, drawables…), a text file in `res/raw` or `assets`, or a
+ *    manifest that the destinations table does not list, or a listed host the code no longer has
+ *    (checked per host, not per row);
  *  - the core's DNS seed arrays (`BRMainNetDNSSeeds`, `BRTestNetDNSSeeds`) differing from the
  *    table's seed rows, or the JNI bridge's mainnet peers drifting from the core's canon;
  *  - a file that uses a network API and is not in the call-site table, or a listed file that no
  *    longer does (a destination built at run time, which no literal shows, still needs a call site);
  *  - cleartext traffic permitted anywhere;
- *  - a source-set directory the gate does not know how to scan.
+ *  - a source-set directory, or a resource or asset file type, the gate does not know how to scan.
  *
- * The scan roots are derived from `settings.gradle.kts` and each module's `src/<set>/` (test source
- * sets excluded), so a new module or source set is scanned without touching this file. Comments are
- * not scanned; string templates are blanked first. A source gate never passes vacuously: a missing
- * directory or table fails, and the scan must find the destinations it knows.
+ * The scan roots are derived from `settings.gradle.kts` and each module's `src/<set>/` (Gradle's
+ * test source sets excluded: `test`, `androidTest`, `testFixtures` and their variants), so a new
+ * module or source set is scanned without touching this file. Comments are not scanned; string
+ * templates are blanked first. A source gate never passes vacuously: a missing directory or table
+ * fails, and the scan must find the destinations it knows.
  *
  * The iOS app carries the same gate over its own sources (`NetworkDestinationsGateTests.swift`).
  */
@@ -34,6 +39,8 @@ class NetworkDestinationsGateTest {
     private val repo = File("..").canonicalFile
     private val doc = File(repo, "docs/network-destinations.md")
     private val coreDir = File(repo, "native/src/main/jni/digibytewallet-core")
+
+    @get:Rule val tmp = TemporaryFolder()
 
     // ── The gate ─────────────────────────────────────────────────────────────────────────────
 
@@ -108,6 +115,67 @@ class NetworkDestinationsGateTest {
         assertTrue("the scan read too few files", s.fileCount > 200)
         for (root in listOf("app/src/main/java", "app/src/play/java", "app/src/sideload/java", "core/src/main/java", "game/src/main/java")) {
             assertTrue("the derived roots no longer include $root", root in s.codeRoots)
+        }
+        // Translations are read, not only the default locale.
+        assertTrue(
+            "the scan no longer reads translated string resources",
+            "app/src/main/res/values-de/strings_wallet.xml" in s.hosts["digiscope.me"].orEmpty(),
+        )
+    }
+
+    // ── The scan's coverage, on fixed trees ────────────────────────────────────────────────
+
+    /** Only Gradle's test source sets are skipped; a shipped set whose name starts with "test" is scanned. */
+    @Test
+    fun onlyTestSourceSetsAreSkipped() {
+        val src = tmp.newFolder("module", "src")
+        val shipped = listOf("main", "debug", "testnet", "testing", "tests", "testnetRelease")
+        val tests = listOf("test", "testDebug", "testPlayRelease", "androidTest", "androidTestDebug", "testFixtures", "testFixturesRelease")
+        for (n in shipped + tests) File(src, n).mkdirs()
+        assertEquals(shipped.toSet(), shippedSourceSets(src).map { it.name }.toSet())
+    }
+
+    /** `res/raw`, every `res/` XML directory, translated strings and `assets` are read; binary files are not. */
+    @Test
+    fun resourcesAndAssetsAreScanned() {
+        val set = tmp.newFolder("module", "src", "main")
+        fun put(path: String, text: String) = File(set, path).apply { parentFile!!.mkdirs(); writeText(text) }
+        put("res/raw/peers.json", """{"seeder": "https://raw-json.example-host.tools/api/peers"}""")
+        put("res/raw/nodes.txt", "seed.raw-text.cz:12024\n")
+        put("res/layout/screen.xml", """<TextView android:text="https://layout.example-host.tools/help" />""")
+        put("res/values-de/strings.xml", """<resources><string name="x">Siehe translation.example-host.tools</string></resources>""")
+        put("res/drawable/icon.png", "https://png-metadata.example-host.tools")
+        put("assets/config.json", """{"hub": "wss://asset.example-host.tools/ws"}""")
+        put("assets/fonts/face.ttf", "https://font-metadata.example-host.tools")
+        put("assets/words/en.txt", "abandon\nability\n")
+        assertEquals(
+            setOf(
+                "raw-json.example-host.tools", "seed.raw-text.cz", "layout.example-host.tools",
+                "translation.example-host.tools", "asset.example-host.tools",
+            ),
+            scanSets(listOf(set)).hosts.keys,
+        )
+    }
+
+    /** A resource or asset file the gate cannot classify fails it rather than going unread. */
+    @Test
+    fun anUnknownResourceFileTypeFailsTheGate() {
+        val set = tmp.newFolder("module", "src", "main")
+        File(set, "assets/blob.unknownext").apply { parentFile!!.mkdirs(); writeText("https://hidden.example-host.tools") }
+        assertThrows(AssertionError::class.java) { scanSets(listOf(set)) }
+    }
+
+    /**
+     * A name is a reverse-DNS identifier only when the whole name reads as one: a package root first,
+     * every label an identifier (no hyphen, no leading digit), and no country-code domain last.
+     */
+    @Test
+    fun aHostIsNotMistakenForAReverseDnsIdentifier() {
+        for (h in listOf("app.mywallet.nl", "io.node.cz", "com.seed-node.wallet", "net.peers.nl:12024", "app.1node.xx")) {
+            assertEquals("`$h` is a host", setOf(h.substringBefore(':')), hostsIn(h, wholeLiteral = true))
+        }
+        for (id in listOf("app.aroundtheblock.wallet", "com.google.android.gms", "androidx.startup", "io.github.wallet", "kern.ostype", "hw.machine")) {
+            assertEquals("`$id` is an identifier, not a host", emptySet<String>(), hostsIn(id, wholeLiteral = true))
         }
     }
 
@@ -300,8 +368,9 @@ class NetworkDestinationsGateTest {
         /**
          * A literal that IS a host name, with any alphabetic top-level domain ("seed.digibyte.nl",
          * "node.example.cz:12024"). Lower case only: identifiers such as "android.intent.action.VIEW"
-         * are not hosts. A last label that is a file extension, or a first label that starts a
-         * reverse-DNS identifier ("app.aroundtheblock.wallet"), is not a host either.
+         * are not hosts. A last label that is a file extension, or a whole name that reads as a
+         * reverse-DNS identifier ("app.aroundtheblock.wallet", see [isReverseDnsIdentifier]), is not a
+         * host either.
          */
         val WHOLE_HOST = Regex("^([a-z0-9-]+(?:\\.[a-z0-9-]+)+)(?::\\d{1,5})?$")
         val FILE_EXTENSIONS = (
@@ -312,6 +381,23 @@ class NetworkDestinationsGateTest {
             ).split(' ').toSet()
         val REVERSE_DNS_ROOTS = "app com org net io android androidx java javax kotlin kotlinx dagger okhttp3 coil junit kern hw vm"
             .split(' ').toSet()
+
+        /**
+         * A package-style name: a package root first, every label a Java identifier segment (a host
+         * label may hold a hyphen or start with a digit; a package segment may not), and a last label
+         * that is not a two-letter country-code domain ("app.mywallet.nl" is a host).
+         */
+        fun isReverseDnsIdentifier(labels: List<String>): Boolean =
+            labels.first() in REVERSE_DNS_ROOTS &&
+                labels.all { l -> l.isNotEmpty() && !l.first().isDigit() && l.all { it.isLetterOrDigit() || it == '_' } } &&
+                labels.last().length != 2
+
+        /** Gradle's test source sets, `test`, `androidTest` and `testFixtures`, and their variants (`testDebug`). */
+        val TEST_SOURCE_SET = Regex("^(?:test|androidTest|testFixtures)(?:[A-Z]\\w*)?$")
+
+        /** Resource and asset files read as text, and files that are binary data and not read. */
+        val TEXT_FILES = "json txt csv tsv html htm js css md properties".split(' ').toSet()
+        val BINARY_FILES = "png jpg jpeg gif webp bmp ttf otf woff woff2 mp3 ogg wav m4a mp4 webm".split(' ').toSet()
 
         /** An IPv4 address anywhere in a literal, with or without a port ("1.2.3.4:12024"). */
         val IPV4 = Regex("(?<![\\d.])((?:\\d{1,3}\\.){3}\\d{1,3})(?![\\d.])")
@@ -357,7 +443,7 @@ class NetworkDestinationsGateTest {
                 WHOLE_HOST.find(literal.trim())?.let { m ->
                     val labels = m.groupValues[1].split('.')
                     val last = labels.last()
-                    if (last.length >= 2 && last.all { it in 'a'..'z' } && last !in FILE_EXTENSIONS && labels.first() !in REVERSE_DNS_ROOTS) {
+                    if (last.length >= 2 && last.all { it in 'a'..'z' } && last !in FILE_EXTENSIONS && !isReverseDnsIdentifier(labels)) {
                         out.add(m.groupValues[1])
                     }
                 }
@@ -406,19 +492,31 @@ class NetworkDestinationsGateTest {
     }
 
     /** Every shipped (non-test) source set of every module: `<module>/src/<set>`. */
-    private fun sourceSets(): List<File> = modules().flatMap { module ->
-        val src = requireDir(File(repo, "$module/src"))
-        (src.listFiles() ?: emptyArray()).filter { it.isDirectory }
-            .filterNot { it.name.startsWith("test") || it.name.startsWith("androidTest") }
-    }
+    private fun sourceSets(): List<File> = modules().flatMap { module -> shippedSourceSets(requireDir(File(repo, "$module/src"))) }
 
-    private fun scan(): Scan {
+    /** The source sets under one module's `src/`, less Gradle's test source sets. */
+    private fun shippedSourceSets(src: File): List<File> =
+        (src.listFiles() ?: emptyArray()).filter { it.isDirectory && !TEST_SOURCE_SET.matches(it.name) }
+
+    private fun scan(): Scan = scanSets(sourceSets())
+
+    private fun scanSets(sets: List<File>): Scan {
         val kotlin = ArrayList<File>()
         val c = ArrayList<File>()
         val values = ArrayList<File>()
         val xml = ArrayList<File>()
+        val text = ArrayList<File>()
         val codeRoots = HashSet<String>()
-        for (set in sourceSets()) {
+        /** A file under `res/<dir>/` or `assets/`: XML, text, or binary data; anything else fails. */
+        fun classify(f: File, inValues: Boolean) {
+            when (f.extension.lowercase()) {
+                "xml" -> if (inValues) values += f else xml += f
+                in TEXT_FILES -> text += f
+                in BINARY_FILES -> Unit
+                else -> fail("source gate: ${rel(f)} is a resource or asset file type the gate does not scan; teach the gate about it")
+            }
+        }
+        for (set in sets) {
             for (child in set.listFiles() ?: emptyArray()) {
                 if (child.isFile) {
                     if (child.name == "AndroidManifest.xml") xml.add(child)
@@ -432,9 +530,10 @@ class NetworkDestinationsGateTest {
                         codeRoots.add(rel(child))
                         kotlin += child.walkTopDown().filter { it.isFile && (it.extension == "kt" || it.extension == "java") }
                     }
-                    "res" -> {
-                        File(child, "values").listFiles()?.filter { it.extension == "xml" }?.let { values += it }
-                        File(child, "xml").listFiles()?.filter { it.extension == "xml" }?.let { xml += it }
+                    "res" -> for (dir in child.listFiles() ?: emptyArray()) {
+                        // Every resource directory: values* (all locales), xml, raw, layout, drawable…
+                        if (!dir.isDirectory) continue
+                        dir.walkTopDown().filter { it.isFile }.forEach { classify(it, inValues = dir.name.startsWith("values")) }
                     }
                     "jni" -> {
                         // The bridge, and the core submodule's shipped sources (its top level, no tests).
@@ -445,7 +544,7 @@ class NetworkDestinationsGateTest {
                         if (core.none { it.name == "BRChainParams.h" }) fail("source gate: the core submodule is not checked out at ${coreDir.path}")
                         c += core
                     }
-                    "assets" -> Unit   // word lists, fonts and animations: data, not code
+                    "assets" -> child.walkTopDown().filter { it.isFile }.forEach { classify(it, inValues = false) }
                 }
             }
         }
@@ -469,11 +568,18 @@ class NetworkDestinationsGateTest {
         }
         // res/xml and manifests: every attribute value and text node (a <domain-config> names its host).
         for (f in xml) {
-            val text = stripXmlComments(f.readText()).replace(Regex("""\sxmlns(:\w+)?\s*=\s*"[^"]*""""), "")
-            for (m in Regex("""=\s*"([^"]*)"""").findAll(text)) add(hostsIn(m.groupValues[1], true), f)
-            for (m in Regex(""">([^<]+)<""").findAll(text)) add(hostsIn(m.groupValues[1].trim(), true), f)
+            val markup = stripXmlComments(f.readText()).replace(Regex("""\sxmlns(:\w+)?\s*=\s*"[^"]*""""), "")
+            for (m in Regex("""=\s*"([^"]*)"""").findAll(markup)) add(hostsIn(m.groupValues[1], true), f)
+            for (m in Regex(""">([^<]+)<""").findAll(markup)) add(hostsIn(m.groupValues[1].trim(), true), f)
         }
-        return Scan(hosts, calls, xml, codeRoots, kotlin.size + c.size + values.size + xml.size)
+        // res/raw and assets text: JSON string values, or each line of any other text file.
+        val jsonString = Regex(""""((?:[^"\\]|\\.)*)"""")
+        for (f in text) {
+            val content = f.readText()
+            val pieces = if (f.extension.lowercase() == "json") jsonString.findAll(content).map { it.groupValues[1] } else content.lineSequence()
+            for (p in pieces) add(hostsIn(p.trim(), true), f)
+        }
+        return Scan(hosts, calls, xml, codeRoots, kotlin.size + c.size + values.size + xml.size + text.size)
     }
 
     private class Row(val entries: List<String>, val code: String)

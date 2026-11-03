@@ -10,8 +10,8 @@ shared with it.
 (an app unit test, so CI's Unit Tests step runs it) reads the two tables between the `gate:` markers
 below and checks them against the code. It fails when:
 
-- a host name, URL host or IPv4 address appears in shipped code, a default-locale string resource,
-  `res/xml` or a manifest, and is not in the destinations table (a new destination), or a listed
+- a host name, URL host or IPv4 address appears in shipped code, a string resource (any locale),
+  any other XML resource, a text file in `res/raw` or `assets`, or a manifest, and is not in the destinations table (a new destination), or a listed
   host is no longer found. **Stale entries are checked per host, not per row:** `api.digiscope.me`
   stands in five rows, and removing one of its uses (say the reconcile client) leaves that row
   stale with no failure. Remove such a row by hand;
@@ -25,25 +25,32 @@ below and checks them against the code. It fails when:
   `SubcomposeAsyncImage`, `rememberAsyncImagePainter`, `ImageLoader`, `imageLoader`), the Tor
   runtime, and in C `connect`, `socket`, `getaddrinfo`, `gethostbyname`;
 - cleartext traffic is permitted in a manifest or `res/xml`;
-- a module's source set holds a directory the gate does not know how to scan.
+- a module's source set holds a directory, or `res/`/`assets/` holds a file type, the gate does not
+  know how to scan.
 
 **What counts as a host.** A URL's host, under any top-level domain. A name with a common
 top-level domain anywhere in a literal ("see api.x.me"). A literal that is a name under any
 alphabetic top-level domain, with an optional `:port`, unless its last label is a file extension
-(`peers.json`) or its first label starts a reverse-DNS identifier (`app.aroundtheblock.wallet`). An
+(`peers.json`) or the whole name reads as a reverse-DNS identifier (`app.aroundtheblock.wallet`):
+a package root first (`app`, `com`, `io`, `androidx`…), every label a package segment (no hyphen, no
+leading digit), and a last label that is not a two-letter country code. So `app.mywallet.nl` and
+`com.seed-node.wallet` are hosts. An
 IPv4 address anywhere in a literal, port or not (`"1.2.3.4:12024"`). Comments are not scanned.
 String templates (`$x`, `${x}`) are blanked first, so `"$txid.to"` is not read as a host. Reserved
 example names (`example.com`), `localhost`, loopback and private (RFC 1918, link-local) addresses
 are ignored: those can only be the user's own node.
 
 **What is scanned.** The roots are derived, never listed. The gate reads every module that
-`settings.gradle.kts` includes, and every source set under `<module>/src/` except `test*` and
-`androidTest*`. In each source set it scans `java/` and `kotlin/` (Kotlin and Java), `jni/`
-(the JNI bridge and the core submodule's top-level C, test files excluded), `res/values/*.xml`
-(`<string>`/`<item>` bodies, default locale only: a translation carries the same hosts),
-`res/xml/*.xml` and `AndroidManifest.xml` (every attribute value and text node, so a new
-`<domain-config>` counts). `assets/` holds word lists, fonts and an animation, so it is not scanned.
-Any other directory fails the gate until it is taught about it.
+`settings.gradle.kts` includes, and every source set under `<module>/src/` except Gradle's test
+source sets (`test`, `androidTest`, `testFixtures` and their variants such as `testDebug`; a shipped
+set named, say, `testnet` is scanned). In each source set it scans `java/` and `kotlin/` (Kotlin and
+Java), `jni/` (the JNI bridge and the core submodule's top-level C, test files excluded),
+`res/values*/*.xml` in every locale (`<string>`/`<item>` bodies), every other XML file under `res/`
+(`xml/`, layouts, drawables…) and `AndroidManifest.xml` (every attribute value and text node, so a
+new `<domain-config>` counts), and the text files under `res/` (`raw/`) and `assets/` (JSON string
+values, or each line of any other text file). Images, fonts and audio are binary data and not read
+(a font's metadata names its foundry's site, not a destination). Any other directory or file type
+fails the gate until it is taught about it.
 
 **Adding a destination:** add a row with the host in backticks in the first column, say whether it
 is required, and say what the user sees when it is unreachable. A destination that is required for
