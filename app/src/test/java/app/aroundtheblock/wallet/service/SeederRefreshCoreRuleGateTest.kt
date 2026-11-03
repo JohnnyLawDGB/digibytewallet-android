@@ -55,10 +55,14 @@ class SeederRefreshCoreRuleGateTest {
     @Test fun `the background refresh decides each list with the core`() {
         val refresh = body(sync, "refreshSeederPools")
         // The filter and general pools (one fetch serves both) and the Dandelion pool.
-        assertEquals(3, sync.calls(rule, refresh).size)
-        assertTrue("filterStale is not the core's answer for the two filter pools", Regex(
-            """val\s+filterStale\s*=\s*NativeBridge\s*\.\s*seederShouldRefresh\([^{}]*\)\s*\|\|\s*NativeBridge\s*\.\s*seederShouldRefresh\("""
-        ).containsMatchIn(sync.code.substring(refresh)))
+        val asks = sync.calls(rule, refresh)
+        assertEquals(3, asks.size)
+        // `val filterStale = <ask> || <ask>`, read from the calls' own ranges (their arguments hold lambdas).
+        val decl = Regex("""val\s+filterStale\s*=\s*""").find(sync.code, refresh.first)
+        assertTrue("no `val filterStale =` in refreshSeederPools", decl != null && decl.range.first in refresh)
+        assertEquals("filterStale is not the core's answer for the filter pools", decl!!.range.last + 1, asks[0].range.first)
+        assertEquals("filterStale is not the core's answer for both filter pools", "||",
+            sync.code.substring(asks[0].range.last + 1, asks[1].range.first).trim())
     }
 
     @Test fun `the worker's refresh is the core's answer`() {
