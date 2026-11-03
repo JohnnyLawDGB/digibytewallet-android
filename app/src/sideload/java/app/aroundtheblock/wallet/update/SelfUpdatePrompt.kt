@@ -28,6 +28,10 @@ import okhttp3.OkHttpClient
  */
 @Composable
 fun SelfUpdatePrompt(okHttpClient: OkHttpClient, torManager: TorManager) {
+    // A debug build is a different package (applicationIdSuffix ".debug"): the release APK this
+    // would offer installs beside it as a second, empty wallet, never over it (seen on the Moto,
+    // 2026-11-03). Debug builds are updated with a debug build.
+    if (BuildConfig.DEBUG) return
     val context = LocalContext.current
     var pendingUpdate by remember { mutableStateOf<AppUpdate?>(null) }
     LaunchedEffect(Unit) {

@@ -30,6 +30,13 @@ class DebugBuildBannerGateTest {
         assertTrue("the banner is drawn after (above) AppNavigation", banner > nav && nav > 0)
     }
 
+    @Test fun `a debug build never offers the release APK as its update`() {
+        val prompt = src("app/src/sideload/java/app/aroundtheblock/wallet/update/SelfUpdatePrompt.kt")
+        val guard = prompt.indexOf("if (BuildConfig.DEBUG) return")
+        assertTrue("debug guard missing", guard > 0)
+        assertTrue("the guard comes before the update check", guard < prompt.indexOf("UpdateChecker("))
+    }
+
     @Test fun `only the debug source set renames the launcher label`() {
         assertTrue(src("app/src/debug/res/values/strings.xml").contains(">HoldFast DEBUG<"))
         assertTrue(src("app/src/main/res/values/strings.xml").contains("name=\"app_name\" translatable=\"false\">HoldFast<"))
