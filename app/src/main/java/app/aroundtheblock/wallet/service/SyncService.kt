@@ -3211,8 +3211,7 @@ class SyncService : Service() {
 
         // The cached list only: a stale or empty one is refreshed in the background
         // ([requestSeederRefresh]), so the seeder never sits between a start path and startSync().
-        if (SeederRefreshPolicy.isStale(prefs.getLong("last_fetch", 0L), System.currentTimeMillis(),
-                pool.isEmpty(), BLOOM_REFRESH_INTERVAL_MS)) {
+        if (NativeBridge.seederShouldRefresh(prefs.getLong("last_fetch", 0L), System.currentTimeMillis(), pool.size)) {
             requestSeederRefresh()
         }
 
@@ -3276,7 +3275,7 @@ class SyncService : Service() {
         val lastFetch = prefs.getLong("last_fetch", 0L)
 
         // Cached pool only; [refreshSeederPools] merges a fresh list into it in the background.
-        if (SeederRefreshPolicy.isStale(lastFetch, now, pool.isEmpty(), BLOOM_REFRESH_INTERVAL_MS)) {
+        if (NativeBridge.seederShouldRefresh(lastFetch, now, pool.size)) {
             requestSeederRefresh()
         }
 
@@ -3465,8 +3464,7 @@ class SyncService : Service() {
         // Cached list only; a stale one is refreshed in the background ([refreshSeederPools]).
         val pool: List<Triple<String, Int, Long>> =
             prefs.getString("peer_pool", null)?.let { parsePool(it) } ?: emptyList()
-        if (SeederRefreshPolicy.isStale(prefs.getLong("last_fetch", 0L), System.currentTimeMillis(),
-                pool.isEmpty(), BLOOM_REFRESH_INTERVAL_MS)) {
+        if (NativeBridge.seederShouldRefresh(prefs.getLong("last_fetch", 0L), System.currentTimeMillis(), pool.size)) {
             requestSeederRefresh()
         }
 
@@ -3514,17 +3512,17 @@ class SyncService : Service() {
         val generalPrefs = getSharedPreferences("dgb_bloom_peers$suffix", MODE_PRIVATE)
         val now = System.currentTimeMillis()
 
-        // Only the lists that are stale. One capability=filter fetch serves both filter pools (they
-        // used to fetch it once each).
+        // Only the lists that are stale (BRSeederShouldRefresh, the rule iOS calls too). One
+        // capability=filter fetch serves both filter pools (they used to fetch it once each).
         //
         // Intended difference from iOS: iOS adds a fetched list only to the manager the fetch started
         // for (`managerGeneration == startedFor`). Here the peers go to whichever manager exists when
         // the fetch returns: injectPeerByIp only adds candidates (deduplicated, under PEER_GUARD), and
         // with no manager they are kept for the next one, so a recreate in between loses nothing.
-        val filterStale = SeederRefreshPolicy.isStale(filterPrefs.getLong("last_fetch", 0L), now,
-            filterPrefs.getString("peer_pool", null)?.let { parsePool(it) }.isNullOrEmpty(), BLOOM_REFRESH_INTERVAL_MS) ||
-            SeederRefreshPolicy.isStale(generalPrefs.getLong("last_fetch", 0L), now,
-                generalPrefs.getString("peer_pool", null)?.let { parsePool(it) }.isNullOrEmpty(), BLOOM_REFRESH_INTERVAL_MS)
+        val filterStale = NativeBridge.seederShouldRefresh(filterPrefs.getLong("last_fetch", 0L), now,
+            filterPrefs.getString("peer_pool", null)?.let { parsePool(it) }?.size ?: 0) ||
+            NativeBridge.seederShouldRefresh(generalPrefs.getLong("last_fetch", 0L), now,
+                generalPrefs.getString("peer_pool", null)?.let { parsePool(it) }?.size ?: 0)
         val fresh = if (filterStale) fetchFromSeeder("filter") else null
         if (!fresh.isNullOrEmpty()) {
             filterPrefs.edit()
@@ -3550,7 +3548,7 @@ class SyncService : Service() {
         if (getSharedPreferences("dgb_dandelion", MODE_PRIVATE).getBoolean("enabled", false)) {
             val dPrefs = getSharedPreferences("dgb_dandelion_peers$suffix", MODE_PRIVATE)
             val cached = dPrefs.getString("peer_pool", null)?.let { parsePool(it) } ?: emptyList()
-            if (SeederRefreshPolicy.isStale(dPrefs.getLong("last_fetch", 0L), now, cached.isEmpty(), BLOOM_REFRESH_INTERVAL_MS)) {
+            if (NativeBridge.seederShouldRefresh(dPrefs.getLong("last_fetch", 0L), now, cached.size)) {
                 val dandelion = fetchFromSeeder("dandelion")
                 if (!dandelion.isNullOrEmpty()) {
                     dPrefs.edit().putString("peer_pool", serializePool(dandelion)).putLong("last_fetch", now).apply()
@@ -4207,8 +4205,6 @@ class SyncService : Service() {
         /** NODE_NETWORK (0x01) | NODE_COMPACT_FILTERS (0x40) — testnet26 nodes
          *  serve BIP157/158 filters, not bloom. */
         private const val TESTNET_PEER_SERVICES = 0x41L
-        /** Refresh bloom peer list every 60 minutes. */
-        private const val BLOOM_REFRESH_INTERVAL_MS = 60 * 60 * 1000L
         /** How many peers to inject per call. The C peer manager caps its
          *  own connections at 5, so injecting more is a pool of candidates
          *  for the peer manager to pick from rather than concurrent connections. */

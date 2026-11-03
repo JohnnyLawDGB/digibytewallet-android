@@ -132,8 +132,11 @@ class SyncWorker @AssistedInject constructor(
         val prefs = applicationContext.getSharedPreferences("dgb_bloom_peers" + networkSuffix(applicationContext), 0)
         val cachedJson = prefs.getString("peers_json", null)
         if (cachedJson != null) injectPeersJson(cachedJson)
-        return SeederRefreshPolicy.isStale(prefs.getLong("last_fetch", 0L), System.currentTimeMillis(),
-            cachedJson == null, 60 * 60 * 1000L)
+        // BRSeederShouldRefresh, as SyncService and iOS. Only whether a cached answer exists is
+        // known here, so a present one counts as one entry (as before: an answer with no peers in
+        // it waits out the hour).
+        return NativeBridge.seederShouldRefresh(prefs.getLong("last_fetch", 0L), System.currentTimeMillis(),
+            if (cachedJson == null) 0 else 1)
     }
 
     /** Fetch the seeder list, cache it and inject it (after startSync(); see doWork). */

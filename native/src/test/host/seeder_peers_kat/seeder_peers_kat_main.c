@@ -1,14 +1,17 @@
 // Host KAT for BRSeederPeers.h -- which seeder peers are added, with which services, and when
-// the cached list is fetched again. Carries Android's parseSeederServicesHex behaviour and the
-// JNI bridge's INJECT_DEFAULT_SERVICES default.
+// the cached list is fetched again. Carries Android's parseSeederServicesHex behaviour, the
+// JNI bridge's INJECT_DEFAULT_SERVICES default, and the cases of SeederRefreshPolicyTest (the
+// Kotlin isStale that BRSeederShouldRefresh replaced, Android #187 -> jni_seeder_refresh.c).
 //
 // BRPeerManagerAddPeer is replaced by a recording stub: the KAT checks what is handed to the
 // manager, not the manager.
 //
-// Built twice by run.sh:
-//   -DSEEDER_PEERS_RED  the "0x" prefix is not removed and unknown services are not defaulted;
-//                       every RED case fails
-//   (default)           the shipped rule; every case passes
+// Built three times by run.sh:
+//   -DSEEDER_PEERS_RED    the "0x" prefix is not removed and unknown services are not defaulted;
+//                         the service cases fail, the refresh cases hold
+//   -DSEEDER_REFRESH_RED  an empty cache waits out the hour and an hour-old list is refetched;
+//                         those two refresh cases fail, every other case holds
+//   (default)             the shipped rule; every case passes
 
 #include "BRSeederPeers.h"
 #include <stdio.h>
@@ -75,11 +78,33 @@ int main(void)
          BRSeederPeerAdd(fake, NULL, 12024, 0) == 0 && g_calls == 0;
     result("only_ipv4_literals_added", ok, NULL);
 
-    ok = BRSeederShouldRefresh(0, 1790000000000LL, 5) && BRSeederShouldRefresh(1790000000000LL, 1790000000000LL, 0) &&
-         ! BRSeederShouldRefresh(1790000000000LL, 1790000000000LL + BR_SEEDER_REFRESH_MS, 5) &&
-         BRSeederShouldRefresh(1790000000000LL, 1790000000000LL + BR_SEEDER_REFRESH_MS + 1, 5) &&
-         ! BRSeederShouldRefresh(1790000000000LL, 1790000000000LL - 5000, 5);   // clock went back: keep
-    result("refresh_rule", ok, NULL);
+    // The refresh decision. now and the cases are SeederRefreshPolicyTest's.
+    {
+        const int64_t now = 1800000000000LL, hour = BR_SEEDER_REFRESH_MS;
+
+        ok = hour == 3600000LL;                     // the interval every Kotlin caller passed
+        result("refresh_interval_is_one_hour", ok, NULL);
+
+        ok = BRSeederShouldRefresh(now, now, 0) && BRSeederShouldRefresh(now - 1000, now, 0);
+        result("empty_cache_refreshes", ok, NULL);
+
+        ok = ! BRSeederShouldRefresh(now - hour, now, 5);
+        result("one_hour_old_is_kept", ok, NULL);
+
+        ok = BRSeederShouldRefresh(now - hour - 1, now, 5);
+        result("over_the_hour_refreshes", ok, NULL);
+
+        ok = BRSeederShouldRefresh(0, now, 5);      // last_fetch absent reads as 0
+        result("never_fetched_refreshes", ok, NULL);
+
+        ok = ! BRSeederShouldRefresh(now - 1000, now, 5) && ! BRSeederShouldRefresh(now, now - 5000, 5) &&
+             ! BRSeederShouldRefresh(now, now, 1);  // clock went back: keep
+        result("fresh_list_kept", ok, NULL);
+
+        // Kotlin's nowMs - lastFetchMs wraps: MIN - 1 is MAX (stale), MIN - MAX is 1 (kept).
+        ok = BRSeederShouldRefresh(1, INT64_MIN, 5) && ! BRSeederShouldRefresh(INT64_MAX, INT64_MIN, 5);
+        result("differences_wrap_as_kotlin_long", ok, NULL);
+    }
 
     if (! g_failed) printf("ALL PASS\n");
     return g_failed;

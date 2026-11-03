@@ -143,6 +143,7 @@ jint JNICALL NativeBridge_rerequestHeadersFromTip(JNIEnv *env, jobject thiz);  /
 void JNICALL NativeBridge_rescan(JNIEnv *env, jobject thiz);  /* jni_peer.c */
 jboolean JNICALL NativeBridge_restoreCfScanLedger(JNIEnv *env, jobject thiz, jbyteArray data);  /* jni_peer.c */
 jboolean JNICALL NativeBridge_restoreWalletFromBytes(JNIEnv *env, jobject thiz, jbyteArray phraseBytes, jlong creationTimestamp, jbyteArray passphrase);  /* jni_wallet.c */
+jboolean JNICALL NativeBridge_seederShouldRefresh(JNIEnv *env, jobject thiz, jlong lastFetchMs, jlong nowMs, jint cachedCount);  /* jni_seeder_refresh.c */
 jstring JNICALL NativeBridge_sendApprovedDigiDollar(JNIEnv *env, jobject thiz, jstring tdAddress, jlong cents, jlong approvedFeeSats);  /* jni_transaction.c */
 jbyteArray JNICALL NativeBridge_serializePeerPenalties(JNIEnv *env, jobject thiz);  /* jni_peer.c */
 void JNICALL NativeBridge_setCallbackHandler(JNIEnv *env, jobject thiz, jobject handler);  /* jni_peer.c */
@@ -307,6 +308,7 @@ jboolean JNICALL NativeBridge_walletContainsAddress(JNIEnv *env, jobject thiz, j
     { "rescan", "()V", (void *) NativeBridge_rescan }, \
     { "restoreCfScanLedger", "([B)Z", (void *) NativeBridge_restoreCfScanLedger }, \
     { "restoreWalletFromBytes", "([BJ[B)Z", (void *) NativeBridge_restoreWalletFromBytes }, \
+    { "seederShouldRefresh", "(JJI)Z", (void *) NativeBridge_seederShouldRefresh }, \
     { "sendApprovedDigiDollar", "(Ljava/lang/String;JJ)Ljava/lang/String;", (void *) NativeBridge_sendApprovedDigiDollar }, \
     { "serializePeerPenalties", "()[B", (void *) NativeBridge_serializePeerPenalties }, \
     { "setCallbackHandler", "(" DGB_JNI_NATIVECALLBACK_SIG ")V", (void *) NativeBridge_setCallbackHandler }, \
@@ -334,6 +336,6 @@ jboolean JNICALL NativeBridge_walletContainsAddress(JNIEnv *env, jobject thiz, j
     { "takeUnprovableServerHeight", "()J", (void *) NativeBridge_takeUnprovableServerHeight }, \
     { "walletContainsAddress", "(Ljava/lang/String;)Z", (void *) NativeBridge_walletContainsAddress }, \
 
-#define DGB_JNI_NATIVEBRIDGE_METHOD_COUNT 162
+#define DGB_JNI_NATIVEBRIDGE_METHOD_COUNT 163
 
 #endif
