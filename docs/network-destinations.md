@@ -12,9 +12,10 @@ below and checks them against the code. It fails when:
 
 - a host name, URL host or IPv4 address appears in shipped code, a string resource (any locale),
   any other XML resource, a text file in `res/raw` or `assets`, or a manifest, and is not in the
-  destinations table (a new destination), or a listed host is no longer found. **Stale entries are checked per host, not per row:** `api.digiscope.me`
-  stands in five rows, and removing one of its uses (say the reconcile client) leaves that row
-  stale with no failure. Remove such a row by hand;
+  destinations table (a new destination), or a listed host is no longer found. **Stale entries
+  are checked per host, not per row:** `api.digiscope.me` stands in five rows, and removing one of
+  its uses (say the reconcile client) leaves that row stale with no failure. Remove such a row by
+  hand;
 - the destinations rows that name `BRMainNetDNSSeeds` and `BRTestNetDNSSeeds` differ from the core's
   arrays (an exact compare, so a seed under any top-level domain is caught), or the JNI bridge's
   hardcoded mainnet peers stop matching the core's canon (`BRPeerCanon.h`);
