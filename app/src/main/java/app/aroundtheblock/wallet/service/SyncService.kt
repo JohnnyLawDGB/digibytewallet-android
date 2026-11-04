@@ -3269,7 +3269,7 @@ class SyncService : Service() {
         val existing = prefs.getString("peer_pool", null)
         // Triple = (ip, port, servicesHex). servicesHex carries the seeder's
         // capability bits (0x40 = compact filters) so filter peers are tagged
-        // when injected; 0 = unknown → native CF-tagged default (INJECT_DEFAULT_SERVICES).
+        // when injected; 0 = unknown → the core's CF-tagged default (BRSeederPeerServices).
         val pool: MutableList<Triple<String, Int, Long>> =
             if (existing != null) parsePool(existing) else mutableListOf()
         val lastFetch = prefs.getLong("last_fetch", 0L)
@@ -3574,8 +3574,9 @@ class SyncService : Service() {
      *  Extracts ip + port + services_hex per peer. services_hex carries the node's
      *  advertised service bits — notably 0x40 (SERVICES_NODE_COMPACT_FILTERS) — so
      *  the native filter-first peer selection can recognize and hold filter peers.
-     *  Absent/unparseable services_hex → 0 (native falls back to the CF-tagged
-     *  INJECT_DEFAULT_SERVICES default, jni_peer.c — never bloom-only). */
+     *  The core reads services_hex (BRSeederServicesParse, the function iOS calls);
+     *  absent/unparseable → 0, which the core tags CF-capable when the peer is added
+     *  (BRSeederPeerServices — never bloom-only). */
     private fun parsePeersJson(json: String): List<Triple<String, Int, Long>> {
         return try {
             val root = org.json.JSONObject(json)
@@ -3586,7 +3587,7 @@ class SyncService : Service() {
             val out = ArrayList<Triple<String, Int, Long>>(arr.length())
             for (i in 0 until arr.length()) {
                 val peer = arr.getJSONObject(i)
-                val services = parseSeederServicesHex(peer.optString("services_hex", ""))
+                val services = NativeBridge.seederServicesParse(peer.optString("services_hex", ""))
                 out.add(Triple(peer.getString("ip"), peer.optInt("port", 12024), services))
             }
             out
@@ -3599,8 +3600,10 @@ class SyncService : Service() {
     /** Pool is stored as a compact JSON array of "ip:port:servicesHex" strings
      *  (servicesHex is lowercase hex, no 0x prefix). Seeder peers are IPv4, so
      *  splitting on ':' is unambiguous. Legacy "ip:port" entries from older
-     *  caches parse with services = 0 (native falls back to the CF-tagged
-     *  INJECT_DEFAULT_SERVICES default, jni_peer.c — never bloom-only). */
+     *  caches parse with services = 0 (the core tags it CF-capable when it is added,
+     *  BRSeederPeerServices — never bloom-only). The stored value is read back by the
+     *  core's parse too, so a value an older build stored that the core does not read
+     *  (a negative one, from the Kotlin parse's sign) is 0 rather than every service bit. */
     private fun serializePool(pool: List<Triple<String, Int, Long>>): String {
         val arr = org.json.JSONArray()
         for ((ip, port, services) in pool) arr.put("$ip:$port:${services.toString(16)}")
@@ -3615,7 +3618,7 @@ class SyncService : Service() {
                 val parts = arr.getString(i).split(':')
                 if (parts.size >= 2) {
                     val port = parts[1].toIntOrNull() ?: 12024
-                    val services = if (parts.size >= 3) (parts[2].toLongOrNull(16) ?: 0L) else 0L
+                    val services = if (parts.size >= 3) NativeBridge.seederServicesParse(parts[2]) else 0L
                     out.add(Triple(parts[0], port, services))
                 }
             }

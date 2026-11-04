@@ -21,7 +21,8 @@ that says "wrap `digibytewallet-core` as an XCFramework and write SwiftUI over i
 loses all of it. 117 JNI entry points across ~7,483 lines. Stranded there:
 
 - **The 15 hardcoded mainnet CF oracle IPs** (`jni_peer.c:405–464`) plus the testnet set,
-  `INJECT_DEFAULT_SERVICES`, and the penalty-restore exemption for canon peers. CLAUDE.md
+  `INJECT_DEFAULT_SERVICES` (removed 2026-11, #202: the core's `BRSeederPeerServices` now
+  tags unknown services on both platforms), and the penalty-restore exemption for canon peers. CLAUDE.md
   calls this peer set "the CANON" — the wallet's only reliable CF source.
 - **`startSync`** (`jni_peer.c:784–1001`) — ~215 lines: rescan-defer heuristic, saved-blocks
   creation gate, priority-peer resolve-and-prepend, saved-block ownership transfer, BIP158

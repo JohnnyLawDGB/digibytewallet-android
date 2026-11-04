@@ -208,13 +208,14 @@ object NativeBridge {
     /** Inject a peer by IP address into the saved peers list for priority connection.
      *  Call BEFORE startSync() to ensure the peer is tried on the next connection cycle.
      *
-     *  [servicesHex] is the peer's advertised service bits (the seeder's
-     *  `services_hex`, e.g. 0x44d for a BIP157/158 filter peer where bit 0x40 =
-     *  SERVICES_NODE_COMPACT_FILTERS). Threading this through lets the native
+     *  [ip] must be an IPv4 dotted-quad literal (the core's BRSeederPeerAddress); anything
+     *  else is not added. [servicesHex] is the peer's advertised service bits (the seeder's
+     *  `services_hex` read by [seederServicesParse], e.g. 0x44d for a BIP157/158 filter peer
+     *  where bit 0x40 = SERVICES_NODE_COMPACT_FILTERS). Threading this through lets the native
      *  filter-first peer selection recognize and hold filter-capable peers.
-     *  Pass 0 when unknown — the native side falls back to
-     *  INJECT_DEFAULT_SERVICES (NODE_NETWORK|NODE_COMPACT_FILTERS), so an
-     *  untagged peer is still treated as CF-capable (the wallet is CF-only). */
+     *  Pass 0 when unknown — the core's BRSeederPeerServices tags it
+     *  NODE_NETWORK|NODE_COMPACT_FILTERS, so an untagged peer is still treated as
+     *  CF-capable (the wallet is CF-only). iOS adds seeder peers with the same functions. */
     external fun injectPeerByIp(ip: String, port: Int, servicesHex: Long)
 
     /** Pin the peer manager to a single own-node. When [exclusive] is true, the
@@ -245,6 +246,12 @@ object NativeBridge {
      *  holding [cachedCount] peers is fetched again at [nowMs] — when it is empty or more than one
      *  hour (BR_SEEDER_REFRESH_MS) old. The one copy of the rule; iOS calls the same function. */
     external fun seederShouldRefresh(lastFetchMs: Long, nowMs: Long, cachedCount: Int): Boolean
+
+    /** BRSeederServicesParse: a seeder peer's `services_hex` (e.g. "0x44d") as service bits, or 0
+     *  ("unknown") when [servicesHex] is null or cannot be read — ASCII space trimmed, one
+     *  "0x"/"0X" removed, then 1 to 16 hex digits that fit a Long. Never negative. The one copy
+     *  of the rule; iOS calls the same function. Pass the result to [injectPeerByIp]. */
+    external fun seederServicesParse(servicesHex: String?): Long
 
     /** Start SPV sync — connects to peers and begins header/transaction sync. */
     external fun startSync()
