@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug builds only: the launcher label says DEBUG so a debug wallet installed beside the
+     release app is never mistaken for it. Release keeps "HoldFast" from src/main. -->
+<resources>
+  <string name="app_name" translatable="false">HoldFast DEBUG</string>
+</resources>
