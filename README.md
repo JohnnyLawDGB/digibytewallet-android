@@ -19,8 +19,8 @@ Every release is built and signed in CI — release signing keys are never held 
 what you downloaded before installing:
 
 ```bash
-sha256sum aroundtheblock-wallet-v4.1.1.apk
-apksigner verify --print-certs aroundtheblock-wallet-v4.1.1.apk
+sha256sum aroundtheblock-wallet-v4.1.3.apk
+apksigner verify --print-certs aroundtheblock-wallet-v4.1.3.apk
 ```
 
 and compare against the SHA-256 published on the release page; the signer certificate's SHA-256 digest must be
