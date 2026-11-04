@@ -76,7 +76,7 @@ class SeederRefreshOrderGateTest {
         assertEquals("one Dandelion fetch", 1, dandelion.size)
         val guard = sync.enclosingBlock(dandelion.single().range.first)
         assertTrue("the Dandelion fetch is not inside its staleness check", guard != null &&
-            sync.code.substring(0, guard.first).trimEnd().let { Regex("""isStale\([^{]*\)\s*\)$""").containsMatchIn(it) })
+            sync.code.substring(0, guard.first).trimEnd().let { Regex("""NativeBridge\s*\.\s*seederShouldRefresh\([^{]*\)\s*\)$""").containsMatchIn(it) })
     }
 
     @Test fun `the background worker fetches only after its startSync`() {

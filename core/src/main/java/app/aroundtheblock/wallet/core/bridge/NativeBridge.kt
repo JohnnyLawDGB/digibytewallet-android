@@ -241,6 +241,11 @@ object NativeBridge {
      *  pin a canon peer over it nor clear its pin slot. */
     external fun ownNodeWatchdogMayPin(ownNodePinned: Boolean): Boolean
 
+    /** BRSeederShouldRefresh: whether a cached seeder list fetched at [lastFetchMs] (0: never) and
+     *  holding [cachedCount] peers is fetched again at [nowMs] — when it is empty or more than one
+     *  hour (BR_SEEDER_REFRESH_MS) old. The one copy of the rule; iOS calls the same function. */
+    external fun seederShouldRefresh(lastFetchMs: Long, nowMs: Long, cachedCount: Int): Boolean
+
     /** Start SPV sync — connects to peers and begins header/transaction sync. */
     external fun startSync()
     /** Flag the peer manager for a clean recreate on the next startSync() — recovers
