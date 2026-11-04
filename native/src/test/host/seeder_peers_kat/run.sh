@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Host KAT runner for BRSeederPeers.h -- which seeder peers are added, with which services,
-# and when the list is fetched again (from Android's PeerServicesPolicy.kt, jni_peer.c and
-# SeederRefreshPolicy.isStale, which now calls BRSeederShouldRefresh over JNI).
+# and when the list is fetched again (from Android's PeerServicesPolicy.kt, jni_peer.c's
+# INJECT_DEFAULT_SERVICES and SeederRefreshPolicy.isStale; Android now calls the core for all three).
 #
 # Header-only: includes BRSeederPeers.h; BRPeerManagerAddPeer is a recording stub.
 #
-#   RED    two comparison arms, each failing only its own cases:
+#   RED    three comparison arms, each failing only its own cases:
 #          -DSEEDER_PEERS_RED    keeps the "0x" prefix and adds unknown peers with no services;
+#          -DSEEDER_SERVICES_RED reads what the Kotlin parseSeederServicesHex read and the core does
+#                                not: a sign, leading zeros past 16 digits, "0x" then "0X";
 #          -DSEEDER_REFRESH_RED  lets an empty cache wait out the hour and refetches an hour-old
 #                                list (the hour half is the ">=" SyncWorker had before #187; that
 #                                SyncWorker fetched at once when nothing was cached).
@@ -27,12 +29,14 @@ CC="${CC:-clang}"
 export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 symbolize=0"
 SAN_RE='ERROR: AddressSanitizer|ERROR: LeakSanitizer|runtime error:'
 
-PEERS_CASES="services_hex_parsed unknown_services_tagged_as_the_canon untagged_peer_added_filter_capable
-             tagged_peer_keeps_its_services"
+PEERS_CASES="services_hex_parsed bloom_only_peer_has_no_filter_bit unknown_services_tagged_as_the_canon
+             untagged_peer_added_filter_capable tagged_peer_keeps_its_services"
+SERVICES_CASES="signed_services_are_unknown leading_zeros_past_16_digits_are_unknown second_prefix_is_unknown"
 REFRESH_CASES="empty_cache_refreshes one_hour_old_is_kept"
-GUARD_CASES="unreadable_services_are_unknown only_ipv4_literals_added refresh_interval_is_one_hour
+GUARD_CASES="odd_length_and_either_case_read unreadable_services_are_unknown non_ascii_forms_are_unknown
+             only_ipv4_literals_added refresh_interval_is_one_hour
              over_the_hour_refreshes never_fetched_refreshes fresh_list_kept differences_wrap_as_kotlin_long"
-ALL_CASES="$PEERS_CASES $REFRESH_CASES $GUARD_CASES"
+ALL_CASES="$PEERS_CASES $SERVICES_CASES $REFRESH_CASES $GUARD_CASES"
 
 build() {
     local out="$1"; shift
@@ -41,7 +45,7 @@ build() {
         "$SCRIPT_DIR/seeder_peers_kat_main.c" -o "$out"
 }
 
-for seam in SEEDER_PEERS_RED SEEDER_REFRESH_RED; do
+for seam in SEEDER_PEERS_RED SEEDER_SERVICES_RED SEEDER_REFRESH_RED; do
     if ! grep -q "$seam" "$CORE_DIR/BRSeederPeers.h" 2>/dev/null; then
         echo "GATE FAILURE: $CORE_DIR/BRSeederPeers.h missing or has no $seam seam; -D would be inert."
         exit 1
@@ -50,6 +54,7 @@ done
 
 FAIL=0
 build "$BUILD_DIR/red_peers" -DSEEDER_PEERS_RED || { echo "GATE FAILURE: SEEDER_PEERS_RED arm did not compile."; exit 1; }
+build "$BUILD_DIR/red_services" -DSEEDER_SERVICES_RED || { echo "GATE FAILURE: SEEDER_SERVICES_RED arm did not compile."; exit 1; }
 build "$BUILD_DIR/red_refresh" -DSEEDER_REFRESH_RED || { echo "GATE FAILURE: SEEDER_REFRESH_RED arm did not compile."; exit 1; }
 build "$BUILD_DIR/green" || { echo "GATE FAILURE: shipped arm did not compile."; exit 1; }
 
@@ -73,6 +78,7 @@ comparison_arm() {
 }
 
 comparison_arm "$BUILD_DIR/red_peers" SEEDER_PEERS_RED "$PEERS_CASES"
+comparison_arm "$BUILD_DIR/red_services" SEEDER_SERVICES_RED "$SERVICES_CASES"
 comparison_arm "$BUILD_DIR/red_refresh" SEEDER_REFRESH_RED "$REFRESH_CASES"
 
 echo "--- SHIPPED ARM: every case MUST pass, ALL PASS, exit 0, no sanitizer report ---"
@@ -89,5 +95,5 @@ for c in $(<<<"$out" sed -n 's/^RESULT \([^ ]*\) .*$/\1/p'); do
     case " $(echo $ALL_CASES) " in *" $c "*) ;; *) echo "  [green $c] GATE FAILURE: case not listed in run.sh"; FAIL=1 ;; esac
 done
 
-[ $FAIL -eq 0 ] && echo "seeder_peers_kat: GATE HELD (RED misread 0x44d, added untagged peers, and refreshed on the wrong lists; GREEN holds every rule)"
+[ $FAIL -eq 0 ] && echo "seeder_peers_kat: GATE HELD (RED misread 0x44d, added untagged peers, read the Kotlin-only forms, and refreshed on the wrong lists; GREEN holds every rule)"
 exit $FAIL

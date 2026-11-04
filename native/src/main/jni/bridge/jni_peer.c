@@ -396,13 +396,12 @@ static size_t g_savedPeersCount = 0;
 #include <netdb.h>
 #include <arpa/inet.h>
 
-/* Default services for an injected peer whose capability tags are unknown
- * (servicesHex == 0, e.g. a legacy cached pool entry or the background
- * SyncWorker): full node + compact filters. The wallet is CF-only (bloom is
- * never selected — see g_pendingSyncMode default below), so an untagged peer
- * must be treated as CF-capable rather than bloom-capable, or filter-first
- * selection would deprioritize/evict it while dialing for filter peers. */
-#define INJECT_DEFAULT_SERVICES  (SERVICES_NODE_NETWORK | SERVICES_NODE_COMPACT_FILTERS)
+/* An injected peer whose services are unknown (0: a legacy cached pool entry, or a
+ * services_hex the core could not read) is tagged by the core's seeder rule,
+ * BRSeederPeerServices (BRSeederPeers.h): full node + compact filters, never bloom-only, so it
+ * still counts toward the filter-first pool. iOS adds seeder peers with the same function.
+ * Until 2026-11 this file kept its own copy of the default (INJECT_DEFAULT_SERVICES). */
+#include "BRSeederPeers.h"
 
 /* testnet26 priority peers serve compact filters, not bloom — tag them
  * compact-filter-capable (no bloom) so filter-first selection dials them and
@@ -607,18 +606,6 @@ static void _prependSavedPeerAddr(UInt128 addr, uint16_t port, uint64_t services
     g_savedPeersCount = newCount;
 }
 
-/* Resolve + prepend in one step. For IP-literal callers (injectPeerByIp) where
- * resolution is cheap, so running it under the lock is fine. Caller holds the
- * lock. Hostname callers should split: _resolveHostToAddr (unlocked) then
- * _prependSavedPeerAddr (locked). */
-static void _injectPriorityPeer(const char *hostname, uint16_t port, uint64_t services) {
-    UInt128 addr;
-    if (!_resolveHostToAddr(hostname, &addr)) return;
-    _prependSavedPeerAddr(addr, port, services);
-    LOGI("_injectPriorityPeer: injected %s as priority peer (services=0x%llx)",
-         hostname, (unsigned long long)services);
-}
-
 /* ---------- injectPeerByIp ---------- */
 
 void JNICALL
@@ -632,16 +619,25 @@ NativeBridge_injectPeerByIp(JNIEnv *env, jobject thiz,
     const char *ip = (*env)->GetStringUTFChars(env, ipStr, NULL);
     if (!ip) return;
 
-    /* Tag the peer with the seeder-advertised services (services_hex). This is
-     * how a BIP157/158 filter peer (0x44d has SERVICES_NODE_COMPACT_FILTERS)
-     * gets recognized by BRPeerManager's filter-first selection so the wallet
-     * holds >=2 filter peers. servicesHex==0 (absent, e.g. SyncWorker or a
-     * legacy pool entry) falls back to INJECT_DEFAULT_SERVICES, which is
-     * CF-tagged (not bloom) so the untagged peer still counts toward the
-     * filter-first pool instead of being treated as bloom-only. */
-    uint64_t services = (servicesHex != 0)
-        ? (uint64_t)servicesHex
-        : INJECT_DEFAULT_SERVICES;
+    /* Tag the peer with the seeder-advertised services (services_hex, read by the
+     * core's BRSeederServicesParse through seederServicesParse). This is how a
+     * BIP157/158 filter peer (0x44d has SERVICES_NODE_COMPACT_FILTERS) gets
+     * recognized by BRPeerManager's filter-first selection so the wallet holds >=2
+     * filter peers. servicesHex==0 (unknown) is tagged by the core's rule,
+     * BRSeederPeerServices: CF-tagged, not bloom. */
+    uint64_t services = BRSeederPeerServices((uint64_t)servicesHex);
+
+    /* Only an IPv4 dotted-quad literal is added, by the core's rule (BRSeederPeerAddress),
+     * for the next manager and the live one alike. Every caller passes one (the seeder serves
+     * IPv4; the own node is resolved in Kotlin, off this lock). Until 2026-11 the kept copy
+     * went through getaddrinfo, which also took a host name (a DNS lookup under PEER_GUARD)
+     * or a shortened address such as "10.1", which the live add and iOS refuse. */
+    UInt128 addr;
+    if (!BRSeederPeerAddress(ip, &addr)) {
+        LOGW("injectPeerByIp: not an IPv4 literal, not added");
+        (*env)->ReleaseStringUTFChars(env, ipStr, ip);
+        return;
+    }
 
     /* Exclusive-mode enforcement (acceptance rig, 2026-07-26): when the user
      * pinned an own-node in exclusive mode, do NOT inject public seeder/priority
@@ -653,14 +649,7 @@ NativeBridge_injectPeerByIp(JNIEnv *env, jobject thiz,
      * is itself injected through this same path (see setPinnedPeer's contract),
      * so it MUST be allowed through — the guard drops only NON-pin peers. */
     if (g_ownNodeExclusive) {
-        UInt128 injAddr = UINT128_ZERO;
-        struct in_addr ip4x;
-        int isPin = (inet_pton(AF_INET, ip, &ip4x) == 1);
-        if (isPin) {
-            injAddr.u16[5] = 0xffff;
-            injAddr.u32[3] = ip4x.s_addr;
-            isPin = UInt128Eq(injAddr, g_pinnedAddr) && (uint16_t)port == g_pinnedPort;
-        }
+        int isPin = UInt128Eq(addr, g_pinnedAddr) && (uint16_t)port == g_pinnedPort;
         if (! isPin) {
             LOGD("injectPeerByIp: exclusive mode — dropping non-pin peer %s", ip);
             (*env)->ReleaseStringUTFChars(env, ipStr, ip);
@@ -669,8 +658,10 @@ NativeBridge_injectPeerByIp(JNIEnv *env, jobject thiz,
     }
 
     /* Update g_savedPeers for the cold-start case when peer manager doesn't
-     * exist yet — _injectPriorityPeer dedupes and prepends. */
-    _injectPriorityPeer(ip, (uint16_t)port, services);
+     * exist yet — _prependSavedPeerAddr dedupes and prepends. */
+    _prependSavedPeerAddr(addr, (uint16_t)port, services);
+    LOGI("injectPeerByIp: injected %s as priority peer (services=0x%llx)",
+         ip, (unsigned long long)services);
 
     /* If the peer manager is already alive, ALSO add to its live candidate
      * pool. Without this, post-startup injections accumulate in g_savedPeers
@@ -678,14 +669,8 @@ NativeBridge_injectPeerByIp(JNIEnv *env, jobject thiz,
      * up calling injectPeerByIp on every tick with zero effect, leaving the
      * wallet stuck at 0 peers when the initial peer set fails to dial. */
     if (g_peerManager) {
-        UInt128 addr = UINT128_ZERO;
-        struct in_addr ip4;
-        if (inet_pton(AF_INET, ip, &ip4) == 1) {
-            /* Build IPv4-mapped IPv6 address (::ffff:x.x.x.x) */
-            addr.u16[5] = 0xffff;
-            addr.u32[3] = ip4.s_addr;
-            BRPeerManagerAddPeer(g_peerManager, addr, (uint16_t)port, services);
-        }
+        /* The core's seeder add: the same address and services rule, as iOS adds them. */
+        BRSeederPeerAdd(g_peerManager, ip, (uint16_t)port, (uint64_t)servicesHex);
     }
 
     (*env)->ReleaseStringUTFChars(env, ipStr, ip);
