@@ -31,9 +31,13 @@ class SeederRefreshCoreRuleGateTest {
         assertTrue("SeederRefreshPolicy.kt is back", !File(appRoot, "service/SeederRefreshPolicy.kt").exists())
         for ((name, src) in listOf("SyncService" to sync, "SyncWorker" to worker)) {
             assertTrue("$name calls a Kotlin staleness rule", src.calls("SeederRefreshPolicy.isStale").isEmpty())
-            // The old copies: `now - lastFetch > interval` and `now - lastFetch < 60 * 60 * 1000L`.
-            assertTrue("$name compares a seeder list's age itself",
-                !Regex("""\bnow\w*\s*-\s*\w*[lL]astFetch""").containsMatchIn(src.code))
+            // The old copies: `now - lastFetch > interval` and `now - lastFetch < 60 * 60 * 1000L`. Any
+            // subtraction of a last-fetch value counts, whatever stands on the left
+            // (`System.currentTimeMillis() - lastFetch`), and so does subtracting a prefs read
+            // (`now - prefs.getLong("last_fetch", 0L)`: the key is a literal, blanked in `code`).
+            assertTrue("$name compares a seeder list's age itself", !Regex(
+                """-\s*([A-Za-z_]\w*\s*\.\s*)*\w*[lL]ast_?[fF]etch\w*|-\s*\w+\s*\.\s*getLong\s*\("""
+            ).containsMatchIn(src.code))
         }
         assertTrue("an Android-only seeder interval is back", !Regex("""\bBLOOM_REFRESH_INTERVAL_MS\b""").containsMatchIn(sync.code))
     }
@@ -67,7 +71,11 @@ class SeederRefreshCoreRuleGateTest {
 
     @Test fun `the worker's refresh is the core's answer`() {
         val inject = body(worker, "injectCachedPeers")
-        assertEquals(1, worker.calls(rule, inject).size)
+        val ask = worker.calls(rule, inject)
+        assertEquals(1, ask.size)
+        // The count is the core's "is it empty": no cached answer is 0 (refresh now), one is 1.
+        // Inverted, an empty cache would wait out the hour and a cached one be refetched each run.
+        assertEquals("SyncWorker passes the wrong cached count", "if (cachedJson == null) 0 else 1", ask.single().arguments[2])
         assertTrue("injectCachedPeers does not return $rule's answer",
             Regex("""return\s+NativeBridge\s*\.\s*seederShouldRefresh\(""").containsMatchIn(worker.code.substring(inject)))
     }

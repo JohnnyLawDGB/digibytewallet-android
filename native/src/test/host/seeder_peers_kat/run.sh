@@ -8,7 +8,8 @@
 #   RED    two comparison arms, each failing only its own cases:
 #          -DSEEDER_PEERS_RED    keeps the "0x" prefix and adds unknown peers with no services;
 #          -DSEEDER_REFRESH_RED  lets an empty cache wait out the hour and refetches an hour-old
-#                                list (the ">=" SyncWorker had before #187).
+#                                list (the hour half is the ">=" SyncWorker had before #187; that
+#                                SyncWorker fetched at once when nothing was cached).
 #          In each arm every one of its RED cases MUST fail and every other case pass.
 #   GREEN  the shipped rule: every case passes, ALL PASS, exit 0. Every arm under ASan + UBSan.
 #
