@@ -98,7 +98,7 @@ class StaleSendCoreRuleGateTest {
         assertEquals("an input's answer does not reach the core whole", listOf("outputUnspent(t, v)"),
             node.calls("staleInputCode", b).single().arguments)
         assertTrue("the loop is not bounded to one question for the txid and one per input",
-            Regex("""repeat\(\s*inputs\.size\s*\+\s*2\s*\)""").containsMatchIn(text))
+            Regex("""for\s*\(\s*\w+\s+in\s+0\s+until\s+inputs\.size\s*\+\s*2\s*\)""").containsMatchIn(text))
         assertTrue("only the core's NEVER_RELAYED may answer true",
             Regex("""STALE_STEP_NEVER_RELAYED\s*->\s*return\s+true""").containsMatchIn(text) &&
                 Regex("""return\s+true""").findAll(text).count() == 1)

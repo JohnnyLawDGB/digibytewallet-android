@@ -237,7 +237,7 @@ class DgbNodeClient(
         var txStatus = STALE_TX_NOT_ASKED
         var asked = 0
         var lastAnswer = STALE_INPUT_NO_ANSWER
-        repeat(inputs.size + 2) {
+        for (question in 0 until inputs.size + 2) {
             when (NativeBridge.staleSendNextStep(pinned, inputs.size, txStatus, asked, lastAnswer)) {
                 STALE_STEP_ASK_TX -> txStatus = staleTxCode(txNetworkStatus(txid))
                 STALE_STEP_ASK_INPUT -> {
