@@ -45,25 +45,12 @@ data class StuckSendResult(
      *  because it is a different failure from a merely-dead send, and a user who was told
      *  "nothing to clear" by an earlier version deserves to see that it found something. */
     val orphansCleared: Int = 0,
-    /** Of [dropped], how many were STALE ([StaleSendPredicate]): valid, unconfirmed a day or more,
-     *  and unknown to the network -- never relayed, so nothing would ever have released their coins. */
+    /** Of [dropped], how many were STALE (BRStaleSend.h, through NativeBridge.staleSendIsStale): valid,
+     *  unconfirmed a day or more, and unknown to the network -- never relayed, so nothing would ever have
+     *  released their coins (4.1.3, review R8). Every unconfirmed DigiDollar send is held pending, so one
+     *  that never relayed kept its coins for good. */
     val staleCleared: Int = 0,
 )
-
-/**
- * An own send that is valid but went nowhere (4.1.3, review R8): unconfirmed for [MIN_AGE_S] or more and,
- * on the pinned node's evidence ([app.aroundtheblock.wallet.core.reconcile.DgbNodeClient.sendNeverRelayed]),
- * never taken by the network -- the node does not know the txid and every input is still unspent. Every
- * unconfirmed DigiDollar send is held pending, so one that never relayed kept its coins for good.
- */
-object StaleSendPredicate {
-    const val MIN_AGE_S = 24L * 60 * 60
-
-    /** Old enough to ask the node about (a send with no timestamp is never old enough). */
-    fun oldEnough(timestampS: Long, nowS: Long): Boolean = timestampS > 0L && nowS - timestampS >= MIN_AGE_S
-
-    fun isStale(timestampS: Long, nowS: Long, neverRelayed: Boolean): Boolean = oldEnough(timestampS, nowS) && neverRelayed
-}
 
 /**
  * The `cf_birth_height` value to persist for a given native birth-checkpoint height,
@@ -579,8 +566,9 @@ class WalletManager @Suppress("LongParameterList") constructor(
      * (e.g. `withContext(Dispatchers.IO) { walletManager.clearStuckSends() }`).
      */
     suspend fun clearStuckSends(
-        /** Whether the network never took a send with these inputs ([StaleSendPredicate]); the default
-         *  cannot tell, so no send is cleared as stale. */
+        /** Whether the network never took a send with these inputs
+         *  ([app.aroundtheblock.wallet.core.reconcile.DgbNodeClient.sendNeverRelayed], decided by the core);
+         *  the default cannot tell, so no send is cleared as stale. */
         neverRelayed: suspend (txid: String, inputs: List<Pair<String, Int>>) -> Boolean = { _, _ -> false },
         nowS: Long = System.currentTimeMillis() / 1000L,
     ): StuckSendResult {
@@ -662,8 +650,8 @@ class WalletManager @Suppress("LongParameterList") constructor(
                 // Valid and not orphaned, but a day old and unknown to the network: it never relayed, and
                 // nothing else would release its coins (R8). The node is asked only about such a send.
                 val ts = p[4].toLongOrNull() ?: 0L
-                val stale = !dead && !orphan && StaleSendPredicate.oldEnough(ts, nowS) &&
-                    StaleSendPredicate.isStale(ts, nowS, neverRelayed(txid,
+                val stale = !dead && !orphan && NativeBridge.staleSendOldEnough(ts, nowS) &&
+                    NativeBridge.staleSendIsStale(ts, nowS, neverRelayed(txid,
                         OrphanSendPredicate.parseInputs(runCatching { NativeBridge.getTransactionInputsForHash(txid) }.getOrNull())
                             .map { it.prevTxid to it.prevVout }))
                 if (stale) {

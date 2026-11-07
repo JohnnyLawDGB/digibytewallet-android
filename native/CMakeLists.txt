@@ -146,6 +146,7 @@ add_library(
         src/main/jni/bridge/jni_fee_quote.c
         src/main/jni/bridge/jni_own_node.c
         src/main/jni/bridge/jni_seeder_peers.c
+        src/main/jni/bridge/jni_stale_send.c
         src/main/jni/bridge/jni_class_paths.h
         src/main/jni/bridge/jni_registry_gen.h
         src/main/jni/bridge/jni_registry.c

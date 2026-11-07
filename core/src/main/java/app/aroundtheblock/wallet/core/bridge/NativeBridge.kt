@@ -253,6 +253,22 @@ object NativeBridge {
      *  of the rule; iOS calls the same function. Pass the result to [injectPeerByIp]. */
     external fun seederServicesParse(servicesHex: String?): Long
 
+    /** BRStaleSendOldEnough: a send with [timestampS] (seconds; 0: none) is old enough at [nowS] to
+     *  ask the node whether it ever relayed -- above 0 and one day (BR_STALE_SEND_MIN_AGE_S) old or
+     *  more, the difference wrapping as a Long does. The one copy of the rule (4.1.3, R8); iOS calls
+     *  the same function. */
+    external fun staleSendOldEnough(timestampS: Long, nowS: Long): Boolean
+
+    /** BRStaleSendIsStale: old enough ([staleSendOldEnough]) and [neverRelayed]. The stale-send
+     *  clear removes such a send, which gives its coins back. */
+    external fun staleSendIsStale(timestampS: Long, nowS: Long, neverRelayed: Boolean): Boolean
+
+    /** BRStaleSendNextStep: from the node's answers so far, what [app.aroundtheblock.wallet.core.reconcile.DgbNodeClient.sendNeverRelayed]
+     *  asks next or its verdict. [txStatus] is a BRStaleSendTxStatus (0: not asked yet),
+     *  [lastInputAnswer] the BRStaleSendInputAnswer for input [inputsAsked] - 1. Returns a
+     *  BRStaleSendStep: 0 not shown, 1 never relayed, 2 ask the txid, 3 ask input [inputsAsked]. */
+    external fun staleSendNextStep(pinnedNode: Boolean, inputCount: Int, txStatus: Int, inputsAsked: Int, lastInputAnswer: Int): Int
+
     /** Start SPV sync — connects to peers and begins header/transaction sync. */
     external fun startSync()
     /** Flag the peer manager for a clean recreate on the next startSync() — recovers
