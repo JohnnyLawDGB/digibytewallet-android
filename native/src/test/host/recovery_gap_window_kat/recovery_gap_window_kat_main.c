@@ -122,9 +122,10 @@ int main(void)
     result("use_past_the_window_grows_a_gap_past_it", ok, why);
 
     // A grown window grows by at least a whole gap, even when the use sits right at its end.
-    ok = BRRecoveryGapNext(0, 200, 100) == 300 && BRRecoveryGapNext(1, 100, 50) == 150;
-    snprintf(why, sizeof(why), "next(200, 100) = %d, internal next(100, 50) = %d",
-             BRRecoveryGapNext(0, 200, 100), BRRecoveryGapNext(1, 100, 50));
+    ok = BRRecoveryGapNext(0, 200, 100) == 300 && BRRecoveryGapNext(1, 100, 50) == 150 &&
+         BRRecoveryGapNext(0, 50, 0) == 150;
+    snprintf(why, sizeof(why), "next(200, 100) = %d, internal next(100, 50) = %d, next(50, 0) = %d",
+             BRRecoveryGapNext(0, 200, 100), BRRecoveryGapNext(1, 100, 50), BRRecoveryGapNext(0, 50, 0));
     result("grown_window_grows_by_a_whole_gap", ok, why);
 
     ok = BRRecoveryGapNext(0, 1950, 1990) == 2000 && BRRecoveryGapNext(1, 990, 989) == 1000;
@@ -137,6 +138,12 @@ int main(void)
     // Never below count: a window already past the cap (a profile's own start) is kept.
     ok = BRRecoveryGapNext(0, 5000, 4999) == 5000 && BRRecoveryGapNext(1, 1200, 10) == 1200;
     result("never_below_count", ok, NULL);
+
+    // Index 0 is a used address, not "nothing used": only a negative index is Kotlin's null.
+    ok = BRRecoveryGapNext(0, 0, 0) == 101 && BRRecoveryGapNext(1, 0, 0) == 51 && BRRecoveryGapNext(0, 50, 0) > 50 &&
+         BRRecoveryGapCapped(0, 0) == 0 && BRRecoveryGapOutcome(0, 0, 101, 51, 0, 0, 1, 22) == BR_RECOVERY_GAP_ASK_AGAIN;
+    snprintf(why, sizeof(why), "next(0, 0) = %d, next(50, 0) = %d", BRRecoveryGapNext(0, 0, 0), BRRecoveryGapNext(0, 50, 0));
+    result("index_zero_is_used", ok, why);
 
     // Kotlin's null is any negative index here (a real index never is).
     ok = BRRecoveryGapNext(0, 200, -5) == 200 && BRRecoveryGapNext(0, 0, INT32_MIN) == 0 && ! BRRecoveryGapCapped(1, -1);

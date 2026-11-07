@@ -35,7 +35,7 @@ CAP_RED_CASES="round_bound_stop_is_capped cap_stop_is_capped path_in_use_at_the_
                always_used_lookup_is_bounded_and_capped use_near_the_far_end_reaches_the_cap_in_whole_gaps"
 GUARD_CASES="gaps_and_caps_are_kotlins nothing_used_keeps_the_window use_a_gap_from_the_end_keeps_the_window
              use_past_the_window_grows_a_gap_past_it growth_stops_at_the_cap use_within_a_gap_of_the_cap_is_capped
-             never_below_count a_negative_index_is_nothing_used arithmetic_wraps_as_kotlin_int
+             never_below_count index_zero_is_used a_negative_index_is_nothing_used arithmetic_wraps_as_kotlin_int
              unknown_chain_never_grows_and_is_capped round_bound growing_path_asks_again_and_settled_path_is_finished
              coin_past_the_fixed_window_is_found empty_path_is_asked_once paid_but_emptied_address_widens_the_window"
 ALL_CASES="$(echo $GAP_RED_CASES $CAP_RED_CASES $GUARD_CASES | tr ' ' '\n' | awk '!seen[$0]++' | tr '\n' ' ')"
