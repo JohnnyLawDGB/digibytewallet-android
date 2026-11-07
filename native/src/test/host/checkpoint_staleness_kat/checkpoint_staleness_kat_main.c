@@ -48,14 +48,20 @@
 //        7 |    40,320 |            40,320 |    ~28 MB
 //       14 |    80,640 |            80,640 |    ~56 MB
 //       21 |   120,960 |           120,960 |    ~85 MB
+//       28 |   161,280 |           161,280 |   ~113 MB
 //       60 |   345,600 |           345,600 |   ~242 MB   <-- what shipped in 2026-08
 //
-// FAIL at 21 days. It cannot usefully go lower: BRPeerManager.c:4754 only selects a
-// checkpoint whose timestamp is at least 7 days older than the wallet's earliest key
-// time, so ~7 days of span is structural and no table can beat it.
+// FAIL at 28 days (Mark, 2026-11-07; was 21). The table cannot be kept much fresher
+// than that by construction: checkpoints sit on a 50,000-block grid (~8.7 days) and a
+// row is only added once it is 50,000 blocks deep (gen_block_checkpoints.sh MIN_DEPTH,
+// ~8.7 days), so the newest addable row is always ~9-17 days old. At 21 days the gate
+// went red roughly every 9 days between refreshes; 28 leaves room for a refresh on a
+// two-week cadence. It cannot usefully go below ~7: BRPeerManager.c:4754 only selects
+// a checkpoint whose timestamp is at least 7 days older than the wallet's earliest key
+// time.
 // WARN at 14 days so the table gets refreshed on a normal release cadence instead of
 // first becoming visible as a red CI run.
-#define CKPT_MAX_STALE_DAYS   21
+#define CKPT_MAX_STALE_DAYS   28
 #define CKPT_WARN_STALE_DAYS  14
 #define DGB_BLOCKS_PER_DAY    5760   /* 86400s / 15s target spacing */
 
