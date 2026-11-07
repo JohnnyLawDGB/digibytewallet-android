@@ -253,6 +253,28 @@ object NativeBridge {
      *  of the rule; iOS calls the same function. Pass the result to [injectPeerByIp]. */
     external fun seederServicesParse(servicesHex: String?): Long
 
+    /** BRRecoveryGapNext: the window [count] (addresses 0 until count) of the recovery scan's
+     *  [chain] (0 external, 1 internal) grows to, given [highestUsed] (negative: nothing used) —
+     *  a gap (100 external, 50 internal) past the last use, by at least a whole gap, up to the cap
+     *  (2000 / 1000); [count] when it already reaches a gap past it. The one copy of the rule
+     *  (BRRecoveryGapWindow.h); iOS calls the same function. */
+    external fun recoveryGapNext(chain: Int, count: Int, highestUsed: Int): Int
+
+    /** BRRecoveryGapOutcome: what one round's answer is for a path whose windows were
+     *  [externalCount]/[internalCount] and should now be [nextExternal]/[nextInternal]
+     *  ([recoveryGapNext]), with highest used indices [usedExternal]/[usedInternal] (negative:
+     *  none), on [round] (from 1) of at most [bound] ([recoveryGapRoundBound]): 0 ask again,
+     *  1 finished, 2 capped (not a finished answer). Any other value is to be read as capped. */
+    external fun recoveryGapOutcome(
+        externalCount: Int, internalCount: Int, nextExternal: Int, nextInternal: Int,
+        usedExternal: Int, usedInternal: Int, round: Int, bound: Int,
+    ): Int
+
+    /** BRRecoveryGapScanRoundBound: more rounds than any path's windows can take to reach their
+     *  caps from the smallest starting windows [startExternal]/[startInternal] (0 and 0 when there
+     *  are no paths). */
+    external fun recoveryGapRoundBound(startExternal: Int, startInternal: Int): Int
+
     /** Start SPV sync — connects to peers and begins header/transaction sync. */
     external fun startSync()
     /** Flag the peer manager for a clean recreate on the next startSync() — recovers

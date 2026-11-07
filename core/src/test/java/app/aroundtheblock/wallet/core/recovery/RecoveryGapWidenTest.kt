@@ -11,9 +11,16 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * The plain-DGB recovery scan widens each path's window while its far end is in use, and says so
- * when its cap stops it (4.1.3 G1). A fixed 200/100 window lost every coin past it and still reported
- * a finished answer.
+ * The plain-DGB recovery scan's loop around the core's gap rule (4.1.3 G1): it asks the rule with
+ * each chain's highest used index (counting an address paid but since emptied), derives a path
+ * again at the windows the rule gives while the rule says to ask again, keeps the answer finished
+ * or capped as the rule says, and reads an outcome it does not know as capped.
+ *
+ * The rule itself (how far a window grows, when the cap stops it, the round bound) is the core's,
+ * BRRecoveryGapWindow.h; its values, including every case this test held while the rule was
+ * Kotlin, are checked by the host KAT recovery_gap_window_kat. NativeBridge cannot load on the host
+ * JVM, so here the rule is [Scripted]: a stand-in whose answers each test chooses, deliberately not
+ * the core's arithmetic.
  */
 class RecoveryGapWidenTest {
     private val profile = DerivationProfile.BUILT_INS.first { it.label == "Legacy DigiByte mobile wallet" }
@@ -32,34 +39,78 @@ class RecoveryGapWidenTest {
         return a to ReconcileResult(listOf(UtxoEntry("%064x".format(chain * 10_000 + i), 0, sat, a, 100L, "00")), emptyMap(), 200L)
     }
 
-    private fun service(byAddress: Map<String, ReconcileResult>) =
-        FakeUtxoSource(byAddress).let { it to RecoveryScanService(it, listOf(profile)) }
+    /** A rule whose answers the test scripts, recording what the scan asked it. */
+    private class Scripted(
+        val bound: Int = 20,
+        val nextFn: (chain: Int, count: Int, used: Int?) -> Int = { _, count, _ -> count },
+        val outcomeFn: (grew: Boolean, round: Int, bound: Int) -> Int =
+            { grew, round, b -> if (grew && round < b) RecoveryGapRule.ASK_AGAIN else RecoveryGapRule.FINISHED },
+    ) : RecoveryGapRule {
+        val nextCalls = mutableListOf<Triple<Int, Int, Int?>>()
+        val outcomeCalls = mutableListOf<List<Int?>>()
+        var boundAskedWith: Pair<Int, Int>? = null
 
-    @Test fun aCoinPastTheFixedWindowIsFound() = runBlocking {
-        // 150 is inside the old window, 250 is past it: the old scan reported 1 000 sat, complete.
-        val (_, svc) = service(mapOf(coinAt(0, 150), coinAt(0, 250)))
+        override fun next(chain: Int, count: Int, highestUsed: Int?): Int {
+            nextCalls += Triple(chain, count, highestUsed)
+            return nextFn.invoke(chain, count, highestUsed)
+        }
+
+        override fun outcome(
+            externalCount: Int, internalCount: Int, nextExternal: Int, nextInternal: Int,
+            usedExternal: Int?, usedInternal: Int?, round: Int, bound: Int,
+        ): Int {
+            outcomeCalls += listOf(externalCount, internalCount, nextExternal, nextInternal, usedExternal, usedInternal, round, bound)
+            return outcomeFn.invoke(nextExternal != externalCount || nextInternal != internalCount, round, bound)
+        }
+
+        override fun roundBound(startExternal: Int, startInternal: Int): Int {
+            boundAskedWith = startExternal to startInternal
+            return bound
+        }
+    }
+
+    private fun service(byAddress: Map<String, ReconcileResult>, rule: RecoveryGapRule) =
+        FakeUtxoSource(byAddress).let { it to RecoveryScanService(it, listOf(profile), rule) }
+
+    @Test fun aCoinPastTheFirstWindowIsFoundOnceTheRuleWidensIt() = runBlocking {
+        // 150 is inside the 200 window, 250 is past it. The rule widens external to 400 once.
+        val rule = Scripted(nextFn = { chain, count, used -> if (chain == 0 && count == 200 && used != null) 400 else count })
+        val (src, svc) = service(mapOf(coinAt(0, 150), coinAt(0, 250)), rule)
         val done = svc.classifyWidening(::derive, outputScripts = { emptySet() }, scriptOf = { null })
         assertEquals(2_000L, done.totalBalanceSat)
         assertFalse(done.results.single().capped)
         assertTrue(done.cappedProfileLabels.isEmpty())
+        assertEquals(2, src.fetchCount)
+        // Asked with each chain's highest used index: 150 in the first window, 250 in the second;
+        // nothing on the internal chain.
+        assertEquals(listOf(Triple(0, 200, 150), Triple(1, 100, null), Triple(0, 400, 250), Triple(1, 100, null)), rule.nextCalls)
+        assertEquals(200 to 100, rule.boundAskedWith)
     }
 
     @Test fun anEmptyPathIsAskedOnce() = runBlocking {
-        val (src, svc) = service(emptyMap())
+        val rule = Scripted()
+        val (src, svc) = service(emptyMap(), rule)
         val done = svc.classifyWidening(::derive, outputScripts = { emptySet() }, scriptOf = { null })
         assertEquals(1, src.fetchCount)
         assertEquals(0L, done.totalBalanceSat)
         assertFalse(done.results.single().capped)
+        assertEquals(listOf(listOf<Int?>(200, 100, 200, 100, null, null, 1, 20)), rule.outcomeCalls)
     }
 
-    @Test fun aPathStillInUseAtTheCapIsMarkedIncomplete() = runBlocking {
-        // A coin every 90 indices: each window's far end is always in use, up to the cap.
-        val coins = (0 until RecoveryGapWindow.MAX_EXTERNAL step 90).associate { coinAt(0, it) }
-        val (_, svc) = service(coins)
+    @Test fun aPathTheRuleCallsCappedIsMarkedIncomplete() = runBlocking {
+        val rule = Scripted(outcomeFn = { _, _, _ -> 2 /* BR_RECOVERY_GAP_CAPPED */ })
+        val (_, svc) = service(mapOf(coinAt(0, 10)), rule)
         val done = svc.classifyWidening(::derive, outputScripts = { emptySet() }, scriptOf = { null })
         assertTrue(done.results.single().capped)
         assertEquals(listOf(profile.label), done.cappedProfileLabels)
-        assertEquals(RecoveryGapWindow.MAX_EXTERNAL, done.results.single().derivedAddresses.count { it.chain == 0 })
+        assertEquals(1_000L, done.totalBalanceSat)
+    }
+
+    @Test fun anOutcomeTheScanDoesNotKnowIsReadAsCapped() = runBlocking {
+        val rule = Scripted(outcomeFn = { _, _, _ -> 7 })
+        val (_, svc) = service(emptyMap(), rule)
+        val done = svc.classifyWidening(::derive, outputScripts = { emptySet() }, scriptOf = { null })
+        assertTrue(done.results.single().capped)
     }
 
     @Test fun anAddressPaidButEmptiedCountsAsUsed() = runBlocking {
@@ -73,39 +124,41 @@ class RecoveryGapWidenTest {
             ),
             coinAt(0, 280),
         )
-        val (_, svc) = service(withTx)
+        // The rule widens only when something at 150 or above is used: 10 alone would not.
+        val rule = Scripted(nextFn = { chain, count, used -> if (chain == 0 && count == 200 && (used ?: 0) >= 150) 300 else count })
+        val (_, svc) = service(withTx, rule)
         val done = svc.classifyWidening(
             ::derive,
             outputScripts = { r -> if (r.rawTxs.isNotEmpty()) setOf("script-$paid") else emptySet() },
             scriptOf = { a -> "script-$a" },
         )
+        assertEquals(Triple(0, 200, 190), rule.nextCalls.first())
         assertEquals(1_500L, done.totalBalanceSat)
     }
 
-    @Test fun aLookupThatAlwaysAnswersUsedIsBoundedAndAskedOnlyForGrownPaths() = runBlocking {
-        // Every address "used": the window must reach the cap in whole-gap steps, not one per address.
-        val everything = object : UtxoSource {
-            var calls = 0
-            override suspend fun fetchUtxos(addresses: List<String>): ReconcileResult {
-                calls++
-                return ReconcileResult(addresses.map { UtxoEntry("%064x".format(it.hashCode().toLong() and 0xffffffffL), 0, 1L, it, 100L, "00") }, emptyMap(), 200L)
-            }
-        }
-        val svc = RecoveryScanService(everything, listOf(profile))
+    @Test fun theRoundBoundComesFromTheRuleAndEachRoundIsNumbered() = runBlocking {
+        // A rule that always grows: the scan asks again until the rule's bound, then keeps the
+        // answer the rule gives at the bound (capped).
+        val rule = Scripted(
+            bound = 3,
+            nextFn = { _, count, _ -> count + 10 },
+            outcomeFn = { grew, round, b -> if (grew && round < b) RecoveryGapRule.ASK_AGAIN else 2 },
+        )
+        val (src, svc) = service(emptyMap(), rule)
         val done = svc.classifyWidening(::derive, outputScripts = { emptySet() }, scriptOf = { null })
+        assertEquals(3, src.fetchCount)
+        assertEquals(listOf(1, 2, 3), rule.outcomeCalls.map { it[6] })
+        assertTrue(rule.outcomeCalls.all { it[7] == 3 })
+        // Each round derives at the windows the previous round's rule answer gave.
+        assertEquals(listOf(200, 210, 220), rule.outcomeCalls.map { it[0] })
+        assertEquals(listOf(100, 110, 120), rule.outcomeCalls.map { it[1] })
         assertTrue(done.results.single().capped)
-        assertTrue("rounds ${everything.calls}", everything.calls <= RecoveryGapWindow.roundBound(100, 50, 1000))
+        assertEquals(220, done.results.single().derivedAddresses.count { it.chain == 0 })
     }
 
-    @Test fun gapWindowArithmetic() {
-        assertEquals(200, RecoveryGapWindow.next(200, null, 100, 2000))
-        assertEquals(200, RecoveryGapWindow.next(200, 99, 100, 2000))
-        assertEquals(351, RecoveryGapWindow.next(200, 250, 100, 2000))
-        // a grown window grows by at least a whole gap, even when the use sits right at its end
-        assertEquals(300, RecoveryGapWindow.next(200, 100, 100, 2000))
-        assertEquals(2000, RecoveryGapWindow.next(1950, 1990, 100, 2000))
-        assertTrue(RecoveryGapWindow.capped(1990, 100, 2000))
-        assertFalse(RecoveryGapWindow.capped(1899, 100, 2000))
-        assertNull(RecoveryGapWindow.highestUsed(listOf(DerivedAddress("a", 0, 3)), setOf("a"), 1))
+    @Test fun highestUsedIsPerChain() {
+        val svc = RecoveryScanService(FakeUtxoSource(emptyMap()), listOf(profile), Scripted())
+        assertNull(svc.highestUsed(listOf(DerivedAddress("a", 0, 3)), setOf("a"), 1))
+        assertEquals(7, svc.highestUsed(listOf(DerivedAddress("a", 0, 3), DerivedAddress("b", 0, 7), DerivedAddress("c", 1, 9)), setOf("a", "b", "c"), 0))
     }
 }
