@@ -25,6 +25,8 @@ import kotlinx.coroutines.withContext
 class RecoveryScanService(
     private val utxoSource: UtxoSource,
     private val profiles: List<DerivationProfile> = DerivationProfile.BUILT_INS,
+    /** How far each path's window widens and when its answer is finished: the core's rule. */
+    private val gapRule: RecoveryGapRule = RecoveryGapRule.Core,
 ) {
     sealed class State {
         object Idle : State()
@@ -83,7 +85,7 @@ class RecoveryScanService(
                     .map { it.profile.label }
 
             /** Paths whose window the scan's cap stopped while the far end was still in use
-             *  ([RecoveryGapWindow]): there may be more on them than this answer shows. */
+             *  ([RecoveryGapRule]): there may be more on them than this answer shows. */
             val cappedProfileLabels: List<String> =
                 results.filter { it.capped }.map { it.profile.label }
         }
@@ -104,7 +106,7 @@ class RecoveryScanService(
          *  Distinguishes "we asked and got nothing" from "we never got an
          *  answer" — critical for honest UX during backend outages. */
         val reachableBackend: Boolean = true,
-        /** The window reached its cap with the far end still in use ([RecoveryGapWindow]): not a
+        /** The window reached its cap with the far end still in use ([RecoveryGapRule]): not a
          *  finished answer for this path. */
         val capped: Boolean = false,
     ) {
@@ -171,7 +173,8 @@ class RecoveryScanService(
      * fixed window lost every coin past it and the scan still said it was done. [derive] derives the
      * given profiles at their own gaps; [outputScripts] lists the output scripts (hex) of the
      * transactions a lookup returned, which is how an address paid but since emptied counts as used.
-     * Each round asks again only while some window grew; a window the cap stopped is marked capped.
+     * Each round asks again only for the paths [gapRule] says to (the core's BRRecoveryGapOutcome);
+     * a path it calls capped is marked capped.
      */
     internal suspend fun classifyWidening(
         derive: (List<DerivationProfile>) -> Map<DerivationProfile, List<DerivedAddress>>,
@@ -181,10 +184,7 @@ class RecoveryScanService(
         // Each round asks again only for the paths whose window grew; the others keep their answer.
         val answer = arrayOfNulls<ProfileResult>(profiles.size)
         var pending = profiles.indices.associateWith { profiles[it] }
-        val bound = maxOf(
-            RecoveryGapWindow.roundBound(profiles.minOfOrNull { it.gapExternal } ?: 0, RecoveryGapWindow.GAP_EXTERNAL, RecoveryGapWindow.MAX_EXTERNAL),
-            RecoveryGapWindow.roundBound(profiles.minOfOrNull { it.gapInternal } ?: 0, RecoveryGapWindow.GAP_INTERNAL, RecoveryGapWindow.MAX_INTERNAL),
-        )
+        val bound = gapRule.roundBound(profiles.minOfOrNull { it.gapExternal } ?: 0, profiles.minOfOrNull { it.gapInternal } ?: 0)
         var round = 0
         var last: State.Done? = null
         while (pending.isNotEmpty()) {
@@ -202,18 +202,14 @@ class RecoveryScanService(
                 if (scripts.isNotEmpty()) {
                     for (d in r.derivedAddresses) if (d.address !in used && scriptOf(d.address) in scripts) used += d.address
                 }
-                val usedExt = RecoveryGapWindow.highestUsed(r.derivedAddresses, used, 0)
-                val usedInt = RecoveryGapWindow.highestUsed(r.derivedAddresses, used, 1)
-                val ext = RecoveryGapWindow.next(p.gapExternal, usedExt, RecoveryGapWindow.GAP_EXTERNAL, RecoveryGapWindow.MAX_EXTERNAL)
-                val int = RecoveryGapWindow.next(p.gapInternal, usedInt, RecoveryGapWindow.GAP_INTERNAL, RecoveryGapWindow.MAX_INTERNAL)
-                val grew = ext != p.gapExternal || int != p.gapInternal
-                if (grew && round < bound) {
-                    next[idx] = p.copy(gapExternal = ext, gapInternal = int)
-                } else {
-                    val capped = grew ||
-                        RecoveryGapWindow.capped(usedExt, RecoveryGapWindow.GAP_EXTERNAL, RecoveryGapWindow.MAX_EXTERNAL) ||
-                        RecoveryGapWindow.capped(usedInt, RecoveryGapWindow.GAP_INTERNAL, RecoveryGapWindow.MAX_INTERNAL)
-                    answer[idx] = if (capped) r.copy(capped = true) else r
+                val usedExt = highestUsed(r.derivedAddresses, used, 0)
+                val usedInt = highestUsed(r.derivedAddresses, used, 1)
+                val ext = gapRule.next(0, p.gapExternal, usedExt)
+                val int = gapRule.next(1, p.gapInternal, usedInt)
+                when (gapRule.outcome(p.gapExternal, p.gapInternal, ext, int, usedExt, usedInt, round, bound)) {
+                    RecoveryGapRule.ASK_AGAIN -> next[idx] = p.copy(gapExternal = ext, gapInternal = int)
+                    RecoveryGapRule.FINISHED -> answer[idx] = r
+                    else -> answer[idx] = r.copy(capped = true)
                 }
             }
             pending = next
@@ -223,6 +219,11 @@ class RecoveryScanService(
         _state.value = merged
         return merged
     }
+
+    /** The highest index on [chain] (0 external, 1 internal) among [derived] whose address is in
+     *  [used], or null when none is: the "used" input the core's gap rule is asked with. */
+    internal fun highestUsed(derived: List<DerivedAddress>, used: Set<String>, chain: Int): Int? =
+        derived.filter { it.chain == chain && it.address in used }.maxOfOrNull { it.index }
 
     /** Output scripts (hex, lowercase) of every transaction a lookup returned for [r]. Parsed natively. */
     private fun outputScriptsOf(r: ProfileResult): Set<String> {
