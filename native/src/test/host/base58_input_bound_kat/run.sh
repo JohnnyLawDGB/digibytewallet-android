@@ -52,20 +52,25 @@ build() {   # <out> <64|32> [-D...]
 }
 
 # bounded <limit> <outfile> <cmd...>: exit code of the command, or 124 if it was stopped at the limit.
+# The watchdog leaves <outfile>.stopped BEFORE it kills, and that file alone says the run was
+# stopped. Asking whether the watchdog is still alive does not: `wait` returns as soon as the
+# kill lands, often before the watchdog subshell has exited, and a stopped run was then reported
+# as one that returned rc=137 by itself (core CI runs 42417707869 and 42442804014).
 bounded() {
     local limit="$1" outfile="$2"; shift 2
+    local stopped="$outfile.stopped"
+    rm -f "$stopped"
     "$@" >"$outfile" 2>&1 &
     local pid=$!
     # The watchdog subshell inherits this script's EXIT trap; a plain kill would run it and
     # remove $BUILD_DIR under the other arms. Drop the trap inside, and stop the watchdog with a
     # signal that runs no trap at all.
-    ( trap - EXIT; sleep "$limit"; kill -9 "$pid" 2>/dev/null ) >/dev/null 2>&1 &
+    ( trap - EXIT; sleep "$limit"; : >"$stopped"; kill -9 "$pid" 2>/dev/null ) >/dev/null 2>&1 &
     local watchdog=$!
     wait "$pid" 2>/dev/null; local rc=$?
-    if kill -0 "$watchdog" 2>/dev/null; then
-        kill -9 "$watchdog" 2>/dev/null; wait "$watchdog" 2>/dev/null; return $rc
-    fi
-    return 124
+    kill -9 "$watchdog" 2>/dev/null; wait "$watchdog" 2>/dev/null
+    [ -e "$stopped" ] && return 124
+    return $rc
 }
 
 ARMS=("red64 64 -DBASE58_INPUT_BOUND_UNFIXED" "green64 64" "red32 32 -DBASE58_INPUT_BOUND_UNFIXED" "green32 32")
@@ -84,6 +89,18 @@ for arm in "${ARMS[@]}"; do
         exit 1
     fi
 done
+# Each binary names the arm it was built as; a binary at the wrong path, or built without (or
+# with) the -D, fails here rather than as a confusing case result later.
+for arm in "${ARMS[@]}"; do
+    set -- $arm; name="$1"; bits="$2"; shift 2
+    want="shipped"; [ "$#" -gt 0 ] && want="comparison"
+    got="$("$BUILD_DIR/$name" arm 2>&1)"
+    if [ "$got" != "arm: $want, ${bits}-bit" ]; then
+        echo "GATE FAILURE: $name says \"$got\"; it must say \"arm: $want, ${bits}-bit\"."
+        exit 1
+    fi
+done
+echo "arms: red64, red32 comparison (-DBASE58_INPUT_BOUND_UNFIXED); green64, green32 shipped; each confirmed by the binary"
 ENTRIES=($("$BUILD_DIR/green64" list))
 DECODERS=($("$BUILD_DIR/green64" list-decoders))
 if [ "${#ENTRIES[@]}" -eq 0 ] || [ "${#DECODERS[@]}" -eq 0 ]; then echo "GATE FAILURE: the KAT lists no entry points."; exit 1; fi
@@ -140,6 +157,9 @@ for bits in 64 32; do
             printf '  [%s entry %s] still decoding at %ss; stopped\n' "$arm" "$e" "$RED_LIMIT_S"
         elif [ "$rc" = "124" ]; then
             printf '  [%s entry %s] GATE FAILURE: stopped before it reached the decode (a loaded machine?)\n' "$arm" "$e"
+            FAIL=1
+        elif [ "$rc" != "none" ] && [ "$rc" -ge 128 ]; then
+            printf '  [%s entry %s] GATE FAILURE: ended by signal %s before the limit, not by the watchdog (OOM killer?)\n' "$arm" "$e" "$((rc - 128))"
             FAIL=1
         else
             printf '  [%s entry %s] GATE FAILURE: returned (rc=%s); this KAT cannot see what the bound governs\n' "$arm" "$e" "$rc"
