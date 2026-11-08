@@ -125,11 +125,14 @@ class RecoveryScanService(
         // Each chain's window widens while its far end is in use ([DigiDollarGapRule], the core's
         // rule): DigiDollar change walks the internal chain one index per send, past any fixed
         // window (4.1.2 row 19). Lookups are asked once per address, however many times the window
-        // grows.
+        // grows; the round bound stops a lookup that keeps the far end in use.
         val asked = HashMap<String, app.aroundtheblock.wallet.core.reconcile.DigiDollarHoldingResult?>()
         var external = DigiDollarGapRule.start(0)
         var internal = DigiDollarGapRule.start(1)
+        val bound = DigiDollarGapRule.roundBound()
+        var round = 0
         while (true) {
+            round++
             val lines = app.aroundtheblock.wallet.core.bridge.NativeBridge.deriveDigiDollarAddresses(
                 seedBytes, external, internal,
             ) ?: return null
@@ -152,14 +155,14 @@ class RecoveryScanService(
             val usedInternal = used.filter { it.chain == 1 }.maxOfOrNull { it.index }
             val nextExternal = DigiDollarGapRule.next(0, external, usedExternal)
             val nextInternal = DigiDollarGapRule.next(1, internal, usedInternal)
-            when (DigiDollarGapRule.outcome(external, internal, nextExternal, nextInternal, usedExternal, usedInternal)) {
+            when (DigiDollarGapRule.outcome(external, internal, nextExternal, nextInternal, usedExternal, usedInternal, round, bound)) {
                 RecoveryGapRule.ASK_AGAIN -> {
                     external = nextExternal
                     internal = nextInternal
                 }
                 RecoveryGapRule.FINISHED -> return result
-                // Stopped by the cap rather than by a gap past the last use (or an outcome this
-                // build does not know): not a finished answer.
+                // Stopped by the cap or the round bound rather than by a gap past the last use (or an
+                // outcome this build does not know): not a finished answer.
                 else -> return result.copy(reachable = false)
             }
         }

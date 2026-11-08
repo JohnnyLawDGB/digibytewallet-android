@@ -297,19 +297,24 @@ object NativeBridge {
     external fun recoveryDigiDollarGapStart(chain: Int): Int
 
     /** BRRecoveryDigiDollarGapNext: the window [count] of the DigiDollar scan's [chain] grows to,
-     *  given [highestUsed] (negative: nothing used) — the chain's gap past the last use, up to the
-     *  cap (1000); [count] when it already reaches a gap past it. */
+     *  given [highestUsed] (negative: nothing used) — the chain's gap past the last use, by at
+     *  least a whole gap, up to the cap (1000); [count] when it already reaches a gap past it. */
     external fun recoveryDigiDollarGapNext(chain: Int, count: Int, highestUsed: Int): Int
 
     /** BRRecoveryDigiDollarGapOutcome: what one round of the DigiDollar scan is, its windows having
      *  been [externalCount]/[internalCount] and now [nextExternal]/[nextInternal]
      *  ([recoveryDigiDollarGapNext]), with highest used indices [usedExternal]/[usedInternal]
-     *  (negative: none): 0 ask again, 1 finished, 2 capped (not a finished answer). Any other
-     *  value is to be read as capped. */
+     *  (negative: none), on [round] (from 1) of at most [bound] ([recoveryDigiDollarGapRoundBound]):
+     *  0 ask again, 1 finished, 2 capped (not a finished answer). Any other value is to be read as
+     *  capped. */
     external fun recoveryDigiDollarGapOutcome(
         externalCount: Int, internalCount: Int, nextExternal: Int, nextInternal: Int,
-        usedExternal: Int, usedInternal: Int,
+        usedExternal: Int, usedInternal: Int, round: Int, bound: Int,
     ): Int
+
+    /** BRRecoveryDigiDollarGapRoundBound: more rounds than the DigiDollar scan's windows can take
+     *  to reach the cap from their starting windows, growing by a whole gap (101). */
+    external fun recoveryDigiDollarGapRoundBound(): Int
 
     /** Start SPV sync — connects to peers and begins header/transaction sync. */
     external fun startSync()

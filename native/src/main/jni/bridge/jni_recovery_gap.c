@@ -13,10 +13,11 @@
  * and, for the DigiDollar scan (RecoveryScanService.scanDigiDollar through DigiDollarGapRule, 4.1.2
  * row 19), replacing the Kotlin DigiDollarGapWindow, the scan's gaps and its stop decision:
  *
- *   recoveryDigiDollarGapStart    BRRecoveryDigiDollarGapStart: the window a chain starts at.
- *   recoveryDigiDollarGapNext     BRRecoveryDigiDollarGapNext: the window a chain grows to.
- *   recoveryDigiDollarGapOutcome  BRRecoveryDigiDollarGapOutcome: ask again (0), finished (1) or
- *                                 capped (2).
+ *   recoveryDigiDollarGapStart       BRRecoveryDigiDollarGapStart: the window a chain starts at.
+ *   recoveryDigiDollarGapNext        BRRecoveryDigiDollarGapNext: the window a chain grows to.
+ *   recoveryDigiDollarGapOutcome     BRRecoveryDigiDollarGapOutcome: ask again (0), finished (1)
+ *                                    or capped (2).
+ *   recoveryDigiDollarGapRoundBound  BRRecoveryDigiDollarGapRoundBound: the scan's round bound.
  *
  * Kotlin's Int is a jint is an int32_t, so every value crosses unchanged; Kotlin passes a negative
  * highest-used index for "nothing used" (its null). The rules' values are checked by the host KAT
@@ -65,9 +66,16 @@ NativeBridge_recoveryDigiDollarGapNext(JNIEnv *env, jobject thiz, jint chain, ji
 jint JNICALL
 NativeBridge_recoveryDigiDollarGapOutcome(JNIEnv *env, jobject thiz, jint externalCount, jint internalCount,
                                           jint nextExternal, jint nextInternal, jint usedExternal,
-                                          jint usedInternal) {
+                                          jint usedInternal, jint round, jint bound) {
     (void)env; (void)thiz;
     return (jint)BRRecoveryDigiDollarGapOutcome((int32_t)externalCount, (int32_t)internalCount,
                                                 (int32_t)nextExternal, (int32_t)nextInternal,
-                                                (int32_t)usedExternal, (int32_t)usedInternal);
+                                                (int32_t)usedExternal, (int32_t)usedInternal,
+                                                (int32_t)round, (int32_t)bound);
+}
+
+jint JNICALL
+NativeBridge_recoveryDigiDollarGapRoundBound(JNIEnv *env, jobject thiz) {
+    (void)env; (void)thiz;
+    return (jint)BRRecoveryDigiDollarGapRoundBound();
 }

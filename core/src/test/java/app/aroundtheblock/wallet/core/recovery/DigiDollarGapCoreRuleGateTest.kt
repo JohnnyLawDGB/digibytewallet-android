@@ -14,9 +14,12 @@ import java.io.File
  * its scanDigiDollar. A second copy on one platform is a restore that finds a different set of
  * dollars, or calls a capped answer finished, on the other.
  *
- * The rule's values, including every case of the DigiDollarGapWindowTest that held the Kotlin copy,
- * are checked by the host KAT digidollar_gap_window_kat, whose red arms DIGIDOLLAR_GAP_RED and
- * DIGIDOLLAR_CAP_RED fail them.
+ * Since 2026-11 the rule is the plain-DGB one (the whole-gap step and the round bound) with
+ * DigiDollar's gaps and cap, so the scan also takes the core's round bound and passes it, with the
+ * round, to every outcome.
+ *
+ * The rule's values are checked by the host KAT digidollar_gap_window_kat, whose red arms
+ * DIGIDOLLAR_GAP_RED, DIGIDOLLAR_STEP_RED and DIGIDOLLAR_CAP_RED fail them.
  */
 class DigiDollarGapCoreRuleGateTest {
 
@@ -64,6 +67,15 @@ class DigiDollarGapCoreRuleGateTest {
         assertEquals("one start per chain, from the rule", 2, count(scan, "DigiDollarGapRule.start"))
         assertEquals("one next per chain, from the rule", 2, count(scan, "DigiDollarGapRule.next"))
         assertEquals("one outcome per round, from the rule", 1, count(scan, "DigiDollarGapRule.outcome"))
+        assertEquals("one round bound per scan, from the rule", 1, count(scan, "DigiDollarGapRule.roundBound"))
+        // The bound is taken once before the loop, the round counted once per pass from 1, and both
+        // reach the outcome: without them a lookup that keeps the far end in use is never stopped.
+        assertTrue("the round bound is not taken once, before a loop that counts its rounds from 1",
+            Regex("""val\s+bound\s*=\s*DigiDollarGapRule\.roundBound\(\)\s+var\s+round\s*=\s*0\s+while\s*\(\s*true\s*\)\s*\{\s*round\+\+""")
+                .containsMatchIn(scan))
+        assertEquals("the round changes only once per pass", 1, Regex("""\bround\s*(\+\+|--|\+=|-=|=(?!=))""").findAll(scan).count() - 1)
+        assertTrue("the outcome is not given the round and the bound",
+            Regex("""DigiDollarGapRule\.outcome\([^)]*,\s*round\s*,\s*bound\s*\)""").containsMatchIn(scan))
         // The old copy's steps: its arithmetic, its gaps and cap, its own "neither grew" test.
         assertTrue("scanDigiDollar computes a window itself",
             !Regex("""\b(maxOf|minOf|coerceAtMost|coerceAtLeast|coerceIn)\s*\(""").containsMatchIn(scan))
@@ -84,6 +96,7 @@ class DigiDollarGapCoreRuleGateTest {
             "start" to "NativeBridge.recoveryDigiDollarGapStart",
             "next" to "NativeBridge.recoveryDigiDollarGapNext",
             "outcome" to "NativeBridge.recoveryDigiDollarGapOutcome",
+            "roundBound" to "NativeBridge.recoveryDigiDollarGapRoundBound",
         )) {
             val decl = Regex("""fun\s+$fn\s*\(""").find(rule) ?: error("DigiDollarGapRule has no $fn")
             val nextDecl = Regex("""\bfun\s""").find(rule, decl.range.last)?.range?.first ?: rule.length
@@ -93,7 +106,8 @@ class DigiDollarGapCoreRuleGateTest {
                 1, Regex("""\bNativeBridge\.\w+\s*\(""").findAll(fnSrc).count())
         }
         val jniSrc = code(jni)
-        for (c in listOf("BRRecoveryDigiDollarGapStart", "BRRecoveryDigiDollarGapNext", "BRRecoveryDigiDollarGapOutcome")) {
+        for (c in listOf("BRRecoveryDigiDollarGapStart", "BRRecoveryDigiDollarGapNext", "BRRecoveryDigiDollarGapOutcome",
+                         "BRRecoveryDigiDollarGapRoundBound")) {
             assertEquals("jni_recovery_gap.c must call $c once", 1, count(jniSrc, c))
             assertTrue("$header does not define $c: is the core pin current?",
                 Regex("""static\s+inline\s+int(32_t)?\s+$c\s*\(""").containsMatchIn(header.readText()))
