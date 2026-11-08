@@ -21,7 +21,11 @@ below and checks them against the code. It fails when:
   hardcoded mainnet peers stop matching the core's canon (`BRPeerCanon.h`);
 - a file starts using a network API and is not in the call-site table, or a listed file no longer
   does. The APIs: an OkHttp call or WebSocket, `Dns.SYSTEM`, a socket (`Socket`, `ServerSocket`,
-  `createSocket`, `DatagramSocket`), `URL`/`openConnection`/`openStream`, `HttpURLConnection` and
+  `createSocket`, `DatagramSocket`), a raw `java.nio` channel (`SocketChannel.open`,
+  `ServerSocketChannel.open`, `DatagramChannel.open`, `AsynchronousSocketChannel.open`,
+  `AsynchronousServerSocketChannel.open`, `AsynchronousDatagramChannel`, and the `SelectorProvider`
+  forms `openSocketChannel`, `openDatagramChannel`, `openServerSocketChannel`),
+  `URL`/`openConnection`/`openStream`, `HttpURLConnection` and
   `HttpsURLConnection`, a name lookup, a WebView `loadUrl`/`postUrl`, a Coil load (`AsyncImage`,
   `SubcomposeAsyncImage`, `rememberAsyncImagePainter`, `ImageLoader`, `imageLoader`), the Tor
   runtime, and in C `connect`, `socket`, `getaddrinfo`, `gethostbyname`;

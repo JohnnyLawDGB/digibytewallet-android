@@ -245,7 +245,10 @@ class NetworkDestinationsGateTest {
             "u.toURL()", "InetAddress.getByName(h)", "InetAddress.getAllByName(h)", "web.loadUrl(u)",
             "web.postUrl(u, b)", "AsyncImage(model = m)", "SubcomposeAsyncImage(model = m)",
             "rememberAsyncImagePainter(m)", "ImageLoader.Builder(c)", "context.imageLoader", "TorRuntime.Builder()",
-            "Dns.SYSTEM.lookup(h)",
+            "Dns.SYSTEM.lookup(h)", "SocketChannel.open(a)", "ServerSocketChannel.open()", "DatagramChannel.open()",
+            "AsynchronousSocketChannel.open(g)", "AsynchronousServerSocketChannel.open()",
+            "AsynchronousDatagramChannel.open(f, g)", "SelectorProvider.provider().openSocketChannel()",
+            "provider.openDatagramChannel(f)", "provider.openServerSocketChannel()",
         )
         for (api in apis) {
             assertTrue("the call-site matcher misses `$api`", KOTLIN_CALLS.containsMatchIn(Lexer.lex(api, Lang.KOTLIN).code))
@@ -436,7 +439,10 @@ class NetworkDestinationsGateTest {
                 "\\.openStream\\(", "\\bURL\\(", "\\.toURL\\(", "InetAddress\\.(?:getByName|getAllByName)\\b",
                 "\\.loadUrl\\(", "\\.postUrl\\(", "\\bAsyncImage\\(", "\\bSubcomposeAsyncImage\\b",
                 "\\brememberAsyncImagePainter\\b", "\\bImageLoader\\b", "\\.imageLoader\\b", "\\bTorRuntime\\b",
-                "\\bDns\\.SYSTEM\\b",
+                "\\bDns\\.SYSTEM\\b", "\\bSocketChannel\\.open\\b", "\\bServerSocketChannel\\.open\\b",
+                "\\bDatagramChannel\\.open\\b", "\\bAsynchronousSocketChannel\\.open\\b",
+                "\\bAsynchronousServerSocketChannel\\.open\\b", "\\bAsynchronousDatagramChannel\\b",
+                "\\bopenSocketChannel\\(", "\\bopenDatagramChannel\\(", "\\bopenServerSocketChannel\\(",
             ).joinToString("|"),
         )
 
