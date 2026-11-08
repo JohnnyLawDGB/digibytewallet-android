@@ -136,13 +136,15 @@ fun AppNavigation(
     // recur. popUpTo(0) clears the wallet graph so BACK from the PIN screen leaves the app
     // instead of revealing the screen underneath; UnlockScreen's existing success path then
     // navigates to "wallet" exactly as on a cold start. See shouldRouteToUnlock for the
-    // flows deliberately left alone (lost-PIN → pin_setup, onboarding graph, cold start).
+    // flows deliberately left alone (lost-PIN → pin_setup, setup routes with no wallet stored,
+    // cold start).
     // Also keyed on the route: a wallet screen that appears while the state is already Locked (no
     // Unlocked→Locked change to react to) is routed to unlock too (LOCK-PD).
     LaunchedEffect(walletState, currentRoute) {
         // A store that cannot be read counts as PIN-protected: routed to unlock, never left open (row 23, R10).
         val hasPin = pinManager.pinAssumedForLock()
-        if (shouldRouteToUnlock(walletState, hasPin, currentRoute)) {
+        // Read here, not a key: every path that stores or erases a wallet also navigates, which re-runs this.
+        if (shouldRouteToUnlock(walletState, hasPin, currentRoute, walletManager.hasSavedWallet())) {
             android.util.Log.i("AppNavigation", "wallet locked on route=$currentRoute — routing to unlock")
             SeedViewGate.revoke()
             resumeAfterUnlock = routeToResumeAfterUnlock(currentRoute)

@@ -115,6 +115,9 @@ class MainActivity : FragmentActivity() {
             )
         )
         enableEdgeToEdge()
+        // Before anything reads the intent, and before the NavHost exists: no launching intent
+        // chooses a screen (NAV-DEEPLINK).
+        app.aroundtheblock.wallet.ui.navigation.NavIntentExtras.strip(intent)
 
         // Wipe-after-N backstop: if a prior wipe-after-N was interrupted (process
         // killed between PinManager returning ShouldWipe and the wallet wipe
@@ -499,6 +502,8 @@ class MainActivity : FragmentActivity() {
     }
 
     override fun onNewIntent(intent: Intent) {
+        // Before any listener sees it (NAV-DEEPLINK).
+        app.aroundtheblock.wallet.ui.navigation.NavIntentExtras.strip(intent)
         super.onNewIntent(intent)
         handleDigiIdIntent(intent)
     }
