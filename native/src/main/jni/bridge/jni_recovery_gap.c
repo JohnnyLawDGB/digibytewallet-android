@@ -13,7 +13,7 @@
  * and, for the DigiDollar scan (RecoveryScanService.scanDigiDollar through DigiDollarGapRule, 4.1.2
  * row 19), replacing the Kotlin DigiDollarGapWindow, the scan's gaps and its stop decision, on the
  * plain-DGB rule (whole-gap step and round bound) since 2026-11 (the owner's decision; the earlier
- * BRRecoveryDigiDollarGapNext / _GapOutcome are deprecated in the core and no longer called):
+ * BRRecoveryDigiDollarGapNext / _GapOutcome are no longer called and are removed from the core):
  *
  *   recoveryDigiDollarGapStart         BRRecoveryDigiDollarGapStart: the window a chain starts at.
  *   recoveryDigiDollarWholeGapNext     BRRecoveryDigiDollarWholeGapNext: the window a chain grows

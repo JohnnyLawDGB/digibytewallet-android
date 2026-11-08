@@ -3,7 +3,7 @@
 # BRRecoveryDigiDollarWholeGapNext / _GapRoundBound / _WholeGapOutcome): how far the DigiDollar
 # recovery scan derives at m/86'/20'/0' and when its answer is finished or capped (4.1.2 row 19). The
 # owner's decision of 2026-11-08; Android calls these (jni_recovery_gap.c) and iOS the same
-# functions. The earlier, deprecated rule is digidollar_gap_window_kat's.
+# functions. The earlier rule and its suite (digidollar_gap_window_kat) are removed.
 #
 # Header-only: includes BRRecoveryGapWindow.h (libc only).
 #
