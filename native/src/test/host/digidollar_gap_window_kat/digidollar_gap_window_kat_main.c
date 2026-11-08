@@ -6,22 +6,13 @@
 // platform's scan loop as a simulation (simulate() below, which does what scanDigiDollar does per
 // round with a lookup that answers from a set of used indices).
 //
-// Since 2026-11 the rule is the plain-DGB one (a grown window grows by at least a whole gap, and the
-// scan stops at a round bound) with DigiDollar's gaps and cap, by the owner's decision. The Kotlin
-// grew a window only to a gap past the last use and had no round bound; the cases that held its
-// answers for that now hold the new ones (named for what they check), and DIGIDOLLAR_STEP_RED
-// restores the old step.
-//
 // Kotlin's next(count, used, gap = 10) and capped(used, gap = 10) are chain 1 (the internal gap);
 // the scan passed only its external gap (20) with chain 0 and its internal gap (10) with chain 1.
 //
-// Built four times by run.sh:
+// Built three times by run.sh:
 //   -DDIGIDOLLAR_GAP_RED  the fixed window: a window never grows; the cases that need it to grow
 //                         fail, every other case holds
-//   -DDIGIDOLLAR_STEP_RED a grown window grows only to a gap past the last use (the rule before
-//                         2026-11); the cases that need the whole-gap step fail, every other holds
-//   -DDIGIDOLLAR_CAP_RED  a scan the cap or the round bound stopped is reported finished; the
-//                         capped cases fail,
+//   -DDIGIDOLLAR_CAP_RED  a scan the cap stopped is reported finished; the capped cases fail,
 //                         every other case holds
 //   (default)             the shipped rule; every case passes
 
@@ -53,24 +44,20 @@ typedef struct {
     int rounds;
 } Scan;
 
-// The platform's loop (scanDigiDollar): start at the gaps, take the round bound, ask, grow while the
-// rule says ask again.
+// The platform's loop (scanDigiDollar): start at the gaps, ask, grow while the rule says ask again.
 static Scan simulate(Highest highest, const void *ctx)
 {
     Scan s;
     int32_t external = BRRecoveryDigiDollarGapStart(0), internal = BRRecoveryDigiDollarGapStart(1);
-    int32_t bound = BRRecoveryDigiDollarGapRoundBound();
     int round = 0;
 
     for (;;) {
         int32_t usedExternal = highest(0, external, ctx), usedInternal = highest(1, internal, ctx);
         int32_t nextExternal = BRRecoveryDigiDollarGapNext(0, external, usedExternal);
         int32_t nextInternal = BRRecoveryDigiDollarGapNext(1, internal, usedInternal);
-        int outcome;
+        int outcome = BRRecoveryDigiDollarGapOutcome(external, internal, nextExternal, nextInternal, usedExternal, usedInternal);
 
         round++;
-        outcome = BRRecoveryDigiDollarGapOutcome(external, internal, nextExternal, nextInternal, usedExternal, usedInternal,
-                                                 round, bound);
         if (outcome != BR_RECOVERY_GAP_ASK_AGAIN || round > 10000) {
             s.outcome = outcome; s.external = external; s.internal = internal; s.rounds = round;
             return s;
@@ -94,13 +81,6 @@ static int32_t fromSet(int chain, int32_t window, const void *ctx)
 
 static int32_t everything(int chain, int32_t window, const void *ctx) { (void)chain; (void)ctx; return window - 1; }
 static int32_t nothing(int chain, int32_t window, const void *ctx) { (void)chain; (void)window; (void)ctx; return -1; }
-// The #209 review's lookup: "used" exactly one gap from the far end, the least that makes a window
-// grow. Under the old step it walked the window one address per round.
-static int32_t oneGapFromTheEnd(int chain, int32_t window, const void *ctx)
-{
-    (void)ctx;
-    return window - (chain == 0 ? BR_RECOVERY_DIGIDOLLAR_GAP_EXTERNAL : BR_RECOVERY_DIGIDOLLAR_GAP_INTERNAL);
-}
 
 int main(void)
 {
@@ -119,25 +99,19 @@ int main(void)
     ok = BRRecoveryDigiDollarGapNext(1, 10, -1) == 10;
     result("an_unused_chain_keeps_its_window", ok, NULL);
 
-    // Use near the end widens the window to a gap past it, by at least a whole gap: 10 -> 20, then
-    // 20 -> 30 (a gap past index 11 is 22, less than a whole gap), and 20 -> 36 (a gap past 25,
-    // more than a whole gap). The Kotlin gave 20 -> 22.
-    ok = BRRecoveryDigiDollarGapNext(1, 10, 9) == 20 && BRRecoveryDigiDollarGapNext(1, 20, 11) == 30 &&
-         BRRecoveryDigiDollarGapNext(1, 20, 25) == 36;
-    snprintf(why, sizeof(why), "next(10, 9) = %d, next(20, 11) = %d, next(20, 25) = %d",
-             BRRecoveryDigiDollarGapNext(1, 10, 9), BRRecoveryDigiDollarGapNext(1, 20, 11), BRRecoveryDigiDollarGapNext(1, 20, 25));
-    result("use_near_the_end_widens_the_window_by_at_least_a_gap", ok, why);
+    // `use near the end widens the window to a gap past it`: 10 -> 20, then 20 -> 22.
+    ok = BRRecoveryDigiDollarGapNext(1, 10, 9) == 20 && BRRecoveryDigiDollarGapNext(1, 20, 11) == 22;
+    snprintf(why, sizeof(why), "next(10, 9) = %d, next(20, 11) = %d",
+             BRRecoveryDigiDollarGapNext(1, 10, 9), BRRecoveryDigiDollarGapNext(1, 20, 11));
+    result("use_near_the_end_widens_the_window_to_a_gap_past_it", ok, why);
 
     // `a window already a gap past the last use stops growing`
     ok = BRRecoveryDigiDollarGapNext(1, 22, 11) == 22;
     result("a_window_a_gap_past_the_last_use_stops_growing", ok, NULL);
 
-    // `the window never passes the cap`: next(995, 994) is MAX, and so is next(999, 990) (a whole gap
-    // would pass it, a gap past the last use would not).
-    ok = BRRecoveryDigiDollarGapNext(1, 995, 994) == BR_RECOVERY_DIGIDOLLAR_MAX &&
-         BRRecoveryDigiDollarGapNext(1, 999, 990) == BR_RECOVERY_DIGIDOLLAR_MAX;
-    snprintf(why, sizeof(why), "next(995, 994) = %d, next(999, 990) = %d", BRRecoveryDigiDollarGapNext(1, 995, 994),
-             BRRecoveryDigiDollarGapNext(1, 999, 990));
+    // `the window never passes the cap`: next(995, 994) is MAX.
+    ok = BRRecoveryDigiDollarGapNext(1, 995, 994) == BR_RECOVERY_DIGIDOLLAR_MAX;
+    snprintf(why, sizeof(why), "next(995, 994) = %d", BRRecoveryDigiDollarGapNext(1, 995, 994));
     result("the_window_grows_to_the_cap_and_not_past_it", ok, why);
 
     // `twelve sends are found where the fixed window stopped at ten`: the Kotlin test's own loop,
@@ -161,10 +135,9 @@ int main(void)
     result("capped_is_kotlins", ok, NULL);
 
     // The external chain at the scan's external gap (20).
-    ok = BRRecoveryDigiDollarGapNext(0, 20, 19) == 40 && BRRecoveryDigiDollarGapNext(0, 40, 21) == 60 &&
+    ok = BRRecoveryDigiDollarGapNext(0, 20, 19) == 40 && BRRecoveryDigiDollarGapNext(0, 40, 21) == 42 &&
          BRRecoveryDigiDollarGapNext(0, 990, 985) == BR_RECOVERY_DIGIDOLLAR_MAX;
-    snprintf(why, sizeof(why), "external next(20, 19) = %d, next(40, 21) = %d", BRRecoveryDigiDollarGapNext(0, 20, 19),
-             BRRecoveryDigiDollarGapNext(0, 40, 21));
+    snprintf(why, sizeof(why), "external next(20, 19) = %d", BRRecoveryDigiDollarGapNext(0, 20, 19));
     result("external_chain_widens_at_its_own_gap", ok, why);
 
     ok = BRRecoveryDigiDollarGapNext(0, 42, 21) == 42 && BRRecoveryDigiDollarGapNext(0, 20, -1) == 20 &&
@@ -172,14 +145,13 @@ int main(void)
          BRRecoveryDigiDollarGapCapped(1, 990) && ! BRRecoveryDigiDollarGapCapped(1, 989);
     result("each_chain_caps_within_its_own_gap", ok, NULL);
 
-    // Index 0 is a use, and the window it grows grows by a whole gap, as the plain-DGB rule's does: a
-    // use at index 0 of the starting internal window of 10 grows it to 20 (the Kotlin: 11). From an
-    // empty window a gap past index 0 (11) is more than a whole gap (10).
-    ok = BRRecoveryDigiDollarGapNext(1, 10, 0) == 20 && BRRecoveryDigiDollarGapNext(1, 0, 0) == 11 &&
-         BRRecoveryDigiDollarGapNext(0, 20, 0) == 40;
-    snprintf(why, sizeof(why), "next(10, 0) = %d, next(0, 0) = %d, external next(20, 0) = %d",
-             BRRecoveryDigiDollarGapNext(1, 10, 0), BRRecoveryDigiDollarGapNext(1, 0, 0), BRRecoveryDigiDollarGapNext(0, 20, 0));
-    result("index_zero_is_used_and_grows_the_window_by_a_whole_gap", ok, why);
+    // Grows only to a gap past the last use, not by a whole gap (unlike the plain-DGB rule): a use
+    // at index 0 of the starting internal window of 10 grows it by one.
+    ok = BRRecoveryDigiDollarGapNext(1, 10, 0) == 11 && BRRecoveryDigiDollarGapNext(1, 0, 0) == 11 &&
+         BRRecoveryDigiDollarGapNext(0, 20, 0) == 21;
+    snprintf(why, sizeof(why), "next(10, 0) = %d, next(0, 0) = %d", BRRecoveryDigiDollarGapNext(1, 10, 0),
+             BRRecoveryDigiDollarGapNext(1, 0, 0));
+    result("index_zero_is_used_and_grows_to_a_gap_past_it", ok, why);
 
     // Kotlin's null is any negative index here (a real index never is).
     ok = BRRecoveryDigiDollarGapNext(1, 10, -5) == 10 && BRRecoveryDigiDollarGapNext(0, 20, INT32_MIN) == 20 &&
@@ -191,15 +163,15 @@ int main(void)
          ! BRRecoveryDigiDollarGapCapped(1, INT32_MAX - 5) && ! BRRecoveryDigiDollarGapCapped(0, INT32_MAX);
     result("arithmetic_wraps_as_kotlin_int", ok, NULL);
 
-    // A window is never below count, as the plain-DGB rule's: one already past the cap is kept,
-    // whether or not it still wants to grow (the Kotlin's minOf(wanted, MAX) dropped one that did to
-    // the cap), including one exactly a gap past its last use (wanted == count). The scan never has
+    // Kotlin's minOf(wanted, MAX): a window already past the cap that still wants to grow falls to
+    // the cap; one that does not want to grow is kept, including one already exactly a gap past
+    // its last use (wanted == count: Kotlin's strict `wanted > count`, not >=). The scan never has
     // such a window.
-    ok = BRRecoveryDigiDollarGapNext(1, 1500, 1495) == 1500 &&
+    ok = BRRecoveryDigiDollarGapNext(1, 1500, 1495) == BR_RECOVERY_DIGIDOLLAR_MAX &&
          BRRecoveryDigiDollarGapNext(1, 1500, 10) == 1500 && BRRecoveryDigiDollarGapNext(1, 1500, 1489) == 1500 &&
-         BRRecoveryDigiDollarGapNext(0, 1500, 1479) == 1500 && BRRecoveryDigiDollarGapNext(0, 1500, 1495) == 1500;
+         BRRecoveryDigiDollarGapNext(0, 1500, 1479) == 1500;
     snprintf(why, sizeof(why), "next(1500, 1495) = %d", BRRecoveryDigiDollarGapNext(1, 1500, 1495));
-    result("a_window_past_the_cap_is_kept", ok, why);
+    result("a_window_past_the_cap_falls_to_it_as_kotlins_did", ok, why);
 
     // A chain the scan does not have starts empty, never grows and is never a finished answer.
     ok = BRRecoveryDigiDollarGapStart(2) == 0 && BRRecoveryDigiDollarGapStart(-1) == 0 &&
@@ -207,38 +179,21 @@ int main(void)
          BRRecoveryDigiDollarGapCapped(2, -1) && BRRecoveryDigiDollarGapCapped(-1, 5);
     result("unknown_chain_never_grows_and_is_capped", ok, NULL);
 
-    // The round bound: the internal chain's, ceil((1000 - 10) / 10) + 2 = 101 (the external chain's
-    // is ceil(980 / 20) + 2 = 51).
-    ok = BRRecoveryDigiDollarGapRoundBound() == 101;
-    snprintf(why, sizeof(why), "round bound %d", BRRecoveryDigiDollarGapRoundBound());
-    result("round_bound_is_the_internal_chains", ok, why);
-
-    // The stop decision, before the round bound: either window grew -> ask again (even at the cap);
-    // neither grew -> capped if capped(external) || capped(internal), else finished (on any round).
-    ok = BRRecoveryDigiDollarGapOutcome(20, 10, 20, 20, -1, 9, 1, 101) == BR_RECOVERY_GAP_ASK_AGAIN &&
-         BRRecoveryDigiDollarGapOutcome(20, 10, 40, 10, 19, -1, 1, 101) == BR_RECOVERY_GAP_ASK_AGAIN &&
-         BRRecoveryDigiDollarGapOutcome(20, 995, 20, 1000, -1, 994, 100, 101) == BR_RECOVERY_GAP_ASK_AGAIN &&
-         BRRecoveryDigiDollarGapOutcome(20, 22, 20, 22, -1, 11, 2, 101) == BR_RECOVERY_GAP_FINISHED &&
-         BRRecoveryDigiDollarGapOutcome(20, 10, 20, 10, -1, -1, 1, 101) == BR_RECOVERY_GAP_FINISHED &&
-         BRRecoveryDigiDollarGapOutcome(1000, 10, 1000, 10, 979, -1, 50, 101) == BR_RECOVERY_GAP_FINISHED &&
-         BRRecoveryDigiDollarGapOutcome(20, 22, 20, 22, -1, 11, 101, 101) == BR_RECOVERY_GAP_FINISHED;
+    // scanDigiDollar's stop decision: either window grew -> ask again (even at the cap); neither
+    // grew -> capped if capped(external) || capped(internal), else finished.
+    ok = BRRecoveryDigiDollarGapOutcome(20, 10, 20, 20, -1, 9) == BR_RECOVERY_GAP_ASK_AGAIN &&
+         BRRecoveryDigiDollarGapOutcome(20, 10, 40, 10, 19, -1) == BR_RECOVERY_GAP_ASK_AGAIN &&
+         BRRecoveryDigiDollarGapOutcome(20, 995, 20, 1000, -1, 994) == BR_RECOVERY_GAP_ASK_AGAIN &&
+         BRRecoveryDigiDollarGapOutcome(20, 22, 20, 22, -1, 11) == BR_RECOVERY_GAP_FINISHED &&
+         BRRecoveryDigiDollarGapOutcome(20, 10, 20, 10, -1, -1) == BR_RECOVERY_GAP_FINISHED &&
+         BRRecoveryDigiDollarGapOutcome(1000, 10, 1000, 10, 979, -1) == BR_RECOVERY_GAP_FINISHED;
     result("growing_scan_asks_again_and_settled_scan_is_finished", ok, NULL);
 
-    ok = BRRecoveryDigiDollarGapOutcome(20, 1000, 20, 1000, -1, 995, 3, 101) == BR_RECOVERY_GAP_CAPPED &&
-         BRRecoveryDigiDollarGapOutcome(1000, 10, 1000, 10, 990, -1, 3, 101) == BR_RECOVERY_GAP_CAPPED &&
-         BRRecoveryDigiDollarGapOutcome(1000, 1000, 1000, 1000, 999, 999, 101, 101) == BR_RECOVERY_GAP_CAPPED;
-    snprintf(why, sizeof(why), "internal cap -> %s", RESULT_IS(BRRecoveryDigiDollarGapOutcome(20, 1000, 20, 1000, -1, 995, 3, 101)));
+    ok = BRRecoveryDigiDollarGapOutcome(20, 1000, 20, 1000, -1, 995) == BR_RECOVERY_GAP_CAPPED &&
+         BRRecoveryDigiDollarGapOutcome(1000, 10, 1000, 10, 990, -1) == BR_RECOVERY_GAP_CAPPED &&
+         BRRecoveryDigiDollarGapOutcome(1000, 1000, 1000, 1000, 999, 999) == BR_RECOVERY_GAP_CAPPED;
+    snprintf(why, sizeof(why), "internal cap -> %s", RESULT_IS(BRRecoveryDigiDollarGapOutcome(20, 1000, 20, 1000, -1, 995)));
     result("cap_stop_is_capped", ok, why);
-
-    // A scan still growing on the round bound's last round stops there, capped: the rounds ran out,
-    // not the use. (With the whole-gap step the scan's windows reach the cap first, so the bound is
-    // what stops a lookup that misbehaves some other way.)
-    ok = BRRecoveryDigiDollarGapOutcome(20, 10, 20, 20, -1, 9, 101, 101) == BR_RECOVERY_GAP_CAPPED &&
-         BRRecoveryDigiDollarGapOutcome(20, 10, 40, 10, 19, -1, 150, 101) == BR_RECOVERY_GAP_CAPPED &&
-         BRRecoveryDigiDollarGapOutcome(20, 10, 40, 10, 19, -1, 1, 0) == BR_RECOVERY_GAP_CAPPED;
-    snprintf(why, sizeof(why), "grew on round 101 of 101 -> %s",
-             RESULT_IS(BRRecoveryDigiDollarGapOutcome(20, 10, 20, 20, -1, 9, 101, 101)));
-    result("round_bound_stop_is_capped", ok, why);
 
     // An empty wallet: asked once, at the starting windows, finished.
     s = simulate(nothing, NULL);
@@ -246,35 +201,25 @@ int main(void)
     result("empty_wallet_is_asked_once", ok, NULL);
 
     // Twelve sends with change (internal 0..11) and three receives (external 0..2): the scan finds
-    // every used index and is finished (windows 40 and 30, a whole gap per growth; the Kotlin's were
-    // a gap past the last use, 23 and 22), where the fixed window stopped at 10 and said complete.
+    // every used index (windows a gap past the last use: 23 and 22) and is finished, where the
+    // fixed window stopped at 10 and said complete.
     {
         static const int32_t ext[] = { 0, 1, 2 };
         static const int32_t in[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 };
         Used u = { ext, 3, in, 12 };
         s = simulate(fromSet, &u);
-        ok = s.outcome == BR_RECOVERY_GAP_FINISHED && s.internal == 30 && s.external == 40 && s.rounds == 3;
+        ok = s.outcome == BR_RECOVERY_GAP_FINISHED && s.internal == 22 && s.external == 23;
         snprintf(why, sizeof(why), "%s at %d/%d after %d rounds", RESULT_IS(s.outcome), s.external, s.internal, s.rounds);
         result("change_past_ten_sends_is_found_and_finished", ok, why);
     }
 
     // A lookup that answers "used" for every address: both windows walk to the cap (a gap per
-    // round: the internal chain's 99 growths, then the round that finds it can grow no more), the
-    // scan stops there, and the answer is capped, not finished.
+    // round), the scan stops there, and the answer is capped, not finished.
     s = simulate(everything, NULL);
     ok = s.outcome == BR_RECOVERY_GAP_CAPPED && s.external == BR_RECOVERY_DIGIDOLLAR_MAX &&
-         s.internal == BR_RECOVERY_DIGIDOLLAR_MAX && s.rounds == 100;
+         s.internal == BR_RECOVERY_DIGIDOLLAR_MAX && s.rounds <= 10000;
     snprintf(why, sizeof(why), "%s at %d/%d after %d rounds", RESULT_IS(s.outcome), s.external, s.internal, s.rounds);
     result("always_used_lookup_stops_at_the_cap_and_is_capped", ok, why);
-
-    // The #209 review's lookup, "used" exactly one gap from the far end each round: a whole gap per
-    // round takes both windows to the cap in the same 100 rounds, capped. The Kotlin's step grew
-    // them one address per round (about 990 rounds, each re-deriving the windows).
-    s = simulate(oneGapFromTheEnd, NULL);
-    ok = s.outcome == BR_RECOVERY_GAP_CAPPED && s.external == BR_RECOVERY_DIGIDOLLAR_MAX &&
-         s.internal == BR_RECOVERY_DIGIDOLLAR_MAX && s.rounds == 100;
-    snprintf(why, sizeof(why), "%s at %d/%d after %d rounds", RESULT_IS(s.outcome), s.external, s.internal, s.rounds);
-    result("a_lookup_one_gap_from_the_end_reaches_the_cap_a_gap_per_round", ok, why);
 
     if (! g_failed) printf("ALL PASS\n");
     return g_failed;

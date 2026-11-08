@@ -15,7 +15,7 @@ import app.aroundtheblock.wallet.core.bridge.NativeBridge
  *
  * Kotlin's null crosses as -1 (a real index is never negative). The outcome values are
  * [RecoveryGapRule.ASK_AGAIN] and [RecoveryGapRule.FINISHED]; anything else is capped. The rule's
- * values are checked by the host KAT digidollar_gap_window_kat.
+ * values are checked by the host KAT digidollar_whole_gap_kat.
  */
 object DigiDollarGapRule {
     /** The window [chain] (0 external, 1 internal) starts at. */
@@ -23,14 +23,14 @@ object DigiDollarGapRule {
 
     /** The window [count] of [chain] grows to, given [highestUsed]. */
     fun next(chain: Int, count: Int, highestUsed: Int?): Int =
-        NativeBridge.recoveryDigiDollarGapNext(chain, count, highestUsed ?: -1)
+        NativeBridge.recoveryDigiDollarWholeGapNext(chain, count, highestUsed ?: -1)
 
     /** [RecoveryGapRule.ASK_AGAIN], [RecoveryGapRule.FINISHED], or anything else: capped, on
      *  [round] (from 1) of at most [bound] ([roundBound]). */
     fun outcome(
         externalCount: Int, internalCount: Int, nextExternal: Int, nextInternal: Int,
         usedExternal: Int?, usedInternal: Int?, round: Int, bound: Int,
-    ): Int = NativeBridge.recoveryDigiDollarGapOutcome(
+    ): Int = NativeBridge.recoveryDigiDollarWholeGapOutcome(
         externalCount, internalCount, nextExternal, nextInternal, usedExternal ?: -1, usedInternal ?: -1,
         round, bound,
     )

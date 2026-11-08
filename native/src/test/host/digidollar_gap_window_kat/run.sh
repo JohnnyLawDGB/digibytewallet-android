@@ -6,15 +6,11 @@
 #
 # Header-only: includes BRRecoveryGapWindow.h (libc only).
 #
-#   RED    three comparison arms, each failing only its own cases:
+#   RED    two comparison arms, each failing only its own cases:
 #          -DDIGIDOLLAR_GAP_RED  the fixed window: a window never grows, so DigiDollar change past
 #                                the tenth send is lost and the scan still says finished (the 4.1.2
 #                                row 19 bug);
-#          -DDIGIDOLLAR_STEP_RED a grown window grows only to a gap past the last use, not by a whole
-#                                gap (the rule before 2026-11), so a lookup that keeps answering
-#                                "used one gap from the end" walks one address per round;
-#          -DDIGIDOLLAR_CAP_RED  a scan the cap or the round bound stopped is reported finished
-#                                ("that is everything").
+#          -DDIGIDOLLAR_CAP_RED  a scan the cap stopped is reported finished ("that is everything").
 #          In each arm every one of its RED cases MUST fail and every other case pass.
 #   GREEN  the shipped rule: every case passes, ALL PASS, exit 0. Every arm under ASan + UBSan.
 #
@@ -32,22 +28,16 @@ CC="${CC:-clang}"
 export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 symbolize=0"
 SAN_RE='ERROR: AddressSanitizer|ERROR: LeakSanitizer|runtime error:'
 
-GAP_RED_CASES="use_near_the_end_widens_the_window_by_at_least_a_gap the_window_grows_to_the_cap_and_not_past_it
+GAP_RED_CASES="use_near_the_end_widens_the_window_to_a_gap_past_it the_window_grows_to_the_cap_and_not_past_it
                twelve_sends_are_found_where_the_fixed_window_stopped_at_ten external_chain_widens_at_its_own_gap
-               index_zero_is_used_and_grows_the_window_by_a_whole_gap
-               change_past_ten_sends_is_found_and_finished always_used_lookup_stops_at_the_cap_and_is_capped
-               a_lookup_one_gap_from_the_end_reaches_the_cap_a_gap_per_round"
-STEP_RED_CASES="use_near_the_end_widens_the_window_by_at_least_a_gap external_chain_widens_at_its_own_gap
-                index_zero_is_used_and_grows_the_window_by_a_whole_gap change_past_ten_sends_is_found_and_finished
-                a_lookup_one_gap_from_the_end_reaches_the_cap_a_gap_per_round"
-CAP_RED_CASES="cap_stop_is_capped round_bound_stop_is_capped always_used_lookup_stops_at_the_cap_and_is_capped
-               a_lookup_one_gap_from_the_end_reaches_the_cap_a_gap_per_round"
+               index_zero_is_used_and_grows_to_a_gap_past_it a_window_past_the_cap_falls_to_it_as_kotlins_did
+               change_past_ten_sends_is_found_and_finished always_used_lookup_stops_at_the_cap_and_is_capped"
+CAP_RED_CASES="cap_stop_is_capped always_used_lookup_stops_at_the_cap_and_is_capped"
 GUARD_CASES="gaps_cap_and_starts_are_kotlins an_unused_chain_keeps_its_window a_window_a_gap_past_the_last_use_stops_growing
              capped_is_kotlins each_chain_caps_within_its_own_gap a_negative_index_is_nothing_used
-             arithmetic_wraps_as_kotlin_int a_window_past_the_cap_is_kept unknown_chain_never_grows_and_is_capped
-             round_bound_is_the_internal_chains growing_scan_asks_again_and_settled_scan_is_finished
-             empty_wallet_is_asked_once"
-ALL_CASES="$(echo $GAP_RED_CASES $STEP_RED_CASES $CAP_RED_CASES $GUARD_CASES | tr ' ' '\n' | awk '!seen[$0]++' | tr '\n' ' ')"
+             arithmetic_wraps_as_kotlin_int unknown_chain_never_grows_and_is_capped
+             growing_scan_asks_again_and_settled_scan_is_finished empty_wallet_is_asked_once"
+ALL_CASES="$(echo $GAP_RED_CASES $CAP_RED_CASES $GUARD_CASES | tr ' ' '\n' | awk '!seen[$0]++' | tr '\n' ' ')"
 
 build() {
     local out="$1"; shift
@@ -55,7 +45,7 @@ build() {
         -fno-omit-frame-pointer "$@" -I "$CORE_DIR" "$SCRIPT_DIR/digidollar_gap_window_kat_main.c" -o "$out"
 }
 
-for seam in DIGIDOLLAR_GAP_RED DIGIDOLLAR_STEP_RED DIGIDOLLAR_CAP_RED; do
+for seam in DIGIDOLLAR_GAP_RED DIGIDOLLAR_CAP_RED; do
     if ! grep -q "$seam" "$CORE_DIR/BRRecoveryGapWindow.h" 2>/dev/null; then
         echo "GATE FAILURE: $CORE_DIR/BRRecoveryGapWindow.h missing or has no $seam seam; -D would be inert."
         exit 1
@@ -64,7 +54,6 @@ done
 
 FAIL=0
 build "$BUILD_DIR/red_gap" -DDIGIDOLLAR_GAP_RED || { echo "GATE FAILURE: DIGIDOLLAR_GAP_RED arm did not compile."; exit 1; }
-build "$BUILD_DIR/red_step" -DDIGIDOLLAR_STEP_RED || { echo "GATE FAILURE: DIGIDOLLAR_STEP_RED arm did not compile."; exit 1; }
 build "$BUILD_DIR/red_cap" -DDIGIDOLLAR_CAP_RED || { echo "GATE FAILURE: DIGIDOLLAR_CAP_RED arm did not compile."; exit 1; }
 build "$BUILD_DIR/green" || { echo "GATE FAILURE: shipped arm did not compile."; exit 1; }
 
@@ -88,7 +77,6 @@ comparison_arm() {
 }
 
 comparison_arm "$BUILD_DIR/red_gap" DIGIDOLLAR_GAP_RED "$GAP_RED_CASES"
-comparison_arm "$BUILD_DIR/red_step" DIGIDOLLAR_STEP_RED "$STEP_RED_CASES"
 comparison_arm "$BUILD_DIR/red_cap" DIGIDOLLAR_CAP_RED "$CAP_RED_CASES"
 
 echo "--- SHIPPED ARM: every case MUST pass, ALL PASS, exit 0, no sanitizer report ---"
@@ -105,5 +93,5 @@ for c in $(<<<"$out" sed -n 's/^RESULT \([^ ]*\) .*$/\1/p'); do
     case " $ALL_CASES " in *" $c "*) ;; *) echo "  [green $c] GATE FAILURE: case not listed in run.sh"; FAIL=1 ;; esac
 done
 
-[ $FAIL -eq 0 ] && echo "digidollar_gap_window_kat: GATE HELD (RED kept the fixed window, grew by less than a gap and reported capped scans finished; GREEN holds every rule)"
+[ $FAIL -eq 0 ] && echo "digidollar_gap_window_kat: GATE HELD (RED kept the fixed window and reported capped scans finished; GREEN holds every rule)"
 exit $FAIL

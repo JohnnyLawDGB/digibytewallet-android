@@ -18,8 +18,11 @@ import java.io.File
  * DigiDollar's gaps and cap, so the scan also takes the core's round bound and passes it, with the
  * round, to every outcome.
  *
- * The rule's values are checked by the host KAT digidollar_gap_window_kat, whose red arms
- * DIGIDOLLAR_GAP_RED, DIGIDOLLAR_STEP_RED and DIGIDOLLAR_CAP_RED fail them.
+ * The core functions are BRRecoveryDigiDollarWholeGapNext/_WholeGapOutcome/_GapRoundBound; the
+ * earlier BRRecoveryDigiDollarGapNext/_GapOutcome are deprecated there and must not be called.
+ *
+ * The rule's values are checked by the host KAT digidollar_whole_gap_kat, whose red arms
+ * DIGIDOLLAR_WHOLE_FIXED_RED, DIGIDOLLAR_WHOLE_STEP_RED and DIGIDOLLAR_WHOLE_CAP_RED fail them.
  */
 class DigiDollarGapCoreRuleGateTest {
 
@@ -94,8 +97,8 @@ class DigiDollarGapCoreRuleGateTest {
         val rule = code(File(recovery, "DigiDollarGapRule.kt"))
         for ((fn, native) in listOf(
             "start" to "NativeBridge.recoveryDigiDollarGapStart",
-            "next" to "NativeBridge.recoveryDigiDollarGapNext",
-            "outcome" to "NativeBridge.recoveryDigiDollarGapOutcome",
+            "next" to "NativeBridge.recoveryDigiDollarWholeGapNext",
+            "outcome" to "NativeBridge.recoveryDigiDollarWholeGapOutcome",
             "roundBound" to "NativeBridge.recoveryDigiDollarGapRoundBound",
         )) {
             val decl = Regex("""fun\s+$fn\s*\(""").find(rule) ?: error("DigiDollarGapRule has no $fn")
@@ -106,11 +109,15 @@ class DigiDollarGapCoreRuleGateTest {
                 1, Regex("""\bNativeBridge\.\w+\s*\(""").findAll(fnSrc).count())
         }
         val jniSrc = code(jni)
-        for (c in listOf("BRRecoveryDigiDollarGapStart", "BRRecoveryDigiDollarGapNext", "BRRecoveryDigiDollarGapOutcome",
-                         "BRRecoveryDigiDollarGapRoundBound")) {
+        for (c in listOf("BRRecoveryDigiDollarGapStart", "BRRecoveryDigiDollarWholeGapNext",
+                         "BRRecoveryDigiDollarWholeGapOutcome", "BRRecoveryDigiDollarGapRoundBound")) {
             assertEquals("jni_recovery_gap.c must call $c once", 1, count(jniSrc, c))
             assertTrue("$header does not define $c: is the core pin current?",
                 Regex("""static\s+inline\s+int(32_t)?\s+$c\s*\(""").containsMatchIn(header.readText()))
+        }
+        // The earlier DigiDollar rule (deprecated in the core, to be removed) is not called.
+        for (c in listOf("BRRecoveryDigiDollarGapNext", "BRRecoveryDigiDollarGapOutcome")) {
+            assertEquals("jni_recovery_gap.c calls the deprecated $c", 0, count(jniSrc, c))
         }
         assertTrue("jni_recovery_gap.c is not built",
             File(repo, "native/CMakeLists.txt").readText().contains("src/main/jni/bridge/jni_recovery_gap.c"))
