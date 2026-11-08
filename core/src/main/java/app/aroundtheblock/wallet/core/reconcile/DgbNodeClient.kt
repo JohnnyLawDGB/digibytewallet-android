@@ -1,6 +1,7 @@
 package app.aroundtheblock.wallet.core.reconcile
 
 import android.content.Context
+import app.aroundtheblock.wallet.core.bridge.NativeBridge
 import app.aroundtheblock.wallet.core.network.BoundedBody
 import app.aroundtheblock.wallet.core.networkSuffix
 import kotlinx.coroutines.Dispatchers
@@ -221,16 +222,34 @@ class DgbNodeClient(
 
     /**
      * True only when the network never took [txid] (4.1.3, review R8), on the evidence of the PINNED node
-     * alone -- a custom endpoint may be blocksonly or keep no transaction index, so it is never asked: the
-     * node's own "Transaction not found" for the txid, AND every one of [inputs] still unspent in its UTXO
-     * set (mempool included). A send the network did take has its inputs spent there, confirmed or not,
-     * so the second half catches a node that merely failed to index it.
+     * alone. The rule is the core's (BRStaleSendNextStep in BRStaleSend.h, which iOS calls too): it says
+     * which question comes next -- the txid, then each of [inputs] in order -- and when to stop; this
+     * function only asks them. Today's rule: a custom endpoint (it may be blocksonly or keep no
+     * transaction index) and a send with no inputs are never asked; the node's own "Transaction not
+     * found" for the txid, AND every input still unspent in its UTXO set (mempool included) by its
+     * explicit answer, stopping at the first that is not. A send the network did take has its inputs
+     * spent there, confirmed or not, so the second half catches a node that merely failed to index it.
+     * At most one question for the txid and one per input; past that, or on a step this code does not
+     * know, the answer is false (the send is kept).
      */
     suspend fun sendNeverRelayed(txid: String, inputs: List<Pair<String, Int>>): Boolean {
-        if (endpoint() != DEFAULT_BASE_URL || inputs.isEmpty()) return false
-        if (txNetworkStatus(txid) != TxNetworkStatus.UNKNOWN) return false
-        for ((t, v) in inputs) if (outputUnspent(t, v) != true) return false
-        return true
+        val pinned = endpoint() == DEFAULT_BASE_URL
+        var txStatus = STALE_TX_NOT_ASKED
+        var asked = 0
+        var lastAnswer = STALE_INPUT_NO_ANSWER
+        for (question in 0 until inputs.size + 2) {
+            when (NativeBridge.staleSendNextStep(pinned, inputs.size, txStatus, asked, lastAnswer)) {
+                STALE_STEP_ASK_TX -> txStatus = staleTxCode(txNetworkStatus(txid))
+                STALE_STEP_ASK_INPUT -> {
+                    val (t, v) = inputs.getOrNull(asked) ?: return false
+                    lastAnswer = staleInputCode(outputUnspent(t, v))
+                    asked++
+                }
+                STALE_STEP_NEVER_RELAYED -> return true
+                else -> return false
+            }
+        }
+        return false
     }
 
     /**
@@ -500,6 +519,36 @@ data class TxConfirmation(val height: Long, val time: Long)
 
 /** What a node knows of one txid ([DgbNodeClient.txNetworkStatus]). */
 enum class TxNetworkStatus { CONFIRMED, IN_MEMPOOL, UNKNOWN, UNAVAILABLE }
+
+// BRStaleSend.h's codes (BRStaleSendTxStatus, BRStaleSendInputAnswer, BRStaleSendStep), passed to and
+// from NativeBridge.staleSendNextStep. StaleSendCoreRuleGateTest reads each against the header.
+internal const val STALE_TX_NOT_ASKED = 0
+internal const val STALE_TX_CONFIRMED = 1
+internal const val STALE_TX_IN_MEMPOOL = 2
+internal const val STALE_TX_UNKNOWN = 3
+internal const val STALE_TX_UNAVAILABLE = 4
+internal const val STALE_INPUT_NO_ANSWER = 0
+internal const val STALE_INPUT_UNSPENT = 1
+internal const val STALE_INPUT_SPENT = 2
+internal const val STALE_STEP_NOT_SHOWN = 0
+internal const val STALE_STEP_NEVER_RELAYED = 1
+internal const val STALE_STEP_ASK_TX = 2
+internal const val STALE_STEP_ASK_INPUT = 3
+
+/** A [TxNetworkStatus] as the core's BRStaleSendTxStatus. A name for each value; no decision. */
+internal fun staleTxCode(status: TxNetworkStatus): Int = when (status) {
+    TxNetworkStatus.CONFIRMED -> STALE_TX_CONFIRMED
+    TxNetworkStatus.IN_MEMPOOL -> STALE_TX_IN_MEMPOOL
+    TxNetworkStatus.UNKNOWN -> STALE_TX_UNKNOWN
+    TxNetworkStatus.UNAVAILABLE -> STALE_TX_UNAVAILABLE
+}
+
+/** An [DgbNodeClient.outputUnspent] answer as the core's BRStaleSendInputAnswer. A name for each value; no decision. */
+internal fun staleInputCode(unspent: Boolean?): Int = when (unspent) {
+    true -> STALE_INPUT_UNSPENT
+    false -> STALE_INPUT_SPENT
+    null -> STALE_INPUT_NO_ANSWER
+}
 
 /** Pure: an `/explorer/spending/:txid/:vout` answer -- true for `{"spent": false}`, false for `{"spent": true}`, else null. */
 internal fun parseSpendingAnswer(code: Int, body: String?): Boolean? {
