@@ -65,20 +65,25 @@ LIMIT_S=10   # the witness comparison arm does not return; it is killed at this 
 
 # bounded <outfile> <cmd...>: exit code of the command, or 124 if it was killed at
 # the limit. Used for the tx_witness comparison arm, whose walk does not return.
+# The watchdog leaves <outfile>.stopped BEFORE it kills, and that file alone says the run was
+# stopped. Asking whether the watchdog is still alive does not: `wait` returns as soon as the
+# kill lands, often before the watchdog subshell has exited, and a stopped run was then reported
+# as one that returned rc=137 by itself (the race fixed in base58_input_bound_kat, #211).
 bounded() {
     local outfile="$1"; shift
+    local stopped="$outfile.stopped"
+    rm -f "$stopped"
     "$@" >"$outfile" 2>&1 &
     local pid=$!
     # The watchdog subshell inherits this script's EXIT trap; a plain kill would run it
     # and remove $BUILD_DIR under the other arms. Drop the trap inside, and stop the
     # watchdog with a signal that runs no trap at all.
-    ( trap - EXIT; sleep "$LIMIT_S"; kill -9 "$pid" 2>/dev/null ) >/dev/null 2>&1 &
+    ( trap - EXIT; sleep "$LIMIT_S"; : >"$stopped"; kill -9 "$pid" 2>/dev/null ) >/dev/null 2>&1 &
     local watchdog=$!
     wait "$pid" 2>/dev/null; local rc=$?
-    if kill -0 "$watchdog" 2>/dev/null; then
-        kill -9 "$watchdog" 2>/dev/null; wait "$watchdog" 2>/dev/null; return $rc
-    fi
-    return 124
+    kill -9 "$watchdog" 2>/dev/null; wait "$watchdog" 2>/dev/null
+    [ -e "$stopped" ] && return 124
+    return $rc
 }
 
 shopt -s nullglob
@@ -396,6 +401,9 @@ run_witness() {
     bounded "$BUILD_DIR/wred${bits}.tx_witness.out" "$BUILD_DIR/wred${bits}" tx_witness; local rc=$?
     if [ $rc -eq 124 ]; then
         echo "  [$bits red tx_witness] did not return; killed at the limit (rc=124) -- the KAT sees what the bound governs"
+    elif [ $rc -ge 128 ]; then
+        echo "  [$bits red tx_witness] GATE FAILURE: ended by signal $((rc - 128)) before the limit, not by the watchdog (OOM killer?)"
+        head -6 "$BUILD_DIR/wred${bits}.tx_witness.out" 2>/dev/null | sed 's/^/      /'; FAIL=1
     else
         echo "  [$bits red tx_witness] GATE FAILURE: returned (rc=$rc); this arm cannot see what the bound governs"
         head -6 "$BUILD_DIR/wred${bits}.tx_witness.out" 2>/dev/null | sed 's/^/      /'; FAIL=1

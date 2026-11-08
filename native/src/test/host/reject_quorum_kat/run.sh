@@ -89,17 +89,22 @@ build() {   # <out> <64|32> [-D...]
 }
 
 # bounded <outfile> <asan-options> <cmd...>: the command's exit code, or 124 if killed at the limit.
+# The watchdog leaves <outfile>.stopped BEFORE it kills, and that file alone says the run was
+# stopped. Asking whether the watchdog is still alive does not: `wait` returns as soon as the
+# kill lands, often before the watchdog subshell has exited, and a stopped run was then reported
+# as one that returned rc=137 by itself (the race fixed in base58_input_bound_kat, #211).
 bounded() {
     local outfile="$1" opts="$2"; shift 2
+    local stopped="$outfile.stopped"
+    rm -f "$stopped"
     ASAN_OPTIONS="$opts" "$@" >"$outfile" 2>&1 &
     local pid=$!
-    ( trap - EXIT; sleep "$LIMIT_S"; kill -9 "$pid" 2>/dev/null ) >/dev/null 2>&1 &
+    ( trap - EXIT; sleep "$LIMIT_S"; : >"$stopped"; kill -9 "$pid" 2>/dev/null ) >/dev/null 2>&1 &
     local watchdog=$!
     wait "$pid" 2>/dev/null; local rc=$?
-    if kill -0 "$watchdog" 2>/dev/null; then
-        kill -9 "$watchdog" 2>/dev/null; wait "$watchdog" 2>/dev/null; return $rc
-    fi
-    return 124
+    kill -9 "$watchdog" 2>/dev/null; wait "$watchdog" 2>/dev/null
+    [ -e "$stopped" ] && return 124
+    return $rc
 }
 
 show() { sed -n "1,${2:-10}p" "$1" | sed 's/^/      /'; }
