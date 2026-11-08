@@ -131,6 +131,9 @@ jlongArray JNICALL NativeBridge_quoteTransaction(JNIEnv *env, jobject thiz, jbyt
 jstring JNICALL NativeBridge_rawTransactionId(JNIEnv *env, jobject thiz, jbyteArray rawTx);  /* jni_asset_send.c */
 jboolean JNICALL NativeBridge_reanchorCompactFilterChainAtFloor(JNIEnv *env, jobject thiz);  /* jni_peer.c */
 jboolean JNICALL NativeBridge_recoverWalletFromBytes(JNIEnv *env, jobject thiz, jbyteArray phraseBytes, jlong creationTimestamp, jbyteArray passphrase);  /* jni_wallet.c */
+jint JNICALL NativeBridge_recoveryDigiDollarGapNext(JNIEnv *env, jobject thiz, jint chain, jint count, jint highestUsed);  /* jni_recovery_gap.c */
+jint JNICALL NativeBridge_recoveryDigiDollarGapOutcome(JNIEnv *env, jobject thiz, jint externalCount, jint internalCount, jint nextExternal, jint nextInternal, jint usedExternal, jint usedInternal);  /* jni_recovery_gap.c */
+jint JNICALL NativeBridge_recoveryDigiDollarGapStart(JNIEnv *env, jobject thiz, jint chain);  /* jni_recovery_gap.c */
 jint JNICALL NativeBridge_recoveryGapNext(JNIEnv *env, jobject thiz, jint chain, jint count, jint highestUsed);  /* jni_recovery_gap.c */
 jint JNICALL NativeBridge_recoveryGapOutcome(JNIEnv *env, jobject thiz, jint externalCount, jint internalCount, jint nextExternal, jint nextInternal, jint usedExternal, jint usedInternal, jint round, jint bound);  /* jni_recovery_gap.c */
 jint JNICALL NativeBridge_recoveryGapRoundBound(JNIEnv *env, jobject thiz, jint startExternal, jint startInternal);  /* jni_recovery_gap.c */
@@ -300,6 +303,9 @@ jboolean JNICALL NativeBridge_walletContainsAddress(JNIEnv *env, jobject thiz, j
     { "rawTransactionId", "([B)Ljava/lang/String;", (void *) NativeBridge_rawTransactionId }, \
     { "reanchorCompactFilterChainAtFloor", "()Z", (void *) NativeBridge_reanchorCompactFilterChainAtFloor }, \
     { "recoverWalletFromBytes", "([BJ[B)Z", (void *) NativeBridge_recoverWalletFromBytes }, \
+    { "recoveryDigiDollarGapNext", "(III)I", (void *) NativeBridge_recoveryDigiDollarGapNext }, \
+    { "recoveryDigiDollarGapOutcome", "(IIIIII)I", (void *) NativeBridge_recoveryDigiDollarGapOutcome }, \
+    { "recoveryDigiDollarGapStart", "(I)I", (void *) NativeBridge_recoveryDigiDollarGapStart }, \
     { "recoveryGapNext", "(III)I", (void *) NativeBridge_recoveryGapNext }, \
     { "recoveryGapOutcome", "(IIIIIIII)I", (void *) NativeBridge_recoveryGapOutcome }, \
     { "recoveryGapRoundBound", "(II)I", (void *) NativeBridge_recoveryGapRoundBound }, \
@@ -344,6 +350,6 @@ jboolean JNICALL NativeBridge_walletContainsAddress(JNIEnv *env, jobject thiz, j
     { "takeUnprovableServerHeight", "()J", (void *) NativeBridge_takeUnprovableServerHeight }, \
     { "walletContainsAddress", "(Ljava/lang/String;)Z", (void *) NativeBridge_walletContainsAddress }, \
 
-#define DGB_JNI_NATIVEBRIDGE_METHOD_COUNT 167
+#define DGB_JNI_NATIVEBRIDGE_METHOD_COUNT 170
 
 #endif
