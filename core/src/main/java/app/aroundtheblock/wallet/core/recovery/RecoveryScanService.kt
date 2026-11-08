@@ -113,27 +113,22 @@ class RecoveryScanService(
         val totalSat: Long = utxos.sumOf { it.amountSatoshi }
     }
 
-    /** One request per address, so these stay small. A wallet's DigiDollar sits on the first few
-     *  receive indices in practice; the long tail the plain-DGB scan needs would be wasted
-     *  round-trips here. */
-    private val ddGapExternal = 20
-    private val ddGapInternal = 10
-
     /**
      * What this seed holds in DigiDollar, at m/86'/20'/0'.
      *
-     * A shorter gap than the DGB profiles use: DigiDollar receive addresses are handed out one at
-     * a time by a wallet that has only ever had one DD address per index, so the long tail the
-     * plain-DGB scan needs is wasted round-trips here — each address is its own request rather
-     * than part of a batch.
+     * A shorter gap than the DGB profiles use (the core's, through [DigiDollarGapRule]): DigiDollar
+     * receive addresses are handed out one at a time by a wallet that has only ever had one DD
+     * address per index, so the long tail the plain-DGB scan needs is wasted round-trips here —
+     * each address is its own request rather than part of a batch.
      */
     private suspend fun scanDigiDollar(seedBytes: ByteArray): DigiDollarScan.Result? {
-        // Each chain's window widens while its far end is in use (DigiDollarGapWindow): DigiDollar
-        // change walks the internal chain one index per send, past any fixed window (4.1.2 row 19).
-        // Lookups are asked once per address, however many times the window grows.
+        // Each chain's window widens while its far end is in use ([DigiDollarGapRule], the core's
+        // rule): DigiDollar change walks the internal chain one index per send, past any fixed
+        // window (4.1.2 row 19). Lookups are asked once per address, however many times the window
+        // grows.
         val asked = HashMap<String, app.aroundtheblock.wallet.core.reconcile.DigiDollarHoldingResult?>()
-        var external = ddGapExternal
-        var internal = ddGapInternal
+        var external = DigiDollarGapRule.start(0)
+        var internal = DigiDollarGapRule.start(1)
         while (true) {
             val lines = app.aroundtheblock.wallet.core.bridge.NativeBridge.deriveDigiDollarAddresses(
                 seedBytes, external, internal,
@@ -155,16 +150,18 @@ class RecoveryScanService(
             )
             val usedExternal = used.filter { it.chain == 0 }.maxOfOrNull { it.index }
             val usedInternal = used.filter { it.chain == 1 }.maxOfOrNull { it.index }
-            val nextExternal = DigiDollarGapWindow.next(external, usedExternal, ddGapExternal)
-            val nextInternal = DigiDollarGapWindow.next(internal, usedInternal, ddGapInternal)
-            if (nextExternal == external && nextInternal == internal) {
-                // Stopped by the cap rather than by a gap past the last use: not a finished answer.
-                val capped = DigiDollarGapWindow.capped(usedExternal, ddGapExternal) ||
-                    DigiDollarGapWindow.capped(usedInternal, ddGapInternal)
-                return if (capped) result.copy(reachable = false) else result
+            val nextExternal = DigiDollarGapRule.next(0, external, usedExternal)
+            val nextInternal = DigiDollarGapRule.next(1, internal, usedInternal)
+            when (DigiDollarGapRule.outcome(external, internal, nextExternal, nextInternal, usedExternal, usedInternal)) {
+                RecoveryGapRule.ASK_AGAIN -> {
+                    external = nextExternal
+                    internal = nextInternal
+                }
+                RecoveryGapRule.FINISHED -> return result
+                // Stopped by the cap rather than by a gap past the last use (or an outcome this
+                // build does not know): not a finished answer.
+                else -> return result.copy(reachable = false)
             }
-            external = nextExternal
-            internal = nextInternal
         }
     }
 

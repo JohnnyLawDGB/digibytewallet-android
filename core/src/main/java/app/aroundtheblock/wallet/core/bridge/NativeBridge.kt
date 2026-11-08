@@ -291,6 +291,26 @@ object NativeBridge {
      *  are no paths). */
     external fun recoveryGapRoundBound(startExternal: Int, startInternal: Int): Int
 
+    /** BRRecoveryDigiDollarGapStart: the window the DigiDollar recovery scan's [chain] (0 external,
+     *  1 internal) starts at, its gap (20 external, 10 internal); 0 for any other chain. The one
+     *  copy of the rule (BRRecoveryGapWindow.h); iOS calls the same function. */
+    external fun recoveryDigiDollarGapStart(chain: Int): Int
+
+    /** BRRecoveryDigiDollarGapNext: the window [count] of the DigiDollar scan's [chain] grows to,
+     *  given [highestUsed] (negative: nothing used) — the chain's gap past the last use, up to the
+     *  cap (1000); [count] when it already reaches a gap past it. */
+    external fun recoveryDigiDollarGapNext(chain: Int, count: Int, highestUsed: Int): Int
+
+    /** BRRecoveryDigiDollarGapOutcome: what one round of the DigiDollar scan is, its windows having
+     *  been [externalCount]/[internalCount] and now [nextExternal]/[nextInternal]
+     *  ([recoveryDigiDollarGapNext]), with highest used indices [usedExternal]/[usedInternal]
+     *  (negative: none): 0 ask again, 1 finished, 2 capped (not a finished answer). Any other
+     *  value is to be read as capped. */
+    external fun recoveryDigiDollarGapOutcome(
+        externalCount: Int, internalCount: Int, nextExternal: Int, nextInternal: Int,
+        usedExternal: Int, usedInternal: Int,
+    ): Int
+
     /** Start SPV sync — connects to peers and begins header/transaction sync. */
     external fun startSync()
     /** Flag the peer manager for a clean recreate on the next startSync() — recovers
