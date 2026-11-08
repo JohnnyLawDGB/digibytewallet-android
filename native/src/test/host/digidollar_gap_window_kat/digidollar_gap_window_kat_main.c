@@ -164,9 +164,12 @@ int main(void)
     result("arithmetic_wraps_as_kotlin_int", ok, NULL);
 
     // Kotlin's minOf(wanted, MAX): a window already past the cap that still wants to grow falls to
-    // the cap; one that does not want to grow is kept. The scan never has such a window.
+    // the cap; one that does not want to grow is kept, including one already exactly a gap past
+    // its last use (wanted == count: Kotlin's strict `wanted > count`, not >=). The scan never has
+    // such a window.
     ok = BRRecoveryDigiDollarGapNext(1, 1500, 1495) == BR_RECOVERY_DIGIDOLLAR_MAX &&
-         BRRecoveryDigiDollarGapNext(1, 1500, 10) == 1500;
+         BRRecoveryDigiDollarGapNext(1, 1500, 10) == 1500 && BRRecoveryDigiDollarGapNext(1, 1500, 1489) == 1500 &&
+         BRRecoveryDigiDollarGapNext(0, 1500, 1479) == 1500;
     snprintf(why, sizeof(why), "next(1500, 1495) = %d", BRRecoveryDigiDollarGapNext(1, 1500, 1495));
     result("a_window_past_the_cap_falls_to_it_as_kotlins_did", ok, why);
 
