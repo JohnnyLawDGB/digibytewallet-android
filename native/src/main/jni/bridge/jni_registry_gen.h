@@ -169,6 +169,9 @@ jbyteArray JNICALL NativeBridge_signPreparedTransaction(JNIEnv *env, jobject thi
 jbyteArray JNICALL NativeBridge_signTransaction(JNIEnv *env, jobject thiz, jbyteArray unsignedTx);  /* jni_transaction.c */
 jlong JNICALL NativeBridge_snapAutoFetchThroughToScanFrontier(JNIEnv *env, jobject thiz);  /* jni_peer.c */
 jlongArray JNICALL NativeBridge_spendableNotListed(JNIEnv *env, jobject thiz, jobjectArray outpoints);  /* jni_wallet.c */
+jboolean JNICALL NativeBridge_staleSendIsStale(JNIEnv *env, jobject thiz, jlong timestampS, jlong nowS, jboolean neverRelayed);  /* jni_stale_send.c */
+jint JNICALL NativeBridge_staleSendNextStep(JNIEnv *env, jobject thiz, jboolean pinnedNode, jint inputCount, jint txStatus, jint inputsAsked, jint lastInputAnswer);  /* jni_stale_send.c */
+jboolean JNICALL NativeBridge_staleSendOldEnough(JNIEnv *env, jobject thiz, jlong timestampS, jlong nowS);  /* jni_stale_send.c */
 void JNICALL NativeBridge_startSync(JNIEnv *env, jobject thiz);  /* jni_peer.c */
 void JNICALL NativeBridge_stopSync(JNIEnv *env, jobject thiz);  /* jni_peer.c */
 jint JNICALL NativeBridge_strandedRefusalActionFor(JNIEnv *env, jobject thiz, jint publishError, jboolean plainDgb, jboolean refusedByPeers);  /* jni_stranded_refusal.c */
@@ -341,6 +344,9 @@ jboolean JNICALL NativeBridge_walletContainsAddress(JNIEnv *env, jobject thiz, j
     { "signTransaction", "([B)[B", (void *) NativeBridge_signTransaction }, \
     { "snapAutoFetchThroughToScanFrontier", "()J", (void *) NativeBridge_snapAutoFetchThroughToScanFrontier }, \
     { "spendableNotListed", "([Ljava/lang/String;)[J", (void *) NativeBridge_spendableNotListed }, \
+    { "staleSendIsStale", "(JJZ)Z", (void *) NativeBridge_staleSendIsStale }, \
+    { "staleSendNextStep", "(ZIIII)I", (void *) NativeBridge_staleSendNextStep }, \
+    { "staleSendOldEnough", "(JJ)Z", (void *) NativeBridge_staleSendOldEnough }, \
     { "startSync", "()V", (void *) NativeBridge_startSync }, \
     { "stopSync", "()V", (void *) NativeBridge_stopSync }, \
     { "strandedRefusalActionFor", "(IZZ)I", (void *) NativeBridge_strandedRefusalActionFor }, \
@@ -350,6 +356,6 @@ jboolean JNICALL NativeBridge_walletContainsAddress(JNIEnv *env, jobject thiz, j
     { "takeUnprovableServerHeight", "()J", (void *) NativeBridge_takeUnprovableServerHeight }, \
     { "walletContainsAddress", "(Ljava/lang/String;)Z", (void *) NativeBridge_walletContainsAddress }, \
 
-#define DGB_JNI_NATIVEBRIDGE_METHOD_COUNT 170
+#define DGB_JNI_NATIVEBRIDGE_METHOD_COUNT 173
 
 #endif
