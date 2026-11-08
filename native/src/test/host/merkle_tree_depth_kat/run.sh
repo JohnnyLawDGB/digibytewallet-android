@@ -28,17 +28,22 @@ if ! grep -q 'MERKLE_TREE_DEPTH_UNFIXED' "$CORE_DIR/BRMerkleBlock.c"; then
     echo "GATE FAILURE: the MERKLE_TREE_DEPTH_UNFIXED comparison seam is not in BRMerkleBlock.c"; exit 1
 fi
 
+# The watchdog leaves <outfile>.stopped BEFORE it kills, and that file alone says the run was
+# stopped. Asking whether the watchdog is still alive does not: `wait` returns as soon as the
+# kill lands, often before the watchdog subshell has exited, and a stopped run was then reported
+# as one that returned rc=137 by itself (the race fixed in base58_input_bound_kat, #211).
 bounded() {
     local outfile="$1"; shift
+    local stopped="$outfile.stopped"
+    rm -f "$stopped"
     "$@" >"$outfile" 2>&1 &
     local pid=$!
-    ( trap - EXIT; sleep "$LIMIT_S"; kill -9 "$pid" 2>/dev/null ) >/dev/null 2>&1 &
+    ( trap - EXIT; sleep "$LIMIT_S"; : >"$stopped"; kill -9 "$pid" 2>/dev/null ) >/dev/null 2>&1 &
     local watchdog=$!
     wait "$pid" 2>/dev/null; local rc=$?
-    if kill -0 "$watchdog" 2>/dev/null; then
-        kill -9 "$watchdog" 2>/dev/null; wait "$watchdog" 2>/dev/null; return $rc
-    fi
-    return 124
+    kill -9 "$watchdog" 2>/dev/null; wait "$watchdog" 2>/dev/null
+    [ -e "$stopped" ] && return 124
+    return $rc
 }
 
 shopt -s nullglob
@@ -81,6 +86,7 @@ expect() {
     if grep -Eq "$SAN_RE" "$out"; then got=san
     elif [ "$rc" -eq 124 ]; then got=timeout
     elif [ "$rc" -eq 0 ] && grep -q "^CASE PASS $kase" "$out"; then got=pass
+    elif [ "$rc" -ge 128 ]; then got="signal $((rc - 128)) before the limit, not the watchdog (rc=$rc)"
     else got="other(rc=$rc)"
     fi
     if [ "$got" = "$want" ]; then
