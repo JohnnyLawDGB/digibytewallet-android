@@ -8,8 +8,8 @@
 // The owner's decision (2026-11-08, on the #209 review's finding 2): the DigiDollar window follows
 // the plain-DGB rule, a grown window growing by at least a whole gap and the scan stopping at a round
 // bound, with DigiDollar's gaps (20/10) and cap (1000). The earlier rule (BRRecoveryDigiDollarGapNext
-// / _GapOutcome, deprecated) stays checked by digidollar_gap_window_kat until a follow-up core PR
-// removes it; this suite holds the new rule's answers, each as a named case, and the platform's scan
+// / _GapOutcome) is removed from the core, and digidollar_gap_window_kat, which checked it, with it;
+// this suite holds the rule's answers, each as a named case, and the platform's scan
 // loop as a simulation (simulate() below, which does what scanDigiDollar does per round with a lookup
 // that answers from a set of used indices), including the review's lookup that answers "used one gap
 // from the far end".

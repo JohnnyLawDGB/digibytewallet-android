@@ -19,7 +19,8 @@ import java.io.File
  * round, to every outcome.
  *
  * The core functions are BRRecoveryDigiDollarWholeGapNext/_WholeGapOutcome/_GapRoundBound; the
- * earlier BRRecoveryDigiDollarGapNext/_GapOutcome are deprecated there and must not be called.
+ * earlier BRRecoveryDigiDollarGapNext/_GapOutcome must not be called (removed from the core after
+ * Android moved off them).
  *
  * The rule's values are checked by the host KAT digidollar_whole_gap_kat, whose red arms
  * DIGIDOLLAR_WHOLE_FIXED_RED, DIGIDOLLAR_WHOLE_STEP_RED and DIGIDOLLAR_WHOLE_CAP_RED fail them.
