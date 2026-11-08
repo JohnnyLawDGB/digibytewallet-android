@@ -27,6 +27,8 @@
 //   prefix <name>  one of the two decoders is handed BR_BASE58_MAX_STR_LEN + 1 characters in a heap
 //                  block of exactly that size, with no terminating NUL. It must answer 0 without
 //                  reading past the block; AddressSanitizer reports any read that does.
+//   arm            prints which arm this binary is ("arm: comparison, 64-bit" or "arm: shipped,
+//                  32-bit", ...); run.sh checks every binary before it runs a case.
 //   list           prints the entry point names (list-decoders: the two decoders' four forms), so
 //                  run.sh and this file cannot drift.
 //
@@ -432,6 +434,14 @@ static int case_prefix(const char *name)
 int main(int argc, char **argv)
 {
     setvbuf(stdout, NULL, _IONBF, 0); // every line is out before a run is stopped at its limit
+    if (argc == 2 && strcmp(argv[1], "arm") == 0) {
+#ifdef BASE58_INPUT_BOUND_UNFIXED
+        printf("arm: comparison, %zu-bit\n", sizeof(void *) * 8);
+#else
+        printf("arm: shipped, %zu-bit\n", sizeof(void *) * 8);
+#endif
+        return 0;
+    }
     if (argc == 2 && strcmp(argv[1], "vectors") == 0) return case_vectors();
     if (argc == 2 && strcmp(argv[1], "bound") == 0) return case_bound();
     if (argc == 3 && strcmp(argv[1], "entry") == 0) return case_entry(argv[2]);
@@ -445,7 +455,7 @@ int main(int argc, char **argv)
         }
         return 0;
     }
-    fprintf(stderr, "usage: %s vectors | bound | entry <name> | stack <name> | prefix <name> | list | list-decoders\n",
+    fprintf(stderr, "usage: %s arm | vectors | bound | entry <name> | stack <name> | prefix <name> | list | list-decoders\n",
             argv[0]);
     return 2;
 }
