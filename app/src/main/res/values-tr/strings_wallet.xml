@@ -481,7 +481,7 @@
     <string name="dsp_oracle_note">Zincir üstü oracle fiyat akışları mainnet\'te DigiByte v9 gerektirir.</string>
     <string name="dsp_show_prices">Fiyatları göster</string>
     <string name="dsp_show_prices_on">DGB fiyatları, CoinGecko veya Binance\'ten</string>
-    <string name="dsp_show_prices_off">Kapalı: fiyat isteği yok, dolar tutarı yok</string>
+    <string name="dsp_show_prices_off">Kapalı: fiyat isteği yok, fiyat gösterilmez</string>
     <string name="did_login">Digi-ID girişi</string>
     <string name="did_auth_title">Digi-ID kimlik doğrulama</string>
     <string name="did_auth_subtitle">%1$s hesabına giriş için kimliğinizi doğrulayın</string>

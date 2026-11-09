@@ -478,7 +478,7 @@
     <string name="dsp_oracle_note">Nguồn giá oracle on-chain yêu cầu DigiByte v9 trên mainnet.</string>
     <string name="dsp_show_prices">Hiển thị giá</string>
     <string name="dsp_show_prices_on">Giá DGB, từ CoinGecko hoặc Binance</string>
-    <string name="dsp_show_prices_off">Tắt: không yêu cầu giá, không hiển thị số tiền đô la</string>
+    <string name="dsp_show_prices_off">Tắt: không yêu cầu giá, không hiển thị giá</string>
     <string name="did_login">Đăng nhập Digi-ID</string>
     <string name="did_auth_title">Xác thực Digi-ID</string>
     <string name="did_auth_subtitle">Xác thực để đăng nhập vào %1$s</string>

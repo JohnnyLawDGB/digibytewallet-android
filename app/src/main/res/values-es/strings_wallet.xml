@@ -486,7 +486,7 @@
     <string name="dsp_oracle_note">Los precios del oráculo on-chain requieren DigiByte v9 en mainnet.</string>
     <string name="dsp_show_prices">Mostrar precios</string>
     <string name="dsp_show_prices_on">Precios de DGB, de CoinGecko o Binance</string>
-    <string name="dsp_show_prices_off">Desactivado: sin consultas de precio, sin importes en dólares</string>
+    <string name="dsp_show_prices_off">Desactivado: sin consultas de precio, sin precios mostrados</string>
     <string name="did_login">Inicio de sesión Digi-ID</string>
     <string name="did_auth_title">Autenticación Digi-ID</string>
     <string name="did_auth_subtitle">Autentícate para iniciar sesión en %1$s</string>

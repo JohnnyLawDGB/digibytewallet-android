@@ -487,7 +487,7 @@
     <string name="dsp_oracle_note">Ценовые потоки ончейн-оракула требуют DigiByte v9 в основной сети.</string>
     <string name="dsp_show_prices">Показывать цены</string>
     <string name="dsp_show_prices_on">Цены DGB из CoinGecko или Binance</string>
-    <string name="dsp_show_prices_off">Выкл.: без запросов цены, без сумм в долларах</string>
+    <string name="dsp_show_prices_off">Выкл.: без запросов цены, цены не показываются</string>
     <string name="did_login">Вход через Digi-ID</string>
     <string name="did_auth_title">Аутентификация Digi-ID</string>
     <string name="did_auth_subtitle">Подтвердите личность для входа на %1$s</string>

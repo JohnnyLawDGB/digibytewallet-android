@@ -478,7 +478,7 @@
     <string name="dsp_oracle_note">链上预言机价格源需要主网 DigiByte v9。</string>
     <string name="dsp_show_prices">显示价格</string>
     <string name="dsp_show_prices_on">DGB 价格，来自 CoinGecko 或 Binance</string>
-    <string name="dsp_show_prices_off">关闭：不请求价格，不显示美元金额</string>
+    <string name="dsp_show_prices_off">关闭：不请求价格，不显示价格</string>
     <string name="did_login">Digi-ID 登录</string>
     <string name="did_auth_title">Digi-ID 认证</string>
     <string name="did_auth_subtitle">请验证身份以登录 %1$s</string>

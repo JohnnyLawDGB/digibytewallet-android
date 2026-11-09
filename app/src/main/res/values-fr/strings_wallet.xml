@@ -471,7 +471,7 @@
     <string name="dsp_oracle_note">Les flux de prix de l\'oracle on-chain nécessitent DigiByte v9 sur le mainnet.</string>
     <string name="dsp_show_prices">Afficher les cours</string>
     <string name="dsp_show_prices_on">Cours du DGB, depuis CoinGecko ou Binance</string>
-    <string name="dsp_show_prices_off">Désactivé : aucune requête de cours, aucun montant en dollars</string>
+    <string name="dsp_show_prices_off">Désactivé : aucune requête de cours, aucun cours affiché</string>
     <string name="did_login">Connexion Digi-ID</string>
     <string name="did_auth_title">Authentification Digi-ID</string>
     <string name="did_auth_subtitle">Authentifiez-vous pour vous connecter à %1$s</string>

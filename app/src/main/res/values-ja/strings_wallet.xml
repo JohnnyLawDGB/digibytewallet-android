@@ -478,7 +478,7 @@
     <string name="dsp_oracle_note">オンチェーンオラクルの価格フィードにはメインネットの DigiByte v9 が必要です。</string>
     <string name="dsp_show_prices">価格を表示</string>
     <string name="dsp_show_prices_on">DGB の価格（CoinGecko または Binance）</string>
-    <string name="dsp_show_prices_off">オフ: 価格の取得なし、ドル金額の表示なし</string>
+    <string name="dsp_show_prices_off">オフ: 価格の取得なし、価格の表示なし</string>
     <string name="did_login">Digi-ID ログイン</string>
     <string name="did_auth_title">Digi-ID 認証</string>
     <string name="did_auth_subtitle">%1$s にログインするには認証してください</string>

@@ -478,7 +478,7 @@
     <string name="dsp_oracle_note">Umpan harga oracle on-chain memerlukan DigiByte v9 di mainnet.</string>
     <string name="dsp_show_prices">Tampilkan harga</string>
     <string name="dsp_show_prices_on">Harga DGB, dari CoinGecko atau Binance</string>
-    <string name="dsp_show_prices_off">Mati: tanpa permintaan harga, tanpa jumlah dolar</string>
+    <string name="dsp_show_prices_off">Mati: tanpa permintaan harga, tanpa harga ditampilkan</string>
     <string name="did_login">Masuk Digi-ID</string>
     <string name="did_auth_title">Autentikasi Digi-ID</string>
     <string name="did_auth_subtitle">Autentikasi untuk masuk ke %1$s</string>
