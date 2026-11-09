@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import app.aroundtheblock.wallet.core.model.DigiDollarEvent
 import app.aroundtheblock.wallet.core.OutgoingTxStore
+import app.aroundtheblock.wallet.core.TransactionRows
 import app.aroundtheblock.wallet.core.PriceData
 import app.aroundtheblock.wallet.core.PriceProvider
 import app.aroundtheblock.wallet.core.bridge.NativeBridge
@@ -824,21 +825,24 @@ class WalletViewModel @Inject constructor(
                         while (scanSamples.size > 24) scanSamples.removeFirst()
                     }
                 }
-                val txDetails = NativeBridge.getTransactionDetails()
+                // The activity list: the shared core's rows (BRTxRows.h), in its order. Display only;
+                // the amount, fee and date are the core's and the list is never re-sorted here.
+                // One line, so LogRedactionSourceGateTest marks txRows as transaction data.
+                val nowSecs = System.currentTimeMillis() / 1000L
+                val txRows = TransactionRows.parse(NativeBridge.getTransactionRows(nowSecs, TransactionRows.LIMIT))
                 // Log every ~60s for debugging. Heights and peers only: a transaction row (txid, amounts,
                 // addresses) never goes to logcat (4.1.2 row 7, K1).
                 if (System.currentTimeMillis() % 60000 < 5000) {
                     android.util.Log.d("WalletVM", "heights: last=$currentHeight est=$estHeight peers=$peers")
                 }
-                if (txDetails.isNotEmpty()) {
+                if (txRows.isNotEmpty()) {
                     // Exclude unconfirmed txs: their blockHeight is TX_UNCONFIRMED
                     // (native INT32_MAX = 2_147_483_647). A pending send would
                     // otherwise poison this floor and the height/progress readout
                     // would jump to ~2.1 billion. Real block heights are ~23M.
-                    val txHeights = txDetails.trim().lines().mapNotNull { line ->
-                        line.split("|").getOrNull(3)?.toLongOrNull()
-                    }.filter { it > 0 && it < Int.MAX_VALUE.toLong() }
-                    val maxTxHeight = txHeights.maxOrNull() ?: 0L
+                    val maxTxHeight = txRows.map { it.blockHeight }
+                        .filter { it > 0 && it < Int.MAX_VALUE.toLong() }
+                        .maxOrNull() ?: 0L
 
                     // Confirmations are measured against their OWN tip, deliberately kept separate
                     // from `currentHeight`. `currentHeight` is the PoW-validated native height that
@@ -860,73 +864,14 @@ class WalletViewModel @Inject constructor(
                         maxTxHeight = maxTxHeight,
                     )
 
-                    val txList = txDetails.trim().lines().mapNotNull { line ->
-                        val parts = line.split("|")
-                        if (parts.size >= 5) {
-                            // Normalize the unconfirmed sentinel (TX_UNCONFIRMED =
-                            // INT32_MAX from native) to 0 so confs computes as 0 and
-                            // the detail screen's "blockHeight > 0 ? height : Pending"
-                            // shows "Pending" rather than "2147483647".
-                            val rawHeight = parts[3].toLongOrNull() ?: 0L
-                            val txHeight = if (rawHeight in 1 until Int.MAX_VALUE.toLong()) rawHeight else 0L
-                            val confs = ChainTipPolicy.confirmationsFor(txHeight, confTip)
-                            val txid = parts[0]
-                            val nativeAmount = parts[1].toLongOrNull() ?: 0L
-                            val nativeFee = parts[2].toLongOrNull() ?: 0L
-                            val nativeSent = if (parts.size >= 7) parts[5].toLongOrNull() ?: 0L else 0L
-                            val nativeReceived = if (parts.size >= 7) parts[6].toLongOrNull() ?: 0L else 0L
-
-                            // BRWalletAmountSentByTx under-counts when parent UTXO txs
-                            // aren't all in BRWallet->allTx (Universal-Restore wallets and
-                            // post-bloom-fallback re-downloads hit this). When ALL parents
-                            // are missing it returns 0 (amount = received - sent = +change,
-                            // mis-categorized as a receive); when SOME are missing it returns
-                            // a partial, undercounted sum (amount = change - partialInputs, a
-                            // wrong negative — e.g. a 5.2121 send rendered as -2.1133386).
-                            // For any tx WE broadcast, OutgoingTxStore holds the authoritative
-                            // recipient amount/fee/address, so it wins whenever a record
-                            // exists — not only the all-parents-missing (nativeSent==0) case.
-                            // EXCEPTION: a self-transfer sweep (recovering legacy funds into
-                            // our OWN wallet) increases the balance and the C core categorizes
-                            // it as a receive; overriding it would misrender it as a large
-                            // negative "Sent" to our own address, so those records are skipped
-                            // here (OutgoingTxStore.shouldApplyOutgoingOverride). Genuine
-                            // external sends still get the corrected negative amount.
-                            val recorded = outgoingTxStore.lookup(txid)
-                            val applyOverride = OutgoingTxStore.shouldApplyOutgoingOverride(recorded)
-                            val amount = if (applyOverride) -recorded!!.sentSats else nativeAmount
-                            val fee = if (applyOverride) recorded!!.feeSats else nativeFee
-                            val toAddress = if (applyOverride) recorded!!.toAddress else ""
-                            val sent = if (applyOverride) recorded!!.sentSats else nativeSent
-                            val received = nativeReceived
-
-                            TransactionEntity(
-                                txid = txid,
-                                amount = amount,
-                                fee = fee,
-                                blockHeight = txHeight,
-                                timestamp = parts[4].toLongOrNull() ?: 0L,
-                                toAddress = toAddress,
-                                fromAddress = "",
-                                confirmations = confs,
-                                sent = sent,
-                                received = received,
-                                isAssetTx = false
-                            )
-                        } else null
+                    // Each row as the core gives it: a send is its payee amount, the fee its own
+                    // line (unknown when the wallet lacks a parent: no fee shown). The only thing
+                    // read from the app's own record of a broadcast is who a payee row paid.
+                    val shown = txRows.map { row ->
+                        TransactionRows.entity(row, confTip, outgoingTxStore.lookup(row.txid)?.toAddress)
                     }
-                    // Most recent on top. Primary key is timestamp (native maps an
-                    // unconfirmed tx's 0 timestamp to now, so a fresh send sorts
-                    // above all confirmed history); blockHeight breaks ties between
-                    // txs sharing a timestamp. Not "pending first" — a restored
-                    // wallet briefly loads old txs as unconfirmed, and that would
-                    // float years-old history to the top until they re-confirm.
-                    val sorted = txList.sortedWith(
-                        compareByDescending<TransactionEntity> { it.timestamp }
-                            .thenByDescending { it.blockHeight }
-                    )
-                    if (sorted != _transactions.value) {
-                        _transactions.value = sorted
+                    if (shown != _transactions.value) {
+                        _transactions.value = shown
                     }
 
                     // Classify each visible tx for the activity list: DigiAsset if
@@ -934,7 +879,7 @@ class WalletViewModel @Inject constructor(
                     // the native classifier, else plain DGB. Cheap — one DB read
                     // plus a hash lookup per row (list is display-capped).
                     val assetTxids = runCatching { assetManager.assetTxids() }.getOrDefault(emptySet())
-                    val kinds = sorted.associate { tx ->
+                    val kinds = shown.associate { tx ->
                         val ddType = runCatching { NativeBridge.digiDollarTxType(tx.txid) }.getOrDefault(0)
                         tx.txid to classifyTxKind(tx.txid in assetTxids, ddType)
                     }
@@ -945,7 +890,7 @@ class WalletViewModel @Inject constructor(
                     // received, a transfer to the wallet itself, a redemption. The DGB movement is not
                     // read for it — a mint sends DGB away while dollars arrive, a redemption brings DGB
                     // back while dollars are burned.
-                    val ddEvents = sorted.mapNotNull { tx ->
+                    val ddEvents = shown.mapNotNull { tx ->
                         if (kinds[tx.txid] != TxKind.DIGIDOLLAR) return@mapNotNull null
                         DigiDollarEvent.of(runCatching { NativeBridge.digiDollarEvent(tx.txid) }.getOrNull())
                             ?.takeIf { it.kind != DigiDollarEvent.Kind.NONE }
@@ -958,7 +903,7 @@ class WalletViewModel @Inject constructor(
                     // Owned-script set built once here, not per row. Absent entry → row shows plain DGB.
                     val ownedScripts = runCatching { assetManager.buildOwnedScriptHexes() }
                         .getOrDefault(emptySet())
-                    val typedAmounts = sorted.mapNotNull { tx ->
+                    val typedAmounts = shown.mapNotNull { tx ->
                         val display: TypedAmount? = when (kinds[tx.txid]) {
                             TxKind.DIGIDOLLAR -> ddEvents[tx.txid]?.cents?.takeIf { it > 0L }
                                 ?.let { TypedAmount.Formatted(formatDigiDollar(it)) }

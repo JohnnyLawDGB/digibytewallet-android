@@ -364,8 +364,8 @@ class TransactionBuilder(
      *    BEFORE anything is reported about it, so leaving the screen or a force-stop loses nothing;
      *  - it is [DigiDollarSendState.Sent] only when a peer took it, else [DigiDollarSendState.NotYetRelayed].
      *
-     * The record says no DGB went to the payee ([OutgoingTxStore.Record.isDigiDollar]): the activity list
-     * keeps the wallet's own reading of the transfer's DGB movement, its fee.
+     * The record says no DGB went to the payee ([OutgoingTxStore.Record.isDigiDollar]); the activity list
+     * reads the transfer's DGB movement from the core's row (BRTxRows.h), never from the record.
      */
     suspend fun sendDigiDollar(prepared: PreparedDigiDollar): DigiDollarSendState =
         DigiDollarSend<PreparedDigiDollar>(

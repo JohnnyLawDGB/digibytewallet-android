@@ -3,12 +3,10 @@ package app.aroundtheblock.wallet.core
 import android.content.Context
 
 /**
- * Records transactions that the user broadcast locally so the activity list
- * can categorize them as "Sent" even when the C wallet's amountSent lookup
- * misses (which happens when the parent UTXO transactions aren't in
- * BRWallet->allTx — e.g. wallets restored via Universal Restore's
- * UTXO-only scan, or after the bloom-fallback re-download path that
- * doesn't replay historical parents).
+ * Records transactions that the user broadcast locally: the stranded-send sweep
+ * publishes them again until they confirm, and the activity list names a send's
+ * recipient from [Record.toAddress]. The list's amount, fee and date are the shared
+ * core's (BRTxRows.h, core/TransactionRows), never this record's.
  *
  * Stored as a flat SharedPreferences map: each broadcast writes up to five
  * keys per txid: `<txid>.sent`, `<txid>.fee`, `<txid>.to`, `<txid>.self`, `<txid>.dd`.
@@ -20,17 +18,15 @@ class OutgoingTxStore(context: Context) {
 
     /** @param isSelfTransfer true when [toAddress] is an address THIS wallet
      *  owns (e.g. a legacy-funds sweep into our own receive address). Such a tx
-     *  increases the balance and the C core categorizes it as a receive, so the
-     *  activity list must NOT apply the outgoing "Sent" override to it — see
-     *  [shouldApplyOutgoingOverride]. Genuine external sends store false. */
+     *  increases the balance, and the core's row reads it as a receive. Genuine
+     *  external sends store false. */
     data class Record(
         val sentSats: Long,
         val feeSats: Long,
         val toAddress: String,
         val isSelfTransfer: Boolean = false,
-        /** A DigiDollar send: recorded so the stranded-send sweep publishes it again until it confirms,
-         *  but its DGB movement is the wallet's own reading (the fee), never this record's — see
-         *  [shouldApplyOutgoingOverride]. Its row says what it did from the transaction itself. */
+        /** A DigiDollar send: recorded so the stranded-send sweep publishes it again until it confirms.
+         *  Its row says what it did from the transaction itself, never from this record. */
         val isDigiDollar: Boolean = false,
     )
 
@@ -75,7 +71,7 @@ class OutgoingTxStore(context: Context) {
     /** Settle a recorded send for the sweep: the wallet holds it at a confirmed height (or has
      *  aged it out of its recent-transaction window, which only a confirmed tx does), or the
      *  sweep has given up on it. The record itself stays — the activity list still reads it
-     *  through [lookup] to render the send with its recipient amount — but [pendingTxids] no
+     *  through [lookup] to name the send's recipient — but [pendingTxids] no
      *  longer lists it, so the sweep never re-publishes it again. */
     fun markSettled(txid: String) {
         prefs.edit().putBoolean("$txid.settled", true).apply()
@@ -137,28 +133,5 @@ class OutgoingTxStore(context: Context) {
             }
             return recordedTxidsOf(keys).filterNotTo(HashSet()) { it in settled }
         }
-
-        /**
-         * Whether the activity list should override a tx's amount with the
-         * recorded outgoing (negative "Sent") values.
-         *
-         * The override exists to correct BRWalletAmountSentByTx under-counting
-         * on genuine external sends (missing parent UTXOs → wrong/zero sent).
-         * A SELF-transfer sweep (recovering legacy funds into our OWN wallet)
-         * is the opposite case: it INCREASES the balance and the C core rightly
-         * categorizes it as a receive. Forcing the outgoing override there would
-         * render the recovery as a large negative "Sent" to our own address —
-         * "the feature sent my money away". So: override external sends only;
-         * let the C core's natural categorization stand for self-transfers.
-         *
-         * A DigiDollar send is the other case the override does not fit: it pays its payee no DGB at
-         * all (the dollars ride a zero-value output), so the record's "sent" is 0 and the override
-         * would show a DGB movement of nothing. The wallet built it from its own coins, so its own
-         * reading — the fee, going out — stands.
-         *
-         * Pure (no Android/JNI) so the decision is unit-testable in isolation.
-         */
-        fun shouldApplyOutgoingOverride(record: Record?): Boolean =
-            record != null && !record.isSelfTransfer && !record.isDigiDollar
     }
 }

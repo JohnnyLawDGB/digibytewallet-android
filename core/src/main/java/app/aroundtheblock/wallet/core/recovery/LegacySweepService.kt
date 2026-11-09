@@ -157,9 +157,7 @@ class LegacySweepService internal constructor(
         precomputedVerdicts: Map<app.aroundtheblock.wallet.core.reconcile.UtxoEntry, ForeignUtxoAssetClassifier.Verdict>? = null,
         /** True when [destAddress] is an address THIS wallet owns (the default
          *  "recover into my own wallet" path). Recorded on the OutgoingTxStore
-         *  entry so the activity list won't misrender the balance-increasing
-         *  sweep as a large negative "Sent" (see OutgoingTxStore
-         *  .shouldApplyOutgoingOverride). External-address sweeps pass false. */
+         *  entry (Record.isSelfTransfer). External-address sweeps pass false. */
         destIsSelf: Boolean = false,
     ): Result {
         // Classified ONCE for the whole sweep rather than per profile: profiles share addresses
@@ -381,9 +379,8 @@ class LegacySweepService internal constructor(
             // because their output pays a wallet address, so they persist and
             // re-broadcast like an ordinary send.
             //
-            // isSelfTransfer tags a "recover into my own wallet" sweep so the
-            // activity list leaves the C core's receive categorization intact
-            // instead of overriding it to a negative "Sent" (Finding 1).
+            // isSelfTransfer tags a "recover into my own wallet" sweep (Finding 1).
+            // The activity list's figures are the core's rows, never this record's.
             outgoingTxStore.record(
                 txid = txid,
                 sentSats = inputs.totalIn,
