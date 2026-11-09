@@ -15,7 +15,7 @@ import java.math.RoundingMode
  *  - at most two decimals may be TYPED: "1.005" is not an amount of cents, and neither is
  *    "1.0000";
  *  - only digits and one decimal point: no sign, no exponent, no "NaN";
- *  - the length is bounded before anything is built from the text.
+ *  - at most 32 characters are read (the bound is checked after the digits are mapped, as on iOS).
  *
  * The C source of truth is the core's BRFiatAmount.h, which iOS uses directly (Policy/FiatText.swift);
  * this is its Kotlin mirror (docs/ios-port/push-down-recipe.md), and UsdCentsVectorsTest holds every

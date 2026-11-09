@@ -78,6 +78,8 @@ class UsdCentsTest {
         assertEquals(1250L, UsdCents.parse("\u06f1\u06f2.\u06f5")) // Extended Arabic-Indic (Persian)
         assertEquals(1250L, UsdCents.parse("\u0967\u0968.\u096b\u0966")) // Devanagari
         assertEquals(1250L, UsdCents.parse("\uff11\uff12.\uff15\uff10")) // full width
+        assertEquals(150L, UsdCents.parse("\ud835\udfcf.\ud835\udfd3")) // mathematical bold, outside the BMP
+        assertNull(UsdCents.parse("\ud835")) // a lone surrogate is no digit
         assertEquals(123_450L, UsdCents.parse("\u0661,\u0662\u0663\u0664.\u0665")) // ASCII separators
         assertEquals("50", UsdCents.dgbTextFor("\u0660.\u0665", 0.01))
     }
