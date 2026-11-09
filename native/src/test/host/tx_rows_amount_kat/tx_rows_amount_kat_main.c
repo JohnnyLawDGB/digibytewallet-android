@@ -305,7 +305,9 @@ static void self_sweep_foreign_key(void)
     wit[0] = 71; memset(&wit[1], 0x30, 71); wit[72] = 33; memcpy(&wit[73], G, 33);
     BRTransaction *t = BRTransactionNew();
     t->version = 2;
-    BRTransactionAddInput(t, ph, 0, 0, NULL, 0, NULL, 0, wit, sizeof(wit), 0xffffffff);
+    // kPlaceholder, 0 rather than NULL, 0: _BRTxInputData memcpy's the scriptSig even when it is empty,
+    // and memcpy from NULL is undefined (UBSan stops on it under glibc)
+    BRTransactionAddInput(t, ph, 0, 0, kPlaceholder, 0, kPlaceholder, 0, wit, sizeof(wit), 0xffffffff);
     BRTransactionAddOutput(t, 250000000, spk, spkLen);
     t->blockHeight = HEIGHT; t->timestamp = TS;
     finalizeTxHash(t);
