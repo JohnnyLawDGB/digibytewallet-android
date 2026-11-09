@@ -29,7 +29,8 @@ import app.aroundtheblock.wallet.ui.theme.DigiDollarGreenBright
  * are named by their mark rather than in words; see the contentDescription note
  * on each, because a logo that replaces a word has to keep saying it aloud.
  *
- * @param fiatAmount  Pre-formatted equivalent string in the chosen currency, e.g. "$12.34"
+ * @param fiatAmount  Pre-formatted equivalent string in the chosen currency, e.g. "$12.34";
+ *                    null when Settings → Display → Show prices is off (no line is drawn)
  * @param dgbAmount   Pre-formatted DGB amount WITHOUT the ticker, e.g. "1,234.56789012" —
  *                    the DigiByte mark is rendered after it in place of the word "DGB"
  * @param ddAmount    Pre-formatted DigiDollar string e.g. "$50.00", or null to hide the pill
@@ -39,7 +40,7 @@ import app.aroundtheblock.wallet.ui.theme.DigiDollarGreenBright
  */
 @Composable
 fun BalanceDisplay(
-    fiatAmount: String,
+    fiatAmount: String?,
     dgbAmount: String,
     ddAmount: String? = null,
     isSynced: Boolean = true,
@@ -52,7 +53,7 @@ fun BalanceDisplay(
     // the DGB row, the equivalent line, the DigiDollar pill — stays exactly the same, so
     // toggling never reflows the hero card. See BalancePrivacyPrefs / maskedAmount.
     val dgbText = app.aroundtheblock.wallet.core.settings.maskedAmount(hidden, dgbAmount)
-    val fiatText = app.aroundtheblock.wallet.core.settings.maskedAmount(hidden, fiatAmount)
+    val fiatText = fiatAmount?.let { app.aroundtheblock.wallet.core.settings.maskedAmount(hidden, it) }
 
     val alpha = if (isSynced) 1f else 0.4f
     val primaryColor = MaterialTheme.colorScheme.onBackground.copy(alpha = alpha)
@@ -95,17 +96,19 @@ fun BalanceDisplay(
 
         Spacer(modifier = Modifier.height(4.dp))
 
-        // Secondary: chosen equivalent (tap to cycle USD / BTC / PHP)
-        Text(
-            text = "≈ $fiatText",
-            style = MaterialTheme.typography.titleMedium.copy(
-                fontWeight = FontWeight.Medium,
-                fontSize = 18.sp
-            ),
-            color = equivColor,
-            textAlign = TextAlign.Center,
-            modifier = if (onFiatTap != null) Modifier.clickable { onFiatTap() } else Modifier
-        )
+        // Secondary: chosen equivalent (tap to cycle USD / BTC / PHP). None with prices off.
+        if (fiatText != null) {
+            Text(
+                text = "≈ $fiatText",
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 18.sp
+                ),
+                color = equivColor,
+                textAlign = TextAlign.Center,
+                modifier = if (onFiatTap != null) Modifier.clickable { onFiatTap() } else Modifier
+            )
+        }
 
         // DigiDollar held — a distinct pill, separate from the DGB total
         if (ddAmount != null) {

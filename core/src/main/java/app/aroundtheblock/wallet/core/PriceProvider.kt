@@ -5,8 +5,11 @@ import app.aroundtheblock.wallet.core.db.entity.PriceCacheEntity
 import app.aroundtheblock.wallet.core.model.OraclePriceProvider
 import app.aroundtheblock.wallet.core.model.PriceSource
 import app.aroundtheblock.wallet.core.network.BoundedBody
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -99,15 +102,68 @@ fun okHttpFetcher(client: OkHttpClient): HttpFetcher = HttpFetcher { url ->
  * Source attribution is preserved in [PriceData.source]:
  * - "coingecko" — live CoinGecko data
  * - "binance"   — live Binance data
- * - "<source> (cached)" — stale Room-cached data
+ * - "<source> (cached)" — Room-cached data no older than [MAX_AGE_MS]
  * - "unavailable" — no data at all
+ *
+ * Owner decisions for both apps (2026-11-09; iOS's PriceProvider has the same rules):
+ * - **A maximum age.** A cached price older than [MAX_AGE_MS] (one hour), or dated in the future
+ *   (a clock set back), is not used: the answer is "unavailable" and no dollar figure is shown
+ *   from it. DGB entry keeps working.
+ * - **An off switch** ([enabled], Settings → Display → Show prices, default on). Off, nothing is
+ *   fetched, nothing is cached, and every answer is "unavailable".
+ * - **A reuse window.** [currentPrice] answers from a price fetched less than [REUSE_MS] ago
+ *   instead of fetching again, for the send screen, which asks on every keystroke.
  */
 class PriceProvider(
     private val priceCacheDao: PriceCacheDao,
     private val fetcher: HttpFetcher,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
-    private val oracleProvider: OraclePriceProvider? = null
+    private val oracleProvider: OraclePriceProvider? = null,
+    /** Settings → Display → Show prices. Read on every call, so turning it off takes effect at once. */
+    private val enabled: () -> Boolean = { true },
+    private val nowMs: () -> Long = System::currentTimeMillis,
 ) {
+    companion object {
+        /** A cached price older than this is not shown (owner decision, 2026-11-09). */
+        const val MAX_AGE_MS: Long = 60 * 60 * 1000L
+        /** [currentPrice] reuses a price fetched no longer ago than this (iOS's window). */
+        const val REUSE_MS: Long = 60 * 1000L
+
+        /**
+         * Fetched no more than [MAX_AGE_MS] before [nowMs], and not after it (a clock set back). Checked
+         * wherever a price is shown or converts an amount, not only at fetch: a price held in
+         * memory ages too.
+         */
+        fun isFreshAt(updatedAt: Long, nowMs: Long): Boolean = (nowMs - updatedAt) in 0..MAX_AGE_MS
+
+        /** A price to show or convert at, at [nowMs]: a real one ([isFreshAt]), not "unavailable". */
+        fun isFresh(price: PriceData, nowMs: Long): Boolean =
+            price.source != "unavailable" && price.priceUsd > 0.0 && !price.priceUsd.isInfinite() &&
+                isFreshAt(price.updatedAt, nowMs)
+    }
+
+    /**
+     * The price for a screen that asks often (the send screen, per keystroke): the cached price when
+     * it was fetched no more than [REUSE_MS] ago, else [fetchPrice]. USD only: the cache row carries
+     * no [PriceData.rates].
+     */
+    suspend fun currentPrice(currency: String = "USD"): PriceData = withContext(ioDispatcher) {
+        if (!enabled()) return@withContext unavailable()
+        val cached = priceCacheDao.getPrice(currency)
+        if (cached != null && isWithin(cached, REUSE_MS) && cached.pricePerDgb > 0.0) {
+            return@withContext PriceData(
+                priceUsd = cached.pricePerDgb,
+                change24h = cached.change24h,
+                source = cached.source,
+                updatedAt = cached.updatedAt
+            )
+        }
+        fetchPrice(currency)
+    }
+
+    /** Drops the cached price (Show prices turned off). */
+    suspend fun clearCache() = withContext(ioDispatcher) { priceCacheDao.clear() }
+
     /**
      * Fetch with a preferred [PriceSource].
      * - [PriceSource.ORACLE]: tries the oracle provider first; falls back to API if unavailable.
@@ -118,6 +174,7 @@ class PriceProvider(
         currency: String = "USD",
         preferredSource: PriceSource
     ): PriceData = withContext(ioDispatcher) {
+        if (!enabled()) return@withContext unavailable()
         when (preferredSource) {
             PriceSource.ORACLE -> {
                 // Try oracle provider first; fall back to API path if not available
@@ -134,52 +191,65 @@ class PriceProvider(
                 // Oracle unavailable — fall through to normal API path
                 return@withContext fetchPrice(currency)
             }
-            PriceSource.CACHED -> {
-                val cached = priceCacheDao.getPrice(currency)
-                return@withContext if (cached != null) {
-                    PriceData(
-                        priceUsd = cached.pricePerDgb,
-                        change24h = cached.change24h,
-                        source = cached.source + " (cached)",
-                        updatedAt = cached.updatedAt
-                    )
-                } else {
-                    PriceData(0.0, 0.0, "unavailable", System.currentTimeMillis())
-                }
-            }
+            PriceSource.CACHED -> return@withContext cachedOrUnavailable(currency)
             PriceSource.API -> fetchPrice(currency)
         }
     }
 
     suspend fun fetchPrice(currency: String = "USD"): PriceData = withContext(ioDispatcher) {
-        // Try CoinGecko first
-        try {
-            val price = fetchFromCoinGecko()
-            cachePrice(price, currency)
-            return@withContext price
-        } catch (_: Exception) { }
+        // Off: no request at all.
+        if (!enabled()) return@withContext unavailable()
 
-        // Fallback to Binance
-        try {
-            val price = fetchFromBinance()
-            cachePrice(price, currency)
-            return@withContext price
-        } catch (_: Exception) { }
+        // CoinGecko first, then Binance
+        val live = fromLiveSource(currency) { fetchFromCoinGecko() }
+            ?: fromLiveSource(currency) { fetchFromBinance() }
+        if (live != null) return@withContext live
 
-        // Both failed — return cached
+        // Both failed — the cached price, while it is under an hour old; else nothing
+        ensureActive()
+        if (!enabled()) return@withContext unavailable()
+        cachedOrUnavailable(currency)
+    }
+
+    /**
+     * One live source, cached on success; null when it failed. A fetch cancelled, or turned off,
+     * while the request was out stops here: it neither moves on to the next source nor writes the
+     * cache that turning prices off has just cleared.
+     */
+    private suspend fun fromLiveSource(currency: String, fetch: () -> PriceData): PriceData? {
+        currentCoroutineContext().ensureActive()
+        if (!enabled()) return null
+        val price = try {
+            fetch()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            return null
+        }
+        currentCoroutineContext().ensureActive()
+        if (!enabled()) return null
+        cachePrice(price, currency)
+        return price
+    }
+
+    private suspend fun cachedOrUnavailable(currency: String): PriceData {
         val cached = priceCacheDao.getPrice(currency)
-        if (cached != null) {
-            return@withContext PriceData(
+        if (cached != null && isWithin(cached, MAX_AGE_MS) && cached.pricePerDgb > 0.0) {
+            return PriceData(
                 priceUsd = cached.pricePerDgb,
                 change24h = cached.change24h,
                 source = cached.source + " (cached)",
                 updatedAt = cached.updatedAt
             )
         }
-
-        // Nothing available
-        PriceData(0.0, 0.0, "unavailable", System.currentTimeMillis())
+        return unavailable()
     }
+
+    private fun unavailable() = PriceData(0.0, 0.0, "unavailable", nowMs())
+
+    /** Fetched no more than [ms] ago, and not in the future (a clock set back). */
+    private fun isWithin(cached: PriceCacheEntity, ms: Long): Boolean =
+        (nowMs() - cached.updatedAt) in 0..ms
 
     private fun fetchFromCoinGecko(): PriceData {
         val body = fetcher.fetch(
@@ -200,7 +270,7 @@ class PriceProvider(
             priceUsd = json.getDouble("usd"),
             change24h = json.optDouble("usd_24h_change", 0.0),
             source = "coingecko",
-            updatedAt = System.currentTimeMillis(),
+            updatedAt = nowMs(),
             pricePhp = json.optDouble("php", 0.0),
             rates = rates,
         )
@@ -215,11 +285,13 @@ class PriceProvider(
             priceUsd = json.getString("lastPrice").toDouble(),
             change24h = json.getString("priceChangePercent").toDouble(),
             source = "binance",
-            updatedAt = System.currentTimeMillis()
+            updatedAt = nowMs()
         )
     }
 
     private suspend fun cachePrice(price: PriceData, currency: String) {
+        // Turned off while the request was out: the cleared cache stays clear.
+        if (!enabled()) return
         priceCacheDao.insert(
             PriceCacheEntity(
                 currency = currency,

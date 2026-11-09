@@ -67,6 +67,7 @@ fun WalletScreen(
     // What each DigiDollar transaction did: its row's label and direction.
     val txDdEvents by viewModel.txDdEvents.collectAsStateWithLifecycle()
     val price by viewModel.price.collectAsStateWithLifecycle()
+    val pricesShown by viewModel.pricesShown.collectAsStateWithLifecycle()
     val torState by viewModel.torState.collectAsStateWithLifecycle()
     val displayCurrency by viewModel.displayCurrency.collectAsStateWithLifecycle()
     var showCurrencyPicker by remember { mutableStateOf(false) }
@@ -123,7 +124,8 @@ fun WalletScreen(
                     }
 
                     BalanceDisplay(
-                        fiatAmount = fiatBalance,
+                        // Show prices off: no fiat line at all, and nothing to tap.
+                        fiatAmount = if (pricesShown) fiatBalance else null,
                         dgbAmount = WalletViewModel.formatSatoshisBare(balance),
                         // Always give DigiDollar a place on the hero — shows $0.00
                         // when none is held (rather than hiding the pill).
@@ -132,7 +134,7 @@ fun WalletScreen(
                         // while cfheaders is still catching up.
                         isSynced = syncProgressInfo.stage == SyncStage.Synced,
                         hidden = balanceHidden,
-                        onFiatTap = { showCurrencyPicker = true },
+                        onFiatTap = if (pricesShown) ({ showCurrencyPicker = true }) else null,
                         onDigiDollarTap = onNavigateReceiveDigiDollar,
                     )
 
