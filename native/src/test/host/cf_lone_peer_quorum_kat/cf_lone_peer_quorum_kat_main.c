@@ -4,7 +4,9 @@
 // check against our chain at a height ABOVE the top compiled checkpoint (mainnet), the
 // single-peer escape hatch in _peerRelayedCFHeaders does not re-anchor on that one peer's word.
 // It records the stall (cfLoneStallCount) and keeps the chain until a second, distinct peer has
-// claimed the same prevFilterHeader from a distinct address (ports on one host count once). Exempt, and unchanged: the user's own node in exclusive mode
+// claimed the same prevFilterHeader from a distinct HOST (a network group, _BRAddressNetGroup: one operator's ports
+// and addresses count once). A refused round backs off (the driver is held, not re-asked every round) and another
+// filter peer's connect releases the hold. Exempt, and unchanged: the user's own node in exclusive mode
 // (BRPeerManagerSetPinnedPeer(..., exclusive=1) with the lone peer as the pin) -- trusted by the
 // user and by design the only peer -- still re-anchors after CF_SINGLE_PEER_REANCHOR_ROUNDS.
 // A pinned node that is NOT exclusive is not exempt (other peers can be dialled).
@@ -95,8 +97,11 @@ static void rigFree(Rig *r) { BRPeerManagerFree(r->manager); BRWalletFree(r->wal
 static BRPeer *lonePeer(uint8_t addrByte, uint16_t port)
 {
     BRPeer *p = BRPeerNew(BRMainNetParams.magicNumber);
+    p->address.u16[5] = 0xffff;          // IPv4-mapped, one /16 (one host) per addrByte
+    p->address.u8[12] = addrByte;
     p->address.u8[15] = addrByte;
     p->port = port;
+    p->services |= SERVICES_NODE_COMPACT_FILTERS;
     return p;
 }
 
@@ -203,6 +208,40 @@ static void test_ports_on_one_host_do_not_corroborate(void)
     printf("test_ports_on_one_host_do_not_corroborate: done\n");
 }
 
+// RED/GREEN (both arms): a host is a network group -- two addresses in one /16, in turn, do not corroborate.
+static void test_one_netgroup_does_not_corroborate(void)
+{
+    Rig r; rigInit(&r);
+    BRPeer *a = lonePeer(0x0A, 12024), *b = lonePeer(0x0A, 12024);
+    b->address.u8[15] = 0x0B;                                         // another address in the same /16
+    diverge(&r, a, u256_fill(0xD5));
+    for (int round = 1; round < CF_SINGLE_PEER_REANCHOR_ROUNDS + 1; round++) diverge(&r, b, u256_fill(0xD5));
+    check(chainIntact(&r), "netgroup: two addresses in one network group do not corroborate a lone divergence");
+    rigFree(&r); BRPeerFree(a); BRPeerFree(b);
+    printf("test_one_netgroup_does_not_corroborate: done\n");
+}
+
+// RED/GREEN (both arms): a refused lone-peer round backs off -- the cfheaders driver is held on the contested batch
+// instead of re-asking every round -- and another filter peer's connect releases the hold.
+static void test_refused_round_backs_off(void)
+{
+    Rig r; rigInit(&r);
+    BRPeer *p = lonePeer(0x0C, 12024);
+    for (int round = 0; round < CF_SINGLE_PEER_REANCHOR_ROUNDS; round++) diverge(&r, p, u256_fill(0xDF));
+    uint32_t contested = BRCompactFilterChainNextHeight(r.manager->compactFilterChain);
+    check(r.manager->cfLoneStallHeld == 1 && r.manager->cfHeadersRequestedThrough == contested &&
+          r.manager->cfHeadersRequestTime > time(NULL),
+          "backoff: a refused round holds the cfheaders driver on the contested batch, into the future");
+    BRPeer *q = lonePeer(0x0D, 12024);
+    BRPeerCallbackInfo info = { .peer = q, .manager = r.manager, .hash = UINT256_ZERO };
+    MGR_LOCK(r.manager);
+    _BRPeerManagerOnFilterCapablePeerConnected(r.manager, &info, q);
+    MGR_UNLOCK(r.manager);
+    check(r.manager->cfLoneStallHeld == 0, "backoff: another filter peer's connect releases the hold");
+    rigFree(&r); BRPeerFree(p); BRPeerFree(q);
+    printf("test_refused_round_backs_off: done\n");
+}
+
 int main(void)
 {
     test_lone_peer_keeps_chain();
@@ -211,6 +250,8 @@ int main(void)
     test_own_node_exclusive_keeps_hatch();
     test_corroborated_divergence_reanchors();
     test_ports_on_one_host_do_not_corroborate();
+    test_one_netgroup_does_not_corroborate();
+    test_refused_round_backs_off();
     printf(g_fail ? "cf_lone_peer_quorum_kat: %d FAILURE(S)\n" : "cf_lone_peer_quorum_kat: all checks passed\n", g_fail);
     return g_fail ? 1 : 0;
 }

@@ -6,10 +6,13 @@
 # as a separate unit below. ASan, 64- and 32-bit.
 #
 # ==== RED-BEFORE-GREEN GATE ====
-#   RED   -DCF_LONE_PEER_REANCHOR_UNFIXED restores the earlier single-peer hatch. The build must
-#         exit nonzero and its FAIL lines must be EXACTLY the five listed below.
+#   RED   -DCF_LONE_PEER_REANCHOR_UNFIXED restores the earlier single-peer hatch (the earlier hatch
+#         re-anchors onto the lone peer's chain, and its next diverging batch is then refused).
+#   RED   -DCF_CKPT_G5R2_UNFIXED restores the f795f60 hatch: corroboration by exact address, and
+#         a refused round re-asked every round.
+#   Each red build must exit nonzero and its FAIL lines must equal its WANT_* list below exactly.
 #   GREEN every check passes, exit 0, no sanitizer report.
-#   GUARD own-node exclusive and the corroborated divergence pass in both arms.
+#   GUARD own-node exclusive and the distinct-host corroboration pass in every arm.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -67,17 +70,26 @@ build() {
         -o "$out"
 }
 
-if ! grep -q 'CF_LONE_PEER_REANCHOR_UNFIXED' "$CORE_DIR/BRPeerManager.c"; then
-    echo "GATE FAILURE: BRPeerManager.c has no CF_LONE_PEER_REANCHOR_UNFIXED seam; -D would be inert."; exit 1
-fi
+for seam in CF_LONE_PEER_REANCHOR_UNFIXED CF_CKPT_G5R2_UNFIXED; do
+    if ! grep -q "$seam" "$CORE_DIR/BRPeerManager.c"; then
+        echo "GATE FAILURE: BRPeerManager.c has no $seam seam; -D would be inert."; exit 1
+    fi
+done
 
-WANT_RED="$(sort <<'LINES'
+WANT_LONE="$(sort <<'LINES'
 FAIL: lone: a lone peer above the compiled table never re-anchors the chain
 FAIL: lone: every refused round from the threshold on is recorded as a stall
 FAIL: lone: the peer is not banned for it either
 FAIL: not-exclusive: a pinned but non-exclusive lone peer does not re-anchor
 FAIL: split: lone peers that disagree with each other do not re-anchor
 FAIL: one-host: two ports of one address do not corroborate a lone divergence
+FAIL: netgroup: two addresses in one network group do not corroborate a lone divergence
+FAIL: backoff: a refused round holds the cfheaders driver on the contested batch, into the future
+LINES
+)"
+WANT_G5R2="$(sort <<'LINES'
+FAIL: netgroup: two addresses in one network group do not corroborate a lone divergence
+FAIL: backoff: a refused round holds the cfheaders driver on the contested batch, into the future
 LINES
 )"
 
@@ -85,22 +97,26 @@ FAIL=0
 run_bits() {
     local bits="$1"
     echo "=== ${bits}-bit build ==="
-    if ! build "$BUILD_DIR/red${bits}" "$bits" -DCF_LONE_PEER_REANCHOR_UNFIXED; then
-        echo "GATE FAILURE: ${bits}-bit red arm did not compile (a build error is not evidence)."; FAIL=1; return
-    fi
     if ! build "$BUILD_DIR/green${bits}" "$bits"; then
         echo "GATE FAILURE: ${bits}-bit green arm did not compile."; FAIL=1; return
     fi
-
-    "$BUILD_DIR/red${bits}" > "$BUILD_DIR/red${bits}.log" 2>&1; local rc=$?
-    local got; got="$(grep '^FAIL: ' "$BUILD_DIR/red${bits}.log" | sort)"
-    if [ "$rc" -ne 0 ] && [ "$got" = "$WANT_RED" ]; then
-        echo "  [$bits red] the earlier hatch fails exactly the lone / not-exclusive / split / one-host checks"
-    else
-        echo "  [$bits red] GATE FAILURE (rc=$rc): expected exactly:"; sed 's/^/      | /' <<<"$WANT_RED"
-        echo "      saw:"; sed 's/^/      | /' <<<"$got"; FAIL=1
-    fi
-    if grep -Eq "$SAN_RE" "$BUILD_DIR/red${bits}.log"; then echo "  [$bits red] GATE FAILURE: sanitizer report"; FAIL=1; fi
+    local flag want label rc got
+    for label in lone g5r2; do
+        if [ "$label" = lone ]; then flag=CF_LONE_PEER_REANCHOR_UNFIXED; want="$WANT_LONE"
+        else flag=CF_CKPT_G5R2_UNFIXED; want="$WANT_G5R2"; fi
+        if ! build "$BUILD_DIR/$label${bits}" "$bits" "-D$flag"; then
+            echo "GATE FAILURE: ${bits}-bit $flag arm did not compile (a build error is not evidence)."; FAIL=1; continue
+        fi
+        "$BUILD_DIR/$label${bits}" > "$BUILD_DIR/$label${bits}.log" 2>&1; rc=$?
+        got="$(grep '^FAIL: ' "$BUILD_DIR/$label${bits}.log" | sort)"
+        if [ "$rc" -ne 0 ] && [ "$got" = "$want" ]; then
+            echo "  [$bits $label] -D$flag fails exactly its $(grep -c . <<<"$want") check(s)"
+        else
+            echo "  [$bits $label] GATE FAILURE (rc=$rc): expected exactly:"; sed 's/^/      | /' <<<"$want"
+            echo "      saw:"; sed 's/^/      | /' <<<"$got"; FAIL=1
+        fi
+        if grep -Eq "$SAN_RE" "$BUILD_DIR/$label${bits}.log"; then echo "  [$bits $label] GATE FAILURE: sanitizer report"; FAIL=1; fi
+    done
 
     "$BUILD_DIR/green${bits}" > "$BUILD_DIR/green${bits}.log" 2>&1; rc=$?
     grep -E "^(PASS|FAIL|cf_lone_peer_quorum_kat)" "$BUILD_DIR/green${bits}.log" | sed 's/^/  /'
@@ -115,4 +131,4 @@ run_bits 32
 
 echo
 if [ "$FAIL" -ne 0 ]; then echo "cf_lone_peer_quorum_kat: FAILED"; exit 1; fi
-echo "cf_lone_peer_quorum_kat: PASS (64- and 32-bit; red arm fails exactly its cases, green arm clean)"
+echo "cf_lone_peer_quorum_kat: PASS (64- and 32-bit; both red arms fail exactly their cases, green arm clean)"
