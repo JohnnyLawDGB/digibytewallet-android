@@ -5,6 +5,7 @@ package app.aroundtheblock.wallet.ui.settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -174,6 +175,41 @@ fun SeedViewScreen(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
+                    // The passphrase, if there is one, as the grid's FIRST full-width item. The grid is the
+                    // screen's only scrolling container, so anything placed after it in the Column was laid
+                    // out below the visible area and could not be reached: a backup taken from this screen
+                    // held the words without the passphrase they need. Silent when there is none, which is
+                    // the case for most wallets, so the screen is unchanged for them.
+                    backup.passphrase?.let { storedPassphrase ->
+                        item(key = "passphrase", span = { GridItemSpan(maxLineSpan) }) {
+                            Card(
+                                shape = RoundedCornerShape(8.dp),
+                                colors = CardDefaults.cardColors(containerColor = Color(0xFF1A2742)),
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Column(Modifier.padding(14.dp)) {
+                                    Text(
+                                        text = stringResource(R.string.pass_enter),
+                                        color = Color(0xFF8FA1B8),
+                                        style = MaterialTheme.typography.labelMedium,
+                                    )
+                                    Spacer(Modifier.height(6.dp))
+                                    Text(
+                                        text = storedPassphrase,
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Medium,
+                                        fontSize = 15.sp,
+                                    )
+                                    Spacer(Modifier.height(8.dp))
+                                    Text(
+                                        text = stringResource(R.string.pass_warn),
+                                        color = Color(0xFFFFCC66),
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                }
+                            }
+                        }
+                    }
                     itemsIndexed(backup.words) { idx, word ->
                         Card(
                             shape = RoundedCornerShape(8.dp),
@@ -197,39 +233,6 @@ fun SeedViewScreen(
                                     fontSize = 15.sp
                                 )
                             }
-                        }
-                    }
-                }
-
-                // The passphrase, if there is one. Silent when there is not — the overwhelming
-                // majority of wallets — so this screen is unchanged for them.
-                val storedPassphrase = backup.passphrase
-                if (storedPassphrase != null) {
-                    Spacer(Modifier.height(20.dp))
-                    Card(
-                        shape = RoundedCornerShape(8.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFF1A2742)),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Column(Modifier.padding(14.dp)) {
-                            Text(
-                                text = stringResource(R.string.pass_enter),
-                                color = Color(0xFF8FA1B8),
-                                style = MaterialTheme.typography.labelMedium,
-                            )
-                            Spacer(Modifier.height(6.dp))
-                            Text(
-                                text = storedPassphrase,
-                                color = Color.White,
-                                fontWeight = FontWeight.Medium,
-                                fontSize = 15.sp,
-                            )
-                            Spacer(Modifier.height(8.dp))
-                            Text(
-                                text = stringResource(R.string.pass_warn),
-                                color = Color(0xFFFFCC66),
-                                style = MaterialTheme.typography.bodySmall,
-                            )
                         }
                     }
                 }
