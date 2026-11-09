@@ -239,10 +239,12 @@ int main(void)
             "00,000,000,000,000,000,000,000,000,000.01", "000,000,000,000,000,000,000,000,000,000.01",
             "0000000000000000000000000000000,1", "000000000000000000000000000000,1",
             "                                        5",
-            // Where Kotlin and C differ by design (BRFiatAmount.h's "Where this deliberately
-            // differs"): Unicode spaces, the ASCII separators U+001C..U+001F, non-ASCII digits.
-            "\xc2\xa0" "5", "5\xc2\xa0", "\xe2\x80\x83" "5", "\x1c" "5", "5\x1f", "\xd9\xa5", "\xef\xbc\x95",
-            "\xd9\xa5.\xd9\xa5", "\xff", "5\xff",
+            // Not whitespace to the core (Kotlin's trim() once took them): Unicode spaces and the
+            // ASCII separators U+001C..U+001F. Non-ASCII digits are not here: a platform maps them
+            // to ASCII before the core reads the text (iOS FiatText.asciiDigits, UsdCents.asciiDigits),
+            // which a line of the core's answers cannot express; UsdCentsTest covers the mapping.
+            "\xc2\xa0" "5", "5\xc2\xa0", "\xe2\x80\x83" "5", "\x1c" "5", "5\x1f", "\xd9\xab",
+            "\xff", "5\xff",
         };
         for (i = 0; i < sizeof(t) / sizeof(t[0]); i++) parseLine(t[i], strlen(t[i]));
         parseLine("1\0" "5", 3);      // an embedded NUL is a character, not the end

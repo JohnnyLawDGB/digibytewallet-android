@@ -17,31 +17,101 @@ import java.math.RoundingMode
  *  - only digits and one decimal point: no sign, no exponent, no "NaN";
  *  - the length is bounded before anything is built from the text.
  *
- * The C source of truth is the core's BRFiatAmount.h, which iOS uses directly; this is its Kotlin
- * mirror (docs/ios-port/push-down-recipe.md), and UsdCentsVectorsTest holds every answer here to
- * the header's own, written down by native/src/test/host/fiat_vectors_kat. The one deliberate
- * difference is the header's: it reads only ASCII whitespace and digits, while [parse] still takes
- * what Kotlin's trim() and isDigit() take.
+ * The C source of truth is the core's BRFiatAmount.h, which iOS uses directly (Policy/FiatText.swift);
+ * this is its Kotlin mirror (docs/ios-port/push-down-recipe.md), and UsdCentsVectorsTest holds every
+ * answer here to the header's own, written down by native/src/test/host/fiat_vectors_kat. Dollar text
+ * is read as iOS reads it: Unicode decimal digits mapped to ASCII ([asciiDigits]), then exactly
+ * BRUsdCentsParse — ASCII whitespace only, ASCII digits only.
  */
 object UsdCents {
     private const val DECIMALS = 2
 
-    /** Longer than any text that fits a Long of cents, grouping included. Checked before parsing. */
+    /** Longer than any text that fits a Long of cents (BR_USD_CENTS_MAX_TEXT). Checked before parsing. */
     private const val MAX_TEXT_LENGTH = 32
 
-    /** Cents for a dollar amount typed as text, or null when it is not one. Zero is returned as 0. */
+    /**
+     * Cents for a dollar amount typed as text, or null when it is not one. Zero is returned as 0.
+     *
+     * [asciiDigits], then BRUsdCentsParse line for line: surrounding ASCII whitespace (space, tab,
+     * LF, CR, FF, VT) is ignored — not Unicode spaces, not U+001C..U+001F; a dot is the decimal point
+     * and commas around it are grouping; a lone comma with no dot is the point; several commas with no
+     * dot are refused; at most 32 characters once grouping commas are dropped; then only ASCII digits
+     * and one point, at most two decimals, never rounded.
+     */
     fun parse(input: String): Long? {
-        val text = DgbAmount.normalizeSeparators(input.trim()) ?: return null
-        if (text.isEmpty() || text.length > MAX_TEXT_LENGTH) return null
-        if (!text.all { it.isDigit() || it == '.' }) return null
-        val value = text.toBigDecimalOrNull() ?: return null
-        // With only digits and a point in the text, the scale IS the number of typed decimals.
-        if (value.scale() > DECIMALS) return null
-        return try {
-            value.movePointRight(DECIMALS).longValueExact()
-        } catch (_: ArithmeticException) {
-            null
+        val text = asciiDigits(input)
+        var start = 0
+        var end = text.length
+        while (start < end && isAsciiSpace(text[start])) start++
+        while (end > start && isAsciiSpace(text[end - 1])) end--
+
+        var commas = 0
+        var dots = 0
+        for (i in start until end) {
+            if (text[i] == ',') commas++ else if (text[i] == '.') dots++
         }
+        if (commas > 1 && dots == 0) return null // ambiguous
+        // The bound is on the text once grouping commas are dropped. Any non-ASCII character left
+        // is refused below whatever this counts, so counting chars rather than UTF-8 bytes (as the
+        // C does) cannot change an answer.
+        val bounded = end - start - (if (dots > 0) commas else 0)
+        if (bounded == 0 || bounded > MAX_TEXT_LENGTH) return null
+
+        var sawDigit = false
+        var sawPoint = false
+        var decimals = 0
+        var value = 0L
+        for (i in start until end) {
+            var c = text[i]
+            if (c == ',') {
+                if (dots > 0) continue // grouping
+                c = '.' // the lone comma is the point
+            }
+            if (c == '.') {
+                if (sawPoint) return null
+                sawPoint = true
+            } else if (c in '0'..'9') {
+                sawDigit = true
+                if (sawPoint) {
+                    decimals++
+                    if (decimals > DECIMALS) return null // typed, so never rounded
+                }
+                val d = (c - '0').toLong()
+                if (value > (Long.MAX_VALUE - d) / 10) return null
+                value = value * 10 + d
+            } else {
+                return null // no sign, exponent, letters, or non-ASCII
+            }
+        }
+        if (!sawDigit) return null
+        while (decimals < DECIMALS) {
+            if (value > Long.MAX_VALUE / 10) return null
+            value *= 10
+            decimals++
+        }
+        return value
+    }
+
+    /** BRAmountParse.h's _BRAmountIsSpace. */
+    private fun isAsciiSpace(c: Char): Boolean =
+        c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\u000C' || c == '\u000B'
+
+    /**
+     * Every Unicode decimal digit (general category Nd: Arabic-Indic, Extended Arabic-Indic,
+     * Devanagari, full width...) as its ASCII digit; nothing else changes. iOS FiatText.asciiDigits:
+     * the Arabic decimal and thousands separators (U+066B, U+066C) are NOT mapped, so "٥٫٥" is no
+     * amount on either platform; fractions and numerals (½, Ⅻ) are not decimal digits.
+     */
+    internal fun asciiDigits(text: String): String {
+        val out = StringBuilder(text.length)
+        var i = 0
+        while (i < text.length) {
+            val cp = text.codePointAt(i)
+            val digit = if (Character.getType(cp) == Character.DECIMAL_DIGIT_NUMBER.toInt()) Character.digit(cp, 10) else -1
+            if (digit in 0..9) out.append('0' + digit) else out.appendCodePoint(cp)
+            i += Character.charCount(cp)
+        }
+        return out.toString()
     }
 
     /** Plain decimal text for [cents] — always two decimals, no grouping, no exponent, no locale. */

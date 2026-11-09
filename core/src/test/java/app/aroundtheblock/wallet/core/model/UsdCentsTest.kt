@@ -69,6 +69,38 @@ class UsdCentsTest {
         assertNull(UsdCents.parse("$5"))
     }
 
+    /**
+     * Dollar text is read as iOS reads it (FiatText.asciiDigits, then the core's BRUsdCentsParse):
+     * FiatTextTests' digit cases, value for value.
+     */
+    @Test fun `non-ASCII decimal digits are read as their ASCII digits`() {
+        assertEquals(1250L, UsdCents.parse("\u0661\u0662.\u0665\u0660")) // Arabic-Indic
+        assertEquals(1250L, UsdCents.parse("\u06f1\u06f2.\u06f5")) // Extended Arabic-Indic (Persian)
+        assertEquals(1250L, UsdCents.parse("\u0967\u0968.\u096b\u0966")) // Devanagari
+        assertEquals(1250L, UsdCents.parse("\uff11\uff12.\uff15\uff10")) // full width
+        assertEquals(123_450L, UsdCents.parse("\u0661,\u0662\u0663\u0664.\u0665")) // ASCII separators
+        assertEquals("50", UsdCents.dgbTextFor("\u0660.\u0665", 0.01))
+    }
+
+    /** Not mapped, as on iOS: the same text is no amount on either platform. */
+    @Test fun `the Arabic separators, fractions and numerals are not mapped`() {
+        assertNull(UsdCents.parse("\u0665\u066b\u0665")) // the Arabic decimal separator is not a point
+        assertNull(UsdCents.parse("\u0661\u066c\u0662\u0663\u0664.\u0665")) // the Arabic thousands separator
+        assertEquals("", UsdCents.dgbTextFor("\u0665\u066b\u0665", 0.01))
+        assertEquals("5\u066b5", UsdCents.asciiDigits("\u0665\u066b\u0665"))
+        assertEquals("abc \u00bd \u216b", UsdCents.asciiDigits("abc \u00bd \u216b"))
+        assertNull(UsdCents.parse("\u00bd"))
+    }
+
+    /** BRUsdCentsParse's whitespace: ASCII only. Kotlin's trim() used to take these too. */
+    @Test fun `only ASCII whitespace surrounds an amount`() {
+        assertEquals(500L, UsdCents.parse(" \t\n\r\u000C\u000B5 \t\n\r\u000C\u000B"))
+        assertNull(UsdCents.parse("\u00a05")) // no-break space
+        assertNull(UsdCents.parse("5\u2003")) // em space
+        assertNull(UsdCents.parse("\u001c5")) // U+001C..U+001F are separators, not whitespace
+        assertNull(UsdCents.parse("5\u001f"))
+    }
+
     @Test(timeout = 2_000) fun `out of range is refused and the exact ceiling is accepted`() {
         assertEquals(Long.MAX_VALUE, UsdCents.parse("92233720368547758.07"))
         assertNull(UsdCents.parse("92233720368547758.08"))

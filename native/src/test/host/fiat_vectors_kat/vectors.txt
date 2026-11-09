@@ -4902,9 +4902,7 @@ parse "5\xc2\xa0" -
 parse "\xe2\x80\x835" -
 parse "\x1c5" -
 parse "5\x1f" -
-parse "\xd9\xa5" -
-parse "\xef\xbc\x95" -
-parse "\xd9\xa5.\xd9\xa5" -
+parse "\xd9\xab" -
 parse "\xff" -
 parse "5\xff" -
 parse "1\x005" -

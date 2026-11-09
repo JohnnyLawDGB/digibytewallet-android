@@ -18,9 +18,9 @@ import java.math.BigInteger
  * exactly on a rounding boundary, arbitrary doubles), both HALF_EVEN conversions up to the Long
  * ceiling, dollar text both ways, and the send screen's two amount fields end to end.
  *
- * The one deliberate difference ([KOTLIN_ONLY]): BRUsdCentsParse reads ASCII whitespace and ASCII
- * digits only; Kotlin's trim() and digit rules also take Unicode spaces, U+001C..U+001F and other
- * decimal digits. BRFiatAmount.h documents it; those lines may give Kotlin's own answer instead.
+ * One answer per line, with no allowance. The one step before the core's parser, mapping Unicode
+ * decimal digits to ASCII ([UsdCents.asciiDigits], as iOS's FiatText does), is the identity on
+ * every parse line here (checked below); UsdCentsTest covers the mapping itself.
  */
 class UsdCentsVectorsTest {
 
@@ -86,15 +86,8 @@ class UsdCentsVectorsTest {
                 "s4c" -> assertEquals(line, longOrNull(f[3]), UsdCents.satsForCents(f[1].toLong(), rate(f[2])))
                 "parse" -> {
                     val input = text(f[1])
-                    val want = longOrNull(f[2])
-                    val got = UsdCents.parse(input)
-                    val kotlinOnly = KOTLIN_ONLY[input]
-                    if (kotlinOnly != null) {
-                        assertEquals("$line: the core refuses what only Kotlin reads", null, want)
-                        assertTrue("$line: Kotlin gave $got", got == want || got == kotlinOnly)
-                    } else {
-                        assertEquals(line, want, got)
-                    }
+                    assertEquals("$line: the digit mapping must not touch a core vector", input, UsdCents.asciiDigits(input))
+                    assertEquals(line, longOrNull(f[2]), UsdCents.parse(input))
                 }
                 "format" -> assertEquals(line, text(f[2]), UsdCents.format(f[1].toLong()))
                 "preview" -> assertEquals(line, text(f[3]), UsdCents.previewForDgb(text(f[1]), price(f[2])))
@@ -118,13 +111,5 @@ class UsdCentsVectorsTest {
             0.00612, 2.82879384806159e17, 1.8014398509481988e16, 1.801439850948199e16)) {
             assertTrue("no rate vector for $p", p.toRawBits() in rated)
         }
-    }
-
-    private companion object {
-        /** Text BRUsdCentsParse refuses by design and Kotlin may read: what Kotlin reads it as. */
-        val KOTLIN_ONLY: Map<String, Long> = mapOf(
-            " 5" to 500L, "5 " to 500L, " 5" to 500L, "\u001c5" to 500L, "5\u001f" to 500L,
-            "٥" to 500L, "５" to 500L, "٥.٥" to 550L,
-        )
     }
 }
