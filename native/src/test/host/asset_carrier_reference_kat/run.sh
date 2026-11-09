@@ -99,6 +99,8 @@ single_version0
 single_badop
 op1negate_after
 four_nulldata
+enckey_shape
+enckey_shape_two_outputs
 CHECKS
 
 echo "--- GREEN: must pass clean ---"

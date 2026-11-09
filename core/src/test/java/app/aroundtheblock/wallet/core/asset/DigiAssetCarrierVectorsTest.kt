@@ -34,14 +34,24 @@ class DigiAssetCarrierVectorsTest {
             val f = line.trim().split(' ')
             if (f.size < 3 || f[0] != "v") return@forEachLine
             read++
-            val got = when (val v = DigiAssetCarrierRule.verdict(f.drop(3).map(::hex), decoder)) {
+            var inputs = 2
+            var amounts: List<Long>? = null
+            val scripts = f.drop(3).mapNotNull { tok ->
+                when {
+                    tok.startsWith("in=") -> { inputs = tok.substring(3).toInt(); null }
+                    tok.startsWith("amt=") -> { amounts = tok.substring(4).split(',').map { it.toLong() }; null }
+                    else -> hex(tok)
+                }
+            }
+            val shape = DigiAssetCarrierRule.TxShape.of(inputs, amounts ?: List(scripts.size) { 700L })
+            val got = when (val v = DigiAssetCarrierRule.verdict(scripts, decoder, shape)) {
                 DigiAssetCarrierRule.Verdict.None -> "NONE"
                 is DigiAssetCarrierRule.Verdict.Carrier -> "CARRIER:${v.index}"
                 DigiAssetCarrierRule.Verdict.Undecided -> "UNDECIDED"
             }
             if (got != f[2]) wrong += "${f[1]}: Kotlin $got, vectors ${f[2]}"
         }
-        assertTrue("only $read vectors were read", read >= 39)
+        assertTrue("only $read vectors were read", read >= 45)
         assertEquals("DigiAssetCarrierRule disagrees with the shared vectors: $wrong", 0, wrong.size)
     }
 }

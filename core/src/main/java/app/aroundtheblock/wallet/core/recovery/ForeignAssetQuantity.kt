@@ -54,7 +54,11 @@ object ForeignAssetQuantity {
         // DA-014-REF: the carrier by the one rule (DigiAsset Core's), not the first OP_RETURN. A
         // transaction it cannot decide reads as an unknown count (0 here; see the class note).
         val verdict = try {
-            app.aroundtheblock.wallet.core.asset.DigiAssetCarrierRule.verdict(outputs.map { it.script }, decoder)
+            // The input count is not known here: the encrypted-key shape fails closed (unknown).
+            app.aroundtheblock.wallet.core.asset.DigiAssetCarrierRule.verdict(
+                outputs.map { it.script }, decoder,
+                app.aroundtheblock.wallet.core.asset.DigiAssetCarrierRule.TxShape.of(null, outputs.map { it.sats }),
+            )
         } catch (_: Throwable) {
             null
         }

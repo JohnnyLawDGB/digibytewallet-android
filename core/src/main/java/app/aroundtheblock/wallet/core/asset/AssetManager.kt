@@ -678,8 +678,20 @@ class AssetManager(
      * `transferRuleState("unresolved:...")` read UNKNOWN and refused — the user paid a PIN prompt
      * to be told "Blocked". A verdict for another asset is no verdict for this one.
      */
-    suspend fun verifyTransferRules(assetId: String): TransferRuleState {
-        val utxo = utxoDao.getAssetUtxosByIdNow(assetId).firstOrNull()
+    suspend fun verifyTransferRules(assetId: String): TransferRuleState =
+        verifyTransferRulesImpl(assetId, ownedScriptHexesCached(), ::nativeSpentState, ::nativeOutputLines, ::nativeInputCount)
+
+    /** [verifyTransferRules] with its native reads passed in. It walks from the first row the
+     *  count rule keeps ([firstCountedRow]): a row the balance excludes (one an earlier carrier
+     *  rule credited) must not stand in for the asset and turn a genuine holding's answer UNKNOWN. */
+    internal suspend fun verifyTransferRulesImpl(
+        assetId: String,
+        ownedScriptHexes: Set<String>,
+        spentState: suspend (String, Int) -> Int,
+        fundingOutputLines: suspend (String) -> Array<out String?>?,
+        fundingInputCount: (String) -> Int?,
+    ): TransferRuleState {
+        val utxo = firstCountedRow(assetId, ownedScriptHexes, spentState, fundingOutputLines, fundingInputCount)
             ?: return TransferRuleState.UNKNOWN
         val (facts, state) = verifyFactsForTx(utxo.txid, expectedAssetId = assetId)
         return if (facts?.assetId == assetId) state else TransferRuleState.UNKNOWN
@@ -700,25 +712,21 @@ class AssetManager(
             // the native-authoritative recompute below is not free (per-row native probes),
             // and firing it on every insert adds back-pressure to the sync loop.
             .debounce(250L)
-            .map { (naiveBalances, metadata) ->
+            .map { (_, metadata) ->
             // displaySafe: rows cached before the category filter still carry what the old filter let through.
             val metadataMap = metadata.associateBy { it.assetId }.mapValues { (_, row) -> row.displaySafe() }
             // NATIVE-AUTHORITATIVE display balance: the naive DB SUM over spent=0 rows
             // over-counts, because the Room UTXO cache accumulates phantoms (recipient
-            // markers from sends, dead-send change, dropped txs). Recompute what the
-            // wallet ACTUALLY holds from the sovereign native view — count a row only if
-            // we own its address AND native holds it live (see [isHeldForDisplay]). Null
-            // when the owned-script set is unavailable (wallet not loaded) → fall back to
-            // the naive SUM so a transient native hiccup never blanks the user's assets.
-            // This is DISPLAY ONLY — nothing is deleted, so a wrong call is a self-
-            // correcting glitch, never lost funds.
-            val held = runCatching { computeHeldAssetBalances() }.getOrNull()
-            val rows: List<Triple<String, Long, Int>> = if (held != null) {
+            // markers from sends, dead-send change, dropped txs, and rows an earlier carrier
+            // rule credited). Recompute what the wallet ACTUALLY holds from the sovereign native
+            // view (the count rule: [isHeldForDisplay] plus the carrier verdict, DA-014-REF).
+            // Null when the owned-script set is unavailable (wallet not loaded): the last good
+            // answer is shown, never the naive SUM, which would bring every excluded row back.
+            // This is DISPLAY ONLY — nothing is deleted.
+            val held = displayHeldBalances(runCatching { computeHeldAssetBalances() }.getOrNull())
+            val rows: List<Triple<String, Long, Int>> =
                 held.entries.filter { it.value.quantity > 0 }
                     .map { Triple(it.key, it.value.quantity, it.value.utxoCount) }
-            } else {
-                naiveBalances.map { Triple(it.assetId, it.totalQuantity, it.utxoCount) }
-            }
             rows.map { (assetId, quantity, utxoCount) ->
                 val meta = metadataMap[assetId]
                 OwnedAsset(
@@ -748,6 +756,22 @@ class AssetManager(
      *  UTXO count over the rows [isHeldForDisplay] accepts. */
     data class HeldBalance(val quantity: Long, val utxoCount: Int)
 
+    @Volatile private var lastHeldBalances: Map<String, HeldBalance>? = null
+
+    /**
+     * What the Assets screen shows for a recompute that answered [computed]. A recompute that
+     * could not run (null: the owned-script set was unavailable) shows the LAST GOOD answer, as
+     * [ownedScriptHexesCached] keeps its last good set, and nothing before there has been one. It
+     * never falls back to the naive DB sum: that sum counts every row the count rule excludes.
+     */
+    internal fun displayHeldBalances(computed: Map<String, HeldBalance>?): Map<String, HeldBalance> {
+        if (computed != null) {
+            lastHeldBalances = computed
+            return computed
+        }
+        return lastHeldBalances ?: emptyMap()
+    }
+
     /**
      * Compute per-assetId held balances from the SOVEREIGN native view instead of a
      * naive SUM over the Room cache. Returns null (→ caller falls back to the DB SUM)
@@ -758,13 +782,19 @@ class AssetManager(
     suspend fun computeHeldAssetBalances(): Map<String, HeldBalance>? =
         computeHeldAssetBalancesImpl(
             ownedScriptHexesCached(),
-            spentState = { txid, vout ->
-                runCatching { NativeBridge.outpointSpentState(txid, vout) }.getOrDefault(-99)
-            },
-            fundingOutputLines = { txid ->
-                runCatching { NativeBridge.getTransactionOutputsForHash(txid) }.getOrNull()
-            },
+            spentState = ::nativeSpentState,
+            fundingOutputLines = ::nativeOutputLines,
+            fundingInputCount = ::nativeInputCount,
         )
+
+    private fun nativeSpentState(txid: String, vout: Int): Int =
+        runCatching { NativeBridge.outpointSpentState(txid, vout) }.getOrDefault(-99)
+
+    private fun nativeOutputLines(txid: String): Array<out String?>? =
+        runCatching { NativeBridge.getTransactionOutputsForHash(txid) }.getOrNull()
+
+    private fun nativeInputCount(txid: String): Int? =
+        runCatching { NativeBridge.getTransactionInputsForHash(txid)?.size }.getOrNull()
 
     /**
      * DA-014-REF, the count side: why output [vout] of the transaction listed by [lines] can NOT
@@ -774,9 +804,9 @@ class AssetManager(
      * the remainder goes). Computed on every recompute, so a row written under an earlier rule
      * stops counting as soon as the rule no longer credits it; the row itself is kept.
      */
-    internal fun carrierCreditRefusal(lines: Array<out String?>?, vout: Int): String? {
+    internal fun carrierCreditRefusal(lines: Array<out String?>?, vout: Int, inputCount: () -> Int?): String? {
         val scripts = DigiAssetCarrierRule.scriptsOfLines(lines) ?: return "carrier:unreadable"
-        val carrier = when (val v = DigiAssetCarrierRule.verdict(scripts, decoder)) {
+        val carrier = when (val v = DigiAssetCarrierRule.verdict(scripts, decoder, DigiAssetCarrierRule.shapeOf(lines, inputCount))) {
             DigiAssetCarrierRule.Verdict.None -> return "carrier:none"
             DigiAssetCarrierRule.Verdict.Undecided -> return "carrier:undecided"
             is DigiAssetCarrierRule.Verdict.Carrier -> v
@@ -835,8 +865,66 @@ class AssetManager(
         ownedScriptHexes: Set<String>,
         spentState: suspend (String, Int) -> Int,
         fundingOutputLines: suspend (String) -> Array<out String?>?,
-    ): Map<String, HeldBalance>? = computeHeldAssetBalancesCore(ownedScriptHexes, spentState) { linesOf, txid, vout ->
-        carrierCreditRefusal(linesOf.getOrPut(txid) { fundingOutputLines(txid) }, vout)
+        fundingInputCount: (String) -> Int? = { null },
+    ): Map<String, HeldBalance>? = computeHeldAssetBalancesCore(
+        ownedScriptHexes, spentState, carrierRefusalFrom(fundingOutputLines, fundingInputCount),
+    )
+
+    /** The count rule's carrier half over native reads, each funding transaction read once. */
+    private fun carrierRefusalFrom(
+        fundingOutputLines: suspend (String) -> Array<out String?>?,
+        fundingInputCount: (String) -> Int?,
+    ): suspend (String, Int) -> String? {
+        val linesOf = HashMap<String, Array<out String?>?>()
+        val inputsOf = HashMap<String, Int?>()
+        return { txid, vout ->
+            val lines = if (txid in linesOf) linesOf[txid] else fundingOutputLines(txid).also { linesOf[txid] = it }
+            carrierCreditRefusal(lines, vout) {
+                if (txid in inputsOf) inputsOf[txid] else fundingInputCount(txid).also { inputsOf[txid] = it }
+            }
+        }
+    }
+
+    /**
+     * THE count rule for one row, shared by the balance and by everything that must act only on a
+     * row the balance counts: null when [row] counts, otherwise why not ("not-held" covers
+     * spent, unowned, unbacked and every native answer but HELD; the carrier reasons are
+     * [carrierCreditRefusal]'s).
+     */
+    private suspend fun rowCountRefusal(
+        row: app.aroundtheblock.wallet.core.db.entity.UtxoEntity,
+        owned: Set<String>,
+        state: Int,
+        carrierRefusal: suspend (String, Int) -> String?,
+    ): String? {
+        if (row.spent) return "spent"
+        val held = AssetCredit.counts(row.assetCredit) &&
+            isHeldForDisplay(row.scriptPubKey.toHex().lowercase(), owned, row.assetSource, state,
+                             everConfirmed = row.blockHeight > 0L)
+        if (!held) return "not-held"
+        return carrierRefusal(row.txid, row.vout)
+    }
+
+    /** The first of [assetId]'s rows the count rule keeps, or null. */
+    internal suspend fun firstCountedRow(
+        assetId: String,
+        ownedScriptHexes: Set<String>,
+        spentState: suspend (String, Int) -> Int,
+        fundingOutputLines: suspend (String) -> Array<out String?>?,
+        fundingInputCount: (String) -> Int?,
+    ): app.aroundtheblock.wallet.core.db.entity.UtxoEntity? {
+        val owned = ownedScriptHexes.map { it.lowercase() }.toSet()
+        if (owned.isEmpty()) return null
+        val refusal = carrierRefusalFrom(fundingOutputLines, fundingInputCount)
+        for (row in utxoDao.getAssetUtxosByIdNow(assetId)) {
+            val why = rowCountRefusal(row, owned, spentState(row.txid, row.vout), refusal)
+            if (why == null) return row
+            runCatching {
+                android.util.Log.i("AssetManager",
+                    "rule check skips ${LogTag.tx(row.txid)}:${row.vout} for $assetId: not counted ($why)")
+            }
+        }
+        return null
     }
 
     /** For JVM tests that are NOT about the carrier rule: every funding transaction is taken as
@@ -844,33 +932,27 @@ class AssetManager(
     internal suspend fun computeHeldAssetBalancesImpl(
         ownedScriptHexes: Set<String>,
         spentState: suspend (String, Int) -> Int,
-    ): Map<String, HeldBalance>? = computeHeldAssetBalancesCore(ownedScriptHexes, spentState) { _, _, _ -> null }
+    ): Map<String, HeldBalance>? = computeHeldAssetBalancesCore(ownedScriptHexes, spentState) { _, _ -> null }
 
     private suspend fun computeHeldAssetBalancesCore(
         ownedScriptHexes: Set<String>,
         spentState: suspend (String, Int) -> Int,
-        carrierRefusal: suspend (HashMap<String, Array<out String?>?>, String, Int) -> String?,
+        carrierRefusal: suspend (String, Int) -> String?,
     ): Map<String, HeldBalance>? {
         val owned = ownedScriptHexes.map { it.lowercase() }.toSet()
         if (owned.isEmpty()) return null
         val qty = HashMap<String, Long>()
         val cnt = HashMap<String, Int>()
-        val linesOf = HashMap<String, Array<out String?>?>()   // one read per funding tx per recompute
         for (row in utxoDao.getAllAssetUtxosNow()) {
             if (row.spent) continue   // reconciled-spent — matches getAssetBalances WHERE spent=0
             val assetId = row.assetId ?: continue   // unattributed row — can't group by asset
             val scriptHex = row.scriptPubKey.toHex().lowercase()
             val state = spentState(row.txid, row.vout)
-            // Units count only when they are backed: a transfer's quantity read from its
-            // instructions alone is a claim, and so is the name the first input's history gives
-            // it (see AssetCredit). An unbacked row is held out of DGB spending all the same.
-            val held = AssetCredit.counts(row.assetCredit) &&
-                isHeldForDisplay(scriptHex, owned, row.assetSource, state,
-                                 everConfirmed = row.blockHeight > 0L)
-            // DA-014-REF: native holding the output is not enough; the funding transaction must be
-            // one the carrier rule credits, at this output. Asked only of rows that would count.
-            val refusal = if (!held) null else carrierRefusal(linesOf, row.txid, row.vout)
-            val keep = held && refusal == null
+            // Units count only when they are backed (see AssetCredit), native holds the output,
+            // and (DA-014-REF) the funding transaction's carrier verdict credits this output.
+            val why = rowCountRefusal(row, owned, state, carrierRefusal)
+            val keep = why == null
+            val refusal = why?.takeIf { it.startsWith("carrier:") }
             // PER-ROW DIAGNOSTIC. Every asset-balance investigation so far has had totals
             // and no rows, which is how two different wrong diagnoses both looked plausible.
             // This is the row-level fact: which outpoint, how many units, what height, whose
@@ -964,8 +1046,10 @@ class AssetManager(
      * rule cannot decide, or if parsing fails.
      */
     fun parseTransaction(rawTx: ByteArray): AssetData? {
-        val scripts = DigiAssetCarrierRule.scriptsOfLines(NativeBridge.getRawTransactionOutputs(rawTx)) ?: return null
-        return (DigiAssetCarrierRule.verdict(scripts, decoder) as? DigiAssetCarrierRule.Verdict.Carrier)?.header?.toAssetData()
+        val lines = NativeBridge.getRawTransactionOutputs(rawTx)
+        val scripts = DigiAssetCarrierRule.scriptsOfLines(lines) ?: return null
+        val shape = DigiAssetCarrierRule.shapeOf(lines) { DigiAssetCarrierRule.inputCountOfRawTx(rawTx) }
+        return (DigiAssetCarrierRule.verdict(scripts, decoder, shape) as? DigiAssetCarrierRule.Verdict.Carrier)?.header?.toAssetData()
     }
 
     /**
@@ -1018,14 +1102,18 @@ class AssetManager(
      * [app.aroundtheblock.wallet.core.model.AssetOperation.UNCLASSIFIABLE] header: nothing is
      * credited from it and the hold rule takes every owned output.
      */
-    private fun assetCarrier(scripts: List<ByteArray>): Pair<ByteArray, DecodedAssetHeader>? =
-        when (val v = DigiAssetCarrierRule.verdict(scripts, decoder)) {
+    private fun assetCarrier(
+        scripts: List<ByteArray>,
+        shape: DigiAssetCarrierRule.TxShape,
+    ): Pair<ByteArray, DecodedAssetHeader>? =
+        when (val v = DigiAssetCarrierRule.verdict(scripts, decoder, shape)) {
             DigiAssetCarrierRule.Verdict.None -> null
             is DigiAssetCarrierRule.Verdict.Carrier -> v.script to v.header
             DigiAssetCarrierRule.Verdict.Undecided -> ByteArray(0) to DecodedAssetHeader.unclassifiable()
         }
 
-    private fun assetCarrierHeader(scripts: List<ByteArray>): DecodedAssetHeader? = assetCarrier(scripts)?.second
+    private fun assetCarrierHeader(scripts: List<ByteArray>, shape: DigiAssetCarrierRule.TxShape): DecodedAssetHeader? =
+        assetCarrier(scripts, shape)?.second
 
     /** [assetCarrier] over bridge lines of which [parsedCount] parsed into [scripts]. A line that did
      *  not parse could be the carrier: the transaction is then undecided, as [DigiAssetCarrierRule]
@@ -1034,11 +1122,12 @@ class AssetManager(
         lines: Array<out String?>,
         parsedCount: Int,
         scripts: List<ByteArray>,
+        inputCount: () -> Int?,
     ): Pair<ByteArray, DecodedAssetHeader>? =
         if (parsedCount != lines.size || DigiAssetCarrierRule.scriptsOfLines(lines) == null) {
             ByteArray(0) to DecodedAssetHeader.unclassifiable()
         } else {
-            assetCarrier(scripts)
+            assetCarrier(scripts, DigiAssetCarrierRule.shapeOf(lines, inputCount))
         }
 
     suspend fun processIncomingAssetTx(
@@ -1065,7 +1154,10 @@ class AssetManager(
         // Locate the DigiAsset carrier among the OP_RETURN outputs (0x6A) and decode it.
         // DA-014-REF: an output line that cannot be read could be the carrier, so the
         // transaction is undecided (every readable owned output held), never "no asset".
-        val (carrierScript, header) = assetCarrierOfLines(outputLines, outputs.size, outputs.map { it.script }) ?: return null
+        val (carrierScript, header) = assetCarrierOfLines(outputLines, outputs.size, outputs.map { it.script }) {
+            nativeInputCount(txHashHex)
+        }
+            ?: return null
 
         // Asset-ID resolution:
         //  - ISSUANCE + locked: derive deterministically from first input outpoint.
@@ -1734,6 +1826,9 @@ class AssetManager(
             txid,
             fetch = ::fetchRawTransactionBytes,
             outputScriptsOf = { DigiAssetCarrierRule.scriptsOfLines(NativeBridge.getRawTransactionOutputs(it)) },
+            txShapeOf = {
+                DigiAssetCarrierRule.shapeOf(NativeBridge.getRawTransactionOutputs(it)) { DigiAssetCarrierRule.inputCountOfRawTx(it) }
+            },
             deriveIssuanceAssetId = { prevTxidHex, prevVout, aggregation, divisibility ->
                 NativeBridge.deriveIssuanceAssetId(
                     firstInputTxidHex = prevTxidHex,
@@ -1754,6 +1849,8 @@ class AssetManager(
         fetch: suspend (String) -> ByteArray?,
         outputScriptsOf: (ByteArray) -> List<ByteArray>?,
         deriveIssuanceAssetId: (prevTxidHex: String, prevVout: Int, aggregation: Int, divisibility: Int) -> String?,
+        // Input count and amounts for the encrypted-key shape; unknown fails closed.
+        txShapeOf: (ByteArray) -> DigiAssetCarrierRule.TxShape = { DigiAssetCarrierRule.TxShape.UNKNOWN },
     ): AssetProvenanceWalker.Hop {
         val rawTx = fetch(txid)
             ?: return AssetProvenanceWalker.Hop.Unavailable
@@ -1763,7 +1860,7 @@ class AssetManager(
         // names no asset: the walk stops, and nothing is renamed or recorded from it.
         val scripts = outputScriptsOf(rawTx)
             ?: return AssetProvenanceWalker.Hop.DeadEnd
-        val header = (DigiAssetCarrierRule.verdict(scripts, decoder) as? DigiAssetCarrierRule.Verdict.Carrier)?.header
+        val header = (DigiAssetCarrierRule.verdict(scripts, decoder, txShapeOf(rawTx)) as? DigiAssetCarrierRule.Verdict.Carrier)?.header
             ?: return AssetProvenanceWalker.Hop.DeadEnd
 
         return when (header.operation) {
@@ -2036,10 +2133,12 @@ class AssetManager(
                 val outputLines = outputsOf(txHash)
                     ?: throw IllegalStateException("a listed transaction could not be read")
                 val outputs = outputLines.map { parsePreSpendOutput(it) }
-                val header = outputs.filter { it.isOpReturn }.map { opReturn ->
-                    opReturn.scriptHex.hexToByteArray()
+                // DA-014-REF: every output script in order (the rule is positional), with the
+                // amounts and input count it needs; an unknown part fails closed.
+                val header = outputs.map { out ->
+                    out.scriptHex.hexToByteArray()
                         ?: throw IllegalStateException("an output script is not hex")
-                }.let { assetCarrierHeader(it) }
+                }.let { assetCarrierHeader(it, DigiAssetCarrierRule.shapeOf(outputLines) { inputsOf(txHash)?.size }) }
                 if (header == null) {
                     plainTxs.add(txHash)
                     continue
@@ -2405,7 +2504,7 @@ class AssetManager(
             if ((script.isEmpty() || script[0] != 0x6A.toByte()) && firstNonOpReturn == null) firstNonOpReturn = v
         }
         // DA-014-REF: the one carrier rule, not the first OP_RETURN.
-        val header = assetCarrierHeader(scripts) ?: return null
+        val header = assetCarrierHeader(scripts, DigiAssetCarrierRule.shapeOf(outputLines) { inputLines()?.size }) ?: return null
         return AssetTxShape(
             header = header,
             firstNonOpReturnVout = firstNonOpReturn,
@@ -2611,7 +2710,9 @@ class AssetManager(
             val s = p.getOrNull(2)?.hexToByteArray() ?: return@mapNotNull null
             v to s
         }
-        val header = assetCarrierOfLines(outputLines, scripts.size, scripts.map { it.second })?.second ?: return null
+        val header = assetCarrierOfLines(outputLines, scripts.size, scripts.map { it.second }) {
+            try { inputsOf(txHashHex)?.size } catch (t: Throwable) { null }
+        }?.second ?: return null
         val firstNonOpReturn = scripts.firstOrNull { it.second.isEmpty() || it.second[0] != 0x6A.toByte() }?.first
         // try/catch rather than runCatching: this is a suspend call, and a cancellation raised
         // inside it has to reach the replay loop, which rethrows it.
@@ -2692,7 +2793,8 @@ class AssetManager(
             val script = parts[2].hexToByteArray() ?: return@mapNotNull null
             ParsedOut(vout, script)
         }
-        val header = assetCarrierOfLines(outputLines, outputs.size, outputs.map { it.script })?.second ?: return null
+        val header = assetCarrierOfLines(outputLines, outputs.size, outputs.map { it.script }) { nativeInputCount(txHashHex) }?.second
+            ?: return null
         val firstNonOpReturn = outputs.firstOrNull {
             it.script.isEmpty() || it.script[0] != 0x6A.toByte()
         }?.vout

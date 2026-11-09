@@ -59,7 +59,8 @@ static void runVector(char *line) {
     char name[128], expected[32], got[32];
     BRTxOutput outs[MAX_OUTS];
     BRTransaction tx;
-    size_t n = 0, idx = 0;
+    size_t n = 0, idx = 0, inCount = 2, nAmt = 0;
+    uint64_t amts[MAX_OUTS];
     int verdict, allHeld = 1, noneHeld = 1;
 
     tok = strtok_r(line, " \n", &save);               /* "v" */
@@ -69,15 +70,24 @@ static void runVector(char *line) {
     snprintf(expected, sizeof(expected), "%s", tok);
     memset(outs, 0, sizeof(outs));
     while ((tok = strtok_r(NULL, " \n", &save)) != NULL && n < MAX_OUTS) {
+        if (strncmp(tok, "in=", 3) == 0) { inCount = (size_t)strtoul(tok + 3, NULL, 10); continue; }
+        if (strncmp(tok, "amt=", 4) == 0) {
+            char *a = tok + 4;
+            nAmt = 0;
+            while (*a && nAmt < MAX_OUTS) { amts[nAmt++] = strtoull(a, &a, 10); if (*a == ',') a++; }
+            continue;
+        }
         outs[n].script = unhex(tok, &outs[n].scriptLen);
         if (!outs[n].script) { check(0, name, "a script is not hex"); goto done; }
         outs[n].amount = 700;
         n++;
     }
+    for (size_t i = 0; i < nAmt && i < n; i++) outs[i].amount = amts[i];
     g_vectors++;
     memset(&tx, 0, sizeof(tx));
     tx.outputs = outs;
     tx.outCount = n;
+    tx.inCount = inCount;   /* inputs are never dereferenced by the rule */
 
     verdict = BRTxAssetCarrier(&tx, &idx);
     if (verdict == DA_TX_NONE) snprintf(got, sizeof(got), "NONE");
@@ -110,7 +120,7 @@ int main(int argc, char **argv) {
         if (line[0] == 'v' && line[1] == ' ') runVector(line);
     }
     fclose(f);
-    if (g_vectors < 39) { printf("FAIL: only %d vectors read\n", g_vectors); g_fail++; }
+    if (g_vectors < 45) { printf("FAIL: only %d vectors read\n", g_vectors); g_fail++; }
     printf("%d vectors, %d failure(s)\n", g_vectors, g_fail);
     return g_fail ? 1 : 0;
 }

@@ -110,4 +110,132 @@ class AssetCarrierCountRuleTest {
         assertNull(balances(row(tx, 0, 7L))["La1"])
         assertTrue(logged.any { it.contains("carrier:unreadable") })
     }
+
+    // ── guards across instruction forms ──────────────────────────────────
+
+    /** Issuance of 10, no instructions: the issuer's marker (first non-OP_RETURN output) counts. */
+    private val issuanceTen = "6a06444103050a10"
+    /** v3 issuance of 10 with one instruction: all 10 to output 0. */
+    private val issuanceAllToZero = "6a0844410305" + "0a" + "000a" + "10"
+    /** Transfer, one RANGE instruction: 10 units over outputs 0..2. */
+    private val rangeToTwo = "6a07444101154002" + "0a"
+    /** Transfer, two instructions: 5 units to output 0 and 5 to output 2. */
+    private val twoInstructions = "6a08444101150005" + "0205"
+
+    @Test fun `the instruction fixtures decode as described`() {
+        fun h(x: String) = DigiAssetDecoder().decode(ByteArray(x.length / 2) { x.substring(2 * it, 2 * it + 2).toInt(16).toByte() })!!
+        for (x in listOf(issuanceTen, issuanceAllToZero, rangeToTwo, twoInstructions)) {
+            assertTrue("$x is not nulldata", DigiAssetCarrierRule.isNullData(ByteArray(x.length / 2) { x.substring(2 * it, 2 * it + 2).toInt(16).toByte() }))
+        }
+        assertEquals(app.aroundtheblock.wallet.core.model.AssetOperation.ISSUANCE, h(issuanceTen).operation)
+        assertEquals(10L, h(issuanceAllToZero).totalQuantity)
+        assertEquals(listOf(0 to 10L), h(issuanceAllToZero).transferInstructions.map { it.outputIndex to it.amount })
+        assertTrue(h(rangeToTwo).transferInstructions.single().range)
+        assertEquals(2, h(rangeToTwo).transferInstructions.single().outputIndex)
+        assertEquals(listOf(0 to 5L, 2 to 5L), h(twoInstructions).transferInstructions.map { it.outputIndex to it.amount })
+    }
+
+    /** GUARD: an issuance's marker row counts. */
+    @Test fun `an issuance marker row counts`() = runTest {
+        val tx = id("i1")
+        funding[tx] = arrayOf("0|0|$issuanceTen", "1|700|$ours", "2|700|$ours")
+
+        assertEquals(10L, balances(row(tx, 1, 10L))["La1"]?.quantity)
+    }
+
+    /** GUARD: an issuance output nothing can deliver to does not count. */
+    @Test fun `an issuance output nothing can deliver to does not count`() = runTest {
+        val tx = id("i2")
+        funding[tx] = arrayOf("0|700|$ours", "1|0|$issuanceAllToZero", "2|700|$ours", "3|700|$ours")
+
+        assertNull(balances(row(tx, 2, 3L))["La1"])
+        assertTrue("$logged", logged.any { it.contains("drop (carrier:not-targeted)") })
+    }
+
+    /** GUARD: every output inside a range counts; one outside it (and not last) does not. */
+    @Test fun `a range transfer credits the outputs it spans`() = runTest {
+        val tx = id("g1")
+        funding[tx] = arrayOf("0|700|$ours", "1|700|$ours", "2|700|$ours", "3|700|$ours", "4|0|$rangeToTwo", "5|700|$ours")
+
+        assertEquals(6L, balances(row(tx, 0, 1L), row(tx, 1, 2L), row(tx, 2, 3L), row(tx, 3, 100L))["La1"]?.quantity)
+    }
+
+    /** GUARD: with two instructions both named outputs and the last output count; another does not. */
+    @Test fun `a multi-instruction transfer credits what it names and the last output`() = runTest {
+        val tx = id("m1")
+        funding[tx] = arrayOf("0|700|$ours", "1|700|$ours", "2|700|$ours", "3|0|$twoInstructions", "4|700|$ours")
+
+        assertEquals(5L + 5L + 4L, balances(row(tx, 0, 5L), row(tx, 1, 50L), row(tx, 2, 5L), row(tx, 4, 4L))["La1"]?.quantity)
+    }
+
+    // ── DA-014-REF: the encrypted-key shape ──────────────────────────────
+
+    /** RED without the shape check: [650 sat, carrier, ours] with one input is read by DigiAsset
+     *  Core as an encrypted-key transaction; nothing it carries counts. */
+    @Test fun `a carrier in the encrypted-key shape does not count`() = runTest {
+        val tx = id("k1")
+        funding[tx] = arrayOf("0|650|$ours", "1|0|$transferTenToZero", "2|700|$ours")
+        coEvery { utxoDao.getAllAssetUtxosNow() } returns listOf(row(tx, 0, 10L))
+
+        val held = mgr.computeHeldAssetBalancesImpl(
+            setOf(ours), spentState = { _, _ -> AssetSpentState.HELD },
+            fundingOutputLines = { funding[it] }, fundingInputCount = { 1 },
+        )!!
+
+        assertNull(held["La1"])
+    }
+
+    /** GUARD: the same shape with two inputs is an asset transaction and counts. */
+    @Test fun `the same shape with two inputs counts`() = runTest {
+        val tx = id("k2")
+        funding[tx] = arrayOf("0|650|$ours", "1|0|$transferTenToZero", "2|700|$ours")
+        coEvery { utxoDao.getAllAssetUtxosNow() } returns listOf(row(tx, 0, 10L))
+
+        val held = mgr.computeHeldAssetBalancesImpl(
+            setOf(ours), spentState = { _, _ -> AssetSpentState.HELD },
+            fundingOutputLines = { funding[it] }, fundingInputCount = { 2 },
+        )!!
+
+        assertEquals(10L, held["La1"]?.quantity)
+    }
+
+    // ── what acts on a counted row ───────────────────────────────────────
+
+    /** RED on firstOrNull: the rule check walks from the first row the count rule KEEPS, so an
+     *  excluded legacy row listed first does not stand in for a genuine holding. */
+    @Test fun `the rule check starts from a counted row, not an excluded one`() = runTest {
+        val legacy = id("p2")
+        val real = id("r9")
+        funding[legacy] = arrayOf("0|700|$ours", "1|0|$transferTenToZero", "2|0|$plain")
+        funding[real] = arrayOf("0|700|$ours", "1|0|$transferTenToZero")
+        coEvery { utxoDao.getAssetUtxosByIdNow("La1") } returns listOf(row(legacy, 0, 40_000L), row(real, 0, 10L))
+
+        val first = mgr.firstCountedRow(
+            "La1", setOf(ours), spentState = { _, _ -> AssetSpentState.HELD },
+            fundingOutputLines = { funding[it] }, fundingInputCount = { 2 },
+        )
+
+        assertEquals(real, first?.txid)
+    }
+
+    /** GUARD: with only excluded rows there is no row to walk from (the gate then reads UNKNOWN). */
+    @Test fun `with only excluded rows there is no counted row`() = runTest {
+        val legacy = id("p3")
+        funding[legacy] = arrayOf("0|700|$ours", "1|0|$transferTenToZero", "2|0|$plain")
+        coEvery { utxoDao.getAssetUtxosByIdNow("La1") } returns listOf(row(legacy, 0, 40_000L))
+
+        assertNull(mgr.firstCountedRow(
+            "La1", setOf(ours), spentState = { _, _ -> AssetSpentState.HELD },
+            fundingOutputLines = { funding[it] }, fundingInputCount = { 2 },
+        ))
+    }
+
+    /** The Assets screen never falls back to the naive sum: a recompute that cannot run shows
+     *  nothing before the first good answer and the last good answer after it. */
+    @Test fun `an unavailable recompute shows the last good answer, else nothing`() {
+        assertEquals(emptyMap<String, AssetManager.HeldBalance>(), mgr.displayHeldBalances(null))
+        val good = mapOf("La1" to AssetManager.HeldBalance(10L, 1))
+        assertEquals(good, mgr.displayHeldBalances(good))
+        assertEquals(good, mgr.displayHeldBalances(null))
+    }
 }
