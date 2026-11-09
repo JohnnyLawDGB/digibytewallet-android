@@ -336,8 +336,8 @@ class ForeignAssetTransferServiceTest {
      * as money leaving. The swept DGB rendered correctly in the same run because
      * LegacySweepService passes the flag and this did not.
      *
-     * See OutgoingTxStore.shouldApplyOutgoingOverride — the rule already existed; this path just
-     * never opted into it.
+     * (The list's amount is now the core's row, BRTxRows.h, whatever the record says; the record
+     * still tells the truth about the move.)
      */
     @Test fun `the move is recorded as a self transfer, not an outgoing send`() {
         run(service(), listOf(profileResult()))
