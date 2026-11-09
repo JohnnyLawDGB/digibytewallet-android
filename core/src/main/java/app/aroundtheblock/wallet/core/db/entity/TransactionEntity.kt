@@ -35,4 +35,10 @@ data class TransactionEntity(
         result = 31 * result + confirmations
         return result
     }
+
+    companion object {
+        /** [fee] when the wallet cannot know it (an input whose coin it does not hold): shown as no
+         *  fee at all, never as a figure (BRTxRows.h, BR_TX_ROW_FEE_UNKNOWN). No real fee is negative. */
+        const val FEE_UNKNOWN = -1L
+    }
 }
