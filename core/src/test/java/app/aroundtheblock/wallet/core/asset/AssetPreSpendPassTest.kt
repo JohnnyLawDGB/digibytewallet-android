@@ -170,7 +170,9 @@ class AssetPreSpendPassTest {
 
         manager().pass()
 
-        assertEquals(listOf(shadowed to 3), held)
+        // DA-014-REF: two nulldata outputs are undecided, so every owned output is held -- the
+        // last one included, which is what this test has guarded since row 13.
+        assertEquals(setOf(shadowed to 2, shadowed to 3), held.toSet())
     }
 
     /**

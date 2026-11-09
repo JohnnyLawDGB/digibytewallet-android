@@ -45,43 +45,4 @@ class JniAssetTest {
         val result = NativeBridge.isAssetTransaction(minimalTx)
         assertFalse("A transaction with no outputs cannot contain an asset", result)
     }
-
-    // ── getOpReturnData ───────────────────────────────────────────────────────
-
-    @Test
-    fun getOpReturnData_withEmptyTx_returnsNull() {
-        // An empty byte array cannot be parsed — must return null
-        val result = NativeBridge.getOpReturnData(ByteArray(0))
-        assertNull("Empty tx should return null for OP_RETURN data", result)
-    }
-
-    @Test
-    fun getOpReturnData_withGarbageBytes_returnsNull() {
-        val garbage = ByteArray(64) { it.toByte() }
-        val result = NativeBridge.getOpReturnData(garbage)
-        assertNull("Garbage bytes should return null for OP_RETURN data", result)
-    }
-
-    @Test
-    fun getOpReturnData_withNoOpReturnOutput_returnsNull() {
-        // A minimal valid tx with no outputs — no OP_RETURN can exist
-        val minimalTx = byteArrayOf(
-            0x01, 0x00, 0x00, 0x00, // version = 1
-            0x00,                   // input count = 0
-            0x00,                   // output count = 0
-            0x00, 0x00, 0x00, 0x00  // locktime = 0
-        )
-        val result = NativeBridge.getOpReturnData(minimalTx)
-        assertNull("Tx with no outputs should return null", result)
-    }
-
-    // ── round-trip consistency ────────────────────────────────────────────────
-
-    @Test
-    fun isAssetTransaction_andGetOpReturnData_agreeOnEmptyInput() {
-        // Both functions must handle the empty-input case consistently
-        val raw = ByteArray(0)
-        assertFalse(NativeBridge.isAssetTransaction(raw))
-        assertNull(NativeBridge.getOpReturnData(raw))
-    }
 }
