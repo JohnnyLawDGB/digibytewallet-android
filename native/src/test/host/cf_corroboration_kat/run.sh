@@ -22,7 +22,11 @@
 #         connected filter peer, the source and silent peers included). It must fail
 #         EXACTLY the g5-silent, g5-source-dup, g5-departed and g5-one-host checks and nothing else.
 #   RED   -DCF_CKPT_RECHECK_UNFIXED (G5-QUORUM) restores ask-once-per-connect. It must
-#         fail EXACTLY the two g5-recheck "re-asked" checks and nothing else.
+#         fail EXACTLY the two g5-recheck "re-asked" checks and the g5-probe checks
+#         (no probe is sent, so there is no answer to judge) and nothing else.
+#   RED   -DCF_CKPT_PROBE_UNFIXED (G5-QUORUM) re-checks with a full cfcheckpt instead of
+#         a single-height getcfheaders. It must fail EXACTLY the g5-probe checks; the
+#         cadence checks ("re-asked once", "not before the crossing") pass in it.
 #   GUARD g5-lone and g5-agreers pass in every arm: one replier never rebuilds, and
 #         answering agreers count against a dissent.
 # Both word sizes are built and run (ASan, -m32 loop as wire_count_bounds_kat).
@@ -88,7 +92,7 @@ build() {
 if [ "$(grep -c 'CF_CORROBORATE_ACT_UNFIXED' "$CORE_DIR/BRPeerManager.c")" -lt 2 ]; then
     echo "GATE FAILURE: BRPeerManager.c has no CF_CORROBORATE_ACT_UNFIXED seam; -D would be inert."; exit 1
 fi
-for seam in CF_CKPT_QUORUM_UNFIXED CF_CKPT_RECHECK_UNFIXED; do
+for seam in CF_CKPT_QUORUM_UNFIXED CF_CKPT_RECHECK_UNFIXED CF_CKPT_PROBE_UNFIXED; do
     if ! grep -q "$seam" "$CORE_DIR/BRPeerManager.c"; then
         echo "GATE FAILURE: BRPeerManager.c has no $seam seam; -D would be inert."; exit 1
     fi
@@ -181,7 +185,19 @@ run_bits() {
     echo "--- RED ARM (-DCF_CKPT_RECHECK_UNFIXED): only the continuous re-check checks fail ---"
     red_exact CF_CKPT_RECHECK_UNFIXED recheck \
         "g5-recheck: after the crossing the peer is re-asked exactly once, at the new stop (the source never)" \
-        "g5-recheck: a clean cfheaders append re-asks the peer once its chain covers the new stop"
+        "g5-recheck: a clean cfheaders append re-asks the peer once its chain covers the new stop" \
+        "g5-probe: the re-check is one single-height getcfheaders at the crossed height, not a cfcheckpt" \
+        "g5-probe: the probe's answer is not appended, not taken for a sync batch, and sends nothing" \
+        "g5-probe: an agreeing answer corroborates height h and counts its peer as a replier" \
+        "g5-probe: a differing answer is recorded as a dissent at (h, the peer's header) and appends nothing" \
+        "g5-probe: the tag is spent by the first answer"
+    echo "--- RED ARM (-DCF_CKPT_PROBE_UNFIXED): the re-check asks a full cfcheckpt; only the probe checks fail ---"
+    red_exact CF_CKPT_PROBE_UNFIXED probe \
+        "g5-probe: the re-check is one single-height getcfheaders at the crossed height, not a cfcheckpt" \
+        "g5-probe: the probe's answer is not appended, not taken for a sync batch, and sends nothing" \
+        "g5-probe: an agreeing answer corroborates height h and counts its peer as a replier" \
+        "g5-probe: a differing answer is recorded as a dissent at (h, the peer's header) and appends nothing" \
+        "g5-probe: the tag is spent by the first answer"
 
     echo "--- GREEN ARM: every check must pass, one MISMATCH line per mismatching reply ---"
     "$BUILD_DIR/green${bits}" > "$BUILD_DIR/green${bits}.log" 2>&1; rc=$?

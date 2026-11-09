@@ -32,6 +32,10 @@
 //     asked again once the stop crosses past the 1000-multiple it was last checked through
 //     and our filter headers cover it -- once per crossing, never while they trail
 //     (test_g5_recheck_cadence; -DCF_CKPT_RECHECK_UNFIXED restores ask-once-per-connect).
+//     The re-check is one single-height getcfheaders (start h, stop = our block at h), tagged
+//     per peer: its answer folds to the peer's header at h, is judged with the same (height,
+//     value) semantics as a cfcheckpt entry, and is never appended or taken for a sync batch
+//     (-DCF_CKPT_PROBE_UNFIXED re-checks with a full cfcheckpt instead).
 //
 // Rig: same "#include a .c for its statics" idiom as cf_checkpoint_quorum_kat --
 // BRPeer.c (for the private BRPeerContext: connect status, and the real
@@ -92,12 +96,23 @@ static uint8_t  g_checkptType = 0xFF;
 static UInt256  g_checkptStop;
 static unsigned g_checkptCount = 0;
 
+// G5-QUORUM: every getcfheaders sent, so a test can tell a single-height re-check probe (start == stop height;
+// blockHashFor encodes the height) from a sync batch.
+#define KAT_HDR_LOG 64
+static BRPeer  *g_hdrPeer[KAT_HDR_LOG];
+static uint32_t g_hdrStart[KAT_HDR_LOG];
+static UInt256  g_hdrStop[KAT_HDR_LOG];
+static size_t   g_hdrCount = 0;
+
 static void seqPush(char c) { if (g_seqLen + 1 < sizeof(g_seq)) g_seq[g_seqLen++] = c; g_seq[g_seqLen] = 0; }
-static void seqReset(void) { g_seqLen = 0; g_seq[0] = 0; g_checkptPeer = NULL; g_checkptType = 0xFF; g_checkptStop = UINT256_ZERO; g_checkptCount = 0; }
+static void seqReset(void) { g_hdrCount = 0; g_seqLen = 0; g_seq[0] = 0; g_checkptPeer = NULL; g_checkptType = 0xFF; g_checkptStop = UINT256_ZERO; g_checkptCount = 0; }
 
 static void kat_BRPeerSendGetCFHeaders(BRPeer *peer, uint8_t filterType, uint32_t startHeight, UInt256 stopHash)
 {
     seqPush('H');
+    if (g_hdrCount < KAT_HDR_LOG) {
+        g_hdrPeer[g_hdrCount] = peer; g_hdrStart[g_hdrCount] = startHeight; g_hdrStop[g_hdrCount] = stopHash; g_hdrCount++;
+    }
     BRPeerSendGetCFHeaders(peer, filterType, startHeight, stopHash);   // real sender, socket -1: no-op
 }
 
@@ -755,6 +770,32 @@ static void test_g5_ports_on_one_host_cannot_reach_quorum(void)
 
 static unsigned countC(void) { unsigned c = 0; for (size_t i = 0; i < g_seqLen; i++) c += (g_seq[i] == 'C'); return c; }
 
+// Single-height getcfheaders probes sent to `p` for height `h` (start h, stop = our block at h).
+static unsigned probesTo(BRPeer *p, uint32_t h)
+{
+    unsigned n = 0;
+    for (size_t i = 0; i < g_hdrCount; i++)
+        n += (g_hdrPeer[i] == p && g_hdrStart[i] == h && UInt256Eq(g_hdrStop[i], blockHashFor(h)));
+    return n;
+}
+
+// Every single-height probe sent, to anyone.
+static unsigned probesAll(void)
+{
+    unsigned n = 0;
+    for (size_t i = 0; i < g_hdrCount; i++) n += (g_hdrStop[i].u32[1] == 0xB10C0000u && g_hdrStop[i].u32[0] == g_hdrStart[i]);
+    return n;
+}
+
+// Any re-check question at all: a single-height probe or a cfcheckpt.
+static unsigned recheckAsks(void) { return probesAll() + countC(); }
+
+// The rig's filter hash at height h (rigInit appends hash i+1 at height start+i).
+static UInt256 rigFilterHash(const Rig *r, uint32_t h)
+{
+    UInt256 x; memset(x.u8, 0, sizeof(x.u8)); x.u32[0] = h - r->start + 1; return x;
+}
+
 // RED/GREEN (-DCF_CKPT_RECHECK_UNFIXED): a peer checked at connect is asked again after our chain crosses the next
 // 1000-multiple, once, and not before. The source's address is never re-asked; nothing goes out while our filter
 // headers trail the new stop.
@@ -776,7 +817,7 @@ static void test_g5_recheck_cadence(void)
     _BRPeerManagerCFCheckptRecheckLocked(r.manager);
     _BRPeerManagerCFCheckptRecheckLocked(r.manager);
     MGR_UNLOCK(r.manager);
-    check(g_checkptCount == 0, "g5-recheck: not re-asked while nothing has moved");
+    check(recheckAsks() == 0, "g5-recheck: not re-asked while nothing has moved");
 
     // Up to one block short of the next stop (the tip plus the margin, less one): no new question.
     BRMerkleBlock *mid = linkBlocks(r.manager, r.tip + 1, r.tip + CF_CORROBORATE_STOP_MARGIN - 1, r.tipBlock->blockHash);
@@ -787,7 +828,7 @@ static void test_g5_recheck_cadence(void)
     _BRPeerManagerCFCheckptRecheckLocked(r.manager);
     MGR_UNLOCK(r.manager);
     check(expectedStop(mid->height, mid->height) == stop0, "g5-recheck: setup -- the stop has not moved yet");
-    check(g_checkptCount == 0, "g5-recheck: not re-asked before the tip crosses the next 1000-multiple");
+    check(recheckAsks() == 0, "g5-recheck: not re-asked before the tip crosses the next 1000-multiple");
 
     // One more block: the stop crosses to the next 1000-multiple, which our chain already covers.
     seqReset();
@@ -801,8 +842,32 @@ static void test_g5_recheck_cadence(void)
     MGR_UNLOCK(r.manager);
     uint32_t stop1 = expectedStop(higher->height, higher->height);
     check(stop1 == stop0 + 1000, "g5-recheck: setup -- the next stop is one 1000-multiple higher");
-    check(g_checkptCount == 1 && g_checkptPeer == r.other && UInt256Eq(g_checkptStop, blockHashFor(stop1)),
+    check(recheckAsks() == 1 && (probesTo(r.other, stop1) == 1 ||
+                                 (g_checkptPeer == r.other && UInt256Eq(g_checkptStop, blockHashFor(stop1)))),
           "g5-recheck: after the crossing the peer is re-asked exactly once, at the new stop (the source never)");
+    check(probesTo(r.other, stop1) == 1 && countC() == 0,
+          "g5-probe: the re-check is one single-height getcfheaders at the crossed height, not a cfcheckpt");
+
+    // The peer answers the probe, agreeing: the header at h - 1 and our filter hash at h. It is judged, never
+    // appended and never taken for a sync batch.
+    {
+        size_t countBefore = BRCompactFilterChainCount(r.manager->compactFilterChain);
+        uint32_t inFlight = r.manager->cfHeadersRequestedThrough = 4242u;   // a sentinel the sync path would clear
+        UInt256 fh = rigFilterHash(&r, stop1);
+        check(UInt256Eq(BRGCSFilterHeader(fh, BRCompactFilterChainHeader(r.manager->compactFilterChain, stop1 - 1)),
+                        BRCompactFilterChainHeader(r.manager->compactFilterChain, stop1)),
+              "g5-probe: setup -- the rig's hash at h folds onto our header at h");
+        seqReset();
+        _peerRelayedCFHeaders(&info, FILTER_TYPE_BASIC, blockHashFor(stop1),
+                              BRCompactFilterChainHeader(r.manager->compactFilterChain, stop1 - 1), &fh, 1);
+        check(BRCompactFilterChainCount(r.manager->compactFilterChain) == countBefore &&
+              r.manager->cfHeadersRequestedThrough == inFlight && g_seqLen == 0,
+              "g5-probe: the probe's answer is not appended, not taken for a sync batch, and sends nothing");
+        check(through(&r) == stop1 && r.manager->cfCkRepCount == 1 && disagreed(&r) == 0,
+              "g5-probe: an agreeing answer corroborates height h and counts its peer as a replier");
+        r.manager->cfHeadersRequestedThrough = 0;
+        assertLockNotHeld(r.manager, "g5-probe: manager->lock released after the probe answer");
+    }
 
     // Another 1000 blocks, but our filter headers trail the new stop: nothing goes out until they catch up.
     seqReset();
@@ -813,7 +878,7 @@ static void test_g5_recheck_cadence(void)
     _cfCkNotePeerHeightLocked(r.manager, r.source, top->height);
     _BRPeerManagerCFCheckptRecheckLocked(r.manager);
     MGR_UNLOCK(r.manager);
-    check(g_checkptCount == 0, "g5-recheck: nothing is asked while our filter headers trail the new stop");
+    check(recheckAsks() == 0, "g5-recheck: nothing is asked while our filter headers trail the new stop");
 
     // They catch up through the real cfheaders handler (a clean append from the source), which re-checks itself.
     uint32_t add = top->height - r.tip;
@@ -827,15 +892,31 @@ static void test_g5_recheck_cadence(void)
     check(BRCompactFilterChainNextHeight(r.manager->compactFilterChain) == top->height + 1,
           "g5-recheck: setup -- the clean append reached the new tip");
     uint32_t stop2 = expectedStop(top->height, top->height);
-    check(countC() == 1 && g_checkptPeer == r.other && UInt256Eq(g_checkptStop, blockHashFor(stop2)),
+    check(recheckAsks() == 1 && (probesTo(r.other, stop2) == 1 ||
+                                 (g_checkptPeer == r.other && UInt256Eq(g_checkptStop, blockHashFor(stop2)))),
           "g5-recheck: a clean cfheaders append re-asks the peer once its chain covers the new stop");
     assertLockNotHeld(r.manager, "g5-recheck: manager->lock released after the append");
+
+    // This time the peer's answer differs from our header at h: a dissent at (h, its header), same as a cfcheckpt.
+    {
+        size_t countBefore = BRCompactFilterChainCount(r.manager->compactFilterChain);
+        UInt256 fh = u256_fill(0x5A);
+        UInt256 prevH = BRCompactFilterChainHeader(r.manager->compactFilterChain, stop2 - 1);
+        _peerRelayedCFHeaders(&info, FILTER_TYPE_BASIC, blockHashFor(stop2), prevH, &fh, 1);
+        check(disagreed(&r) == 1 && r.manager->cfCkDisCount == 1 && r.manager->cfCkDisHeights[0] == stop2 &&
+              UInt256Eq(r.manager->cfCkDisValues[0], BRGCSFilterHeader(fh, prevH)) &&
+              BRCompactFilterChainCount(r.manager->compactFilterChain) == countBefore,
+              "g5-probe: a differing answer is recorded as a dissent at (h, the peer's header) and appends nothing");
+        // A repeat of the same answer is no longer the probe's (the tag is spent): the sync path sees it and drops it.
+        _peerRelayedCFHeaders(&info, FILTER_TYPE_BASIC, blockHashFor(stop2), prevH, &fh, 1);
+        check(disagreed(&r) == 1, "g5-probe: the tag is spent by the first answer");
+    }
 
     seqReset();
     MGR_LOCK(r.manager);
     _BRPeerManagerCFCheckptRecheckLocked(r.manager);
     MGR_UNLOCK(r.manager);
-    check(g_checkptCount == 0, "g5-recheck: not asked a second time for the same crossing");
+    check(recheckAsks() == 0, "g5-recheck: not asked a second time for the same crossing");
     rigFree(&r);
     printf("test_g5_recheck_cadence: done\n");
 }
