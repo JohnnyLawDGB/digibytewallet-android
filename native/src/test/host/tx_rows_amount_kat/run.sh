@@ -52,6 +52,10 @@ CASES=(
     digidollar_keeps_net:fail
     taproot_send_payee:fail
     taproot_keypath_missing_parent:pass
+    unconfirmed_witness_key_not_owned:pass
+    unconfirmed_scriptsig_key_not_owned:pass
+    missing_parent_p2pkh_send:fail
+    self_send_missing_parent:fail
 )
 
 # ---- the seam is real ----------------------------------------------------------------------

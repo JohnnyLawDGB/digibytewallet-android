@@ -287,7 +287,9 @@ static void long_history_prefix(void)
     }
     size_t count = BRWalletTxRowCount(w);
     ck(count == N, "the wallet holds %zu transactions (got %zu)", N, count);
-    BRTxRow *all = calloc(count, sizeof(*all)), *top = calloc(100, sizeof(*top));
+    BRTxRow *all = calloc(count ? count : 1, sizeof(*all)), *top = calloc(100, sizeof(*top));
+    ck(all && top, "the row buffers are allocated");
+    if (!all || !top) { free(all); free(top); BRWalletFree(w); return; }
     size_t na = BRWalletTxRows(w, NOW, all, count), nt = BRWalletTxRows(w, NOW, top, 100);
     ck(na == count && nt == 100, "the whole list and its first 100 (got %zu, %zu)", na, nt);
     ck(memcmp(all, top, 100 * sizeof(*top)) == 0, "the first 100 are the whole list's first 100");
