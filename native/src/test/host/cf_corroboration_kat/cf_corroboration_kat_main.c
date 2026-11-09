@@ -19,6 +19,19 @@
 //     connected filter peers, at least two and none the source, report the same value
 //     at the same height: then the source is banned and the chain rebuilt
 //     (test_majority_disagrees; -DCF_CORROBORATE_ACT_UNFIXED keeps it observe-only).
+//   * G5-QUORUM: that majority is taken over the non-source peers that ANSWERED (distinct
+//     address and port, none at the source's address), at least CF_CKPT_QUORUM_MIN of them
+//     reporting the same value at the same height. Silent peers and the source's address
+//     count on neither side, nor do peers that have since disconnected; the agreeing
+//     dissenters must span CF_CKPT_QUORUM_MIN distinct addresses (votes are per address and
+//     port, but many ports on one host are one host's word); one replier never rebuilds; a
+//     peer's later agreeing reply
+//     withdraws its dispute (test_g5_*; -DCF_CKPT_QUORUM_UNFIXED restores the
+//     every-connected-peer denominator).
+//   * G5-QUORUM: checking is continuous. Each filter peer not at the source's address is
+//     asked again once the stop crosses past the 1000-multiple it was last checked through
+//     and our filter headers cover it -- once per crossing, never while they trail
+//     (test_g5_recheck_cadence; -DCF_CKPT_RECHECK_UNFIXED restores ask-once-per-connect).
 //
 // Rig: same "#include a .c for its statics" idiom as cf_checkpoint_quorum_kat --
 // BRPeer.c (for the private BRPeerContext: connect status, and the real
@@ -577,6 +590,256 @@ static void test_bounded(void)
     printf("test_bounded: done\n");
 }
 
+
+// ---- G5-QUORUM -------------------------------------------------------------
+// The rebuild decision counts only the non-source peers that ANSWERED (distinct address and port, none at the
+// source's address): at least CF_CKPT_QUORUM_MIN must report the same value at the same height, and they must be a
+// strict majority of those that answered. And checking is continuous: each filter peer is asked again once our chain
+// crosses past the 1000-multiple it was last checked through, never twice for one crossing.
+
+// A reply from `p` that differs from our chain at `wrongAt` with `bad`, agrees elsewhere.
+static void relayDissent(Rig *r, BRPeer *p, uint32_t wrongAt, uint8_t bad)
+{
+    size_t n; UInt256 *reply = buildReply(r, r->tip, &n);
+    reply[wrongAt / 1000u - 1] = u256_fill(bad);
+    relay(r, p, FILTER_TYPE_BASIC, r->tipBlock->blockHash, reply, n);
+    free(reply);
+}
+
+static void relayAgree(Rig *r, BRPeer *p)
+{
+    size_t n; UInt256 *reply = buildReply(r, r->tip, &n);
+    relay(r, p, FILTER_TYPE_BASIC, r->tipBlock->blockHash, reply, n);
+    free(reply);
+}
+
+// RED/GREEN (-DCF_CKPT_QUORUM_UNFIXED): two answering dissenters that agree with each other, beside three filter
+// peers that never answer, rebuild the chain. The old denominator (every connected filter peer, the source and the
+// silent ones included: 2 of 6) blocked it.
+static void test_g5_silent_peers_do_not_block(void)
+{
+    Rig r; rigInit(&r, 3000);
+    BRPeer *third = addConnectedFilterPeer(r.manager, 0x03, 10003, r.tip);
+    for (uint8_t a = 0x10; a < 0x13; a++) addConnectedFilterPeer(r.manager, a, 10010, r.tip);   // silent
+    uint32_t wrongAt = r.topCompiled + 2000;
+    unsigned misbehavinBefore = r.manager->misbehavinCount;
+
+    relayDissent(&r, r.other, wrongAt, 0xEE);
+    check(r.manager->compactFilterChain != NULL, "g5-silent: one answering dissenter alone changes nothing");
+    relayDissent(&r, third, wrongAt, 0xEE);
+
+    check(r.manager->compactFilterChain == NULL,
+          "g5-silent: two agreeing answering dissenters beside three silent peers rebuild the chain");
+    check(r.manager->misbehavinCount == misbehavinBefore + 1, "g5-silent: the cfheaders source is marked misbehaving");
+    check(r.manager->cfCkDisCount == 0 && r.manager->cfCkRepCount == 0 && r.manager->cfCkAskCount == 0,
+          "g5-silent: the rebuild clears the dissent, replier and re-check windows");
+    assertLockNotHeld(r.manager, "g5-silent: manager->lock released");
+    rigFree(&r);
+    printf("test_g5_silent_peers_do_not_block: done\n");
+}
+
+// RED/GREEN (-DCF_CKPT_QUORUM_UNFIXED): peers sharing the source's address (other ports) are not voters, so they
+// cannot out-vote a dissent by agreeing with the source's chain. Old rule: 2 of 5 connected, blocked.
+static void test_g5_source_address_peers_do_not_count(void)
+{
+    Rig r; rigInit(&r, 3000);
+    BRPeer *third = addConnectedFilterPeer(r.manager, 0x03, 10003, r.tip);
+    BRPeer *dupA = addConnectedFilterPeer(r.manager, 0x01, 20001, r.tip);   // the source's address, other ports
+    BRPeer *dupB = addConnectedFilterPeer(r.manager, 0x01, 20002, r.tip);
+    uint32_t wrongAt = r.topCompiled + 2000;
+
+    relayAgree(&r, dupA);
+    relayAgree(&r, dupB);
+    check(r.manager->cfCkRepCount == 0, "g5-source-dup: replies from the source's address join no denominator");
+    check(through(&r) == 0, "g5-source-dup: and they corroborate nothing");
+    relayDissent(&r, r.other, wrongAt, 0xEE);
+    relayDissent(&r, third, wrongAt, 0xEE);
+
+    check(r.manager->compactFilterChain == NULL,
+          "g5-source-dup: two agreeing dissenters are not out-voted by the source's own address");
+    rigFree(&r);
+    printf("test_g5_source_address_peers_do_not_count: done\n");
+}
+
+// GUARD: one replier can never rebuild, whatever the rest do -- a lone dissenter beside silent peers, a lone
+// dissenter beside an agreeing replier, the source disputing its own chain, and a dissent its own author withdraws.
+static void test_g5_lone_dissent_never_rebuilds(void)
+{
+    Rig r; rigInit(&r, 3000);
+    BRPeer *third = addConnectedFilterPeer(r.manager, 0x03, 10003, r.tip);
+    for (uint8_t a = 0x10; a < 0x13; a++) addConnectedFilterPeer(r.manager, a, 10010, r.tip);   // silent
+    uint32_t wrongAt = r.topCompiled + 2000;
+    uint8_t reanchors = r.manager->cfReanchorCount;
+    unsigned misbehavin = r.manager->misbehavinCount;
+
+    relayDissent(&r, r.source, wrongAt, 0xEE);
+    check(r.manager->cfCkDisCount == 0 && r.manager->cfCkRepCount == 0,
+          "g5-lone: the source disputing its own chain is neither a vote nor a replier");
+    relayDissent(&r, r.other, wrongAt, 0xEE);
+    relayDissent(&r, r.other, wrongAt, 0xEE);   // the same peer again is still one vote
+    check(r.manager->compactFilterChain != NULL && r.manager->cfCkRepCount == 1 && r.manager->cfCkDisCount == 1,
+          "g5-lone: a lone dissenter among silent peers is one vote of one replier and rebuilds nothing");
+    relayAgree(&r, third);
+    check(r.manager->compactFilterChain != NULL && r.manager->cfCkRepCount == 2,
+          "g5-lone: beside an agreeing replier it is one of two, still no rebuild");
+    relayAgree(&r, r.other);
+    check(r.manager->cfCkDisCount == 0, "g5-lone: a later agreeing reply withdraws that peer's dispute");
+    relayDissent(&r, third, wrongAt, 0xEE);
+    check(r.manager->compactFilterChain != NULL,
+          "g5-lone: a withdrawn dispute does not combine with a new one into a quorum");
+    check(r.manager->cfReanchorCount == reanchors && r.manager->misbehavinCount == misbehavin,
+          "g5-lone: no re-anchor charged, nobody marked misbehaving");
+    rigFree(&r);
+    printf("test_g5_lone_dissent_never_rebuilds: done\n");
+}
+
+// GUARD: the answering peers that agree with our chain count against a dissent. Two dissenters against two
+// agreeing repliers are not a strict majority.
+static void test_g5_answering_agreers_count_against(void)
+{
+    Rig r; rigInit(&r, 3000);
+    BRPeer *p3 = addConnectedFilterPeer(r.manager, 0x03, 10003, r.tip);
+    BRPeer *p4 = addConnectedFilterPeer(r.manager, 0x04, 10004, r.tip);
+    BRPeer *p5 = addConnectedFilterPeer(r.manager, 0x05, 10005, r.tip);
+    uint32_t wrongAt = r.topCompiled + 2000;
+
+    relayAgree(&r, p4);
+    relayAgree(&r, p5);
+    relayDissent(&r, r.other, wrongAt, 0xEE);
+    relayDissent(&r, p3, wrongAt, 0xEE);
+    check(r.manager->compactFilterChain != NULL && r.manager->cfCkRepCount == 4,
+          "g5-agreers: two dissenters of four answering peers are not a majority");
+    rigFree(&r);
+    printf("test_g5_answering_agreers_count_against: done\n");
+}
+
+
+// RED/GREEN (-DCF_CKPT_QUORUM_UNFIXED): a dissenter that has disconnected no longer votes. Old rule: its recorded
+// dissent plus one live dissenter, 2 of 3 connected, rebuilt the chain.
+static void test_g5_departed_dissenter_does_not_count(void)
+{
+    Rig r; rigInit(&r, 3000);
+    BRPeer *third = addConnectedFilterPeer(r.manager, 0x03, 10003, r.tip);
+    uint32_t wrongAt = r.topCompiled + 2000;
+
+    relayDissent(&r, r.other, wrongAt, 0xEE);
+    ((BRPeerContext *)r.other)->status = BRPeerStatusDisconnected;   // it answered, then left
+    relayDissent(&r, third, wrongAt, 0xEE);
+    check(r.manager->compactFilterChain != NULL,
+          "g5-departed: a dissenter that has disconnected no longer counts toward the quorum");
+    ((BRPeerContext *)r.other)->status = BRPeerStatusConnected;     // restore so rigFree's checks see a sane pool
+    rigFree(&r);
+    printf("test_g5_departed_dissenter_does_not_count: done\n");
+}
+
+// RED/GREEN (-DCF_CKPT_QUORUM_UNFIXED): any number of ports on one non-source address are one host's word and cannot
+// reach the quorum alone. Old rule: 3 of 4 connected rebuilt the chain.
+static void test_g5_ports_on_one_host_cannot_reach_quorum(void)
+{
+    Rig r; rigInit(&r, 3000);
+    ((BRPeerContext *)r.other)->status = BRPeerStatusDisconnected;   // keep the pool to the source and one host
+    BRPeer *a = addConnectedFilterPeer(r.manager, 0x07, 30001, r.tip);
+    BRPeer *b = addConnectedFilterPeer(r.manager, 0x07, 30002, r.tip);
+    BRPeer *c = addConnectedFilterPeer(r.manager, 0x07, 30003, r.tip);
+    uint32_t wrongAt = r.topCompiled + 2000;
+
+    relayDissent(&r, a, wrongAt, 0xEE);
+    relayDissent(&r, b, wrongAt, 0xEE);
+    relayDissent(&r, c, wrongAt, 0xEE);
+    check(r.manager->compactFilterChain != NULL && r.manager->cfCkRepCount == 3,
+          "g5-one-host: three ports on one non-source address cannot reach the quorum alone");
+    ((BRPeerContext *)r.other)->status = BRPeerStatusConnected;
+    rigFree(&r);
+    printf("test_g5_ports_on_one_host_cannot_reach_quorum: done\n");
+}
+
+static unsigned countC(void) { unsigned c = 0; for (size_t i = 0; i < g_seqLen; i++) c += (g_seq[i] == 'C'); return c; }
+
+// RED/GREEN (-DCF_CKPT_RECHECK_UNFIXED): a peer checked at connect is asked again after our chain crosses the next
+// 1000-multiple, once, and not before. The source's address is never re-asked; nothing goes out while our filter
+// headers trail the new stop.
+static void test_g5_recheck_cadence(void)
+{
+    // The chain tip is put on a 1000-multiple so every boundary below is exact.
+    Rig r; rigInit(&r, 3000u - (BRCFTopCheckpointHeight() % 1000u));
+    check(r.tip % 1000u == 0, "g5-recheck: setup -- the chain tip sits on a 1000-multiple");
+    BRPeerCallbackInfo info = { .peer = r.other, .manager = r.manager, .hash = UINT256_ZERO };
+    uint32_t stop0 = expectedStop(r.tip, r.tip);
+
+    MGR_LOCK(r.manager);
+    _BRPeerManagerOnFilterCapablePeerConnected(r.manager, &info, r.other);
+    MGR_UNLOCK(r.manager);
+    check(g_checkptCount == 1 && UInt256Eq(g_checkptStop, blockHashFor(stop0)), "g5-recheck: asked once at connect");
+
+    seqReset();
+    MGR_LOCK(r.manager);
+    _BRPeerManagerCFCheckptRecheckLocked(r.manager);
+    _BRPeerManagerCFCheckptRecheckLocked(r.manager);
+    MGR_UNLOCK(r.manager);
+    check(g_checkptCount == 0, "g5-recheck: not re-asked while nothing has moved");
+
+    // Up to one block short of the next stop (the tip plus the margin, less one): no new question.
+    BRMerkleBlock *mid = linkBlocks(r.manager, r.tip + 1, r.tip + CF_CORROBORATE_STOP_MARGIN - 1, r.tipBlock->blockHash);
+    r.manager->lastBlock = mid;
+    MGR_LOCK(r.manager);
+    _cfCkNotePeerHeightLocked(r.manager, r.other, mid->height);
+    _cfCkNotePeerHeightLocked(r.manager, r.source, mid->height);
+    _BRPeerManagerCFCheckptRecheckLocked(r.manager);
+    MGR_UNLOCK(r.manager);
+    check(expectedStop(mid->height, mid->height) == stop0, "g5-recheck: setup -- the stop has not moved yet");
+    check(g_checkptCount == 0, "g5-recheck: not re-asked before the tip crosses the next 1000-multiple");
+
+    // One more block: the stop crosses to the next 1000-multiple, which our chain already covers.
+    seqReset();
+    BRMerkleBlock *higher = linkBlocks(r.manager, mid->height + 1, mid->height + 1, mid->blockHash);
+    r.manager->lastBlock = higher;
+    MGR_LOCK(r.manager);
+    _cfCkNotePeerHeightLocked(r.manager, r.other, higher->height);
+    _cfCkNotePeerHeightLocked(r.manager, r.source, higher->height);
+    _BRPeerManagerCFCheckptRecheckLocked(r.manager);
+    _BRPeerManagerCFCheckptRecheckLocked(r.manager);
+    MGR_UNLOCK(r.manager);
+    uint32_t stop1 = expectedStop(higher->height, higher->height);
+    check(stop1 == stop0 + 1000, "g5-recheck: setup -- the next stop is one 1000-multiple higher");
+    check(g_checkptCount == 1 && g_checkptPeer == r.other && UInt256Eq(g_checkptStop, blockHashFor(stop1)),
+          "g5-recheck: after the crossing the peer is re-asked exactly once, at the new stop (the source never)");
+
+    // Another 1000 blocks, but our filter headers trail the new stop: nothing goes out until they catch up.
+    seqReset();
+    BRMerkleBlock *top = linkBlocks(r.manager, higher->height + 1, higher->height + 1000, higher->blockHash);
+    r.manager->lastBlock = top;
+    MGR_LOCK(r.manager);
+    _cfCkNotePeerHeightLocked(r.manager, r.other, top->height);
+    _cfCkNotePeerHeightLocked(r.manager, r.source, top->height);
+    _BRPeerManagerCFCheckptRecheckLocked(r.manager);
+    MGR_UNLOCK(r.manager);
+    check(g_checkptCount == 0, "g5-recheck: nothing is asked while our filter headers trail the new stop");
+
+    // They catch up through the real cfheaders handler (a clean append from the source), which re-checks itself.
+    uint32_t add = top->height - r.tip;
+    UInt256 *hashes = malloc(add * sizeof(UInt256));
+    for (uint32_t i = 0; i < add; i++) { memset(hashes[i].u8, 0, sizeof(hashes[i].u8)); hashes[i].u32[0] = 0x50000 + i; }
+    UInt256 prev = BRCompactFilterChainTipHeader(r.manager->compactFilterChain);
+    BRPeerCallbackInfo srcInfo = { .peer = r.source, .manager = r.manager, .hash = UINT256_ZERO };
+    seqReset();
+    _peerRelayedCFHeaders(&srcInfo, FILTER_TYPE_BASIC, top->blockHash, prev, hashes, add);
+    free(hashes);
+    check(BRCompactFilterChainNextHeight(r.manager->compactFilterChain) == top->height + 1,
+          "g5-recheck: setup -- the clean append reached the new tip");
+    uint32_t stop2 = expectedStop(top->height, top->height);
+    check(countC() == 1 && g_checkptPeer == r.other && UInt256Eq(g_checkptStop, blockHashFor(stop2)),
+          "g5-recheck: a clean cfheaders append re-asks the peer once its chain covers the new stop");
+    assertLockNotHeld(r.manager, "g5-recheck: manager->lock released after the append");
+
+    seqReset();
+    MGR_LOCK(r.manager);
+    _BRPeerManagerCFCheckptRecheckLocked(r.manager);
+    MGR_UNLOCK(r.manager);
+    check(g_checkptCount == 0, "g5-recheck: not asked a second time for the same crossing");
+    rigFree(&r);
+    printf("test_g5_recheck_cadence: done\n");
+}
+
 int main(void)
 {
     test_request_sent_on_connect();
@@ -588,6 +851,13 @@ int main(void)
     test_never();
     test_same_address();
     test_bounded();
+    test_g5_silent_peers_do_not_block();
+    test_g5_source_address_peers_do_not_count();
+    test_g5_lone_dissent_never_rebuilds();
+    test_g5_answering_agreers_count_against();
+    test_g5_departed_dissenter_does_not_count();
+    test_g5_ports_on_one_host_cannot_reach_quorum();
+    test_g5_recheck_cadence();
     printf(g_fail ? "cf_corroboration_kat: %d FAILURE(S)\n" : "cf_corroboration_kat: all checks passed\n", g_fail);
     return g_fail ? 1 : 0;
 }
