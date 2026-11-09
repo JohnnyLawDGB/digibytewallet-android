@@ -32,6 +32,9 @@ data class PriceData(
      */
     val rates: Map<String, Double> = emptyMap(),
 ) {
+    /** No price at all: the provider's "unavailable" answer (none fetched, too old, or prices off). */
+    val isUnavailable: Boolean get() = source == "unavailable"
+
     /**
      * Rate for [code], or 0.0 when this fetch did not carry it.
      *

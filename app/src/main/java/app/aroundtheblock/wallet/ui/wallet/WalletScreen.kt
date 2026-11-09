@@ -321,7 +321,7 @@ fun WalletScreen(
                     rate = p.rateFor(displayCurrency.code),
                     // No price, one over an hour old, or none in this currency: the card says so
                     // instead of a dash, a 0.00% change and "via unavailable".
-                    available = p.source != "unavailable" &&
+                    available = !p.isUnavailable &&
                         p.rateFor(displayCurrency.code).let { it > 0.0 && it.isFinite() },
                     change24h = p.change24h,
                     source = p.source,
