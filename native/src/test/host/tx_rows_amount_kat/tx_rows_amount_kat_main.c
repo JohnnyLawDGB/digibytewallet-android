@@ -18,6 +18,10 @@
 // about a wallet that never saw a parent -- serialized and parsed again, as storage and peers deliver
 // them (a parsed native-segwit input carries no address; the core does not derive one from a witness).
 //
+// The key test is applied only to confirmed transactions: an unconfirmed transaction may name the
+// wallet's public key over a coin nobody can check (unconfirmed_witness_key_not_owned,
+// unconfirmed_scriptsig_key_not_owned); both must read as the receive they are.
+//
 // KNOWN GAP, pinned (taproot_keypath_missing_parent): a Taproot key-path input's witness is a
 // signature alone. With its parent missing, nothing says the coin was the wallet's, so the send reads
 // as received - sent: its change, positive. The case asserts exactly that, so closing the gap fails it
@@ -553,6 +557,116 @@ static void taproot_keypath_missing_parent(void)
     BRWalletFree(w);
 }
 
+// A transaction relayed unconfirmed that spends a made-up coin, names the wallet's own (public) key over
+// it -- in a P2WPKH witness, or in a P2PKH scriptSig -- with a signature nothing can check, pays the
+// wallet 1000 sat and 10,000,000 DGB elsewhere. The wallet registers it (it pays the wallet). Its row
+// is a receive of 1000: an unconfirmed input whose coin the wallet cannot see is not the wallet's.
+static void unverifiable_key_unconfirmed(int scriptSigForm)
+{
+    BRWallet *w = BRWalletNew(NULL, 0, g_mpk84);
+    BRAddress a = BRWalletReceiveAddress(w, 1);
+    uint8_t pub[33], spk[64], ext[22] = { 0x00, 0x14 }, item[1 + 71 + 1 + 33];
+    size_t spkLen = BRAddressScriptPubKey(spk, sizeof(spk), a.s);
+    UInt256 ph;
+    BRBIP32PubKey(pub, sizeof(pub), g_mpk84, 0, 0);   // external 0: the key behind the address above
+    memset(ext + 2, 0x5a, 20);
+    memset(ph.u8, 0x99, sizeof(ph.u8));
+    item[0] = 71; memset(&item[1], 0x30, 71); item[72] = 33; memcpy(&item[73], pub, 33);
+    BRTransaction *t = BRTransactionNew();
+    t->version = 2;
+    if (scriptSigForm) BRTransactionAddInput(t, ph, 0, 0, kPlaceholder, 0, item, sizeof(item), kPlaceholder, 0, 0xffffffff);
+    else BRTransactionAddInput(t, ph, 0, 0, kPlaceholder, 0, kPlaceholder, 0, item, sizeof(item), 0xffffffff);
+    BRTransactionAddOutput(t, 1000, spk, spkLen);
+    BRTransactionAddOutput(t, 1000000000000000ULL, ext, sizeof(ext));
+    finalizeTxHash(t);
+    BRTransaction *p = parsed(t);
+    BRTransactionFree(t);
+    ck(p != NULL, "the transaction parses");
+    if (!p) { BRWalletFree(w); return; }
+    UInt256 h = p->txHash;
+    printf("NOTE: %s form; parsed input address \"%s\"\n", scriptSigForm ? "scriptSig" : "witness", p->inputs[0].address);
+    ck(p->blockHeight == TX_UNCONFIRMED, "it is unconfirmed");
+    int reg = BRWalletRegisterTransaction(w, p);
+    ck(reg, "the wallet registers it (it pays the wallet)");
+    if (!reg) { BRTransactionFree(p); BRWalletFree(w); return; }
+    BRTxRow r;
+    ck(rowFor(w, h, &r), "it has a row");
+    showRow(scriptSigForm ? "unconfirmed, wallet key in a scriptSig" : "unconfirmed, wallet key in a witness", &r);
+    ck(!r.ownsInput, "the input is not counted as the wallet's");
+    ck(r.amount == 1000 && r.rule == BRTxRowAmountNet, "the row is a receive of +1000, not a send of 10,000,000 DGB (got %" PRId64 ")", r.amount);
+    BRWalletFree(w);
+}
+
+static void unconfirmed_witness_key_not_owned(void) { unverifiable_key_unconfirmed(0); }
+static void unconfirmed_scriptsig_key_not_owned(void) { unverifiable_key_unconfirmed(1); }
+
+// A legacy (P2PKH) coin spent, the parent missing, confirmed: the parsed input's address comes from its
+// scriptSig's key (BRAddressFromScriptSig).
+static void missing_parent_p2pkh_send(void)
+{
+    BRWallet *w = BRWalletNew(NULL, 0, g_mpk84);
+    BRAddress a = BRWalletReceiveAddress(w, 0);
+    char dest[75]; externalAddress(dest, sizeof(dest), 0x62);
+    BRTransaction *coin = coinTx(a.s, 500000000, 0xAB);
+    BRTransaction *keepCopy = BRTransactionCopy(coin);
+    printf("NOTE: legacy coin address %s\n", a.s);
+    BRWalletRegisterTransaction(w, coin);
+    BRTransaction *tx = signedSend(w, 110000000, dest);
+    ck(tx != NULL, "wallet A signs a send of 1.1 DGB from a P2PKH coin");
+    if (!tx) { BRTransactionFree(keepCopy); BRWalletFree(w); return; }
+    ck(tx->inputs[0].sigLen > 0 && tx->inputs[0].witLen == 0, "the input is signed in its scriptSig, no witness");
+    uint64_t change = paidExcept(tx, dest);
+    BRWallet *b = walletWithout(tx, &keepCopy, NULL, 0, 0);
+    ck(b != NULL, "wallet B holds the send, confirmed, and not its parent");
+    if (b) {
+        BRTxRow r;
+        BRTransaction *bt = parsed(tx);
+        ck(bt && strcmp(bt->inputs[0].address, a.s) == 0, "the parsed input's address is the coin's, from its scriptSig key (%s)",
+           bt ? bt->inputs[0].address : "");
+        ck(rowFor(b, tx->txHash, &r), "it has a row");
+        showRow("P2PKH send, parent missing", &r);
+        ck(r.ownsInput && r.sent == 0, "the input is the wallet's by its address; sent 0");
+        ck(r.amount == -110000000, "the row is the payment, -110000000, not +%" PRIu64 " (got %" PRId64 ")", change, r.amount);
+        ck(r.fee == UNKNOWN, "the fee is unknown (got %" PRIu64 ")", r.fee);
+        if (bt) BRTransactionFree(bt);
+        BRWalletFree(b);
+    }
+    BRTransactionFree(tx);
+    BRTransactionFree(keepCopy);
+    BRWalletFree(w);
+}
+
+// A send to the wallet itself, its parent missing, confirmed: it pays no one else, so it reads as
+// received - sent = +received (the whole of what it pays), with its fee unknown.
+static void self_send_missing_parent(void)
+{
+    BRWallet *w = BRWalletNew(NULL, 0, g_mpk84);
+    BRAddress a = BRWalletReceiveAddress(w, 1);
+    BRTransaction *coin = coinTx(a.s, 500000000, 0xAC);
+    BRTransaction *keepCopy = BRTransactionCopy(coin);
+    BRWalletRegisterTransaction(w, coin);
+    BRAddress own = BRWalletReceiveAddress(w, 1);
+    BRTransaction *tx = signedSend(w, 100000000, own.s);
+    ck(tx != NULL, "wallet A signs a send to its own address");
+    if (!tx) { BRTransactionFree(keepCopy); BRWalletFree(w); return; }
+    uint64_t out = 0;
+    for (size_t i = 0; i < tx->outCount; i++) out += tx->outputs[i].amount;
+    BRWallet *b = walletWithout(tx, &keepCopy, NULL, 0, 0);
+    ck(b != NULL, "wallet B holds the self-send, confirmed, and not its parent");
+    if (b) {
+        BRTxRow r;
+        ck(rowFor(b, tx->txHash, &r), "it has a row");
+        showRow("self-send, parent missing", &r);
+        ck(r.ownsInput && r.toOthers == 0 && r.rule == BRTxRowAmountNet, "the wallet's input, nothing to others: rule net");
+        ck(r.amount == (int64_t)out, "it reads as +%" PRIu64 ", everything it pays (got %" PRId64 ")", out, r.amount);
+        ck(r.fee == UNKNOWN, "its fee is unknown (got %" PRIu64 ")", r.fee);
+        BRWalletFree(b);
+    }
+    BRTransactionFree(tx);
+    BRTransactionFree(keepCopy);
+    BRWalletFree(w);
+}
+
 typedef struct { const char *name; void (*run)(void); } Case;
 static const Case kCases[] = {
     { "rule_table", rule_table },
@@ -569,6 +683,10 @@ static const Case kCases[] = {
     { "digidollar_keeps_net", digidollar_keeps_net },
     { "taproot_send_payee", taproot_send_payee },
     { "taproot_keypath_missing_parent", taproot_keypath_missing_parent },
+    { "unconfirmed_witness_key_not_owned", unconfirmed_witness_key_not_owned },
+    { "unconfirmed_scriptsig_key_not_owned", unconfirmed_scriptsig_key_not_owned },
+    { "missing_parent_p2pkh_send", missing_parent_p2pkh_send },
+    { "self_send_missing_parent", self_send_missing_parent },
 };
 
 int main(int argc, char **argv)
