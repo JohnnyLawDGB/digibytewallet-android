@@ -26,7 +26,14 @@
 #         -DCF_CKPT_G5R2_UNFIXED    the f795f60 shape: per-port counting, a dispute cap of
 #                                   CF_DISAGREED_CAP, Connecting peers voting, votes surviving a
 #                                   reconnect, a full table refusing newcomers, late probe
-#                                   answers handed to the sync path.
+#                                   answers handed to the sync path, no filter-type check
+#                                   on a probe answer;
+#         -DCF_CKPT_G5R3_UNFIXED    the dbce2b5 group rule (any disputing voter makes its
+#                                   network group "for").
+#         The g5r3-colocate check is not red under the f795f60 or 4.1.3 arms: their per-port
+#         denominators already outnumber the two newcomers, so it does not apply there.
+#   GUARD g5r3-guard (a genuine one-hash sync batch at the expected height is appended) and
+#         the g5r3-colocate control pass in every arm.
 #   GUARD g5-lone and g5-agreers pass in every G5 arm: one replier never rebuilds, and
 #         answering agreers count against a dissent. "Not re-asked before the crossing" and the
 #         full-capacity jam are guards too (the earlier shapes never re-ask; f795f60 already
@@ -79,7 +86,7 @@ build() {
     [ "$bits" = "32" ] && m=(-m32)
     # -DDEBUG: on the host peer_log is compiled out without it (BRPeer.h); the green
     # arm asserts on the MISMATCH and request log lines.
-    clang -w -include stdint.h -g -DDEBUG -fsanitize=address -fno-omit-frame-pointer \
+    clang -w -include stdint.h -g -DDEBUG -DCF_CKPT_KAT_READOUT -fsanitize=address -fno-omit-frame-pointer \
         "${m[@]}" "$@" \
         -I "$CORE_DIR" \
         -I "$CORE_DIR/secp256k1/include" \
@@ -94,7 +101,7 @@ build() {
 if [ "$(grep -c 'CF_CORROBORATE_ACT_UNFIXED' "$CORE_DIR/BRPeerManager.c")" -lt 2 ]; then
     echo "GATE FAILURE: BRPeerManager.c has no CF_CORROBORATE_ACT_UNFIXED seam; -D would be inert."; exit 1
 fi
-for seam in CF_CKPT_QUORUM_UNFIXED CF_CKPT_RECHECK_UNFIXED CF_CKPT_PROBE_UNFIXED CF_CKPT_G5R2_UNFIXED; do
+for seam in CF_CKPT_QUORUM_UNFIXED CF_CKPT_RECHECK_UNFIXED CF_CKPT_PROBE_UNFIXED CF_CKPT_G5R2_UNFIXED CF_CKPT_G5R3_UNFIXED; do
     if ! grep -q "$seam" "$CORE_DIR/BRPeerManager.c"; then
         echo "GATE FAILURE: BRPeerManager.c has no $seam seam; -D would be inert."; exit 1
     fi
@@ -200,14 +207,16 @@ run_bits() {
         "g5-probe: an agreeing answer corroborates height h and counts its peer as a replier" \
         "g5-probe: a differing answer is recorded as a dissent at (h, the peer's header) and appends nothing" \
         "g5-probe: the tag is spent by the first answer" \
-        "g5r2-late: setup -- the probe went out"
+        "g5r2-late: setup -- the probe went out" \
+        "g5r3-type: setup -- the probe went out"
     echo "--- RED ARM (-DCF_CKPT_PROBE_UNFIXED): a full-cfcheckpt re-check fails exactly the probe checks ---"
     red_exact CF_CKPT_PROBE_UNFIXED probe \
         "g5-probe: the re-check is one single-height getcfheaders at the crossed height, not a cfcheckpt" \
         "g5-probe: an agreeing answer corroborates height h and counts its peer as a replier" \
         "g5-probe: a differing answer is recorded as a dissent at (h, the peer's header) and appends nothing" \
         "g5-probe: the tag is spent by the first answer" \
-        "g5r2-late: setup -- the probe went out"
+        "g5r2-late: setup -- the probe went out" \
+        "g5r3-type: setup -- the probe went out"
     echo "--- RED ARM (-DCF_CKPT_G5R2_UNFIXED): the f795f60 shape fails exactly the review-round-2 checks ---"
     red_exact CF_CKPT_G5R2_UNFIXED g5r2 \
         "g5r2-jam: two honest hosts rebuild after 8 departed one-host disputes" \
@@ -217,7 +226,11 @@ run_bits() {
         "g5r2-evict: a full table of live peers still admits the newcomer's vote" \
         "g5r2-state: a Connecting peer's earlier dispute does not vote" \
         "g5r2-state: a peer reconnecting at the same address and port starts with no vote" \
-        "g5r2-late: a probe answer arriving after a rebuild is consumed, not taken for a sync batch"
+        "g5r2-late: a probe answer arriving after a rebuild is consumed, not taken for a sync batch" \
+        "g5r3-type: a tagged probe answer of another filter type is consumed and not judged"
+    echo "--- RED ARM (-DCF_CKPT_G5R3_UNFIXED): the dbce2b5 any-voter group rule fails exactly the co-location check ---"
+    red_exact CF_CKPT_G5R3_UNFIXED g5r3 \
+        "g5r3-colocate: newcomers inside honest agreeing hosts' /16s do not turn those hosts into votes"
 
     echo "--- GREEN ARM: every check must pass, one MISMATCH line per mismatching reply ---"
     "$BUILD_DIR/green${bits}" > "$BUILD_DIR/green${bits}.log" 2>&1; rc=$?
@@ -231,11 +244,12 @@ run_bits() {
     local mm; mm="$(grep -c 'cf-corroborate: height [0-9]* MISMATCH' "$BUILD_DIR/green${bits}.log")"
     # disagree + bounded (2), majority (2: the second triggers the rebuild), split (2) -- 4.1.3 G5 added four;
     # G5-QUORUM: silent (2), source-dup (2), lone (4: source, other twice, third), agreers (2), departed (2), one-host (3);
-    # review round 2: jam (8+2, then 16+2), ports (2), netgroup (2+2), evict (1), state (2+2), late (2)
-    if [ "$mm" -eq 62 ]; then
-        echo "  [$bits green] exactly one MISMATCH log line per mismatching reply (62 replies, $mm lines)"
+    # review round 2: jam (8+2, then 16+2), ports (2), netgroup (2+2), evict (1), state (2+2), late (2);
+    # review round 3: colocate (2+2)
+    if [ "$mm" -eq 66 ]; then
+        echo "  [$bits green] exactly one MISMATCH log line per mismatching reply (66 replies, $mm lines)"
     else
-        echo "  [$bits green] GATE FAILURE: expected 62 MISMATCH log lines (one per mismatching reply), saw $mm"; FAIL=1
+        echo "  [$bits green] GATE FAILURE: expected 66 MISMATCH log lines (one per mismatching reply), saw $mm"; FAIL=1
     fi
     if grep -q "calling getcfcheckpt" "$BUILD_DIR/green${bits}.log"; then
         echo "  [$bits green] the real sender was reached (request logged)"

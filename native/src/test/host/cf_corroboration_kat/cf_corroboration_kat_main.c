@@ -810,8 +810,9 @@ static BRPeer *addPeerInGroup(BRPeerManager *m, uint8_t group, uint8_t low, uint
     return p;
 }
 
-// H1: one host cycling ports, each with a different value and then leaving, must not jam the dispute table: two
-// honest hosts still rebuild. Run at half capacity (the f795f60 dispute cap) and at full capacity (the eviction path).
+// H1 invariant: a departed voter never holds a slot a live one needs -- disputes share the voter table's capacity and
+// eviction, so however many entries departed peers left behind (here one host's ports, each with its own value),
+// two live honest hosts still reach the quorum. Run at the f795f60 dispute cap and at full capacity (eviction).
 static void test_g5r2_departed_disputes_do_not_jam(void)
 {
     for (int fill = 8; fill <= CF_CKPT_PEER_CAP; fill += CF_CKPT_PEER_CAP - 8) {
@@ -951,6 +952,70 @@ static void test_g5r2_late_probe_answer_after_rebuild(void)
     r.manager->cfHeadersRequestedThrough = 0;
     rigFree(&r);
     printf("test_g5r2_late_probe_answer_after_rebuild: done\n");
+}
+
+
+// HIGH (review round 3): a network group is "for" only if EVERY live voter in it disputes exactly (h, value). Two
+// newcomers placed inside two honest agreeing hosts' /16s split those hosts; split hosts count against, so three
+// honest agreeing hosts are not out-voted. Control: the same two newcomers in fresh /16s are 2 of 5 hosts.
+static void test_g5r3_colocated_newcomers_do_not_capture_a_host(void)
+{
+    for (int fresh = 0; fresh <= 1; fresh++) {
+        Rig r; rigInit(&r, 3000);
+        uint32_t wrongAt = r.topCompiled + 2000;
+        BRPeer *h3 = addConnectedFilterPeer(r.manager, 0x03, 10003, r.tip);
+        BRPeer *h4 = addConnectedFilterPeer(r.manager, 0x04, 10004, r.tip);
+        relayAgree(&r, r.other); relayAgree(&r, h3); relayAgree(&r, h4);
+        BRPeer *a1 = fresh ? addConnectedFilterPeer(r.manager, 0x20, 20001, r.tip) : addPeerInGroup(r.manager, 0x02, 0x99, 20001, r.tip);
+        BRPeer *a2 = fresh ? addConnectedFilterPeer(r.manager, 0x21, 20002, r.tip) : addPeerInGroup(r.manager, 0x03, 0x98, 20002, r.tip);
+        relayDissent(&r, a1, wrongAt, 0xEE);
+        relayDissent(&r, a2, wrongAt, 0xEE);
+        check(r.manager->compactFilterChain != NULL,
+              fresh ? "g5r3-colocate: control -- two disputing hosts in fresh /16s do not out-vote three agreeing hosts"
+                    : "g5r3-colocate: newcomers inside honest agreeing hosts' /16s do not turn those hosts into votes");
+        rigFree(&r);
+    }
+    printf("test_g5r3_colocated_newcomers_do_not_capture_a_host: done\n");
+}
+
+// A tagged probe answer of the wrong filter type is consumed unjudged; GUARD: a genuine one-hash sync batch at the
+// height the sync path expects still reaches it and is appended.
+static void test_g5r3_probe_filter_type_and_sync_guard(void)
+{
+    Rig r; rigInit(&r, 3000u - (BRCFTopCheckpointHeight() % 1000u));
+    BRPeerCallbackInfo info = { .peer = r.other, .manager = r.manager, .hash = UINT256_ZERO };
+    MGR_LOCK(r.manager);
+    _BRPeerManagerOnFilterCapablePeerConnected(r.manager, &info, r.other);
+    MGR_UNLOCK(r.manager);
+    BRMerkleBlock *higher = linkBlocks(r.manager, r.tip + 1, r.tip + CF_CORROBORATE_STOP_MARGIN, r.tipBlock->blockHash);
+    r.manager->lastBlock = higher;
+    seqReset();
+    MGR_LOCK(r.manager);
+    _cfCkNotePeerHeightLocked(r.manager, r.other, higher->height);
+    _BRPeerManagerCFCheckptRecheckLocked(r.manager);
+    MGR_UNLOCK(r.manager);
+    uint32_t h = expectedStop(higher->height, higher->height);
+    check(probesTo(r.other, h) == 1, "g5r3-type: setup -- the probe went out");
+    size_t countBefore = BRCompactFilterChainCount(r.manager->compactFilterChain);
+    r.manager->cfHeadersRequestedThrough = 4242u;
+    UInt256 fh = rigFilterHash(&r, h);
+    _peerRelayedCFHeaders(&info, (uint8_t)(FILTER_TYPE_BASIC + 1), blockHashFor(h),
+                          BRCompactFilterChainHeader(r.manager->compactFilterChain, h - 1), &fh, 1);
+    check(through(&r) == 0 && r.manager->cfCkRepCount == 0 && r.manager->cfHeadersRequestedThrough == 4242u &&
+          BRCompactFilterChainCount(r.manager->compactFilterChain) == countBefore,
+          "g5r3-type: a tagged probe answer of another filter type is consumed and not judged");
+
+    // GUARD: one header at exactly the chain's next height, ending on our tip block, is a sync batch.
+    r.manager->cfHeadersRequestedThrough = 0;
+    uint32_t next = BRCompactFilterChainNextHeight(r.manager->compactFilterChain);
+    UInt256 one = u256_fill(0x61);
+    BRPeerCallbackInfo srcInfo = { .peer = r.source, .manager = r.manager, .hash = UINT256_ZERO };
+    _peerRelayedCFHeaders(&srcInfo, FILTER_TYPE_BASIC, blockHashFor(next),
+                          BRCompactFilterChainTipHeader(r.manager->compactFilterChain), &one, 1);
+    check(BRCompactFilterChainNextHeight(r.manager->compactFilterChain) == next + 1,
+          "g5r3-guard: a genuine one-hash sync batch at the expected height still reaches the sync path");
+    rigFree(&r);
+    printf("test_g5r3_probe_filter_type_and_sync_guard: done\n");
 }
 
 // RED/GREEN (-DCF_CKPT_RECHECK_UNFIXED): a peer checked at connect is asked again after our chain crosses the next
@@ -1104,6 +1169,8 @@ int main(void)
     test_g5r2_full_table_of_live_peers_still_admits();
     test_g5r2_connection_state();
     test_g5r2_late_probe_answer_after_rebuild();
+    test_g5r3_colocated_newcomers_do_not_capture_a_host();
+    test_g5r3_probe_filter_type_and_sync_guard();
     printf(g_fail ? "cf_corroboration_kat: %d FAILURE(S)\n" : "cf_corroboration_kat: all checks passed\n", g_fail);
     return g_fail ? 1 : 0;
 }
