@@ -32,8 +32,15 @@
 #                                   network group "for").
 #         The g5r3-colocate check is not red under the f795f60 or 4.1.3 arms: their per-port
 #         denominators already outnumber the two newcomers, so it does not apply there.
-#   GUARD g5r3-guard (a genuine one-hash sync batch at the expected height is appended) and
-#         the g5r3-colocate control pass in every arm.
+#         The recheck and probe arms also list "g5r3-type: setup -- the probe went out" (and
+#         "g5r2-late: setup -- ..."): those tests need a single-height probe to exist before they
+#         can test its answer, and neither arm sends one (no re-check at all / a cfcheckpt instead),
+#         so their setup check fails there by construction, not because of the behaviour tested.
+#   GUARD g5r3-guard (a genuine one-hash sync batch at the expected height is appended), the
+#         g5r3-colocate control pass in every arm. g5r3-planted (the accepted invariant: a planted
+#         agreeing voter delays but never falsifies a rebuild) passes in green; the earlier rules
+#         rebuild sooner there (4.1.3 with 2 extra hosts, f795f60 with 1, dbce2b5 with 0), so its
+#         "kept" checks are listed in those arms.
 #   GUARD g5-lone and g5-agreers pass in every G5 arm: one replier never rebuilds, and
 #         answering agreers count against a dissent. "Not re-asked before the crossing" and the
 #         full-capacity jam are guards too (the earlier shapes never re-ask; f795f60 already
@@ -198,7 +205,8 @@ run_bits() {
         "g5r2-netgroup: a peer in the source's network group is not an independent dissent" \
         "g5r2-state: a Connecting peer's earlier dispute does not vote" \
         "g5r2-late: setup -- the chain was rebuilt" \
-        "g5r2-late: a probe answer arriving after a rebuild is consumed, not taken for a sync batch"
+        "g5r2-late: a probe answer arriving after a rebuild is consumed, not taken for a sync batch" \
+        "g5r3-planted: with 2 extra clean dissenting host(s) the chain is kept (delayed, not falsified)"
     echo "--- RED ARM (-DCF_CKPT_RECHECK_UNFIXED): ask-once-per-connect fails exactly the re-check and probe checks ---"
     red_exact CF_CKPT_RECHECK_UNFIXED recheck \
         "g5-recheck: after the crossing the peer is re-asked exactly once, at the new stop (the source never)" \
@@ -227,10 +235,15 @@ run_bits() {
         "g5r2-state: a Connecting peer's earlier dispute does not vote" \
         "g5r2-state: a peer reconnecting at the same address and port starts with no vote" \
         "g5r2-late: a probe answer arriving after a rebuild is consumed, not taken for a sync batch" \
-        "g5r3-type: a tagged probe answer of another filter type is consumed and not judged"
+        "g5r3-type: a tagged probe answer of another filter type is consumed and not judged" \
+        "g5r3-planted: with 1 extra clean dissenting host(s) the chain is kept (delayed, not falsified)" \
+        "g5r3-planted: with 2 extra clean dissenting host(s) the chain is kept (delayed, not falsified)"
     echo "--- RED ARM (-DCF_CKPT_G5R3_UNFIXED): the dbce2b5 any-voter group rule fails exactly the co-location check ---"
     red_exact CF_CKPT_G5R3_UNFIXED g5r3 \
-        "g5r3-colocate: newcomers inside honest agreeing hosts' /16s do not turn those hosts into votes"
+        "g5r3-colocate: newcomers inside honest agreeing hosts' /16s do not turn those hosts into votes" \
+        "g5r3-planted: with 0 extra clean dissenting host(s) the chain is kept (delayed, not falsified)" \
+        "g5r3-planted: with 1 extra clean dissenting host(s) the chain is kept (delayed, not falsified)" \
+        "g5r3-planted: with 2 extra clean dissenting host(s) the chain is kept (delayed, not falsified)"
 
     echo "--- GREEN ARM: every check must pass, one MISMATCH line per mismatching reply ---"
     "$BUILD_DIR/green${bits}" > "$BUILD_DIR/green${bits}.log" 2>&1; rc=$?
@@ -245,11 +258,11 @@ run_bits() {
     # disagree + bounded (2), majority (2: the second triggers the rebuild), split (2) -- 4.1.3 G5 added four;
     # G5-QUORUM: silent (2), source-dup (2), lone (4: source, other twice, third), agreers (2), departed (2), one-host (3);
     # review round 2: jam (8+2, then 16+2), ports (2), netgroup (2+2), evict (1), state (2+2), late (2);
-    # review round 3: colocate (2+2)
-    if [ "$mm" -eq 66 ]; then
-        echo "  [$bits green] exactly one MISMATCH log line per mismatching reply (66 replies, $mm lines)"
+    # review round 3: colocate (2+2), planted (2, 3, 4, 5)
+    if [ "$mm" -eq 80 ]; then
+        echo "  [$bits green] exactly one MISMATCH log line per mismatching reply (80 replies, $mm lines)"
     else
-        echo "  [$bits green] GATE FAILURE: expected 66 MISMATCH log lines (one per mismatching reply), saw $mm"; FAIL=1
+        echo "  [$bits green] GATE FAILURE: expected 80 MISMATCH log lines (one per mismatching reply), saw $mm"; FAIL=1
     fi
     if grep -q "calling getcfcheckpt" "$BUILD_DIR/green${bits}.log"; then
         echo "  [$bits green] the real sender was reached (request logged)"

@@ -1018,6 +1018,32 @@ static void test_g5r3_probe_filter_type_and_sync_guard(void)
     printf("test_g5r3_probe_filter_type_and_sync_guard: done\n");
 }
 
+
+// GUARD (accepted invariant): a planted agreeing voter delays but never falsifies a rebuild. The source lies; honest
+// dissenters sit in two /16s and one agreeing address is planted in each, which splits those two hosts so they count
+// against. The honest majority then needs more clean hosts: with 0, 1 or 2 extra clean dissenting hosts the chain is
+// kept (2 of 2, 3 of 3, 4 of 4 split-or-against vs. for -- never a strict majority), with 3 it rebuilds (3 of 5).
+static void test_g5r3_planted_agreer_delays_but_never_falsifies(void)
+{
+    for (int extra = 0; extra <= 3; extra++) {
+        Rig r; rigInit(&r, 3000);
+        uint32_t wrongAt = r.topCompiled + 2000;
+        relayAgree(&r, addPeerInGroup(r.manager, 0x02, 0x99, 20001, r.tip));
+        relayAgree(&r, addPeerInGroup(r.manager, 0x03, 0x98, 20002, r.tip));
+        BRPeer *h3 = addConnectedFilterPeer(r.manager, 0x03, 10003, r.tip);
+        relayDissent(&r, r.other, wrongAt, 0xEE);
+        relayDissent(&r, h3, wrongAt, 0xEE);
+        for (int i = 0; i < extra; i++)
+            relayDissent(&r, addConnectedFilterPeer(r.manager, (uint8_t)(0x40 + i), (uint16_t)(30001 + i), r.tip), wrongAt, 0xEE);
+        char d[160];
+        snprintf(d, sizeof d, "g5r3-planted: with %d extra clean dissenting host(s) the chain is %s", extra,
+                 extra < 3 ? "kept (delayed, not falsified)" : "rebuilt");
+        check(extra < 3 ? r.manager->compactFilterChain != NULL : r.manager->compactFilterChain == NULL, d);
+        rigFree(&r);
+    }
+    printf("test_g5r3_planted_agreer_delays_but_never_falsifies: done\n");
+}
+
 // RED/GREEN (-DCF_CKPT_RECHECK_UNFIXED): a peer checked at connect is asked again after our chain crosses the next
 // 1000-multiple, once, and not before. The source's address is never re-asked; nothing goes out while our filter
 // headers trail the new stop.
@@ -1171,6 +1197,7 @@ int main(void)
     test_g5r2_late_probe_answer_after_rebuild();
     test_g5r3_colocated_newcomers_do_not_capture_a_host();
     test_g5r3_probe_filter_type_and_sync_guard();
+    test_g5r3_planted_agreer_delays_but_never_falsifies();
     printf(g_fail ? "cf_corroboration_kat: %d FAILURE(S)\n" : "cf_corroboration_kat: all checks passed\n", g_fail);
     return g_fail ? 1 : 0;
 }
