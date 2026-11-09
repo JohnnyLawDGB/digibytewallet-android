@@ -827,9 +827,9 @@ class WalletViewModel @Inject constructor(
                 }
                 // The activity list: the shared core's rows (BRTxRows.h), in its order. Display only;
                 // the amount, fee and date are the core's and the list is never re-sorted here.
-                val txRows = TransactionRows.parse(
-                    NativeBridge.getTransactionRows(System.currentTimeMillis() / 1000L, TransactionRows.LIMIT)
-                )
+                // One line, so LogRedactionSourceGateTest marks txRows as transaction data.
+                val nowSecs = System.currentTimeMillis() / 1000L
+                val txRows = TransactionRows.parse(NativeBridge.getTransactionRows(nowSecs, TransactionRows.LIMIT))
                 // Log every ~60s for debugging. Heights and peers only: a transaction row (txid, amounts,
                 // addresses) never goes to logcat (4.1.2 row 7, K1).
                 if (System.currentTimeMillis() % 60000 < 5000) {

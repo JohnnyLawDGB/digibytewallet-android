@@ -29,6 +29,11 @@ data class TransactionEntity(
             && confirmations == other.confirmations
             && amount == other.amount
             && blockHeight == other.blockHeight
+            // A row's fee, date or recipient can change on its own (a parent arrives and the fee
+            // becomes known): the activity list must see that as a change.
+            && fee == other.fee
+            && timestamp == other.timestamp
+            && toAddress == other.toAddress
     }
     override fun hashCode(): Int {
         var result = txid.hashCode()

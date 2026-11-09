@@ -21,9 +21,9 @@ class ActivityRowsAreTheCoresGateTest {
 
     private fun pollBody(): String {
         val vm = source("ui/wallet/WalletViewModel.kt")
-        val start = vm.indexOf("NativeBridge.getTransactionRows(")
+        val start = vm.indexOf("val txRows = TransactionRows.parse(NativeBridge.getTransactionRows(")
         val end = vm.indexOf("_txTypedAmounts.value = typedAmounts", start)
-        assertTrue("source gate: no getTransactionRows ... _txTypedAmounts in WalletViewModel.kt; update the gate",
+        assertTrue("source gate: no txRows = TransactionRows.parse(getTransactionRows ... _txTypedAmounts in WalletViewModel.kt; update the gate",
             start >= 0 && end > start)
         return vm.substring(start, end)
     }
