@@ -145,7 +145,6 @@ class SendViewModel @Inject constructor(
     /** The last conversion that landed: the price's time, which field was typed, and how to redo it. */
     private class Conversion(val priceAt: Long, val dollarsTyped: Boolean, val redo: () -> Unit)
     private var conversion: Conversion? = null
-    private var expiryJob: Job? = null
 
     /**
      * No price to convert at: none, none younger than an hour ([PriceProvider.MAX_AGE_MS]), or
@@ -154,31 +153,38 @@ class SendViewModel @Inject constructor(
     private val _priceUnavailable = MutableStateFlow(false)
     val priceUnavailable: StateFlow<Boolean> = _priceUnavailable.asStateFlow()
 
-    /** The price to convert at, or null; sets [priceUnavailable]. A minute's reuse is the provider's. */
-    private suspend fun freshPrice(): PriceData? {
+    /**
+     * The price to convert at, or null. Sets [priceUnavailable] only while [edit] is still the latest
+     * edit: an older keystroke's lookup, landing late, does not overwrite a newer one's answer. A
+     * minute's reuse is the provider's.
+     */
+    private suspend fun freshPrice(edit: Long): PriceData? {
         val price = runCatching { priceProvider.currentPrice() }.getOrNull()
             ?.takeIf { PriceProvider.isFresh(it, System.currentTimeMillis()) }
-        _priceUnavailable.value = price == null
+        if (edit == amountEdit) _priceUnavailable.value = price == null
         return price
     }
 
     /** The dollar field is on screen: say now whether there is a price, before anything is typed. */
     fun checkPrice() {
-        viewModelScope.launch { freshPrice() }
+        val edit = amountEdit
+        viewModelScope.launch { freshPrice(edit) }
+    }
+
+    /** A conversion landed at [price]: [recheckPrice] and review redo it once the price is too old. */
+    private fun converted(price: PriceData, dollarsTyped: Boolean, redo: () -> Unit) {
+        conversion = Conversion(price.updatedAt, dollarsTyped, redo)
     }
 
     /**
-     * A conversion landed for [edit] at [price]. When the price passes the hour, the conversion is
-     * worked out again ([redo], the edit's own handler), so no figure on screen outlives its price.
+     * Called by the Send screen on resume and every 5 s while it is open. Against the wall clock, not
+     * a timer: a timer runs on uptime, which stops in deep sleep, so a figure could outlive its price.
+     * Past the hour the conversion is worked out again by its own handler, so no figure on screen
+     * outlives its price.
      */
-    private fun converted(edit: Long, price: PriceData, dollarsTyped: Boolean, redo: () -> Unit) {
-        conversion = Conversion(price.updatedAt, dollarsTyped, redo)
-        expiryJob?.cancel()
-        val wait = price.updatedAt + PriceProvider.MAX_AGE_MS + 1 - System.currentTimeMillis()
-        expiryJob = viewModelScope.launch {
-            delay(wait.coerceAtLeast(0L))
-            if (edit == amountEdit) redo()
-        }
+    fun recheckPrice() {
+        val c = conversion ?: return
+        if (!PriceProvider.isFreshAt(c.priceAt, System.currentTimeMillis())) c.redo()
     }
 
     fun onAmountDgbChanged(value: String) {
@@ -189,20 +195,19 @@ class SendViewModel @Inject constructor(
         // neither the form nor a confirmation can set this amount beside an earlier one's dollars.
         amountFiat.value = ""
         conversion = null
-        expiryJob?.cancel()
         _validationError.value = null
         _belowDustSats.value = null
         // Read by the parser the send uses. Text that is not an amount gets no line at all.
         if (DgbAmount.toSats(value) == null) return
         viewModelScope.launch {
-            val price = freshPrice()
+            val price = freshPrice(edit)
             val preview = price?.let {
                 runCatching { UsdCents.previewForDgb(value, it.priceUsd) }.getOrDefault("")
             }.orEmpty()
             // Only for the edit it was worked out for — not after a later one, in either field.
             if (edit == amountEdit) amountFiat.value = preview
             if (edit == amountEdit && price != null && preview.isNotEmpty()) {
-                converted(edit, price, dollarsTyped = false) { onAmountDgbChanged(value) }
+                converted(price, dollarsTyped = false) { onAmountDgbChanged(value) }
             }
         }
     }
@@ -216,18 +221,17 @@ class SendViewModel @Inject constructor(
         // Review answers "enter a valid amount" instead of approving an amount for other text.
         amountDgb.value = ""
         conversion = null
-        expiryJob?.cancel()
         _validationError.value = null
         _belowDustSats.value = null
         if (UsdCents.parse(value) == null) return
         viewModelScope.launch {
-            val price = freshPrice()
+            val price = freshPrice(edit)
             val dgbText = price?.let {
                 runCatching { UsdCents.dgbTextFor(value, it.priceUsd) }.getOrDefault("")
             }.orEmpty()
             if (edit == amountEdit) amountDgb.value = dgbText
             if (edit == amountEdit && price != null && dgbText.isNotEmpty()) {
-                converted(edit, price, dollarsTyped = true) { onAmountFiatChanged(value) }
+                converted(price, dollarsTyped = true) { onAmountFiatChanged(value) }
             }
         }
     }
@@ -275,8 +279,8 @@ class SendViewModel @Inject constructor(
             return
         }
         val fee = FeeRequest.of(isCustomFee.value, customFeeInput.value) ?: return
-        // A converted amount is only as good as its price. Past the hour (a device asleep misses the
-        // expiry timer) it is worked out again first: DGB typed, the dollars line goes and review
+        // A converted amount is only as good as its price. Past the hour (between two of the
+        // screen's 5 s rechecks) it is worked out again first: DGB typed, the dollars line goes and review
         // goes on without it; dollars typed, the DGB amount is redone and the next tap reviews it.
         conversion?.let { c ->
             if (!PriceProvider.isFreshAt(c.priceAt, System.currentTimeMillis())) {

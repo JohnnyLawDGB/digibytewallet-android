@@ -122,6 +122,18 @@ fun SendScreen(
             if (!effectiveDdMode && amountFiat.isNotBlank()) viewModel.onAmountDgbChanged(amountDgb)
         }
     }
+    // A converted figure goes when its price passes the hour: checked against the wall clock on
+    // resume (a device asleep stops timers) and every 5 s while the form is open, as iOS does.
+    androidx.lifecycle.compose.LifecycleResumeEffect(viewModel) {
+        viewModel.recheckPrice()
+        onPauseOrDispose { }
+    }
+    LaunchedEffect(viewModel) {
+        while (true) {
+            kotlinx.coroutines.delay(5_000L)
+            viewModel.recheckPrice()
+        }
+    }
     // The dollar field is up: say at once whether there is a price to convert at.
     LaunchedEffect(inputIsDgb, pricesShown) {
         if (!inputIsDgb && pricesShown) viewModel.checkPrice()

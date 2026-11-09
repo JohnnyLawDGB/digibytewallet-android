@@ -261,4 +261,28 @@ class PriceProviderTest {
         }
         coVerify(exactly = 0) { mockDao.insert(match { it.pricePerDgb <= 0.0 || !it.pricePerDgb.isFinite() }) }
     }
+
+    @Test
+    fun `a price cached as prices go off is cleared again`() = runTest {
+        var on = true
+        coEvery { mockDao.insert(any()) } answers { on = false } // off lands just as the row is written
+        val result = makeProvider(HttpFetcher { coinGeckoJson }, enabled = { on }).fetchPrice("USD")
+
+        coVerifyOrder {
+            mockDao.insert(any())
+            mockDao.clear()
+        }
+        assertEquals("unavailable", result.source)
+    }
+
+    @Test
+    fun `a reused price must be positive and finite`() = runTest {
+        for (bad in listOf(Double.POSITIVE_INFINITY, Double.NaN, 0.0, -0.01)) {
+            val fetcher = CountingFetcher { coinGeckoJson }
+            coEvery { mockDao.getPrice("USD") } returns cachedAt(now).copy(pricePerDgb = bad)
+            val result = makeProvider(fetcher).currentPrice("USD")
+            assertEquals("$bad is not reused", "coingecko", result.source)
+            assertEquals(1, fetcher.urls.size)
+        }
+    }
 }

@@ -452,12 +452,12 @@ class WalletViewModel @Inject constructor(
 
     /**
      * The price the hero and the price card show. It ages in memory between fetches, so the hour
-     * ([PriceProvider.MAX_AGE_MS]) is checked here too, against a clock that ticks every 30 s: once
+     * ([PriceProvider.MAX_AGE_MS]) is checked here too, against a wall clock read every 5 s (as iOS): once
      * the price is too old (or dated in the future) it reads as "unavailable", no fiat figure.
      */
     val price: StateFlow<PriceData?> = combine(
         _price,
-        flow { while (true) { emit(System.currentTimeMillis()); delay(30_000L) } },
+        flow { while (true) { emit(System.currentTimeMillis()); delay(5_000L) } },
     ) { p, now ->
         p?.let { if (PriceProvider.isFresh(it, now)) it else PriceData(0.0, 0.0, "unavailable", it.updatedAt) }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, null)

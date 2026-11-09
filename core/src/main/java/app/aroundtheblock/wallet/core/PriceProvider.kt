@@ -150,7 +150,7 @@ class PriceProvider(
     suspend fun currentPrice(currency: String = "USD"): PriceData = withContext(ioDispatcher) {
         if (!enabled()) return@withContext unavailable()
         val cached = priceCacheDao.getPrice(currency)
-        if (cached != null && isWithin(cached, REUSE_MS) && cached.pricePerDgb > 0.0) {
+        if (cached != null && isWithin(cached, REUSE_MS) && cached.pricePerDgb > 0.0 && cached.pricePerDgb.isFinite()) {
             return@withContext PriceData(
                 priceUsd = cached.pricePerDgb,
                 change24h = cached.change24h,
@@ -229,12 +229,13 @@ class PriceProvider(
         currentCoroutineContext().ensureActive()
         if (!enabled()) return null
         cachePrice(price, currency)
-        return price
+        // Off by the time it is written: not shown either (cachePrice has cleared it again).
+        return if (enabled()) price else null
     }
 
     private suspend fun cachedOrUnavailable(currency: String): PriceData {
         val cached = priceCacheDao.getPrice(currency)
-        if (cached != null && isWithin(cached, MAX_AGE_MS) && cached.pricePerDgb > 0.0) {
+        if (cached != null && isWithin(cached, MAX_AGE_MS) && cached.pricePerDgb > 0.0 && cached.pricePerDgb.isFinite()) {
             return PriceData(
                 priceUsd = cached.pricePerDgb,
                 change24h = cached.change24h,
@@ -308,5 +309,8 @@ class PriceProvider(
                 updatedAt = price.updatedAt
             )
         )
+        // Turned off between that check and the insert: the switch is set before the cache is
+        // cleared, so seeing it off here means the clear may already have run. Clear again.
+        if (!enabled()) priceCacheDao.clear()
     }
 }

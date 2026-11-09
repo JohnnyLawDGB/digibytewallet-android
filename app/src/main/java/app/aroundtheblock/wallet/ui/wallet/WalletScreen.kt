@@ -319,6 +319,10 @@ fun WalletScreen(
                     // so a wallet set to NGN showed "≈ NGN0.00" over "DGB / USD $0.005102".
                     currencyCode = displayCurrency.code,
                     rate = p.rateFor(displayCurrency.code),
+                    // No price, one over an hour old, or none in this currency: the card says so
+                    // instead of a dash, a 0.00% change and "via unavailable".
+                    available = p.source != "unavailable" &&
+                        p.rateFor(displayCurrency.code).let { it > 0.0 && it.isFinite() },
                     change24h = p.change24h,
                     source = p.source,
                     modifier = Modifier
@@ -598,6 +602,7 @@ private fun WalletActionButton(
 private fun PriceFeedCard(
     currencyCode: String,
     rate: Double,
+    available: Boolean,
     change24h: Double,
     source: String,
     modifier: Modifier = Modifier
@@ -631,16 +636,24 @@ private fun PriceFeedCard(
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Text(
-                    text = priceFormatted,
-                    style = MaterialTheme.typography.titleLarge.copy(
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 20.sp
-                    ),
-                    color = MaterialTheme.colorScheme.onSurface
-                )
+                if (available) {
+                    Text(
+                        text = priceFormatted,
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 20.sp
+                        ),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                } else {
+                    Text(
+                        text = stringResource(R.string.send_price_unavailable),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
-            Column(horizontalAlignment = Alignment.End) {
+            if (available) Column(horizontalAlignment = Alignment.End) {
                 Text(
                     text = "$changePrefix $changeFormatted%",
                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
