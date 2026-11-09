@@ -88,6 +88,7 @@ jint JNICALL NativeBridge_getTransactionCount(JNIEnv *env, jobject thiz);  /* jn
 jstring JNICALL NativeBridge_getTransactionDetails(JNIEnv *env, jobject thiz);  /* jni_wallet.c */
 jobjectArray JNICALL NativeBridge_getTransactionInputsForHash(JNIEnv *env, jobject thiz, jstring txHashHex);  /* jni_asset.c */
 jobjectArray JNICALL NativeBridge_getTransactionOutputsForHash(JNIEnv *env, jobject thiz, jstring txHashHex);  /* jni_asset.c */
+jstring JNICALL NativeBridge_getTransactionRows(JNIEnv *env, jobject thiz, jlong nowSecs, jint limit);  /* jni_wallet.c */
 jlong JNICALL NativeBridge_getWalletBirthCheckpointHeight(JNIEnv *env, jobject thiz);  /* jni_peer.c */
 jboolean JNICALL NativeBridge_hasDandelionPeer(JNIEnv *env, jobject thiz);  /* jni_peer.c */
 jboolean JNICALL NativeBridge_hasLegacyFunds(JNIEnv *env, jobject thiz);  /* jni_wallet.c */
@@ -264,6 +265,7 @@ jboolean JNICALL NativeBridge_walletContainsAddress(JNIEnv *env, jobject thiz, j
     { "getTransactionDetails", "()Ljava/lang/String;", (void *) NativeBridge_getTransactionDetails }, \
     { "getTransactionInputsForHash", "(Ljava/lang/String;)[Ljava/lang/String;", (void *) NativeBridge_getTransactionInputsForHash }, \
     { "getTransactionOutputsForHash", "(Ljava/lang/String;)[Ljava/lang/String;", (void *) NativeBridge_getTransactionOutputsForHash }, \
+    { "getTransactionRows", "(JI)Ljava/lang/String;", (void *) NativeBridge_getTransactionRows }, \
     { "getWalletBirthCheckpointHeight", "()J", (void *) NativeBridge_getWalletBirthCheckpointHeight }, \
     { "hasDandelionPeer", "()Z", (void *) NativeBridge_hasDandelionPeer }, \
     { "hasLegacyFunds", "()Z", (void *) NativeBridge_hasLegacyFunds }, \
@@ -358,6 +360,6 @@ jboolean JNICALL NativeBridge_walletContainsAddress(JNIEnv *env, jobject thiz, j
     { "takeUnprovableServerHeight", "()J", (void *) NativeBridge_takeUnprovableServerHeight }, \
     { "walletContainsAddress", "(Ljava/lang/String;)Z", (void *) NativeBridge_walletContainsAddress }, \
 
-#define DGB_JNI_NATIVEBRIDGE_METHOD_COUNT 174
+#define DGB_JNI_NATIVEBRIDGE_METHOD_COUNT 175
 
 #endif

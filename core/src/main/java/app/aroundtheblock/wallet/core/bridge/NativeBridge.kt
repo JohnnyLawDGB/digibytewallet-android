@@ -622,6 +622,14 @@ object NativeBridge {
      *  Format per line: "txHash|amount|fee|blockHeight|timestamp" */
     external fun getTransactionDetails(): String
 
+    /** The activity list's rows as the shared core computes them (BRTxRows.h): the newest [limit],
+     *  newest first, in the core's order, which the app never re-sorts. One line each,
+     *  "txid|amount|fee|blockHeight|shownTimestamp|sent|received|rule"; parse with
+     *  [app.aroundtheblock.wallet.core.TransactionRows.parse]. [nowSecs] is the date a pending row
+     *  shows. DISPLAY ONLY: crediting, asset ingestion, notification gating and the stranded-send
+     *  sweep read [getTransactionDetails], never this. */
+    external fun getTransactionRows(nowSecs: Long, limit: Int): String
+
     // === Asset detection ===
     /** Returns true if the raw serialized transaction contains a DigiAsset OP_RETURN. */
     external fun isAssetTransaction(rawTx: ByteArray): Boolean

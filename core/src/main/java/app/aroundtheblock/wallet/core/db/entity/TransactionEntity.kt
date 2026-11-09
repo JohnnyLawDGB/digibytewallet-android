@@ -29,10 +29,21 @@ data class TransactionEntity(
             && confirmations == other.confirmations
             && amount == other.amount
             && blockHeight == other.blockHeight
+            // A row's fee, date or recipient can change on its own (a parent arrives and the fee
+            // becomes known): the activity list must see that as a change.
+            && fee == other.fee
+            && timestamp == other.timestamp
+            && toAddress == other.toAddress
     }
     override fun hashCode(): Int {
         var result = txid.hashCode()
         result = 31 * result + confirmations
         return result
+    }
+
+    companion object {
+        /** [fee] when the wallet cannot know it (an input whose coin it does not hold): shown as no
+         *  fee at all, never as a figure (BRTxRows.h, BR_TX_ROW_FEE_UNKNOWN). No real fee is negative. */
+        const val FEE_UNKNOWN = -1L
     }
 }
