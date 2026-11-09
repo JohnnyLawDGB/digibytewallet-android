@@ -213,6 +213,7 @@
     <string name="send_switch_to_dgb">切换为 DGB</string>
     <string name="send_approx_usd">≈ $%1$s USD</string>
     <string name="send_approx_dgb">≈ %1$s DGB</string>
+    <string name="send_price_unavailable">价格不可用</string>
     <string name="send_network_fee">网络手续费</string>
     <string name="send_network_fee_row">网络手续费</string>
     <string name="send_fee_default">默认</string>
@@ -475,6 +476,9 @@
     <string name="dsp_onchain_oracle">链上预言机</string>
     <string name="dsp_auto">自动</string>
     <string name="dsp_oracle_note">链上预言机价格源需要主网 DigiByte v9。</string>
+    <string name="dsp_show_prices">显示价格</string>
+    <string name="dsp_show_prices_on">DGB 价格，来自 CoinGecko 或 Binance</string>
+    <string name="dsp_show_prices_off">关闭：不请求价格，不显示美元金额</string>
     <string name="did_login">Digi-ID 登录</string>
     <string name="did_auth_title">Digi-ID 认证</string>
     <string name="did_auth_subtitle">请验证身份以登录 %1$s</string>

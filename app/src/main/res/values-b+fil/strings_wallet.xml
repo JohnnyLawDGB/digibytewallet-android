@@ -213,6 +213,7 @@
     <string name="send_switch_to_dgb">Lumipat sa DGB</string>
     <string name="send_approx_usd">≈ $%1$s USD</string>
     <string name="send_approx_dgb">≈ %1$s DGB</string>
+    <string name="send_price_unavailable">Hindi available ang presyo</string>
     <string name="send_network_fee">Bayad sa Network</string>
     <string name="send_network_fee_row">Bayad sa network</string>
     <string name="send_fee_default">Default</string>
@@ -478,6 +479,9 @@
     <string name="dsp_onchain_oracle">On-Chain Oracle</string>
     <string name="dsp_auto">Awtomatiko</string>
     <string name="dsp_oracle_note">Kailangan ng DigiByte v9 sa mainnet para sa on-chain oracle price feeds.</string>
+    <string name="dsp_show_prices">Ipakita ang mga presyo</string>
+    <string name="dsp_show_prices_on">Mga presyo ng DGB, mula sa CoinGecko o Binance</string>
+    <string name="dsp_show_prices_off">Naka-off: walang request ng presyo, walang halaga sa dolyar</string>
     <string name="did_login">Digi-ID Login</string>
     <string name="did_auth_title">Digi-ID Authentication</string>
     <string name="did_auth_subtitle">Mag-authenticate para mag-log in sa %1$s</string>

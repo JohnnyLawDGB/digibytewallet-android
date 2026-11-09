@@ -213,6 +213,7 @@
     <string name="send_switch_to_dgb">DGB\'ye geç</string>
     <string name="send_approx_usd">≈ $%1$s USD</string>
     <string name="send_approx_dgb">≈ %1$s DGB</string>
+    <string name="send_price_unavailable">Fiyat kullanılamıyor</string>
     <string name="send_network_fee">Ağ ücreti</string>
     <string name="send_network_fee_row">Ağ ücreti</string>
     <string name="send_fee_default">Varsayılan</string>
@@ -478,6 +479,9 @@
     <string name="dsp_onchain_oracle">Zincir üstü oracle</string>
     <string name="dsp_auto">Otomatik</string>
     <string name="dsp_oracle_note">Zincir üstü oracle fiyat akışları mainnet\'te DigiByte v9 gerektirir.</string>
+    <string name="dsp_show_prices">Fiyatları göster</string>
+    <string name="dsp_show_prices_on">DGB fiyatları, CoinGecko veya Binance\'ten</string>
+    <string name="dsp_show_prices_off">Kapalı: fiyat isteği yok, dolar tutarı yok</string>
     <string name="did_login">Digi-ID girişi</string>
     <string name="did_auth_title">Digi-ID kimlik doğrulama</string>
     <string name="did_auth_subtitle">%1$s hesabına giriş için kimliğinizi doğrulayın</string>

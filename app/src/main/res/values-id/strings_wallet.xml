@@ -213,6 +213,7 @@
     <string name="send_switch_to_dgb">Ganti ke DGB</string>
     <string name="send_approx_usd">≈ $%1$s USD</string>
     <string name="send_approx_dgb">≈ %1$s DGB</string>
+    <string name="send_price_unavailable">Harga tidak tersedia</string>
     <string name="send_network_fee">Biaya Jaringan</string>
     <string name="send_network_fee_row">Biaya jaringan</string>
     <string name="send_fee_default">Default</string>
@@ -475,6 +476,9 @@
     <string name="dsp_onchain_oracle">Oracle On-Chain</string>
     <string name="dsp_auto">Otomatis</string>
     <string name="dsp_oracle_note">Umpan harga oracle on-chain memerlukan DigiByte v9 di mainnet.</string>
+    <string name="dsp_show_prices">Tampilkan harga</string>
+    <string name="dsp_show_prices_on">Harga DGB, dari CoinGecko atau Binance</string>
+    <string name="dsp_show_prices_off">Mati: tanpa permintaan harga, tanpa jumlah dolar</string>
     <string name="did_login">Masuk Digi-ID</string>
     <string name="did_auth_title">Autentikasi Digi-ID</string>
     <string name="did_auth_subtitle">Autentikasi untuk masuk ke %1$s</string>

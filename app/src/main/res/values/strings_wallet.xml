@@ -580,7 +580,7 @@
     <string name="dsp_auto">Auto</string>
     <string name="dsp_oracle_note">On-chain oracle price feeds require DigiByte v9 on mainnet.</string>
     <string name="dsp_show_prices">Show prices</string>
-    <string name="dsp_show_prices_on">DGB in USD, from CoinGecko or Binance</string>
+    <string name="dsp_show_prices_on">DGB prices, from CoinGecko or Binance</string>
     <string name="dsp_show_prices_off">Off: no price requests, no dollar amounts</string>
 
     <!-- ── Digi-ID ──────────────────────────────────────────────────────────────── -->
