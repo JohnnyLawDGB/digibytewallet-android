@@ -242,4 +242,23 @@ class PriceProviderTest {
         assertFalse(PriceProvider.isFresh(PriceData(0.0, 0.0, "unavailable", now), now))
         assertFalse(PriceProvider.isFresh(p.copy(priceUsd = 0.0), now))
     }
+
+    @Test
+    fun `a price that is not positive and finite fails its source and the next is tried`() = runTest {
+        for (body in listOf(
+            """{"digibyte":{"usd":0}}""", """{"digibyte":{"usd":-1}}""",
+            """{"digibyte":{}}""", "not json", "",
+        )) {
+            val fetcher = HttpFetcher { url -> if (url.contains("coingecko")) body else binanceJson }
+            assertEquals(body, "binance", makeProvider(fetcher).fetchPrice("USD").source)
+        }
+
+        coEvery { mockDao.getPrice("USD") } returns null
+        for (lastPrice in listOf("0", "-0.01", "NaN", "Infinity", "abc")) {
+            val ticker = """{"lastPrice":"$lastPrice","priceChangePercent":"1"}"""
+            val fetcher = HttpFetcher { url -> if (url.contains("coingecko")) throw Exception("down") else ticker }
+            assertEquals(lastPrice, "unavailable", makeProvider(fetcher).fetchPrice("USD").source)
+        }
+        coVerify(exactly = 0) { mockDao.insert(match { it.pricePerDgb <= 0.0 || !it.pricePerDgb.isFinite() }) }
+    }
 }

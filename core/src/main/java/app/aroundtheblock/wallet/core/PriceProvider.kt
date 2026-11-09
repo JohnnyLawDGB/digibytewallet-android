@@ -267,7 +267,7 @@ class PriceProvider(
         }.toMap()
 
         return PriceData(
-            priceUsd = json.getDouble("usd"),
+            priceUsd = usablePrice(json.getDouble("usd")),
             change24h = json.optDouble("usd_24h_change", 0.0),
             source = "coingecko",
             updatedAt = nowMs(),
@@ -282,12 +282,19 @@ class PriceProvider(
         )
         val json = JSONObject(body)
         return PriceData(
-            priceUsd = json.getString("lastPrice").toDouble(),
+            priceUsd = usablePrice(json.getString("lastPrice").toDouble()),
             change24h = json.getString("priceChangePercent").toDouble(),
             source = "binance",
             updatedAt = nowMs()
         )
     }
+
+    /**
+     * A price that is not a positive finite number fails its source, which moves on to the next one
+     * (as iOS's PriceProvider does), instead of being cached and shown as no price at all.
+     */
+    private fun usablePrice(v: Double): Double =
+        if (v.isFinite() && v > 0.0) v else throw IOException("Not a usable price")
 
     private suspend fun cachePrice(price: PriceData, currency: String) {
         // Turned off while the request was out: the cleared cache stays clear.
