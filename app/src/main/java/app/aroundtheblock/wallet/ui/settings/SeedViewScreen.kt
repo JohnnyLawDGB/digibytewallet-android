@@ -171,7 +171,9 @@ fun SeedViewScreen(
 
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(2),
-                    modifier = Modifier.fillMaxWidth(),
+                    // Weighted, so the grid scrolls inside the space left above the Done button
+                    // instead of taking all of it.
+                    modifier = Modifier.fillMaxWidth().weight(1f),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
