@@ -213,6 +213,7 @@
     <string name="send_switch_to_dgb">Переключить на DGB</string>
     <string name="send_approx_usd">≈ $%1$s USD</string>
     <string name="send_approx_dgb">≈ %1$s DGB</string>
+    <string name="send_price_unavailable">Цена недоступна</string>
     <string name="send_network_fee">Комиссия сети</string>
     <string name="send_network_fee_row">Комиссия сети</string>
     <string name="send_fee_default">По умолчанию</string>
@@ -484,6 +485,9 @@
     <string name="dsp_onchain_oracle">Ончейн-оракул</string>
     <string name="dsp_auto">Автоматически</string>
     <string name="dsp_oracle_note">Ценовые потоки ончейн-оракула требуют DigiByte v9 в основной сети.</string>
+    <string name="dsp_show_prices">Показывать цены</string>
+    <string name="dsp_show_prices_on">Цены DGB из CoinGecko или Binance</string>
+    <string name="dsp_show_prices_off">Выкл.: без запросов цены, цены не показываются</string>
     <string name="did_login">Вход через Digi-ID</string>
     <string name="did_auth_title">Аутентификация Digi-ID</string>
     <string name="did_auth_subtitle">Подтвердите личность для входа на %1$s</string>

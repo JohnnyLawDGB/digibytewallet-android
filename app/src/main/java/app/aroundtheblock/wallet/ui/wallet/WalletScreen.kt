@@ -67,6 +67,7 @@ fun WalletScreen(
     // What each DigiDollar transaction did: its row's label and direction.
     val txDdEvents by viewModel.txDdEvents.collectAsStateWithLifecycle()
     val price by viewModel.price.collectAsStateWithLifecycle()
+    val pricesShown by viewModel.pricesShown.collectAsStateWithLifecycle()
     val torState by viewModel.torState.collectAsStateWithLifecycle()
     val displayCurrency by viewModel.displayCurrency.collectAsStateWithLifecycle()
     var showCurrencyPicker by remember { mutableStateOf(false) }
@@ -123,7 +124,8 @@ fun WalletScreen(
                     }
 
                     BalanceDisplay(
-                        fiatAmount = fiatBalance,
+                        // Show prices off: no fiat line at all, and nothing to tap.
+                        fiatAmount = if (pricesShown) fiatBalance else null,
                         dgbAmount = WalletViewModel.formatSatoshisBare(balance),
                         // Always give DigiDollar a place on the hero — shows $0.00
                         // when none is held (rather than hiding the pill).
@@ -132,7 +134,7 @@ fun WalletScreen(
                         // while cfheaders is still catching up.
                         isSynced = syncProgressInfo.stage == SyncStage.Synced,
                         hidden = balanceHidden,
-                        onFiatTap = { showCurrencyPicker = true },
+                        onFiatTap = if (pricesShown) ({ showCurrencyPicker = true }) else null,
                         onDigiDollarTap = onNavigateReceiveDigiDollar,
                     )
 
@@ -317,6 +319,10 @@ fun WalletScreen(
                     // so a wallet set to NGN showed "≈ NGN0.00" over "DGB / USD $0.005102".
                     currencyCode = displayCurrency.code,
                     rate = p.rateFor(displayCurrency.code),
+                    // No price, one over an hour old, or none in this currency: the card says so
+                    // instead of a dash, a 0.00% change and "via unavailable".
+                    available = !p.isUnavailable &&
+                        p.rateFor(displayCurrency.code).let { it > 0.0 && it.isFinite() },
                     change24h = p.change24h,
                     source = p.source,
                     modifier = Modifier
@@ -596,6 +602,7 @@ private fun WalletActionButton(
 private fun PriceFeedCard(
     currencyCode: String,
     rate: Double,
+    available: Boolean,
     change24h: Double,
     source: String,
     modifier: Modifier = Modifier
@@ -629,16 +636,24 @@ private fun PriceFeedCard(
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Text(
-                    text = priceFormatted,
-                    style = MaterialTheme.typography.titleLarge.copy(
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 20.sp
-                    ),
-                    color = MaterialTheme.colorScheme.onSurface
-                )
+                if (available) {
+                    Text(
+                        text = priceFormatted,
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 20.sp
+                        ),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                } else {
+                    Text(
+                        text = stringResource(R.string.send_price_unavailable),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
-            Column(horizontalAlignment = Alignment.End) {
+            if (available) Column(horizontalAlignment = Alignment.End) {
                 Text(
                     text = "$changePrefix $changeFormatted%",
                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),

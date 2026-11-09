@@ -10,6 +10,7 @@ import app.aroundtheblock.wallet.core.DigiDollarPrepareResult
 import app.aroundtheblock.wallet.core.PrepareResult
 import app.aroundtheblock.wallet.core.PreparedDigiDollar
 import app.aroundtheblock.wallet.core.PreparedSend
+import app.aroundtheblock.wallet.core.PriceData
 import app.aroundtheblock.wallet.core.PriceProvider
 import app.aroundtheblock.wallet.core.SpendPreflight
 import app.aroundtheblock.wallet.core.TransactionBuilder
@@ -141,6 +142,51 @@ class SendViewModel @Inject constructor(
      */
     private var amountEdit = 0L
 
+    /** The last conversion that landed: the price's time, which field was typed, and how to redo it. */
+    private class Conversion(val priceAt: Long, val dollarsTyped: Boolean, val redo: () -> Unit)
+    private var conversion: Conversion? = null
+
+    /**
+     * No price to convert at: none, none younger than an hour ([PriceProvider.MAX_AGE_MS]), or
+     * prices off. The dollar field then says "Price unavailable"; DGB entry works as before.
+     */
+    private val _priceUnavailable = MutableStateFlow(false)
+    val priceUnavailable: StateFlow<Boolean> = _priceUnavailable.asStateFlow()
+
+    /**
+     * The price to convert at, or null. Sets [priceUnavailable] only while [edit] is still the latest
+     * edit: an older keystroke's lookup, landing late, does not overwrite a newer one's answer. A
+     * minute's reuse is the provider's.
+     */
+    private suspend fun freshPrice(edit: Long): PriceData? {
+        val price = runCatching { priceProvider.currentPrice() }.getOrNull()
+            ?.takeIf { PriceProvider.isFresh(it, System.currentTimeMillis()) }
+        if (edit == amountEdit) _priceUnavailable.value = price == null
+        return price
+    }
+
+    /** The dollar field is on screen: say now whether there is a price, before anything is typed. */
+    fun checkPrice() {
+        val edit = amountEdit
+        viewModelScope.launch { freshPrice(edit) }
+    }
+
+    /** A conversion landed at [price]: [recheckPrice] and review redo it once the price is too old. */
+    private fun converted(price: PriceData, dollarsTyped: Boolean, redo: () -> Unit) {
+        conversion = Conversion(price.updatedAt, dollarsTyped, redo)
+    }
+
+    /**
+     * Called by the Send screen on resume and every 5 s while it is open. Against the wall clock, not
+     * a timer: a timer runs on uptime, which stops in deep sleep, so a figure could outlive its price.
+     * Past the hour the conversion is worked out again by its own handler, so no figure on screen
+     * outlives its price.
+     */
+    fun recheckPrice() {
+        val c = conversion ?: return
+        if (!PriceProvider.isFreshAt(c.priceAt, System.currentTimeMillis())) c.redo()
+    }
+
     fun onAmountDgbChanged(value: String) {
         val edit = ++amountEdit
         amountDgb.value = value
@@ -148,16 +194,21 @@ class SendViewModel @Inject constructor(
         // not when the lookup returns: until the line for this text lands there is no line, so
         // neither the form nor a confirmation can set this amount beside an earlier one's dollars.
         amountFiat.value = ""
+        conversion = null
         _validationError.value = null
         _belowDustSats.value = null
         // Read by the parser the send uses. Text that is not an amount gets no line at all.
         if (DgbAmount.toSats(value) == null) return
         viewModelScope.launch {
-            val preview = runCatching {
-                UsdCents.previewForDgb(value, priceProvider.fetchPrice().priceUsd)
-            }.getOrDefault("")
+            val price = freshPrice(edit)
+            val preview = price?.let {
+                runCatching { UsdCents.previewForDgb(value, it.priceUsd) }.getOrDefault("")
+            }.orEmpty()
             // Only for the edit it was worked out for — not after a later one, in either field.
             if (edit == amountEdit) amountFiat.value = preview
+            if (edit == amountEdit && price != null && preview.isNotEmpty()) {
+                converted(price, dollarsTyped = false) { onAmountDgbChanged(value) }
+            }
         }
     }
 
@@ -169,14 +220,19 @@ class SendViewModel @Inject constructor(
         // this edit. It goes now. Until the amount for THIS text lands the DGB field is empty, and
         // Review answers "enter a valid amount" instead of approving an amount for other text.
         amountDgb.value = ""
+        conversion = null
         _validationError.value = null
         _belowDustSats.value = null
         if (UsdCents.parse(value) == null) return
         viewModelScope.launch {
-            val dgbText = runCatching {
-                UsdCents.dgbTextFor(value, priceProvider.fetchPrice().priceUsd)
-            }.getOrDefault("")
+            val price = freshPrice(edit)
+            val dgbText = price?.let {
+                runCatching { UsdCents.dgbTextFor(value, it.priceUsd) }.getOrDefault("")
+            }.orEmpty()
             if (edit == amountEdit) amountDgb.value = dgbText
+            if (edit == amountEdit && price != null && dgbText.isNotEmpty()) {
+                converted(price, dollarsTyped = true) { onAmountFiatChanged(value) }
+            }
         }
     }
 
@@ -223,6 +279,15 @@ class SendViewModel @Inject constructor(
             return
         }
         val fee = FeeRequest.of(isCustomFee.value, customFeeInput.value) ?: return
+        // A converted amount is only as good as its price. Past the hour (between two of the
+        // screen's 5 s rechecks) it is worked out again first: DGB typed, the dollars line goes and review
+        // goes on without it; dollars typed, the DGB amount is redone and the next tap reviews it.
+        conversion?.let { c ->
+            if (!PriceProvider.isFreshAt(c.priceAt, System.currentTimeMillis())) {
+                c.redo()
+                if (c.dollarsTyped) return
+            }
+        }
         val typed = ApprovedSend.dgb(
             addr, amountDgb.value, FeeQuote.DEFAULT_FEE_PER_KB, 0L,
             dollarsShown = amountFiat.value,

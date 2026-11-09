@@ -221,6 +221,7 @@
     <string name="send_switch_to_dgb">Zu DGB wechseln</string>
     <string name="send_approx_usd">≈ $%1$s USD</string>
     <string name="send_approx_dgb">≈ %1$s DGB</string>
+    <string name="send_price_unavailable">Preis nicht verfügbar</string>
     <string name="send_network_fee">Netzwerkgebühr</string>
     <string name="send_network_fee_row">Netzwerkgebühr</string>
     <string name="send_fee_default">Standard</string>
@@ -486,6 +487,9 @@
     <string name="dsp_onchain_oracle">On-Chain-Orakel</string>
     <string name="dsp_auto">Automatisch</string>
     <string name="dsp_oracle_note">On-Chain-Orakel-Preisfeeds erfordern DigiByte v9 im Mainnet.</string>
+    <string name="dsp_show_prices">Preise anzeigen</string>
+    <string name="dsp_show_prices_on">DGB-Preise, von CoinGecko oder Binance</string>
+    <string name="dsp_show_prices_off">Aus: keine Preisabfragen, keine Preise angezeigt</string>
     <string name="did_login">Digi-ID-Anmeldung</string>
     <string name="did_auth_title">Digi-ID-Authentifizierung</string>
     <string name="did_auth_subtitle">Authentifizieren, um sich bei %1$s anzumelden</string>

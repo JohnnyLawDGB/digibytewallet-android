@@ -256,6 +256,7 @@ All JNI functions follow: `Java_io_digibyte_core_bridge_NativeBridge_<methodName
 - `dgb_dandelion` — `enabled` flag for Dandelion++ stem submission (default off / opt-in)
 - `dgb_dandelion_peers` — cached Dandelion-capable peer list from seeder
 - `dgb_pin_store` — EncryptedSharedPreferences for PIN hash
+- `dgb_price` — `price_fetch_enabled`, Settings → Display → Show prices (default on; off: no price request, no fiat figure, cached price dropped). Cleared by a wipe
 
 ### Versioning Policy
 - `3.X.Y` — current line (at v3.10.29). `Y` = patch (every publish bumps at least the patch); `X` = minor (feature batches, e.g. 3.5→3.6→3.7).

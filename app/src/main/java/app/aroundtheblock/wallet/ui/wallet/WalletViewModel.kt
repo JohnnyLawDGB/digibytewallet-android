@@ -448,9 +448,24 @@ class WalletViewModel @Inject constructor(
         app.aroundtheblock.wallet.core.reconcile.PostUpgradeReconciler.clearFailedFlag(application)
     }
 
-    /** Latest price data from PriceProvider (null until first fetch). */
+    /** Latest price data from PriceProvider (null until first fetch, and while prices are off). */
     private val _price = MutableStateFlow<PriceData?>(null)
-    val price: StateFlow<PriceData?> = _price.asStateFlow()
+
+    /**
+     * The price the hero and the price card show. It ages in memory between fetches, so the hour
+     * ([PriceProvider.MAX_AGE_MS]) is checked here too, against a wall clock read every 5 s (as iOS): once
+     * the price is too old (or dated in the future) it reads as "unavailable", no fiat figure.
+     */
+    val price: StateFlow<PriceData?> = combine(
+        _price,
+        flow { while (true) { emit(System.currentTimeMillis()); delay(5_000L) } },
+    ) { p, now ->
+        p?.let { if (PriceProvider.isFresh(it, now)) it else PriceData(0.0, 0.0, "unavailable", it.updatedAt) }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    /** Settings → Display → Show prices. Off: no fiat line on the hero and no price card. */
+    val pricesShown: StateFlow<Boolean> =
+        app.aroundtheblock.wallet.core.settings.PricePrefs.enabled(application)
 
     /**
      * Display currency for the hero's "≈ …" line. Persisted to SharedPreferences BY NAME, which
@@ -922,12 +937,21 @@ class WalletViewModel @Inject constructor(
         }
     }
 
-    /** Fetch price now and then every 5 minutes. */
+    /**
+     * Fetch price now and then every 5 minutes, while Show prices is on. Turning it off cancels the
+     * loop and drops the price held here; turning it on fetches at once.
+     */
     private fun fetchPricePeriodically() {
         viewModelScope.launch {
-            while (true) {
-                runCatching { _price.value = priceProvider.fetchPrice() }
-                delay(5 * 60 * 1000L)
+            pricesShown.collectLatest { on ->
+                if (!on) {
+                    _price.value = null
+                    return@collectLatest
+                }
+                while (true) {
+                    runCatching { _price.value = priceProvider.fetchPrice() }
+                    delay(5 * 60 * 1000L)
+                }
             }
         }
     }

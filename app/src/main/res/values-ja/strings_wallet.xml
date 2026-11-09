@@ -213,6 +213,7 @@
     <string name="send_switch_to_dgb">DGB に切り替え</string>
     <string name="send_approx_usd">≈ $%1$s USD</string>
     <string name="send_approx_dgb">≈ %1$s DGB</string>
+    <string name="send_price_unavailable">価格を取得できません</string>
     <string name="send_network_fee">ネットワーク手数料</string>
     <string name="send_network_fee_row">ネットワーク手数料</string>
     <string name="send_fee_default">デフォルト</string>
@@ -475,6 +476,9 @@
     <string name="dsp_onchain_oracle">オンチェーンオラクル</string>
     <string name="dsp_auto">自動</string>
     <string name="dsp_oracle_note">オンチェーンオラクルの価格フィードにはメインネットの DigiByte v9 が必要です。</string>
+    <string name="dsp_show_prices">価格を表示</string>
+    <string name="dsp_show_prices_on">DGB の価格（CoinGecko または Binance）</string>
+    <string name="dsp_show_prices_off">オフ: 価格の取得なし、価格の表示なし</string>
     <string name="did_login">Digi-ID ログイン</string>
     <string name="did_auth_title">Digi-ID 認証</string>
     <string name="did_auth_subtitle">%1$s にログインするには認証してください</string>

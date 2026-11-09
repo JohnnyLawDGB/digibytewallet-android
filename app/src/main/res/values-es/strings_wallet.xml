@@ -215,6 +215,7 @@
     <string name="send_switch_to_dgb">Cambiar a DGB</string>
     <string name="send_approx_usd">≈ $%1$s USD</string>
     <string name="send_approx_dgb">≈ %1$s DGB</string>
+    <string name="send_price_unavailable">Precio no disponible</string>
     <string name="send_network_fee">Comisión de red</string>
     <string name="send_network_fee_row">Comisión de red</string>
     <string name="send_fee_default">Predeterminada</string>
@@ -483,6 +484,9 @@
     <string name="dsp_onchain_oracle">Oráculo on-chain</string>
     <string name="dsp_auto">Automático</string>
     <string name="dsp_oracle_note">Los precios del oráculo on-chain requieren DigiByte v9 en mainnet.</string>
+    <string name="dsp_show_prices">Mostrar precios</string>
+    <string name="dsp_show_prices_on">Precios de DGB, de CoinGecko o Binance</string>
+    <string name="dsp_show_prices_off">Desactivado: sin consultas de precio, sin precios mostrados</string>
     <string name="did_login">Inicio de sesión Digi-ID</string>
     <string name="did_auth_title">Autenticación Digi-ID</string>
     <string name="did_auth_subtitle">Autentícate para iniciar sesión en %1$s</string>

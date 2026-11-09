@@ -274,6 +274,7 @@
     <string name="send_switch_to_dgb">Switch to DGB</string>
     <string name="send_approx_usd">≈ $%1$s USD</string>
     <string name="send_approx_dgb">≈ %1$s DGB</string>
+    <string name="send_price_unavailable">Price unavailable</string>
     <string name="send_network_fee">Network Fee</string>
     <string name="send_network_fee_row">Network fee</string>
     <string name="send_fee_default">Default</string>
@@ -578,6 +579,9 @@
     <string name="dsp_onchain_oracle">On-Chain Oracle</string>
     <string name="dsp_auto">Auto</string>
     <string name="dsp_oracle_note">On-chain oracle price feeds require DigiByte v9 on mainnet.</string>
+    <string name="dsp_show_prices">Show prices</string>
+    <string name="dsp_show_prices_on">DGB prices, from CoinGecko or Binance</string>
+    <string name="dsp_show_prices_off">Off: no price requests, no prices shown</string>
 
     <!-- ── Digi-ID ──────────────────────────────────────────────────────────────── -->
     <string name="did_login">Digi-ID Login</string>

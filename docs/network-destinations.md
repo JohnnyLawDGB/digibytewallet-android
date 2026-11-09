@@ -83,7 +83,7 @@ unless it is a DigiByte P2P node.
 | `trustless-gateway.link` `dweb.link` `ipfs.io` | `IpfsClient.DEFAULT_GATEWAYS` | Public IPFS gateways (content checked against the CID) | No | The next gateway; after the last, a placeholder image |
 | `api.digiscope.me` | `DigiScopeClient`, `HubWebSocket` (`wss://…/api/hub/ws`) | Community Hub: Digi-ID login, profile, chat, DigiRunner scores | No (Hub only) | The Hub tab shows its error state; the socket retries with backoff. Nothing in the wallet waits on it |
 | `api.digiscope.me` | `core/reconcile/DgbNodeClient.kt` (endpoint can be changed in Settings) | Recover funds / reconcile: asks a node what the wallet's addresses hold. Opened by the user, who is told the address list goes to the server | No | The screen reports the failure |
-| `api.coingecko.com` `api.binance.com` | `core/PriceProvider.kt` | DGB price in 22 currencies (CoinGecko first, Binance for USD) | No | The last price cached in Room, labelled cached; with none, "unavailable" and the fiat line is a dash. The Send form's fiat line stays empty while a lookup runs; a DGB amount is never blocked |
+| `api.coingecko.com` `api.binance.com` | `core/PriceProvider.kt` | DGB price in 22 currencies (CoinGecko first, Binance for USD). Home screen every 5 minutes; the Send form at most once a minute. Never with Settings → Display → Show prices off ("Off: no price requests, no prices shown"; default on, "DGB prices, from CoinGecko or Binance"; off also drops the cached price) | No | The last price cached in Room, labelled cached, while it is under an hour old; then "unavailable": the fiat line is a dash, and the price card and the Send form's dollar field say "Price unavailable". A price held on screen goes the same way at the hour. The Send form's fiat line stays empty while a lookup runs; a DGB amount is never blocked |
 | `api.github.com` | `core/UpdateChecker.kt` (sideload flavor only, `SelfUpdatePrompt`) | Update check: the sideload repository's latest release | No | No prompt. The Play flavor makes no update request |
 | `github.com` | `UpdateChecker.isReleaseUrl`; `AboutScreen`; `NetworkInfoScreen` own-node guide | Release download link; About links (source, licence, issues); the own-node guide | No | Links open in the browser; the app does not fetch them |
 | `chainz.cryptoid.info` | `ui/wallet/TransactionDetailScreen.kt` | "View on Explorer" | No | Opens in the browser on a tap only |
@@ -159,9 +159,10 @@ user turns Tor on. The Play flavor makes no Play-services calls.
   is credited only once the indexer confirms it. With the server gone, asset balances freeze and
   asset sends are impossible; DGB is unaffected. Removing the dependency means checking the stack
   from the chain itself (the M8 push-downs), not a small fix.
-- The price lookup runs on every keystroke in the Send form's amount field (a CoinGecko request per
-  edit, falling back to the cache). It degrades correctly; it is noted as needless traffic to a third
-  party.
+- The Send form's price lookup runs on every keystroke in its amount field, but answers from a price
+  fetched within the last minute (`PriceProvider.currentPrice`, `REUSE_MS`, as iOS) rather than sending
+  a CoinGecko request per edit. With Show prices off it makes no price request and shows no price
+  anywhere.
 
 ## Divergence between the apps
 
@@ -176,7 +177,7 @@ This section is byte-identical in `digibytewallet-android/docs/network-destinati
 | Saved peers | Restored | Not restored (absent until the push-down, iOS plan §19.3) | Absent |
 | Explorer, own-node guide, About links to DigiScope, Around The Block, digibyte.org | Same URLs | Same URLs | Same |
 | GitHub About links (source, licence, issues), bug-report page | Present | Absent | Absent |
-| Price (CoinGecko, Binance) | Present | Absent | Absent |
+| Price (CoinGecko, Binance) | Same two requests, through Tor when it is on; 22 currencies on the price card, the balance and Send; on Send a successful fetch is reused for a minute. A cached price over an hour old is not used ("Price unavailable"); Settings → Display → Show prices off: no price requests, no prices shown | Same two requests, read for USD on Send only, after unlock; a successful fetch is reused for a minute. The same hour ("Price unavailable") and the same switch (Settings → Show prices off: no price requests, no prices shown) | Same rules (owner decisions, 2026-11-09); prices outside Send are absent on iOS |
 | DigiAsset indexers, IPFS gateways, DigiStamp | Present | Absent (M8) | Absent |
 | Digi-ID callbacks | Present | Absent (M6) | Absent |
 | Hub, chat, DigiRunner (`api.digiscope.me`) | Present | Absent | Absent |

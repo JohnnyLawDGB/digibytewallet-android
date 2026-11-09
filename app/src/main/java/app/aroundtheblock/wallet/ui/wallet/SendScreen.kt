@@ -111,6 +111,33 @@ fun SendScreen(
     var ddApproved by remember { mutableStateOf<app.aroundtheblock.wallet.core.model.ApprovedSend.DigiDollar?>(null) }
 
     var inputIsDgb by remember { mutableStateOf(true) }
+    // Settings → Display → Show prices. Off: no "Switch to USD", no dollar amount, no lookup.
+    val pricesShown by remember { app.aroundtheblock.wallet.core.settings.PricePrefs.enabled(context) }
+        .collectAsStateWithLifecycle()
+    val priceUnavailable by viewModel.priceUnavailable.collectAsStateWithLifecycle()
+    LaunchedEffect(pricesShown) {
+        if (!pricesShown) {
+            inputIsDgb = true
+            // Worked out again with prices off: the dollars line goes, and the confirmation has none.
+            if (!effectiveDdMode && amountFiat.isNotBlank()) viewModel.onAmountDgbChanged(amountDgb)
+        }
+    }
+    // A converted figure goes when its price passes the hour: checked against the wall clock on
+    // resume (a device asleep stops timers) and every 5 s while the form is open, as iOS does.
+    androidx.lifecycle.compose.LifecycleResumeEffect(viewModel) {
+        viewModel.recheckPrice()
+        onPauseOrDispose { }
+    }
+    LaunchedEffect(viewModel) {
+        while (true) {
+            kotlinx.coroutines.delay(5_000L)
+            viewModel.recheckPrice()
+        }
+    }
+    // The dollar field is up: say at once whether there is a price to convert at.
+    LaunchedEffect(inputIsDgb, pricesShown) {
+        if (!inputIsDgb && pricesShown) viewModel.checkPrice()
+    }
 
     // ── Failure overlay ───────────────────────────────────────────────────
     // Given the SAME weight as success, deliberately. This used to be one line of bodySmall red
@@ -386,18 +413,20 @@ fun SendScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f)
                 )
-                TextButton(onClick = { inputIsDgb = !inputIsDgb }) {
-                    Text(
-                        text = stringResource(if (inputIsDgb) R.string.send_switch_to_usd else R.string.send_switch_to_dgb),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = DigiByteAccent
-                    )
+                if (pricesShown) {
+                    TextButton(onClick = { inputIsDgb = !inputIsDgb }) {
+                        Text(
+                            text = stringResource(if (inputIsDgb) R.string.send_switch_to_usd else R.string.send_switch_to_dgb),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = DigiByteAccent
+                        )
+                    }
                 }
             }
 
             Spacer(modifier = Modifier.height(6.dp))
 
-            if (inputIsDgb) {
+            if (inputIsDgb || !pricesShown) {
                 OutlinedTextField(
                     value = amountDgb,
                     onValueChange = { viewModel.onAmountDgbChanged(it) },
@@ -408,7 +437,7 @@ fun SendScreen(
                     singleLine = true,
                     shape = RoundedCornerShape(8.dp)
                 )
-                if (amountFiat.isNotBlank()) {
+                if (pricesShown && amountFiat.isNotBlank()) {
                     Text(
                         text = stringResource(R.string.send_approx_usd, amountFiat),
                         style = MaterialTheme.typography.labelSmall,
@@ -427,7 +456,16 @@ fun SendScreen(
                     singleLine = true,
                     shape = RoundedCornerShape(8.dp)
                 )
-                if (amountDgb.isNotBlank()) {
+                // No price, or none younger than an hour: no DGB amount from these dollars, and
+                // Review answers "Enter a valid amount". DGB entry is unaffected.
+                if (priceUnavailable) {
+                    Text(
+                        text = stringResource(R.string.send_price_unavailable),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(0xFFFFCC66),
+                        modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+                    )
+                } else if (amountDgb.isNotBlank()) {
                     Text(
                         text = stringResource(R.string.send_approx_dgb, amountDgb),
                         style = MaterialTheme.typography.labelSmall,
