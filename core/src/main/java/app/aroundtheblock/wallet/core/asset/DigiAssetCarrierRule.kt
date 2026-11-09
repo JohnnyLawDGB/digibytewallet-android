@@ -18,20 +18,32 @@ import app.aroundtheblock.wallet.core.model.AssetOperation
  *    push opcodes (`IsPushOnly`, every opcode <= OP_16 and every push complete). An OP_RETURN
  *    followed by anything else is `nonstandard` and the reference does not look at it.
  *
- * What the wallet does with it, failing closed:
- *  - [Verdict.None]: no output is tagged "DA" at all. The only answer under which a transaction
- *    is known to carry no asset.
- *  - [Verdict.Carrier]: the last nulldata output is a carrier this reader can classify, and no
- *    tagged output anywhere is unclassifiable. That carrier, and only it, decides the transaction.
- *  - [Verdict.Undecided]: some output is tagged "DA", but the reference reads the transaction as
- *    plain (its last nulldata output is not a carrier, or it has no nulldata output at all), or a
- *    tagged carrier cannot be classified. Nothing is credited, every output is held (the hold rule
- *    reads it as [AssetOperation.UNCLASSIFIABLE]), and as a parent it is "may carry units", never
- *    "no asset" — read as no asset, a plain DGB send could spend a remainder and burn it.
+ * One more reference behaviour decides the shape of the rule: DigiAsset Core's transaction reader
+ * (DigiByteTransaction.cpp, the constructor's dataIndex) takes the FIRST nulldata output and offers
+ * it to the KYC, exchange-rate and encrypted-key readers BEFORE the asset reader runs, and a match
+ * there ends the reading: such a transaction is no asset transaction, whatever its last nulldata
+ * output says. Which of those match depends on more than the scripts (amounts, input counts, the
+ * indexer's own watch list), so the wallet does not try to reproduce them here. It refuses to
+ * credit any transaction whose first nulldata output is not the carrier itself. (Those readers
+ * can also take a LONE carrier, by the transaction's amounts and input count, not its scripts;
+ * that residual is outside this rule and recorded separately.)
  *
- * Where this holds more than the reference would credit (an unclassifiable carrier beside the
- * reference's carrier), it is the hold direction only: a held output can be released later, an
- * asset spent as plain DGB is gone.
+ * THE INVARIANT (DA-014-REF), failing closed:
+ *  - [Verdict.None]: no output is tagged "DA". The only answer under which a transaction is known
+ *    to carry no asset.
+ *  - [Verdict.Carrier]: exactly one output is nulldata, exactly one output is tagged "DA", they
+ *    are the same output, and this reader can classify it. That carrier decides the transaction.
+ *    It is both the reference's last nulldata output and its first, so no other reader can take
+ *    the transaction before the asset reader sees it.
+ *  - [Verdict.Undecided]: anything else with a tagged output -- a second nulldata output of any
+ *    kind, a second tagged output, a tagged output that is not nulldata, a carrier that cannot be
+ *    classified (framing or header). Nothing is credited, every output is held (the hold rule
+ *    reads it as [AssetOperation.UNCLASSIFIABLE]), and as a parent it is "may carry units", never
+ *    "no asset": read as no asset, a plain DGB send could spend a remainder and burn it.
+ *
+ * Where this holds more than the reference would credit (two OP_RETURN outputs, which DigiByte
+ * Core does not relay as standard anyway), it is the hold direction only: a held output can be
+ * released later, an asset spent as plain DGB is gone.
  */
 internal object DigiAssetCarrierRule {
 
@@ -55,25 +67,24 @@ internal object DigiAssetCarrierRule {
     /** [scripts] are a transaction's output scripts in output order (non-OP_RETURN scripts may be
      *  left out: they are neither nulldata nor tagged, so they change nothing). */
     fun verdict(scripts: List<ByteArray>, decoder: DigiAssetDecoder): Verdict {
-        var tagged = false
-        var unclassifiable = false
-        var lastNullData = -1
-        var lastNullDataHeader: DecodedAssetHeader? = null
+        var tagged = 0
+        var nullData = 0
+        var carrier = -1
+        var carrierHeader: DecodedAssetHeader? = null
         for ((i, script) in scripts.withIndex()) {
             val header = decoder.decode(script)    // null: not tagged "DA"
+            val isNull = isNullData(script)
+            if (isNull) nullData++
             if (header != null) {
-                tagged = true
-                if (header.operation == AssetOperation.UNCLASSIFIABLE) unclassifiable = true
-            }
-            if (isNullData(script)) {
-                lastNullData = i
-                lastNullDataHeader = header
+                tagged++
+                if (isNull) { carrier = i; carrierHeader = header }
             }
         }
-        if (!tagged) return Verdict.None
-        val header = lastNullDataHeader
-        if (unclassifiable || lastNullData < 0 || header == null) return Verdict.Undecided
-        return Verdict.Carrier(lastNullData, scripts[lastNullData], header)
+        if (tagged == 0) return Verdict.None
+        val header = carrierHeader
+        if (tagged != 1 || nullData != 1 || header == null ||
+            header.operation == AssetOperation.UNCLASSIFIABLE) return Verdict.Undecided
+        return Verdict.Carrier(carrier, scripts[carrier], header)
     }
 
     /** DigiByte Core's `nulldata`: OP_RETURN, then nothing but complete push opcodes. */

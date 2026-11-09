@@ -17,7 +17,7 @@ import org.junit.Before
 import org.junit.Test
 
 /**
- * DA-014-REF: one carrier rule, DigiAsset Core's, at every site that asks "does this transaction
+ * DA-014-REF: one carrier rule, following DigiAsset Core, at every site that asks "does this transaction
  * carry a DigiAsset, and which output is the carrier" ([DigiAssetCarrierRule]).
  *
  * Driven through the pre-spend pass, which runs the two decisions the other sites share: the
@@ -125,26 +125,29 @@ class AssetCarrierReferenceRuleTest {
         assertEquals(listOf(child to 0), held)
     }
 
-    /** GUARD (4.1.2 row 13): [plain OP_RETURN, carrier]: the carrier is the last nulldata output. */
-    @Test fun `a plain OP_RETURN before the carrier leaves the carrier in charge`() = runTest {
+    /** RED on the last-DA-carrier rule. [plain OP_RETURN, carrier]: DigiAsset Core offers the FIRST
+     *  nulldata output to its other readers before the asset reader, so a second nulldata output
+     *  means the wallet cannot vouch for the asset reading: every owned output is held. */
+    @Test fun `a plain OP_RETURN before the carrier holds every owned output`() = runTest {
         backTenUnits()
         wallet[child] = arrayOf("0|700|$ours", "1|0|$plain", "2|0|$transferTenToZero", "3|50000|$ours")
         inputs[child] = arrayOf("$backed|1")
 
         manager().pass()
 
-        assertEquals(listOf(child to 0), held)
+        assertEquals(setOf(child to 0, child to 3), held.toSet())
     }
 
-    /** GUARD: two carriers: the last one decides (it names output 2, the first one names 0). */
-    @Test fun `of two carriers the last one decides`() = runTest {
+    /** RED on the last-DA-carrier rule: two carriers are two nulldata outputs; every owned output
+     *  is held (the last-carrier rule held only output 2, the one the last carrier names). */
+    @Test fun `two carriers hold every owned output`() = runTest {
         backTenUnits()
         wallet[child] = arrayOf("0|700|$ours", "1|0|$transferTenToZero", "2|700|$ours", "3|0|$transferTenToTwo", "4|50000|$ours")
         inputs[child] = arrayOf("$backed|1")
 
         manager().pass()
 
-        assertEquals(listOf(child to 2), held)
+        assertEquals(setOf(child to 0, child to 2, child to 4), held.toSet())
     }
 
     // ── the parent check ─────────────────────────────────────────────────────

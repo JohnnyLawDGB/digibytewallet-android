@@ -1,16 +1,17 @@
 // Host KAT (DA-014-REF): the native DigiAsset carrier rule is the one rule the wallet shares with
 // its Kotlin side, and it is DigiAsset Core's.
 //
-// INVARIANT. Whether a transaction carries a DigiAsset, and which output is its carrier, is decided
-// by the LAST nulldata output (OP_RETURN followed only by complete pushes) -- the only output the
-// reference indexer reads. A transaction with an output tagged "DA" whose last nulldata output is
-// not a carrier this reader can classify is credited nothing and every one of its outputs is held
-// (BRTxOutputIsAsset answers 1 for each); a transaction with no tagged output holds nothing.
+// INVARIANT. A transaction is credited from a DigiAsset carrier only when that carrier is its single
+// nulldata output (OP_RETURN followed only by complete pushes) and its single "DA"-tagged output,
+// and its payload classifies: DigiAsset Core reads the LAST nulldata output as the asset, after
+// offering the FIRST to its KYC, exchange-rate and encrypted-key readers. Any other transaction
+// with a tagged output is credited nothing and every one of its outputs is held (BRTxOutputIsAsset
+// answers 1 for each); a transaction with no tagged output holds nothing.
 // The vectors (vectors/da-carrier/vectors.txt, argv[1]) are the same ones the Kotlin
 // DigiAssetCarrierVectorsTest reads, so the two sides cannot drift apart.
 //
 // RED arm (-DASSET_CARRIER_REF_UNFIXED) restores the earlier rule: the last output that frames as a
-// carrier, whatever OP_RETURN follows it. It must fail every vector named RED-THEN-GREEN in run.sh.
+// carrier, whatever OP_RETURN follows it, and no header-level check in the verdict. It must fail every vector named RED-THEN-GREEN in run.sh.
 //
 // MACRO CONVENTION: PRESENCE of -DASSET_CARRIER_REF_UNFIXED (#ifdef) selects the red arm.
 //
@@ -109,7 +110,7 @@ int main(int argc, char **argv) {
         if (line[0] == 'v' && line[1] == ' ') runVector(line);
     }
     fclose(f);
-    if (g_vectors < 27) { printf("FAIL: only %d vectors read\n", g_vectors); g_fail++; }
+    if (g_vectors < 39) { printf("FAIL: only %d vectors read\n", g_vectors); g_fail++; }
     printf("%d vectors, %d failure(s)\n", g_vectors, g_fail);
     return g_fail ? 1 : 0;
 }

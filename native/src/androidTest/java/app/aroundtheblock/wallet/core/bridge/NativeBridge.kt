@@ -35,7 +35,6 @@ object NativeBridge {
     external fun setCallbackHandler(handler: NativeCallback)
     external fun isValidAddress(address: String): Boolean
     external fun isAssetTransaction(rawTx: ByteArray): Boolean
-    external fun getOpReturnData(rawTx: ByteArray): ByteArray?
     external fun getTransactionCount(): Int
     external fun getTransactionDetails(): String
     external fun loadSavedBlocks(data: ByteArray): Int

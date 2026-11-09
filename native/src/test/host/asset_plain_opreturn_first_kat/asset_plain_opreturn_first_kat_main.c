@@ -1,6 +1,6 @@
 // Host KAT (GUARD): a plain OP_RETURN placed before the DigiAsset carrier does not hide the carrier
-// (4.1.2 row 13, K5 / DA-014). The native reader picks the carrier by its "DA" tag, not by position, so
-// for [plain OP_RETURN, DA carrier, ours, ours] it still holds the output the instruction names. (The
+// (4.1.2 row 13, K5 / DA-014). For [plain OP_RETURN, DA carrier, ours, ours] native holds the output the
+// instruction names and, since DA-014-REF (a second nulldata output is undecided), every other output too. (The
 // remainder that may ride to the LAST output is held by the Kotlin pre-spend pass, which registers it
 // with native as an asset outpoint.) The Kotlin side read the FIRST OP_RETURN and saw nothing; it now
 // chooses as native does -- AssetPreSpendPassTest is its red-then-green gate. This KAT pins the native
@@ -31,7 +31,10 @@ int main(void)
     tx.outputs = outs; tx.outCount = 4;
 
     check(BRTxOutputIsAsset(&tx, &tx.outputs[2]) == 1, "the output the carrier names is held, with a plain OP_RETURN first");
-    check(BRTxOutputIsAsset(&tx, &tx.outputs[0]) == 0, "the plain OP_RETURN is not read as the carrier");
+    // DA-014-REF: two nulldata outputs make the transaction undecided, so EVERY output is held --
+    // the last one too, which is the remainder this guard exists for (asset_carrier_reference_kat
+    // pins the verdict itself).
+    check(BRTxOutputIsAsset(&tx, &tx.outputs[3]) == 1, "the last output is held, with a plain OP_RETURN first");
 
     // [unclassifiable carrier, readable carrier, ours, ours]: one carrier that cannot be classified holds
     // every output, whatever a readable carrier beside it names (the Kotlin side matches this).

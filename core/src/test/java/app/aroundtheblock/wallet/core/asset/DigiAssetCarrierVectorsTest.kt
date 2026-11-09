@@ -41,7 +41,7 @@ class DigiAssetCarrierVectorsTest {
             }
             if (got != f[2]) wrong += "${f[1]}: Kotlin $got, vectors ${f[2]}"
         }
-        assertTrue("only $read vectors were read", read >= 27)
+        assertTrue("only $read vectors were read", read >= 39)
         assertEquals("DigiAssetCarrierRule disagrees with the shared vectors: $wrong", 0, wrong.size)
     }
 }

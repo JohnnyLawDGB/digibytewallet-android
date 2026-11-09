@@ -20,8 +20,8 @@ import org.junit.Test
 
 /**
  * DA-014-REF, the provenance walk: a hop reads a transaction's carrier by the one rule
- * ([DigiAssetCarrierRule]) that detection and native code use, DigiAsset Core's. It never takes
- * the first OP_RETURN, and a transaction the rule cannot decide names no asset.
+ * ([DigiAssetCarrierRule]) that detection and native code use. It never takes the first OP_RETURN,
+ * and a transaction the rule cannot decide (any second nulldata or tagged output) names no asset.
  *
  * The production hop is [AssetManager.classifyProvenanceHopFrom]; only its native reads (the
  * output scripts of a raw transaction, from NativeBridge.getRawTransactionOutputs, and the
@@ -144,37 +144,24 @@ class AssetProvenanceCarrierRuleTest {
     }
 
     /**
-     * RED on the first-OP_RETURN hop. [transfer of A (decoy), issuance of B, victim]: DigiAsset
-     * Core reads the last nulldata output, B's issuance. The first-OP_RETURN hop read the decoy,
-     * climbed to A's issuance and named the received units A.
+     * RED on the first-OP_RETURN hop. [transfer of A (decoy), issuance of B, victim]: two nulldata
+     * outputs, so the walk cannot decide the transaction and names nothing. The first-OP_RETURN hop
+     * read the decoy, climbed to A's issuance and named the received units A.
      */
-    @Test fun `a decoy transfer before an issuance does not name the issuance after the decoy's asset`() = runTest {
-        val facts = walk(listOf(transfer, issuanceTwentyDiv1, victim))
-
-        assertNotNull("the issuance was not resolved", facts)
-        assertEquals(startIssuanceId + "1", facts!!.assetId)
-        assertEquals(20L, facts.totalSupply)
-        assertEquals(1, facts.divisibility)
-        assertTrue("named after the decoy's asset", facts.assetId != assetAId)
+    @Test fun `a decoy transfer before an issuance names nothing`() = runTest {
+        assertEquals(AssetProvenanceWalker.Hop.DeadEnd, hop(listOf(transfer, issuanceTwentyDiv1, victim)))
+        assertNull("named after the decoy's asset", walk(listOf(transfer, issuanceTwentyDiv1, victim)))
     }
 
-    /** RED on the first-OP_RETURN hop: of two issuance carriers the last one names the asset and
-     *  supplies its chain facts. */
-    @Test fun `of two issuance carriers the last one names the asset and its facts`() = runTest {
-        val h = hop(listOf(issuanceTen, issuanceTwentyDiv1, victim))
-
-        val facts = (h as? AssetProvenanceWalker.Hop.Issuance)?.facts
-        assertNotNull("not an issuance: $h", facts)
-        assertEquals(startIssuanceId + "1", facts!!.assetId)
-        assertEquals(20L, facts.totalSupply)
-        assertEquals(1, facts.divisibility)
+    /** RED on the first-OP_RETURN hop: two issuance carriers name nothing (the old hop took the
+     *  first one's id and facts). */
+    @Test fun `two issuance carriers name nothing`() = runTest {
+        assertEquals(AssetProvenanceWalker.Hop.DeadEnd, hop(listOf(issuanceTen, issuanceTwentyDiv1, victim)))
     }
 
-    /** RED on the first-OP_RETURN hop: [plain, issuance]: the issuance is the reference carrier. */
-    @Test fun `a plain OP_RETURN before the carrier does not hide it from the walk`() = runTest {
-        val h = hop(listOf(plain, issuanceTen, victim))
-
-        assertEquals(startIssuanceId + "0", (h as? AssetProvenanceWalker.Hop.Issuance)?.facts?.assetId)
+    /** GUARD (green on the old hop too, for the opposite reason): [plain, issuance] names nothing. */
+    @Test fun `a plain OP_RETURN before the carrier names nothing`() = runTest {
+        assertEquals(AssetProvenanceWalker.Hop.DeadEnd, hop(listOf(plain, issuanceTen, victim)))
     }
 
     /** RED on the first-OP_RETURN hop: [issuance, plain]: DigiAsset Core reads the plain output

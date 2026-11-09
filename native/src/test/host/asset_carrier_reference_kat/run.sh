@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Host KAT (DA-014-REF): the native DigiAsset carrier rule matches the shared vector set the Kotlin
-# side is held to (vectors/da-carrier/vectors.txt), which is DigiAsset Core's rule: the LAST
-# nulldata output is the only one read. Compiles the REAL, live submodule files with ASan.
+# side is held to (vectors/da-carrier/vectors.txt): a transaction is credited only from its single
+# nulldata output when that is also its single tagged output (DigiAsset Core reads the last nulldata
+# output, and offers the first to other readers first). Compiles the REAL, live submodule files with ASan.
 #
 # RED-BEFORE-GREEN GATE (macro convention: PRESENCE of -DASSET_CARRIER_REF_UNFIXED, #ifdef):
-#   RED  : the earlier rule (the last output that frames as a carrier). Every RED-THEN-GREEN check
+#   RED  : the earlier rule (the last output that frames as a carrier, header failures not seen).
+#          Every RED-THEN-GREEN check
 #          named below must FAIL, with no sanitizer report.
 #   GREEN: every check passes -> exit 0, no sanitizer report.
 #
@@ -75,8 +77,11 @@ while IFS= read -r want; do
         echo "FAIL: red arm did not fail the check it must: $want"; exit 1
     fi
 done <<'CHECKS'
+plain_then_carrier
 carrier_then_plain
+two_carriers
 two_carriers_then_plain
+carrier_plain_carrier
 carrier_then_bare_opreturn
 carrier_then_op0
 carrier_then_op16
@@ -84,7 +89,16 @@ carrier_then_op_reserved
 carrier_then_pushdata1_plain
 carrier_not_nulldata
 carrier_not_nulldata_then_plain
+plain_pushdata2_then_carrier
+decoy_transfer_then_issuance
 issuance_then_plain
+two_issuances
+version0_then_carrier
+badop_then_carrier
+single_version0
+single_badop
+op1negate_after
+four_nulldata
 CHECKS
 
 echo "--- GREEN: must pass clean ---"
