@@ -4,21 +4,20 @@
 >
 > It has been two and a half months since the last banner. The app is now **HoldFast Wallet**
 > (`app.aroundtheblock.wallet`); `io.digibyte` was retired at v4.0.87.2. **4.1.3 shipped
-> 2026-11-03** on Google Play and as a signed APK. Every release since 4.0.80 has been a
-> security and reliability train, driven by the founder audit and the bug-bounty programme.
+> 2026-11-03** on Google Play and as a signed APK. Most releases since 4.0.80 have been
+> security and reliability trains, driven by the founder audit and the bug-bounty programme.
 >
 > **NEXT: 4.1.4, a security and reliability train.** Its scope stays private until the release
 > ships; until then a finding is named by ID, never by its mechanism. The public part:
 >
 > - The known issues listed for 4.1.4 in [`BUG-BOUNTY.md`](BUG-BOUNTY.md#known-issues-being-addressed-for-414),
->   including **seed-key binding from creation** (the Phase 2 Keystore item below) and moving
->   the PIN store off an alpha library.
+>   including **seed-key binding from creation** (the Phase 2 Keystore item below).
 > - **Restore with a passphrase, verified end to end.** Host KATs already pin the 12+1 and 24+1
 >   derivations against the official BIP39 vectors and an independent generator. In 4.1.4 the
 >   committed address vectors gain a 24-word phrase, and a restore of each shape is run through
 >   the current restore flow on an emulator.
 > - Already on `develop` since 4.1.3: the seeder, recovery-gap and stale-send rules moved into
->   the shared core (PRs #199–#215).
+>   the shared core (#199, #202, #206, #207, #209, #214, #215).
 >
 > **Unchanged:** the phase order below (sovereignty first). Choosing chains by accumulated work
 > is still the scheduled structural change under Phase 1.
