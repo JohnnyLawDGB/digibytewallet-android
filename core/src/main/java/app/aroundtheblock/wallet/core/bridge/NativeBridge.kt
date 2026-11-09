@@ -626,8 +626,6 @@ object NativeBridge {
     /** Returns true if the raw serialized transaction contains a DigiAsset OP_RETURN. */
     external fun isAssetTransaction(rawTx: ByteArray): Boolean
 
-    /** Returns the raw script bytes of the first OP_RETURN output, or null if none. */
-    external fun getOpReturnData(rawTx: ByteArray): ByteArray?
 
     /** Walks the outputs of a wallet-known transaction and returns each as
      *  "vout|satoshis|scriptHex". Returns null if the wallet hasn't seen

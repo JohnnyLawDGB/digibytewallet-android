@@ -96,9 +96,12 @@ int main(void) {
     check(classify(oldframing, 2 + plen, 4, 3) == 0,
           "a 76-byte payload behind a single length byte is not a valid asset script");
 
-    // RED-THEN-GREEN: the push declares 6 payload bytes (one instruction: output 0). The two
-    // bytes after the declared payload are not part of it, so output 3 is not a carrier.
-    static const uint8_t kTrailing[10] = { 0x6a,0x06,0x44,0x41,0x02,0x15,0x00,0x0a, 0x03,0x01 };
+    // RED-THEN-GREEN: the push declares 6 payload bytes (one instruction: output 0). The bytes
+    // after the declared payload are not part of it, so output 3 is not a carrier. They are a
+    // complete push of their own, so the script stays nulldata, the only form DigiAsset Core
+    // reads (DA-014-REF: an OP_RETURN that is not push-only is no carrier the reference reads,
+    // and its transaction is held whole).
+    static const uint8_t kTrailing[12] = { 0x6a,0x06,0x44,0x41,0x02,0x15,0x00,0x0a, 0x03,0x01,0x00,0x00 };
     check(classify(kTrailing, sizeof(kTrailing), 4, 3) == 0,
           "bytes after the declared payload are not read as instructions");
     // GUARD: the instruction inside the declared payload still marks its output.

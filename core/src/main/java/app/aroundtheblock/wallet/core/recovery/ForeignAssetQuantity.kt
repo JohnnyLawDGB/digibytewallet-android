@@ -51,13 +51,15 @@ object ForeignAssetQuantity {
     ): Long {
         if (outputs.isEmpty()) return 0L
 
-        val marker = outputs.firstOrNull { it.script.isNotEmpty() && it.script[0] == OP_RETURN }
-            ?: return 0L
-        val header = try {
-            decoder.decode(marker.script)
+        // DA-014-REF: the carrier by the one rule (DigiAsset Core's), not the first OP_RETURN. A
+        // transaction it cannot decide reads as an unknown count (0 here; see the class note).
+        val verdict = try {
+            app.aroundtheblock.wallet.core.asset.DigiAssetCarrierRule.verdict(outputs.map { it.script }, decoder)
         } catch (_: Throwable) {
             null
-        } ?: return 0L
+        }
+        val header = (verdict as? app.aroundtheblock.wallet.core.asset.DigiAssetCarrierRule.Verdict.Carrier)?.header
+            ?: return 0L
 
         val firstNonOpReturn = outputs.firstOrNull {
             it.script.isEmpty() || it.script[0] != OP_RETURN

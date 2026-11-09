@@ -64,8 +64,9 @@ class AssetHistoryBackfill(
                 for (tx in batch) {
                     try {
                         val raw = tx.rawBytes ?: continue
-                        val opReturn = NativeBridge.getOpReturnData(raw) ?: continue
-                        val header = decoder.decode(opReturn) ?: continue
+                        // DA-014-REF: the one carrier rule, not the first OP_RETURN.
+                        val scripts = DigiAssetCarrierRule.scriptsOfLines(NativeBridge.getRawTransactionOutputs(raw)) ?: continue
+                        val header = (DigiAssetCarrierRule.verdict(scripts, decoder) as? DigiAssetCarrierRule.Verdict.Carrier)?.header ?: continue
                         val assetId = header.metadataCid ?: continue
                         transactionDao.updateAssetId(tx.txid, assetId)
                         decoded++

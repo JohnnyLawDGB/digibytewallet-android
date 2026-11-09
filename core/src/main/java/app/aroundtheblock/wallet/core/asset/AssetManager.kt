@@ -908,13 +908,13 @@ class AssetManager(
     /**
      * Attempt to parse [rawTx] for embedded DigiAsset data.
      *
-     * Uses the JNI bridge to extract the OP_RETURN script and then passes the
-     * raw script bytes to [DigiAssetDecoder].  Returns null for non-asset
-     * transactions or if parsing fails.
+     * Reads the outputs through the JNI bridge and picks the carrier by the one carrier rule
+     * ([DigiAssetCarrierRule], DA-014-REF). Returns null for non-asset transactions, for one the
+     * rule cannot decide, or if parsing fails.
      */
     fun parseTransaction(rawTx: ByteArray): AssetData? {
-        val opReturn = NativeBridge.getOpReturnData(rawTx) ?: return null
-        return decoder.decode(opReturn)?.toAssetData()
+        val scripts = DigiAssetCarrierRule.scriptsOfLines(NativeBridge.getRawTransactionOutputs(rawTx)) ?: return null
+        return (DigiAssetCarrierRule.verdict(scripts, decoder) as? DigiAssetCarrierRule.Verdict.Carrier)?.header?.toAssetData()
     }
 
     /**
@@ -959,22 +959,20 @@ class AssetManager(
     }.getOrDefault(emptySet())
 
     /**
-     * The DigiAsset header a transaction's outputs carry, chosen as native code chooses it
-     * (BRDigiAsset.c: the LAST output whose OP_RETURN is a DigiAsset carrier), never simply the first
-     * OP_RETURN (4.1.2 row 13, K5 / DA-014). With a plain OP_RETURN placed before the carrier, the
-     * first-OP_RETURN rule decoded nothing here while native held the outputs the carrier names --
-     * the two sides disagreed about which outputs carry the asset.
+     * The DigiAsset header a transaction's outputs carry, by the one carrier rule
+     * ([DigiAssetCarrierRule], DA-014-REF): DigiAsset Core's, which reads the LAST nulldata output
+     * and nothing else, and which native code (BRDigiAsset.c) applies too. Null for a transaction
+     * with no output tagged "DA". A transaction the rule cannot decide -- tagged, but the reference
+     * reads it as plain, or a tagged carrier cannot be classified -- answers an
+     * [app.aroundtheblock.wallet.core.model.AssetOperation.UNCLASSIFIABLE] header: nothing is
+     * credited from it and the hold rule takes every owned output.
      */
-    private fun assetCarrier(scripts: List<ByteArray>): Pair<ByteArray, DecodedAssetHeader>? {
-        val carriers = scripts
-            .filter { it.isNotEmpty() && it[0] == 0x6A.toByte() }
-            .mapNotNull { script -> decoder.decode(script)?.let { script to it } }
-        // A tagged carrier that cannot be classified ANYWHERE in the transaction decides it, as in
-        // native code (any DA_CARRIER_UNCLASSIFIED output -> every output held): a readable carrier
-        // beside it must not narrow the hold to the outputs that one names.
-        return carriers.firstOrNull { it.second.operation == app.aroundtheblock.wallet.core.model.AssetOperation.UNCLASSIFIABLE }
-            ?: carriers.lastOrNull()
-    }
+    private fun assetCarrier(scripts: List<ByteArray>): Pair<ByteArray, DecodedAssetHeader>? =
+        when (val v = DigiAssetCarrierRule.verdict(scripts, decoder)) {
+            DigiAssetCarrierRule.Verdict.None -> null
+            is DigiAssetCarrierRule.Verdict.Carrier -> v.script to v.header
+            DigiAssetCarrierRule.Verdict.Undecided -> ByteArray(0) to DecodedAssetHeader.unclassifiable()
+        }
 
     private fun assetCarrierHeader(scripts: List<ByteArray>): DecodedAssetHeader? = assetCarrier(scripts)?.second
 
@@ -1668,7 +1666,7 @@ class AssetManager(
         classifyProvenanceHopFrom(
             txid,
             fetch = ::fetchRawTransactionBytes,
-            opReturnOf = { NativeBridge.getOpReturnData(it) },
+            outputScriptsOf = { DigiAssetCarrierRule.scriptsOfLines(NativeBridge.getRawTransactionOutputs(it)) },
             deriveIssuanceAssetId = { prevTxidHex, prevVout, aggregation, divisibility ->
                 NativeBridge.deriveIssuanceAssetId(
                     firstInputTxidHex = prevTxidHex,
@@ -1687,15 +1685,18 @@ class AssetManager(
     internal suspend fun classifyProvenanceHopFrom(
         txid: String,
         fetch: suspend (String) -> ByteArray?,
-        opReturnOf: (ByteArray) -> ByteArray?,
+        outputScriptsOf: (ByteArray) -> List<ByteArray>?,
         deriveIssuanceAssetId: (prevTxidHex: String, prevVout: Int, aggregation: Int, divisibility: Int) -> String?,
     ): AssetProvenanceWalker.Hop {
         val rawTx = fetch(txid)
             ?: return AssetProvenanceWalker.Hop.Unavailable
 
-        val opReturn = opReturnOf(rawTx)
+        // DA-014-REF: the carrier by the one rule detection and native code use, never the first
+        // OP_RETURN. A transaction the rule cannot decide (or whose outputs could not be read)
+        // names no asset: the walk stops, and nothing is renamed or recorded from it.
+        val scripts = outputScriptsOf(rawTx)
             ?: return AssetProvenanceWalker.Hop.DeadEnd
-        val header = decoder.decode(opReturn)
+        val header = (DigiAssetCarrierRule.verdict(scripts, decoder) as? DigiAssetCarrierRule.Verdict.Carrier)?.header
             ?: return AssetProvenanceWalker.Hop.DeadEnd
 
         return when (header.operation) {
@@ -2043,14 +2044,15 @@ class AssetManager(
         return PreSpendOutput(vout, scriptHex.lowercase())
     }
 
-    /** [txHasAssetPayload] over lines already fetched: null when there is nothing to judge from. */
+    /**
+     * [txHasAssetPayload] over lines already fetched: null when there is nothing to judge from,
+     * including a line that cannot be read (it could be the carrier). False only when the one
+     * carrier rule ([DigiAssetCarrierRule], DA-014-REF) finds no output tagged "DA"; a transaction
+     * it cannot decide is true, so a child's remainder from it stays held.
+     */
     private fun hasAssetPayload(outputLines: Array<out String?>?): Boolean? {
-        if (outputLines == null || outputLines.isEmpty()) return null
-        val opReturn = outputLines.asSequence()
-            .mapNotNull { line -> line?.split("|", limit = 3)?.getOrNull(2)?.hexToByteArray() }
-            .firstOrNull { it.isNotEmpty() && it[0] == 0x6A.toByte() }
-            ?: return false
-        return decoder.decode(opReturn) != null
+        val scripts = DigiAssetCarrierRule.scriptsOfLines(outputLines) ?: return null
+        return DigiAssetCarrierRule.verdict(scripts, decoder) != DigiAssetCarrierRule.Verdict.None
     }
 
     /**
@@ -2326,19 +2328,17 @@ class AssetManager(
         inputLines: () -> Array<out String?>?,
     ): AssetTxShape? {
         if (outputLines == null || outputLines.isEmpty()) return null
-        var payload: ByteArray? = null
+        val scripts = ArrayList<ByteArray>(outputLines.size)
         var firstNonOpReturn: Int? = null
         for (line in outputLines) {
             val p = line?.split("|", limit = 3) ?: return null
             val v = p.getOrNull(0)?.toIntOrNull()?.takeIf { it >= 0 } ?: return null
             val script = p.getOrNull(2)?.hexToByteArray() ?: return null
-            if (script.isNotEmpty() && script[0] == 0x6A.toByte()) {
-                if (payload == null) payload = script
-            } else if (firstNonOpReturn == null) {
-                firstNonOpReturn = v
-            }
+            scripts += script
+            if ((script.isEmpty() || script[0] != 0x6A.toByte()) && firstNonOpReturn == null) firstNonOpReturn = v
         }
-        val header = payload?.let { decoder.decode(it) } ?: return null
+        // DA-014-REF: the one carrier rule, not the first OP_RETURN.
+        val header = assetCarrierHeader(scripts) ?: return null
         return AssetTxShape(
             header = header,
             firstNonOpReturnVout = firstNonOpReturn,
@@ -2405,16 +2405,8 @@ class AssetManager(
      * isn't retrievable — which [resolveInputAssetUnits] treats as unknown rather than as
      * "no units".
      */
-    private fun txHasAssetPayload(txHashHex: String): Boolean? {
-        val lines = runCatching { NativeBridge.getTransactionOutputsForHash(txHashHex) }
-            .getOrNull() ?: return null
-        if (lines.isEmpty()) return null
-        val opReturn = lines.asSequence()
-            .mapNotNull { line -> line.split("|", limit = 3).getOrNull(2)?.hexToByteArray() }
-            .firstOrNull { it.isNotEmpty() && it[0] == 0x6A.toByte() }
-            ?: return false
-        return decoder.decode(opReturn) != null
-    }
+    private fun txHasAssetPayload(txHashHex: String): Boolean? =
+        hasAssetPayload(runCatching { NativeBridge.getTransactionOutputsForHash(txHashHex) }.getOrNull())
 
     /**
      * Re-register every asset outpoint we hold units for, so plain-DGB coin selection
