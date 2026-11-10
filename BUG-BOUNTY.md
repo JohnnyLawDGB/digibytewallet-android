@@ -367,8 +367,8 @@ found is credited in the notes of the release that fixes it, and not before: sev
 findings are fixed but not yet released, and naming them here would disclose them.
 
 @0x1cb · 0xasuma · 0xradu · Advena · Akbarrsw · apienz · AsrHardi · Astung · Danu Fandiyana ·
-Eula Lawrence · folox · FZN research · @haikaljim9 · iblitzc0de · Jackai · Jo Arsy · Keyzo · Ki ·
-@Lord99900 (Bima maulana) · Lou · Luis_MZ · Mr Fz · Muhammad Harley · naresaelvara · oncodewa ·
+Eula Lawrence · folox · FZN research · @haikaljim9 · hdac · iblitzc0de · Jackai · Jo Arsy · Keyzo ·
+Ki · @Lord99900 (Bima maulana) · Lou · Luis_MZ · Mr Fz · Muhammad Harley · naresaelvara · oncodewa ·
 Redi Sinaga · Rensisme · Ricki Ariadi · rreiissz · sayligood · Toshit · Tsaqif · Umiroh123 ·
 VanSecQA · w4ke · xbyteid · Yudha Eka Saputra
 
