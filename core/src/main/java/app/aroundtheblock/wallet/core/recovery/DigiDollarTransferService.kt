@@ -136,7 +136,7 @@ class DigiDollarTransferService(
 
         val plan = when (planned) {
             is DigiDollarTransferPlan.Result.Refused -> {
-                log('w', "DigiDollar move refused — ${planned.reason}: ${planned.detail}")
+                log('w', "DigiDollar move refused — ${planned.reason}")
                 return@withContext Result(
                     cents = scan.cents,
                     txid = null,
