@@ -2,7 +2,8 @@
 //
 // THE RULES (moved from Kotlin: SweepPartition.kt; ForeignUtxoAssetClassifier.kt's verdicts;
 // RecoverySequence.kt sweepExclusions and assetsLeftBehind):
-//   - the verdict: no bytes or bytes the core cannot parse -> UNKNOWN; the core's DigiAsset reader finds
+//   - the verdict: no bytes, bytes the core cannot parse, or bytes that are not exactly the transaction
+//     with the txid asked for (BRRawTxId) -> UNKNOWN; the core's DigiAsset reader finds
 //     a carrier on any output -> ASSET (every output of the transaction), else PLAIN; an asset's rule
 //     state is UNKNOWN unless a lookup answered it;
 //   - one fetch per transaction: rows grouped by txid, each group taking its first row's verdict;
@@ -10,7 +11,7 @@
 //   - hold everything (the iOS rule while iOS cannot move assets): any ASSET or UNCLASSIFIED row;
 //   - sweep exclusions: every move's asset outpoint and its plan's inputs, broadcast or not;
 //   - left behind: asset-bearing outpoints with no move that arrived.
-// Eight comparison arms, one per bit of -DSWEEP_PARTITION_UNFIXED (see BRSweepPartition.h). Each fails
+// Nine comparison arms, one per bit of -DSWEEP_PARTITION_UNFIXED (see BRSweepPartition.h). Each fails
 // exactly the cases run.sh lists for its bit.
 //
 // Cases carry Android's SweepPartitionTest, ForeignUtxoAssetClassifierTest, RecoverySequenceTest,
@@ -75,15 +76,17 @@ static BRSweepAssetVerdict verdict(int classified, int carries)
 }
 
 // ---- raw transactions --------------------------------------------------------------------------
-// version 1, one input (empty scriptSig), the given output scripts at 1000 sat each, lock time 0.
+// version 1, one input spending prevout <tag>:0 (empty scriptSig), the given output scripts at 1000 sat
+// each, lock time 0.
 
-static size_t rawTx(uint8_t *buf, size_t cap, const uint8_t *const scripts[], const size_t lens[], size_t n)
+static size_t rawTxTagged(uint8_t *buf, size_t cap, uint8_t tag, const uint8_t *const scripts[], const size_t lens[],
+                          size_t n)
 {
     size_t off = 0, i, j;
 #define PUT(b) do { if (off < cap) buf[off] = (uint8_t)(b); off++; } while (0)
     PUT(1); PUT(0); PUT(0); PUT(0);
     PUT(1);
-    for (i = 0; i < 32; i++) PUT(i == 0 ? 0x22 : 0);
+    for (i = 0; i < 32; i++) PUT(i == 0 ? tag : 0);
     PUT(0); PUT(0); PUT(0); PUT(0);
     PUT(0);
     PUT(0xff); PUT(0xff); PUT(0xff); PUT(0xff);
@@ -98,28 +101,74 @@ static size_t rawTx(uint8_t *buf, size_t cap, const uint8_t *const scripts[], co
     return off;
 }
 
+static size_t rawTx(uint8_t *buf, size_t cap, const uint8_t *const scripts[], const size_t lens[], size_t n)
+{
+    return rawTxTagged(buf, cap, 0x22, scripts, lens, n);
+}
+
+// The id the bytes report (BRRawTxId); zero when they report none.
+static UInt256 idOf(const uint8_t *raw, size_t len)
+{
+    UInt256 id = UINT256_ZERO;
+    if (!BRRawTxId(raw, len, &id)) id = UINT256_ZERO;
+    return id;
+}
+
+static BRSweepRawTxClass classifyOwn(const uint8_t *raw, size_t len)
+{
+    UInt256 id = idOf(raw, len);
+    return BRSweepClassifyRawTx(raw, len, &id);
+}
+
 static const uint8_t P2PKH[25] = { 0x76, 0xa9, 20, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
                                    19, 20, 0x88, 0xac };
 static const uint8_t DA_CARRIER[6] = { 0x6a, 0x04, 'D', 'A', 0x03, 0x15 };   // a transfer carrier
 static const uint8_t DA_SHORT[5] = { 0x6a, 0x03, 'D', 'A', 0x03 };           // tagged, too short to classify
 static const uint8_t OTHER_OPRETURN[4] = { 0x6a, 0x02, 'x', 'y' };           // not a DigiAsset carrier
 
-static size_t plainTx(uint8_t *buf, size_t cap)
+// ---- fixtures: real transactions, each with its own id --------------------------------------------
+// A row's txid is the id of the fixture it came from (internal byte order), so the fetch below serves the
+// bytes that really are that transaction -- and a test can serve the wrong ones.
+
+typedef struct { uint8_t tag; int isAsset; uint8_t raw[256]; size_t len; UInt256 id; } Fixture;
+static Fixture g_fx[16];
+static size_t g_fxCount = 0;
+
+static const Fixture *fixture(uint8_t tag, int isAsset)
 {
-    const uint8_t *s[] = { P2PKH, P2PKH };
-    size_t l[] = { sizeof(P2PKH), sizeof(P2PKH) };
-    return rawTx(buf, cap, s, l, 2);
+    const uint8_t *plain[] = { P2PKH, P2PKH }, *asset[] = { P2PKH, DA_CARRIER, P2PKH };
+    size_t lp[] = { sizeof(P2PKH), sizeof(P2PKH) }, la[] = { sizeof(P2PKH), sizeof(DA_CARRIER), sizeof(P2PKH) }, i;
+    Fixture *f;
+    for (i = 0; i < g_fxCount; i++) if (g_fx[i].tag == tag && g_fx[i].isAsset == isAsset) return &g_fx[i];
+    if (g_fxCount >= N(g_fx)) abort();
+    f = &g_fx[g_fxCount++];
+    f->tag = tag; f->isAsset = isAsset;
+    f->len = isAsset ? rawTxTagged(f->raw, sizeof(f->raw), tag, asset, la, 3)
+                     : rawTxTagged(f->raw, sizeof(f->raw), tag, plain, lp, 2);
+    f->id = idOf(f->raw, f->len);
+    if (UInt256IsZero(f->id)) abort();
+    return f;
 }
 
-static size_t assetTx(uint8_t *buf, size_t cap)
+static BRRecoveryUtxo rowOf(const Fixture *f, uint32_t vout, int64_t sat)
 {
-    const uint8_t *s[] = { P2PKH, DA_CARRIER, P2PKH };
-    size_t l[] = { sizeof(P2PKH), sizeof(DA_CARRIER), sizeof(P2PKH) };
-    return rawTx(buf, cap, s, l, 3);
+    BRRecoveryUtxo u;
+    memset(&u, 0, sizeof(u));
+    memcpy(u.txid, f->id.u8, 32);
+    u.vout = vout; u.amount = sat; u.blockHeight = 24000000;
+    return u;
 }
 
-// Kotlin's classify() written against the header: one "fetch" per distinct txid (fetch(i) gives the raw
-// bytes for row i's transaction, or NULL), the rule lookup only for an asset transaction.
+static const Fixture *fixtureFor(const BRRecoveryUtxo *u)
+{
+    size_t i;
+    for (i = 0; i < g_fxCount; i++) if (memcmp(g_fx[i].id.u8, u->txid, 32) == 0) return &g_fx[i];
+    return NULL;
+}
+
+// Kotlin's classify() written against the header: one "fetch" per distinct txid (fetch gives the raw
+// bytes for the row's transaction, or NULL), checked against the row's txid; the rule lookup only for an
+// asset transaction.
 typedef struct { const uint8_t *raw; size_t len; } Fetched;
 typedef Fetched (*FetchFn)(const BRRecoveryUtxo *u, int *fetches);
 typedef int (*ResolveFn)(const BRRecoveryUtxo *u, int *state);   // nonzero: answered
@@ -133,7 +182,10 @@ static int classifyAll(const BRRecoveryUtxo *rows, size_t n, FetchFn fetch, Reso
     for (i = 0; ok && i < n; i++) {
         if (group[i] == i) {
             Fetched f = fetch(&rows[i], fetches);
-            BRSweepRawTxClass c = BRSweepClassifyRawTx(f.raw, f.len);
+            UInt256 id;
+            BRSweepRawTxClass c;
+            memcpy(id.u8, rows[i].txid, 32);
+            c = BRSweepClassifyRawTx(f.raw, f.len, &id);
             int state = -1, resolved = 0;
             if (c == BR_SWEEP_RAW_TX_ASSET && resolve) resolved = resolve(&rows[i], &state);
             out[i] = BRSweepVerdictOf(c, resolved, state);
@@ -146,25 +198,43 @@ static int classifyAll(const BRRecoveryUtxo *rows, size_t n, FetchFn fetch, Reso
     return ok;
 }
 
-static uint8_t g_plain[256], g_asset[256];
-static size_t g_plainLen, g_assetLen;
-static void buildTxs(void)
+// Serves the row's own transaction (NULL for a txid no fixture has).
+static Fetched fetchOwn(const BRRecoveryUtxo *u, int *f)
 {
-    g_plainLen = plainTx(g_plain, sizeof(g_plain));
-    g_assetLen = assetTx(g_asset, sizeof(g_asset));
+    const Fixture *x = fixtureFor(u);
+    Fetched r = { NULL, 0 };
+    (*f)++;
+    if (x) { r.raw = x->raw; r.len = x->len; }
+    return r;
 }
-
-static Fetched fetchPlain(const BRRecoveryUtxo *u, int *f) { Fetched r = { g_plain, g_plainLen }; (void)u; (*f)++; return r; }
-static Fetched fetchAsset(const BRRecoveryUtxo *u, int *f) { Fetched r = { g_asset, g_assetLen }; (void)u; (*f)++; return r; }
 static Fetched fetchNone(const BRRecoveryUtxo *u, int *f) { Fetched r = { NULL, 0 }; (void)u; (*f)++; return r; }
-static Fetched fetchEmpty(const BRRecoveryUtxo *u, int *f) { Fetched r = { g_plain, 0 }; (void)u; (*f)++; return r; }
+static Fetched fetchEmpty(const BRRecoveryUtxo *u, int *f) { Fetched r = { NULL, 0 }; const Fixture *x = fixtureFor(u);
+    (*f)++; if (x) r.raw = x->raw; return r; }
 static const uint8_t g_junk[3] = { 1, 2, 3 };
 static Fetched fetchJunk(const BRRecoveryUtxo *u, int *f) { Fetched r = { g_junk, sizeof(g_junk) }; (void)u; (*f)++; return r; }
 static Fetched fetchDeadNone(const BRRecoveryUtxo *u, int *f)
 {
-    Fetched r = { g_plain, g_plainLen };
+    const Fixture *x = fixtureFor(u);
+    Fetched r = fetchOwn(u, f);
+    if (x && x->tag == 0xde) { r.raw = NULL; r.len = 0; }
+    return r;
+}
+// A provider answering every txid with one plain transaction (tag 0x01): the wrong bytes for any other.
+static Fetched fetchSomePlain(const BRRecoveryUtxo *u, int *f)
+{
+    const Fixture *x = fixture(0x01, 0);
+    Fetched r = { x->raw, x->len };
+    (void)u; (*f)++;
+    return r;
+}
+// The row's own transaction with one byte appended: it parses, but is not exactly that transaction.
+static uint8_t g_trail[260];
+static Fetched fetchTrailing(const BRRecoveryUtxo *u, int *f)
+{
+    const Fixture *x = fixtureFor(u);
+    Fetched r = { NULL, 0 };
     (*f)++;
-    if (u->txid[0] == 0xde) { r.raw = NULL; r.len = 0; }
+    if (x) { memcpy(g_trail, x->raw, x->len); g_trail[x->len] = 0x00; r.raw = g_trail; r.len = x->len + 1; }
     return r;
 }
 static int resolveNone(const BRRecoveryUtxo *u, int *s) { (void)u; *s = BR_SWEEP_RULE_NONE; return 1; }
@@ -291,39 +361,41 @@ static void sp_arguments(void)
 
 static void cl_plain_tx_plain(void)
 {
-    BRRecoveryUtxo u[] = { row(0xaa, 0, 50000) };
+    BRRecoveryUtxo u[1];
     BRSweepAssetVerdict v[1];
     int f = 0;
-    buildTxs();
-    ck(classifyAll(u, 1, fetchPlain, resolveNone, v, &f), "classify");
+    u[0] = rowOf(fixture(0xaa, 0), 0, 50000);
+    ck(classifyAll(u, 1, fetchOwn, resolveNone, v, &f), "classify");
     ck(v[0].classified && !v[0].carriesAsset, "a plain transaction classifies as no asset");
 }
 
 static void cl_asset_tx_asset(void)
 {
-    BRRecoveryUtxo u[] = { row(0xbb, 0, 50000) };
+    BRRecoveryUtxo u[1];
     BRSweepAssetVerdict v[1];
     int f = 0;
-    buildTxs();
-    ck(classifyAll(u, 1, fetchAsset, resolveNone, v, &f), "classify");
+    u[0] = rowOf(fixture(0xbb, 1), 0, 50000);
+    ck(classifyAll(u, 1, fetchOwn, resolveNone, v, &f), "classify");
     ck(v[0].classified && v[0].carriesAsset, "an asset transaction classifies as carrying an asset");
 }
 
 static void cl_every_output_held_change_included(void)
 {
-    BRRecoveryUtxo u[] = { row(0xcc, 0, 1), row(0xcc, 1, 1), row(0xcc, 2, 1) };
+    const Fixture *x = fixture(0xcc, 1);
+    BRRecoveryUtxo u[3];
     BRSweepAssetVerdict v[3];
     int f = 0;
-    buildTxs();
-    ck(classifyAll(u, 3, fetchAsset, resolveNone, v, &f), "classify");
+    u[0] = rowOf(x, 0, 1); u[1] = rowOf(x, 1, 1); u[2] = rowOf(x, 2, 1);
+    ck(classifyAll(u, 3, fetchOwn, resolveNone, v, &f), "classify");
     ck(v[0].carriesAsset && v[1].carriesAsset && v[2].carriesAsset, "all three outputs must be flagged");
 }
 
 static void cl_unfetchable_unknown(void)
 {
-    BRRecoveryUtxo u[] = { row(0xdd, 0, 50000) };
+    BRRecoveryUtxo u[1];
     BRSweepAssetVerdict v[1];
     int f = 0;
+    u[0] = rowOf(fixture(0xdd, 1), 0, 50000);
     ck(classifyAll(u, 1, fetchNone, resolveNone, v, &f), "classify");
     ck(!v[0].classified, "must not claim to have classified it");
     ck(!v[0].carriesAsset, "unknown is not an asset claim either");
@@ -331,35 +403,33 @@ static void cl_unfetchable_unknown(void)
 
 static void cl_empty_body_unknown(void)
 {
-    BRRecoveryUtxo u[] = { row(0xee, 0, 50000) };
+    BRRecoveryUtxo u[1];
     BRSweepAssetVerdict v[1];
     int f = 0;
-    buildTxs();
+    u[0] = rowOf(fixture(0xee, 0), 0, 50000);
     ck(classifyAll(u, 1, fetchEmpty, resolveNone, v, &f) && !v[0].classified, "an empty body is unknown");
 }
 
 // Kotlin: "a throwing parser is unknown". Here the parser is the core's: bytes it cannot read.
 static void cl_unparseable_unknown(void)
 {
-    BRRecoveryUtxo u[] = { row(0xff, 0, 50000) };
+    const Fixture *x = fixture(0xff, 1);
+    BRRecoveryUtxo u[1];
     BRSweepAssetVerdict v[1];
-    uint8_t cut[256];
-    size_t len;
     int f = 0;
+    u[0] = rowOf(x, 0, 50000);
     ck(classifyAll(u, 1, fetchJunk, resolveNone, v, &f), "classify");
     ck(!v[0].classified && !v[0].carriesAsset, "bytes the core cannot parse are unknown, not safe");
-    buildTxs();
-    len = g_assetLen - 9;   // an asset transaction cut short, inside its last output
-    memcpy(cut, g_asset, len);
-    ck(BRSweepClassifyRawTx(cut, len) == BR_SWEEP_RAW_TX_UNREADABLE, "a truncated asset tx is unreadable");
+    // an asset transaction cut short, inside its last output, asked for under its own id
+    ck(BRSweepClassifyRawTx(x->raw, x->len - 9, &x->id) == BR_SWEEP_RAW_TX_UNREADABLE, "a truncated asset tx is unreadable");
 }
 
 static void cl_one_unreachable_not_strand(void)
 {
-    BRRecoveryUtxo u[] = { row(0xaa, 0, 1), row(0xde, 0, 1) };
+    BRRecoveryUtxo u[2];
     BRSweepAssetVerdict v[2];
     int f = 0;
-    buildTxs();
+    u[0] = rowOf(fixture(0xaa, 0), 0, 1); u[1] = rowOf(fixture(0xde, 0), 0, 1);
     ck(classifyAll(u, 2, fetchDeadNone, resolveNone, v, &f), "classify");
     ck(v[0].classified, "the reachable one still classifies");
     ck(!v[1].classified, "the unreachable one is unknown");
@@ -367,12 +437,14 @@ static void cl_one_unreachable_not_strand(void)
 
 static void cl_parent_fetched_once(void)
 {
-    BRRecoveryUtxo u[] = { row(0xcc, 0, 1), row(0xcc, 1, 1), row(0xcc, 2, 1), row(0xaa, 0, 1) };
+    const Fixture *c = fixture(0xcc, 0), *a = fixture(0xaa, 0);
+    BRRecoveryUtxo u[4];
     BRSweepAssetVerdict v[4];
     size_t work[8], group[4];
     int f = 0;
-    buildTxs();
-    ck(classifyAll(u, 4, fetchPlain, resolveNone, v, &f) && f == 2, "one fetch per distinct txid (%d)", f);
+    u[0] = rowOf(c, 0, 1); u[1] = rowOf(c, 1, 1); u[2] = rowOf(c, 2, 1); u[3] = rowOf(a, 0, 1);
+    ck(classifyAll(u, 4, fetchOwn, resolveNone, v, &f) && f == 2, "one fetch per distinct txid (%d)", f);
+    ck(v[0].classified && v[3].classified, "each classified from its own transaction");
     ck(BRSweepTxidGroups(u, 4, work, 8, group) == BR_RECOVERY_UTXO_OK && group[0] == 0 && group[1] == 0 &&
        group[2] == 0 && group[3] == 3, "rows map to the first row naming their txid");
 }
@@ -386,32 +458,32 @@ static void cl_empty_wallet(void)
 
 static void cl_rule_state_carried(void)
 {
-    BRRecoveryUtxo u[] = { row(0xcc, 0, 1) };
+    BRRecoveryUtxo u[1];
     BRSweepAssetVerdict v[1];
     int f = 0;
-    buildTxs();
-    ck(classifyAll(u, 1, fetchAsset, resolveBound, v, &f), "classify");
+    u[0] = rowOf(fixture(0xcc, 1), 0, 1);
+    ck(classifyAll(u, 1, fetchOwn, resolveBound, v, &f), "classify");
     ck(v[0].carriesAsset && v[0].ruleState == BR_SWEEP_RULE_BOUND, "the resolved rule state is carried");
 }
 
 static void cl_resolver_throws_unknown(void)
 {
-    BRRecoveryUtxo u[] = { row(0xdd, 0, 1) };
+    BRRecoveryUtxo u[1];
     BRSweepAssetVerdict v[1];
     int f = 0;
-    buildTxs();
-    ck(classifyAll(u, 1, fetchAsset, resolveThrows, v, &f), "classify");
+    u[0] = rowOf(fixture(0xdd, 1), 0, 1);
+    ck(classifyAll(u, 1, fetchOwn, resolveThrows, v, &f), "classify");
     ck(v[0].carriesAsset, "still an asset");
     ck(v[0].ruleState == BR_SWEEP_RULE_UNKNOWN, "rule state UNKNOWN, not NONE (%d)", (int)v[0].ruleState);
 }
 
 static void cl_no_resolver_unknown(void)
 {
-    BRRecoveryUtxo u[] = { row(0xee, 0, 1) };
+    BRRecoveryUtxo u[1];
     BRSweepAssetVerdict v[1];
     int f = 0;
-    buildTxs();
-    ck(classifyAll(u, 1, fetchAsset, NULL, v, &f) && v[0].ruleState == BR_SWEEP_RULE_UNKNOWN,
+    u[0] = rowOf(fixture(0xee, 1), 0, 1);
+    ck(classifyAll(u, 1, fetchOwn, NULL, v, &f) && v[0].ruleState == BR_SWEEP_RULE_UNKNOWN,
        "without a resolver the rule state is UNKNOWN (%d)", (int)v[0].ruleState);
 }
 
@@ -426,12 +498,12 @@ static void cl_core_reader(void)
     BRSweepAssetVerdict w;
 
     len = rawTx(buf, sizeof(buf), s1, l1, 2);
-    ck(BRSweepClassifyRawTx(buf, len) == BR_SWEEP_RAW_TX_PLAIN, "an OP_RETURN without the DA tag is plain");
+    ck(classifyOwn(buf, len) == BR_SWEEP_RAW_TX_PLAIN, "an OP_RETURN without the DA tag is plain");
     len = rawTx(buf, sizeof(buf), s2, l2, 1);
-    ck(BRSweepClassifyRawTx(buf, len) == BR_SWEEP_RAW_TX_ASSET, "a tagged carrier it cannot classify is held");
+    ck(classifyOwn(buf, len) == BR_SWEEP_RAW_TX_ASSET, "a tagged carrier it cannot classify is held");
     len = rawTx(buf, sizeof(buf), s3, l3, 3);
-    ck(BRSweepClassifyRawTx(buf, len) == BR_SWEEP_RAW_TX_ASSET, "a carrier on the last output counts");
-    ck(BRSweepClassifyRawTx(NULL, 5) == BR_SWEEP_RAW_TX_ABSENT, "NULL bytes are absent");
+    ck(classifyOwn(buf, len) == BR_SWEEP_RAW_TX_ASSET, "a carrier on the last output counts");
+    ck(BRSweepClassifyRawTx(NULL, 5, NULL) == BR_SWEEP_RAW_TX_ABSENT, "NULL bytes are absent");
     w = BRSweepVerdictOf((BRSweepRawTxClass)17, 1, BR_SWEEP_RULE_NONE);
     ck(!w.classified && !w.carriesAsset, "a class the header does not know is unknown");
     w = BRSweepVerdictOf(BR_SWEEP_RAW_TX_ASSET, 1, 9);
@@ -440,6 +512,35 @@ static void cl_core_reader(void)
     ck(w.ruleState == BR_SWEEP_RULE_NONE, "an answered NONE is NONE");
     w = BRSweepVerdictOf(BR_SWEEP_RAW_TX_PLAIN, 1, BR_SWEEP_RULE_NONE);
     ck(w.classified && !w.carriesAsset && w.ruleState == BR_SWEEP_RULE_UNKNOWN, "plain carries no rule state");
+}
+
+// The txid check: the bytes must BE the transaction asked for.
+static void cl_wrong_tx_served(void)
+{
+    const Fixture *asset = fixture(0xab, 1);
+    BRRecoveryUtxo u[1];
+    BRSweepAssetVerdict v[1];
+    int f = 0;
+    u[0] = rowOf(asset, 0, 6000);
+    ck(classifyAll(u, 1, fetchSomePlain, resolveNone, v, &f), "classify");
+    ck(!v[0].classified, "a plain transaction served for an asset's txid is unknown, never plain");
+    ck(BRSweepClassifyRawTx(fixture(0x01, 0)->raw, fixture(0x01, 0)->len, &asset->id) == BR_SWEEP_RAW_TX_UNREADABLE,
+       "the class is UNREADABLE");
+    ck(BRSweepClassifyRawTx(asset->raw, asset->len, &asset->id) == BR_SWEEP_RAW_TX_ASSET, "its own bytes are ASSET");
+}
+
+static void cl_not_exact_bytes(void)
+{
+    const Fixture *plain = fixture(0xac, 0);
+    BRRecoveryUtxo u[1];
+    BRSweepAssetVerdict v[1];
+    int f = 0;
+    u[0] = rowOf(plain, 0, 6000);
+    ck(classifyAll(u, 1, fetchTrailing, resolveNone, v, &f), "classify");
+    ck(!v[0].classified, "the right transaction plus a trailing byte is unknown (it does not re-serialize exactly)");
+    ck(BRSweepClassifyRawTx(plain->raw, plain->len, NULL) == BR_SWEEP_RAW_TX_UNREADABLE,
+       "bytes with no txid to check against are UNREADABLE");
+    ck(BRSweepClassifyRawTx(plain->raw, plain->len, &plain->id) == BR_SWEEP_RAW_TX_PLAIN, "its exact bytes are PLAIN");
 }
 
 static void cl_groups_arguments(void)
@@ -731,6 +832,8 @@ static const Case CASES[] = {
     { "cl_resolver_throws_unknown", cl_resolver_throws_unknown },
     { "cl_no_resolver_unknown", cl_no_resolver_unknown },
     { "cl_core_reader", cl_core_reader },
+    { "cl_wrong_tx_served", cl_wrong_tx_served },
+    { "cl_not_exact_bytes", cl_not_exact_bytes },
     { "cl_groups_arguments", cl_groups_arguments },
     { "ios_asset_holds", ios_asset_holds },
     { "ios_unknown_holds", ios_unknown_holds },

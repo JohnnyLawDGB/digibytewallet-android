@@ -8,11 +8,11 @@
 #               or unreadable raw transaction read as plain; 8 a failed move's plan inputs released to the
 #               sweep; 16 every asset-bearing outpoint called left behind; 32 a failed or missing rule
 #               lookup read as NONE; 64 the hold-everything predicate counting assets only; 128 the quoted
-#               total counting held coins. Each arm fails exactly the cases CASES lists for its bit and
+#               total counting held coins; 256 fetched bytes classified without the exact-id check. Each arm fails exactly the cases CASES lists for its bit and
 #               passes every other.
 #   shipped     -DSWEEP_PARTITION_UNFIXED=0: every case passes, exit 0.
 # All arms under ASan + UBSan, 64-bit, linked against the core's transaction and DigiAsset code (the header
-# classifies raw transactions with BRTransactionParseSigned and BRTXContainsAsset). The arms run with
+# classifies raw transactions with BRRawTxBinding.h's exact parse and BRTXContainsAsset). The arms run with
 # detect_leaks=0; then every case runs once more on the shipped arm under LeakSanitizer where the
 # platform has one (said so, and skipped, where it does not -- Apple clang on macOS).
 #
@@ -70,6 +70,8 @@ CASES=(
     cl_resolver_throws_unknown:32
     cl_no_resolver_unknown:32
     cl_core_reader:4
+    cl_wrong_tx_served:4,256
+    cl_not_exact_bytes:4,256
     cl_groups_arguments:-
     ios_asset_holds:2
     ios_unknown_holds:1,64
@@ -93,7 +95,7 @@ CASES=(
 )
 # The comparison arms, one per defect (BRSweepPartition.h's SWEEP_PARTITION_RED_* bits).
 ARMS=(1:unknown-swept 2:asset-swept 4:unread-tx-plain 8:failed-move-frees-inputs 16:left-behind-all
-      32:rule-lookup-fail-open 64:unknown-not-held 128:total-counts-held)
+      32:rule-lookup-fail-open 64:unknown-not-held 128:total-counts-held 256:txid-unchecked)
 
 # ---- the seam is real ----------------------------------------------------------------------
 if [ ! -f "$HEADER" ]; then
@@ -146,7 +148,7 @@ strip_comments() {   # a C file with // and /* */ comments removed
 }
 CODE="$(strip_comments "$HEADER")"
 includes="$(grep -E '^[[:space:]]*#[[:space:]]*include' <<<"$CODE" | sed -E 's/.*include[[:space:]]*//' | sort -u | tr '\n' ' ')"
-want='"BRDigiAsset.h" "BRRecoveryUtxo.h" "BRTransaction.h" <stddef.h> <stdint.h> <string.h> '
+want='"BRDigiAsset.h" "BRRawTxBinding.h" "BRRecoveryUtxo.h" "BRTransaction.h" <stddef.h> <stdint.h> <string.h> '
 if [ "$includes" != "$want" ]; then
     echo "PORTABILITY GATE FAILED: the header includes $includes(want $want)"; FAIL=1
 fi
@@ -166,7 +168,7 @@ cat > "$BUILD_DIR/strict2.c" <<'EOF'
 #include "BRSweepPartition.h"
 int strict_tu1(void);
 int main(void) { BRSweepAssetVerdict v = BRSweepVerdictUnknown(); size_t n = 9;
-    return (BRSweepClassifyRawTx(NULL, 0) == BR_SWEEP_RAW_TX_ABSENT && BRSweepFoundAssetOrUnknown(&v, 1) &&
+    return (BRSweepClassifyRawTx(NULL, 0, NULL) == BR_SWEEP_RAW_TX_ABSENT && BRSweepFoundAssetOrUnknown(&v, 1) &&
             BRSweepExclusions(NULL, 0, NULL, 0, &n) == BR_RECOVERY_UTXO_OK && strict_tu1()) ? 0 : 1; }
 EOF
 strict_ok=1
