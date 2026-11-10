@@ -87,6 +87,9 @@ object DigiDollarHolding {
      */
     fun outputCents(outputs: List<Output>, vout: Int): Long? {
         val ordered = outputs.sortedBy { it.vout }
+        // Ordinal binding is positional: a missing or repeated vout would shift which amount binds to
+        // which output, so anything but vouts 0..n-1 is unreadable (the caller then holds more).
+        if (ordered.withIndex().any { (i, o) -> o.vout != i }) return null
         val scripts = ordered.map { hexBytes(it.scriptPubKeyHex) ?: return null }
         val dd = scripts.firstOrNull { isDdOpReturn(it) } ?: return null
         val pushes = pushesOf(dd) ?: return null

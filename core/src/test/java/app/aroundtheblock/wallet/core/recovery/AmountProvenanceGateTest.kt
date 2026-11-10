@@ -30,6 +30,7 @@ class AmountProvenanceGateTest {
             // could tell" keeps them testing what they test rather than the new guard.
             fetchRawTx = { byteArrayOf(1) },
             isAssetTx = { false },
+            rawOutputScripts = { null },  // not an asset path: no scripts are read
         ))
     private val legacyProfile =
         DerivationProfile.BUILT_INS.first { it.label == "Legacy DigiByte mobile wallet" }
@@ -113,7 +114,7 @@ class AmountProvenanceGateTest {
     private fun sweeper() = LegacySweepService(
         outgoingTxStore = outgoing,
         walletTxPersister = mockk(relaxed = true),
-        assetClassifier = ForeignUtxoAssetClassifier(fetchRawTx = { byteArrayOf(1) }, isAssetTx = { false }),
+        assetClassifier = ForeignUtxoAssetClassifier(fetchRawTx = { byteArrayOf(1) }, isAssetTx = { false }, rawOutputScripts = { null }),
         parents = book.binding,
         signSweep = { _, _, inputs, _, _ ->
             signedWith += inputs
@@ -290,7 +291,7 @@ class AmountProvenanceGateTest {
         val sweeper = LegacySweepService(
             outgoingTxStore = outgoing,
             walletTxPersister = mockk(relaxed = true),
-            assetClassifier = ForeignUtxoAssetClassifier(fetchRawTx = { byteArrayOf(1) }, isAssetTx = { false }),
+            assetClassifier = ForeignUtxoAssetClassifier(fetchRawTx = { byteArrayOf(1) }, isAssetTx = { false }, rawOutputScripts = { null }),
             parents = book.binding,
             signSweep = { _, _, inputs, _, _ ->
                 book.add(

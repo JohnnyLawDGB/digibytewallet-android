@@ -79,6 +79,7 @@ class ForeignAssetTransferServiceTest {
     ) = ForeignUtxoAssetClassifier(
         fetchRawTx = { txid -> if (txid == "a55e7") byteArrayOf(1) else byteArrayOf(2) },
         isAssetTx = { it.contentEquals(byteArrayOf(1)) },
+        rawOutputScripts = { emptyList() },  // the fake bytes carry no DigiDollar OP_RETURN
         resolveRuleState = { ruleState },
     )
 
@@ -369,6 +370,7 @@ class ForeignAssetTransferServiceTest {
             assetClassifier = ForeignUtxoAssetClassifier(
                 fetchRawTx = { txid -> if (txid.startsWith("asset")) byteArrayOf(1) else byteArrayOf(2) },
                 isAssetTx = { it.contentEquals(byteArrayOf(1)) },
+                rawOutputScripts = { emptyList() },  // the fake bytes carry no DigiDollar OP_RETURN
                 // These assets MOVE. The classifier's default rule state is UNKNOWN, which the
                 // gate refuses — and a fan-out for assets that are all going to be refused is
                 // exactly the waste the movable-only count removes, so leaving it defaulted
@@ -415,6 +417,7 @@ class ForeignAssetTransferServiceTest {
             assetClassifier = ForeignUtxoAssetClassifier(
                 fetchRawTx = { txid -> if (txid.startsWith("asset")) byteArrayOf(1) else byteArrayOf(2) },
                 isAssetTx = { it.contentEquals(byteArrayOf(1)) },
+                rawOutputScripts = { emptyList() },  // the fake bytes carry no DigiDollar OP_RETURN
                 // These assets MOVE. The classifier's default rule state is UNKNOWN, which the
                 // gate refuses — and a fan-out for assets that are all going to be refused is
                 // exactly the waste the movable-only count removes, so leaving it defaulted
@@ -452,6 +455,7 @@ class ForeignAssetTransferServiceTest {
         assetClassifier = ForeignUtxoAssetClassifier(
             fetchRawTx = { txid -> if (txid.startsWith("asset")) byteArrayOf(1) else byteArrayOf(2) },
             isAssetTx = { it.contentEquals(byteArrayOf(1)) },
+            rawOutputScripts = { emptyList() },  // the fake bytes carry no DigiDollar OP_RETURN
             resolveRuleState = { app.aroundtheblock.wallet.core.asset.rules.TransferRuleState.NONE },
         ),
         stackOf = { txid, _ ->

@@ -45,8 +45,9 @@ class ForeignUtxoAssetClassifier(
      * ONE-FAMILY reads a "DD" or OP_DIGIDOLLAR OP_RETURN as a DigiDollar marking as well as the
      * nVersion marker. Production wires `NativeBridge::getRawTransactionOutputs`, the parser
      * [isAssetTx] uses; an asset transaction whose scripts come back unread is held (UNKNOWN).
+     * Required: a test with no scripts passes a reader that returns null.
      */
-    private val rawOutputScripts: ((ByteArray) -> List<ByteArray>?)? = null,
+    private val rawOutputScripts: (ByteArray) -> List<ByteArray>?,
 ) {
 
     /** What was learned about one outpoint. */
@@ -104,8 +105,7 @@ class ForeignUtxoAssetClassifier(
      *  Scripts that a wired reader could not read count as marked (fail closed). */
     private fun marksDigiDollar(raw: ByteArray): Boolean {
         if (app.aroundtheblock.wallet.core.asset.OneFamily.rawTxMarksDigiDollar(raw) == true) return true
-        val reader = rawOutputScripts ?: return false
-        val scripts = reader(raw) ?: return true
+        val scripts = rawOutputScripts(raw) ?: return true
         return app.aroundtheblock.wallet.core.asset.OneFamily.scriptsMarkDigiDollar(scripts)
     }
 

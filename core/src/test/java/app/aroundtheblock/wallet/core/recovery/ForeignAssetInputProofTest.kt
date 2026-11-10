@@ -71,6 +71,7 @@ class ForeignAssetInputProofTest {
         assetClassifier = ForeignUtxoAssetClassifier(
             fetchRawTx = { txid -> if (txid.startsWith("asset")) byteArrayOf(1) else byteArrayOf(2) },
             isAssetTx = { it.contentEquals(byteArrayOf(1)) },
+            rawOutputScripts = { emptyList() },  // the fake bytes carry no DigiDollar OP_RETURN
             resolveRuleState = { app.aroundtheblock.wallet.core.asset.rules.TransferRuleState.NONE },
         ),
         stackOf = { txid, _ ->

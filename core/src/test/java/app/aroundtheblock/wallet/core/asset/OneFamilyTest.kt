@@ -180,7 +180,8 @@ class OneFamilyTest {
     private fun classify(raw: ByteArray, isAsset: Boolean): ForeignUtxoAssetClassifier.Verdict {
         val u = UtxoEntry("aa".repeat(32), 3, 100_000_000L, "D1", 1L)
         val c = ForeignUtxoAssetClassifier(fetchRawTx = { raw }, isAssetTx = { isAsset },
-            resolveRuleState = { app.aroundtheblock.wallet.core.asset.rules.TransferRuleState.NONE })
+            resolveRuleState = { app.aroundtheblock.wallet.core.asset.rules.TransferRuleState.NONE },
+            rawOutputScripts = { emptyList() })
         return runBlocking { c.classify(listOf(u)) }.getValue(u)
     }
 
@@ -275,6 +276,32 @@ class OneFamilyTest {
         val badDual = arrayOf("0|0|$ddToken", "1|0|6a024444" + "61", "2|0|$daCarrier")
         val r = ddScanOf(mapOf("ord" to ordinaryDd, "dual" to badDual), cents = 10_000, unspent = 2)
         assertTrue(r.holdings.isEmpty())
+        assertEquals(10_000L, r.unlocatableCents)
+    }
+
+    /** Nit 3: a TRANSFER with three DD token outputs; this address holds the one at ordinal 1 (vout 2)
+     *  of a dual tx, so exactly that slot's cents (2500) are held and the rest stays movable. */
+    @Test fun `a held output at ordinal 1 of a multi-token transfer subtracts its own cents`() {
+        val other = "5120" + "44".repeat(32)
+        // "DD" type 2 [1000, 2500, 700] then an OP_NOP (not nulldata), DA carrier naming output 0.
+        val ddMulti = "6a024444010202e803" + "02c409" + "02bc02" + "61"
+        val multiDual = arrayOf("0|0|$other", "1|0|$ddMulti", "2|0|$ddToken", "3|0|$other", "4|0|$daCarrier")
+        assertEquals(1000L, DigiDollarHolding.outputCents(outs(multiDual), 0))
+        assertEquals(2500L, DigiDollarHolding.outputCents(outs(multiDual), 2))
+        assertEquals(700L, DigiDollarHolding.outputCents(outs(multiDual), 3))
+        val r = ddScanOf(mapOf("ord" to ordinaryDd, "dual" to multiDual), cents = 7500, unspent = 2)
+        assertEquals(listOf("ord"), r.holdings.map { it.txid })
+        assertEquals(2500L, r.unlocatableCents)
+        assertEquals(5000L, r.movableCents)
+    }
+
+    /** Nit 1: a gap in the vouts (a line the parser dropped) makes the cents unreadable. */
+    @Test fun `a gap in the vouts makes the cents unreadable`() {
+        val gapped = outs(dual).filter { it.vout != 2 }
+        assertNull(DigiDollarHolding.outputCents(gapped, 0))
+        val gappedDual = arrayOf("0|0|$ddToken", "1|0|$ddOpReturnNonNull", "2|0|$daCarrier", "4|100000000|$ours")
+        val r = ddScanOf(mapOf("ord" to ordinaryDd, "dual" to gappedDual), cents = 10_000, unspent = 2)
+        assertTrue("a gapped dual tx must fall back to the whole address", r.holdings.isEmpty())
         assertEquals(10_000L, r.unlocatableCents)
     }
 
