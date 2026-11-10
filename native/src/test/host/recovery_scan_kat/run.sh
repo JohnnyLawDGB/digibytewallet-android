@@ -3,13 +3,12 @@
 # addresses the lookup shows as used, what one widening round means, what a finished scan may say, the
 # sweep set, the passphrase verdict, recoverable value). See recovery_scan_kat_main.c.
 #
-#   comparison  -DRECOVERY_SCAN_UNFIXED=1: an unreachable profile (and an unanswered DigiDollar lookup)
-#               read as answered and empty, incomplete ranked ahead of a positive finding, coins only
-#               (an address paid and since emptied not used), the native profiles swept on the
-#               wallet's own seed. Each case meets the expectation CASES gives it:
-#                 fail  the case fails: the arm cannot keep the rule
-#                 pass  a guard: holds in both arms
-#               and the arm must exit nonzero. One macro trips all four defects.
+#   comparison  one arm per defect, -DRECOVERY_SCAN_UNFIXED=<bit> (BRRecoveryScan.h): 1 an unreachable
+#               profile read as answered and empty; 2 incomplete ranked ahead of a positive finding;
+#               4 coins only (an address paid and since emptied not used); 8 the native profiles swept
+#               on the wallet's own seed; 16 nothing derived read as answered and empty; 32 an
+#               unanswered DigiDollar scan read as a zero balance. Each arm fails exactly the cases
+#               CASES lists for its bit and passes every other.
 #   shipped     -DRECOVERY_SCAN_UNFIXED=0: every case passes, exit 0.
 # Both arms under ASan + UBSan, 64-bit, linked against the core's transaction and address code (the
 # header parses output scripts with BRTransactionParseSigned and BRAddressScriptPubKey).
@@ -25,7 +24,7 @@
 #                     writes from this header.
 #
 # CORE_DIR may be set to run against a core checkout other than the android submodule.
-# MACRO CONVENTION: VALUE of -DRECOVERY_SCAN_UNFIXED (=1 comparison, =0 shipped).
+# MACRO CONVENTION: VALUE of -DRECOVERY_SCAN_UNFIXED, a set of bits (one bit per comparison arm, =0 shipped).
 # Exit code 0 = every expectation held, 1 = otherwise (a build error is never evidence).
 set -uo pipefail   # not -e: the comparison arm's nonzero exit is inspected
 # Here-strings and files, never pipes into an early-exit reader (harness_pipe_status_kat).
@@ -43,48 +42,57 @@ export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 detect_leaks=0 symbolize=0
 export UBSAN_OPTIONS="halt_on_error=1 print_stacktrace=1"
 SAN_RE='ERROR: AddressSanitizer|ERROR: LeakSanitizer|runtime error:'
 
-# <case>:<comparison-arm expectation>
+# <case>:<the comparison arms (bits of RECOVERY_SCAN_UNFIXED) that must fail it, comma-separated; - for none>
 CASES=(
-    pv_funds_is_success:pass
-    pv_typo:pass
-    pv_none_anywhere:pass
-    pv_incomplete_cannot_claim_nothing:pass
-    pv_positive_survives_incomplete:fail
-    pv_no_comparison_no_typo:pass
-    pv_found_needs_no_comparison:pass
-    pv_negative_totals_are_not_funds:pass
-    partial_one_failed_among_several:fail
-    partial_clean_empty_not_partial:pass
-    partial_total_outage_is_both:fail
-    partial_no_addresses_not_unreachable:pass
-    partial_failure_with_funds_still_matters:fail
-    partial_nothing_asked_is_all_unreachable:pass
-    cache_only_when_all_reachable:fail
-    incomplete_from_capped_or_unreachable:fail
-    rv_dollars_alone:pass
-    rv_nothing:pass
-    rv_no_dd_scan_nothing:pass
-    rv_utxos_alone:pass
-    rv_unreachable_dd_not_answered:fail
-    rv_reachable_zero_answered:pass
-    sweep_foreign_includes_native_own_excludes:fail
-    sweep_unfunded_not_swept:pass
-    sweep_and_total_arguments:pass
-    widen_coin_past_first_window:pass
-    widen_empty_path_asked_once:pass
-    widen_capped_marked_incomplete:pass
-    widen_unknown_outcome_capped:pass
-    widen_paid_but_emptied_counts:fail
-    widen_round_bound_and_numbering:pass
-    widen_unreachable_kept_unreachable:fail
-    round_bound_from_profiles:pass
-    used_highest_per_chain:pass
-    used_coin_matching:pass
-    used_script_matching:fail
-    used_unparseable_tx_skipped:pass
-    used_large_inputs:fail
-    used_one_address_many_times:pass
+    pv_funds_is_success:-
+    pv_typo:-
+    pv_none_anywhere:-
+    pv_incomplete_cannot_claim_nothing:-
+    pv_positive_survives_incomplete:2
+    pv_no_comparison_no_typo:-
+    pv_found_needs_no_comparison:-
+    pv_negative_totals_are_not_funds:-
+    partial_one_failed_among_several:1
+    partial_clean_empty_not_partial:-
+    partial_total_outage_is_both:1
+    partial_no_addresses_not_unreachable:-
+    nothing_derived_is_incomplete:16
+    partial_failure_with_funds_still_matters:1
+    partial_nothing_asked_is_all_unreachable:16
+    cache_only_when_all_reachable:1,16
+    incomplete_from_capped_or_unreachable:1
+    rv_dollars_alone:-
+    rv_nothing:-
+    rv_no_dd_scan_nothing:-
+    rv_utxos_alone:-
+    rv_unreachable_dd_not_answered:32
+    rv_reachable_zero_answered:-
+    rv_failed_dd_scan_is_unanswered:32
+    sweep_foreign_includes_native_own_excludes:8
+    sweep_unfunded_not_swept:-
+    sweep_and_total_arguments:-
+    widen_coin_past_first_window:-
+    widen_empty_path_asked_once:-
+    widen_capped_marked_incomplete:-
+    widen_unknown_outcome_capped:-
+    widen_paid_but_emptied_counts:4
+    widen_round_bound_and_numbering:-
+    widen_unreachable_kept_unreachable:1
+    widen_nothing_derived_is_incomplete:16
+    widen_used_begin_failure_is_unreachable:1
+    widen_later_round_unreachable_replaces_rows:1
+    round_bound_from_profiles:-
+    used_highest_per_chain:-
+    used_coin_matching:-
+    used_script_matching:4
+    used_script_kinds:4
+    used_unparseable_tx_skipped:-
+    used_large_inputs:4
+    used_one_address_many_times:-
 )
+# The comparison arms, one per defect (BRRecoveryScan.h's RECOVERY_SCAN_RED_* bits).
+ARMS=(1:unreachable-read-as-empty 2:incomplete-first 4:coins-only 8:native-swept-on-own-seed
+      16:nothing-derived-read-as-empty 32:unanswered-digidollar-read-as-zero)
 
 # ---- the seam is real ----------------------------------------------------------------------
 if [ ! -f "$HEADER" ]; then
@@ -217,7 +225,9 @@ build() {   # <out> <unfixed 0|1>
         "$SCRIPT_DIR/recovery_scan_kat_main.c" "$BUILD_DIR/tu2.c" "$BUILD_DIR"/san_objs/*.o -lm -lpthread -o "$1"
 }
 
-build "$BUILD_DIR/red" 1 || { echo "GATE FAILURE: comparison arm did not compile (a build error is not evidence)."; exit 1; }
+for arm in "${ARMS[@]}"; do
+    build "$BUILD_DIR/red_${arm%%:*}" "${arm%%:*}" || { echo "GATE FAILURE: comparison arm ${arm%%:*} did not compile (a build error is not evidence)."; exit 1; }
+done
 build "$BUILD_DIR/green" 0 || { echo "GATE FAILURE: shipped arm did not compile."; exit 1; }
 
 known="$("$BUILD_DIR/green" list | sort | tr '\n' ' ')"
@@ -226,29 +236,30 @@ if [ "$known" != "$listed" ]; then
     echo "GATE FAILURE: case lists disagree"; echo "  binary: $known"; echo "  run.sh: $listed"; exit 1
 fi
 
-echo "--- COMPARISON ARM (-DRECOVERY_SCAN_UNFIXED=1: unreachable read as empty, incomplete first, coins only, native swept on own seed) ---"
-red_any=0
-for entry in "${CASES[@]}"; do
-    c="${entry%%:*}"; want="${entry##*:}"
-    out="$("$BUILD_DIR/red" "$c" 2>&1)"; rc=$?
-    [ $rc -ne 0 ] && red_any=1
-    if grep -Eq "$SAN_RE" <<<"$out"; then echo "  [red $c] GATE FAILURE: sanitizer report"; FAIL=1; continue; fi
-    case "$want" in
-    fail)
-        if [ $rc -ne 0 ] && grep -q "^RESULT $c fail$" <<<"$out"; then
-            first="$(grep -m1 '^FAIL:' <<<"$out")"
-            echo "  [red $c] failed, as it must: ${first:6:160}"
-        else
-            echo "  [red $c] GATE FAILURE: the comparison arm did not fail this case -- it cannot see the defect"; FAIL=1
-        fi ;;
-    pass)
-        if [ $rc -eq 0 ] && grep -q "^RESULT $c pass$" <<<"$out"; then echo "  [red $c] passed (guard)"
-        else echo "  [red $c] GATE FAILURE: the guard did not hold in the comparison arm"; grep '^FAIL:' <<<"$out" | sed 's/^/      /'; FAIL=1; fi ;;
-    *)
-        echo "  [red $c] GATE FAILURE: unknown expectation '$want'"; FAIL=1 ;;
-    esac
+for arm in "${ARMS[@]}"; do
+    bit="${arm%%:*}"; name="${arm#*:}"
+    echo "--- COMPARISON ARM -DRECOVERY_SCAN_UNFIXED=$bit ($name): fails exactly its cases ---"
+    red_any=0
+    for entry in "${CASES[@]}"; do
+        c="${entry%%:*}"; arms_of="${entry##*:}"
+        want=pass
+        case ",$arms_of," in *",$bit,"*) want=fail ;; esac
+        out="$("$BUILD_DIR/red_$bit" "$c" 2>&1)"; rc=$?
+        if grep -Eq "$SAN_RE" <<<"$out"; then echo "  [red$bit $c] GATE FAILURE: sanitizer report"; FAIL=1; continue; fi
+        if [ "$want" = fail ]; then
+            red_any=1
+            if [ $rc -ne 0 ] && grep -q "^RESULT $c fail$" <<<"$out"; then
+                first="$(grep -m1 '^FAIL:' <<<"$out")"
+                echo "  [red$bit $c] failed, as it must: ${first:6:150}"
+            else
+                echo "  [red$bit $c] GATE FAILURE: this arm did not fail the case -- it cannot see the defect"; FAIL=1
+            fi
+        elif [ $rc -ne 0 ] || ! grep -q "^RESULT $c pass$" <<<"$out"; then
+            echo "  [red$bit $c] GATE FAILURE: failed in an arm that is not its own"; grep '^FAIL:' <<<"$out" | sed 's/^/      /'; FAIL=1
+        fi
+    done
+    [ $red_any -eq 0 ] && { echo "  [red$bit] GATE FAILURE: no case is listed for this arm; it proves nothing"; FAIL=1; }
 done
-[ $red_any -eq 0 ] && { echo "  [red] GATE FAILURE: every case passed in the comparison arm; it proves nothing"; FAIL=1; }
 
 echo "--- SHIPPED ARM (-DRECOVERY_SCAN_UNFIXED=0): every case passes, no sanitizer report ---"
 for entry in "${CASES[@]}"; do
@@ -261,6 +272,6 @@ for entry in "${CASES[@]}"; do
     fi
 done
 
-[ $FAIL -eq 0 ] && echo "PASS: recovery_scan_kat (${#CASES[@]} cases: comparison arm as expected, shipped arm clean under ASan + UBSan; portability; vectors current)"
+[ $FAIL -eq 0 ] && echo "PASS: recovery_scan_kat (${#CASES[@]} cases: ${#ARMS[@]} comparison arms each failing exactly its cases, shipped arm clean under ASan + UBSan; portability; vectors current)"
 [ $FAIL -ne 0 ] && echo "FAIL: recovery_scan_kat"
 exit $FAIL

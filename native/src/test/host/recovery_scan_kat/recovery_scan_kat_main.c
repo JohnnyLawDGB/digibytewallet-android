@@ -13,9 +13,11 @@
 //   - the passphrase verdict: FOUND, LIKELY_TYPO, then INCOMPLETE, then NONE_ANYWHERE;
 //   - recoverable value: a sweepable finding or DigiDollar cents; "nothing" is an answer only when the
 //     DigiDollar lookup, if it ran, answered.
-// The comparison arm (-DRECOVERY_SCAN_UNFIXED=1) reads an unreachable profile (and an unanswered
-// DigiDollar lookup) as answered and empty, ranks incomplete ahead of a positive finding, counts coins
-// only (not addresses paid and since emptied), and sweeps the native profiles on the wallet's own seed.
+// Six comparison arms, one per bit of -DRECOVERY_SCAN_UNFIXED (see BRRecoveryScan.h): 1 an unreachable
+// profile read as answered and empty; 2 incomplete ranked ahead of a positive finding; 4 coins only (an
+// address paid and since emptied not used); 8 the native profiles swept on the wallet's own seed; 16 a
+// profile with nothing derived read as answered and empty; 32 an unanswered DigiDollar scan read as a
+// zero balance. Each arm fails exactly the cases run.sh lists for its bit.
 //
 // Cases carry Android's PassphraseScanVerdictTest, PartialScanFailureTest, RecoverableValueTest,
 // ForeignSweepSelectionTest and RecoveryGapWidenTest case for case. RecoveryGapWidenTest scripted the
@@ -110,6 +112,8 @@ typedef struct {
     const uint8_t *tx; size_t txLen; int txChain; int32_t txIndex;
     int reachable;
     int fetches;
+    int failFromRound;   // > 0: the lookup stops answering from this round on
+    int slotShort;       // nonzero: the executor hands BRRecoveryScanUsedBegin one slot too few
 } Lookup;
 
 #define MAX_ROUNDS 64
@@ -137,7 +141,7 @@ static void scan(Lookup *lk, int32_t ext0, int32_t in0, int isNative, ScanOut *o
         BRRecoveryScanUsed u;
         int32_t usedExt = -1, usedInt = -1, nextExt = 0, nextIn = 0;
         int64_t total = 0;
-        int txAsked = 0;
+        int txAsked = 0, answered;
 
         round++;
         for (i = 0; i < n; i++) {
@@ -147,9 +151,12 @@ static void scan(Lookup *lk, int32_t ext0, int32_t in0, int isNative, ScanOut *o
             a[i].address = text[i]; a[i].chain = chain; a[i].index = idx;
             if (lk->tx && chain == lk->txChain && idx == lk->txIndex) txAsked = 1;
         }
-        lk->fetches++;
-        if (lk->reachable) {
-            BRRecoveryScanUsedBegin(&u, a, n, slots, n);
+        if (n > 0) lk->fetches++;   // nothing derived is not asked
+        answered = lk->reachable && !(lk->failFromRound > 0 && round >= lk->failFromRound);
+        // A used set that could not be built is never "nothing used": the round is unreachable.
+        if (answered && n > 0 &&
+            BRRecoveryScanUsedBegin(&u, a, n, slots, lk->slotShort ? n - 1 : n) != BR_RECOVERY_SCAN_OK) answered = 0;
+        if (answered && n > 0) {
             for (k = 0; k < lk->coinCount; k++) {
                 const Coin *c = &lk->coins[k];
                 if ((c->chain == 0 && c->index < ext) || (c->chain == 1 && c->index < in)) {
@@ -168,9 +175,10 @@ static void scan(Lookup *lk, int32_t ext0, int32_t in0, int isNative, ScanOut *o
             o->rec[round - 1] = r;
         }
         o->rounds = round;
-        o->last = BRRecoveryScanRoundStep(lk->reachable, n, ext, in, usedExt, usedInt, round, bound, &nextExt, &nextIn);
+        if (!answered) total = 0;   // the round's answer is the unreachable one: no rows
+        o->last = BRRecoveryScanRoundStep(answered, n, ext, in, usedExt, usedInt, round, bound, &nextExt, &nextIn);
         o->result.addressCount = n;
-        o->result.reachable = lk->reachable;
+        o->result.reachable = answered || n == 0;
         o->result.capped = (o->last == BR_RECOVERY_SCAN_STEP_CAPPED);
         o->result.isNative = isNative;
         o->result.totalSat = total;
@@ -268,6 +276,18 @@ static void partial_no_addresses_not_unreachable(void)
     ck(!BRRecoveryScanAllUnreachable(r, 2), "nor make the scan all-unreachable");
 }
 
+static void nothing_derived_is_incomplete(void)
+{
+    // Every profile starts at a nonzero window, so nothing derived is a failed derivation.
+    BRRecoveryScanProfileResult r[] = { res(0, 1, 0), res(1, 1, 0) };
+    ck(BRRecoveryScanAnyNothingDerived(r, 2), "a profile with nothing derived");
+    ck(BRRecoveryScanIncomplete(r, 2), "makes the scan incomplete");
+    ck(!BRRecoveryScanMayCache(r, 2), "and not cacheable");
+    ck(BRRecoveryPassphraseVerdict(0, 0, 0, BRRecoveryScanIncomplete(r, 2)) == BR_RECOVERY_PASSPHRASE_INCOMPLETE,
+       "so the verdict is INCOMPLETE, never NONE_ANYWHERE");
+    ck(!BRRecoveryScanAnyUnreachable(r, 2), "it is not an unreachable lookup (it was never asked)");
+}
+
 static void partial_failure_with_funds_still_matters(void)
 {
     BRRecoveryScanProfileResult r[] = { res(1, 0, 0), res(1, 1, 100000000) };
@@ -280,19 +300,24 @@ static void partial_nothing_asked_is_all_unreachable(void)
     // Kotlin's State.Done: results exist and the asked subset is empty, so `all` holds.
     BRRecoveryScanProfileResult r[] = { res(0, 1, 0), res(0, 0, 0) };
     ck(BRRecoveryScanAllUnreachable(r, 2), "no profile asked: there is no answer to report (Kotlin's value)");
-    ck(!BRRecoveryScanAnyUnreachable(r, 2), "and none failed");
+    ck(!BRRecoveryScanAnyUnreachable(r, 2), "and no lookup failed");
+    ck(BRRecoveryScanIncomplete(r, 2) && !BRRecoveryScanMayCache(r, 2), "Incomplete and MayCache agree: incomplete, not cached");
     ck(!BRRecoveryScanAllUnreachable(r, 0) && !BRRecoveryScanAllUnreachable(NULL, 0), "no results: not all unreachable");
+    ck(BRRecoveryScanIncomplete(NULL, 0), "no results: incomplete");
 }
 
 static void cache_only_when_all_reachable(void)
 {
-    BRRecoveryScanProfileResult ok[] = { res(1, 1, 0), res(0, 0, 0), res(1, 1, 5) };
+    BRRecoveryScanProfileResult ok[] = { res(1, 1, 0), res(7, 1, 0), res(1, 1, 5) };
     BRRecoveryScanProfileResult partial[] = { res(1, 1, 5), res(1, 0, 0) };
     BRRecoveryScanProfileResult down[] = { res(1, 0, 0) };
-    ck(BRRecoveryScanMayCache(ok, 3), "every asked profile answered: cached");
+    BRRecoveryScanProfileResult underived[] = { res(1, 1, 5), res(0, 1, 0) };
+    ok[1].capped = 1;
+    ck(BRRecoveryScanMayCache(ok, 3), "every profile asked and answered (one capped): cached");
     ck(!BRRecoveryScanMayCache(partial, 2), "a partial outage is never remembered");
     ck(!BRRecoveryScanMayCache(down, 1), "a total outage is never remembered");
-    ck(BRRecoveryScanMayCache(NULL, 0), "an empty scan may be cached");
+    ck(!BRRecoveryScanMayCache(underived, 2), "a failed derivation is never remembered");
+    ck(!BRRecoveryScanMayCache(NULL, 0), "no results: nothing to remember");
 }
 
 static void incomplete_from_capped_or_unreachable(void)
@@ -309,35 +334,48 @@ static void incomplete_from_capped_or_unreachable(void)
 
 static void rv_dollars_alone(void)
 {
-    ck(BRRecoverableValueExists(0, 1, 100), "dollars alone are recoverable value");
+    ck(BRRecoverableValueExists(0, BR_RECOVERY_DD_ANSWERED, 100), "dollars alone are recoverable value");
+    ck(BRRecoverableValueExists(0, BR_RECOVERY_DD_UNANSWERED, 100), "dollars found by a partly unanswered scan too");
 }
 
 static void rv_nothing(void)
 {
-    ck(!BRRecoverableValueExists(0, 1, 0), "no utxos and no dollars is genuinely nothing");
+    ck(!BRRecoverableValueExists(0, BR_RECOVERY_DD_ANSWERED, 0), "no utxos and no dollars is genuinely nothing");
 }
 
 static void rv_no_dd_scan_nothing(void)
 {
-    ck(!BRRecoverableValueExists(0, 0, 0), "no utxos and no dollar scan at all is nothing found");
-    ck(!BRRecoverableValueExists(0, 0, 100), "cents of a scan that did not run are not read");
-    ck(BRRecoverableValueAnswered(0, 0, 0, 0), "no dollar scan: nothing found is an answer");
+    ck(!BRRecoverableValueExists(0, BR_RECOVERY_DD_NOT_RUN, 0), "no utxos and no dollar scan at all is nothing found");
+    ck(!BRRecoverableValueExists(0, BR_RECOVERY_DD_NOT_RUN, 100), "cents of a scan that did not run are not read");
+    ck(BRRecoverableValueAnswered(0, BR_RECOVERY_DD_NOT_RUN, 0), "no dollar scan by design: nothing found is an answer");
 }
 
 static void rv_utxos_alone(void)
 {
-    ck(BRRecoverableValueExists(2, 0, 0), "utxos alone are recoverable value");
+    ck(BRRecoverableValueExists(2, BR_RECOVERY_DD_NOT_RUN, 0), "utxos alone are recoverable value");
 }
 
 static void rv_unreachable_dd_not_answered(void)
 {
-    ck(!BRRecoverableValueAnswered(0, 1, 0, 0), "an unreachable dollar lookup is not nothing found");
-    ck(BRRecoverableValueAnswered(1, 1, 0, 0), "with value found there is nothing to close");
+    ck(!BRRecoverableValueAnswered(0, BR_RECOVERY_DD_UNANSWERED, 0), "an unreachable dollar lookup is not nothing found");
+    ck(BRRecoverableValueAnswered(1, BR_RECOVERY_DD_UNANSWERED, 0), "with value found there is nothing to close");
+}
+
+static void rv_failed_dd_scan_is_unanswered(void)
+{
+    // A DigiDollar scan that was attempted and failed (derivation empty, or it threw) is UNANSWERED with 0
+    // cents -- never NOT_RUN -- and a state the header does not know reads as UNANSWERED.
+    ck(!BRRecoverableValueExists(0, BR_RECOVERY_DD_UNANSWERED, 0), "a failed scan finds nothing to move");
+    ck(!BRRecoverableValueAnswered(0, BR_RECOVERY_DD_UNANSWERED, 0), "and is not an answer");
+    ck(BRRecoveryDigiDollarScanRead(7) == BR_RECOVERY_DD_UNANSWERED, "an unknown state 7 reads as UNANSWERED");
+    ck(BRRecoveryDigiDollarScanRead(-1) == BR_RECOVERY_DD_UNANSWERED, "an unknown state -1 reads as UNANSWERED");
+    ck(!BRRecoverableValueAnswered(0, 7, 0), "so an unknown state is not an answer");
+    ck(BRRecoverableValueExists(0, 7, 5), "but cents it reports still count");
 }
 
 static void rv_reachable_zero_answered(void)
 {
-    ck(BRRecoverableValueAnswered(0, 1, 0, 1), "reachable zero is a confident nothing");
+    ck(BRRecoverableValueAnswered(0, BR_RECOVERY_DD_ANSWERED, 0), "reachable zero is a confident nothing");
 }
 
 // ---- ForeignSweepSelectionTest -----------------------------------------------------------------
@@ -444,6 +482,7 @@ static void widen_paid_but_emptied_counts(void)
     outs[0].sat = 700; outs[0].len = p2pkhScript(outs[0].script, 0xa5, 0, 190);
     outs[1].sat = 9; outs[1].len = p2pkhScript(outs[1].script, 0x77, 0, 5);   // someone else's
     len = rawTx(tx, sizeof(tx), outs, 2);
+    memset(&lk, 0, sizeof(lk));
     lk.coins = coins; lk.coinCount = 2; lk.tx = tx; lk.txLen = len; lk.txChain = 0; lk.txIndex = 10;
     lk.reachable = 1; lk.fetches = 0;
     scan(&lk, 200, 100, 0, &o);
@@ -494,6 +533,83 @@ static void widen_unreachable_kept_unreachable(void)
        "nothing derived is never unreachable");
 }
 
+static void widen_nothing_derived_is_incomplete(void)
+{
+    // A derivation that came back empty (Android's `?: emptyArray()`): the profile is kept with nothing
+    // derived, never asked, and the scan is incomplete.
+    Lookup lk = { NULL, 0, NULL, 0, 0, 0, 1, 0, 0, 0 };
+    BRRecoveryScanProfileResult r[2];
+    ScanOut o;
+    scan(&lk, 0, 0, 0, &o);
+    ck(o.last == BR_RECOVERY_SCAN_STEP_NOTHING_DERIVED && lk.fetches == 0, "nothing derived, nothing asked");
+    r[0] = o.result; r[1] = res(300, 1, 0);
+    ck(BRRecoveryScanIncomplete(r, 2) && !BRRecoveryScanMayCache(r, 2), "incomplete, not cached");
+    ck(BRRecoveryPassphraseVerdict(0, 0, 0, BRRecoveryScanIncomplete(r, 2)) == BR_RECOVERY_PASSPHRASE_INCOMPLETE,
+       "the verdict cannot be NONE_ANYWHERE");
+}
+
+static void widen_used_begin_failure_is_unreachable(void)
+{
+    // The lookup answered, but the used set could not be built (here: too few slots). Never "nothing
+    // used": the round is unreachable.
+    Coin coins[] = { { 0, 150, 1000 } };
+    Lookup lk = { coins, 1, NULL, 0, 0, 0, 1, 0, 0, 1 };
+    BRRecoveryScanProfileResult r[1];
+    ScanOut o;
+    scan(&lk, 200, 100, 0, &o);
+    ck(o.last == BR_RECOVERY_SCAN_STEP_UNREACHABLE, "the round is UNREACHABLE (step %d)", (int)o.last);
+    r[0] = o.result;
+    ck(BRRecoveryScanAnyUnreachable(r, 1) && BRRecoveryScanIncomplete(r, 1) && !BRRecoveryScanMayCache(r, 1),
+       "the profile is unreachable, the scan incomplete and not cached");
+}
+
+static void widen_later_round_unreachable_replaces_rows(void)
+{
+    // KNOWN LIMIT (fail-closed, as Kotlin): round 1 finds the coin at 150 and widens; round 2 is not
+    // answered, and its empty unreachable answer replaces round 1's rows.
+    Coin coins[] = { { 0, 150, 1000 }, { 0, 250, 1000 } };
+    Lookup lk = { coins, 2, NULL, 0, 0, 0, 1, 0, 2, 0 };
+    BRRecoveryScanProfileResult r[1];
+    ScanOut o;
+    scan(&lk, 200, 100, 0, &o);
+    ck(o.rounds == 2 && o.last == BR_RECOVERY_SCAN_STEP_UNREACHABLE, "round 2 unreachable (%d rounds, step %d)", o.rounds, (int)o.last);
+    ck(o.result.totalSat == 0 && !o.result.reachable, "the kept answer is round 2's: unreachable, no rows");
+    r[0] = o.result;
+    ck(BRRecoveryScanIncomplete(r, 1) && BRRecoveryPassphraseVerdict(0, 0, 0, 1) == BR_RECOVERY_PASSPHRASE_INCOMPLETE,
+       "reported incomplete, never 'no funds'");
+}
+
+static void used_script_kinds(void)
+{
+    // A returned transaction paying a P2SH-P2WPKH, a P2WPKH and a P2TR address: each is used through it.
+    uint8_t sh[23], wpkh[22], tr[34];
+    char a1[76], a2[76], a3[76];
+    BRRecoveryScanAddress a[3];
+    BRRecoveryScanSlot s[3];
+    BRRecoveryScanUsed u;
+    Out outs[3];
+    uint8_t tx[512];
+    size_t i, len, m = 9;
+    sh[0] = 0xa9; sh[1] = 20; for (i = 0; i < 20; i++) sh[2 + i] = (uint8_t)(0x21 + i); sh[22] = 0x87;
+    wpkh[0] = 0x00; wpkh[1] = 20; for (i = 0; i < 20; i++) wpkh[2 + i] = (uint8_t)(0x41 + i);
+    tr[0] = 0x51; tr[1] = 32; for (i = 0; i < 32; i++) tr[2 + i] = (uint8_t)(0x61 + i);
+    ck(BRAddressFromScriptPubKey(a1, sizeof(a1), sh, sizeof(sh)) > 0 && a1[0] == 'S', "P2SH address %s", a1);
+    ck(BRAddressFromScriptPubKey(a2, sizeof(a2), wpkh, sizeof(wpkh)) > 0 && strncmp(a2, "dgb1q", 5) == 0, "P2WPKH address %s", a2);
+    ck(BRAddressFromScriptPubKey(a3, sizeof(a3), tr, sizeof(tr)) > 0 && strncmp(a3, "dgb1p", 5) == 0, "P2TR address %s", a3);
+    a[0].address = a1; a[0].chain = 0; a[0].index = 11;
+    a[1].address = a2; a[1].chain = 1; a[1].index = 22;
+    a[2].address = a3; a[2].chain = 0; a[2].index = 33;
+    BRRecoveryScanUsedBegin(&u, a, 3, s, 3);
+    for (i = 0; i < 3; i++) outs[i].sat = (int64_t)(1000 * (i + 1));
+    memcpy(outs[0].script, sh, sizeof(sh)); outs[0].len = sizeof(sh);
+    memcpy(outs[1].script, wpkh, sizeof(wpkh)); outs[1].len = sizeof(wpkh);
+    memcpy(outs[2].script, tr, sizeof(tr)); outs[2].len = sizeof(tr);
+    len = rawTx(tx, sizeof(tx), outs, 3);
+    ck(BRRecoveryScanUsedMarkRawTx(&u, tx, len, &m) == BR_RECOVERY_SCAN_OK && m == 3, "three outputs matched (%zu)", m);
+    ck(BRRecoveryScanUsedIs(&u, 0) && BRRecoveryScanUsedIs(&u, 1) && BRRecoveryScanUsedIs(&u, 2), "each kind used");
+    ck(BRRecoveryScanUsedHighest(&u, 0) == 33 && BRRecoveryScanUsedHighest(&u, 1) == 22, "receive 33, change 22");
+}
+
 static void round_bound_from_profiles(void)
 {
     size_t n = 0;
@@ -501,7 +617,15 @@ static void round_bound_from_profiles(void)
     int32_t e[2] = { 300, 200 }, i[2] = { 50, 100 };
     ck(BRRecoveryScanRoundBoundForProfiles(p, n) == 20, "the built-in table's bound is 20");
     ck(BRRecoveryScanRoundBound(e, i, 2) == BRRecoveryGapScanRoundBound(200, 50), "the smallest windows, per chain");
-    ck(BRRecoveryScanRoundBound(NULL, NULL, 0) == BRRecoveryGapScanRoundBound(0, 0), "no profiles: 0 and 0");
+    ck(BRRecoveryScanRoundBound(NULL, NULL, 0) == BRRecoveryGapScanRoundBound(0, 0), "no profiles: the bound of windows 0 and 0");
+    ck(BRRecoveryScanRoundBound(NULL, i, 2) == 0 && BRRecoveryScanRoundBound(e, NULL, 2) == 0, "count > 0 with a NULL array: 0");
+    ck(BRRecoveryScanRoundBoundForProfiles(NULL, 3) == 0, "count > 0 with NULL profiles: 0");
+    ck(BRRecoveryScanRoundBoundForProfiles(NULL, 0) == BRRecoveryGapScanRoundBound(0, 0), "no profiles: windows 0 and 0");
+    {
+        int32_t ne = 0, ni = 0;
+        ck(BRRecoveryScanRoundStep(1, 300, 200, 100, 150, -1, 1, 0, &ne, &ni) == BR_RECOVERY_SCAN_STEP_CAPPED && ne == 200,
+           "a bound of 0 never asks again: a path that would grow is capped");
+    }
 }
 
 // ---- used addresses ----------------------------------------------------------------------------
@@ -687,6 +811,7 @@ static const Case kCases[] = {
     { "partial_clean_empty_not_partial", partial_clean_empty_not_partial },
     { "partial_total_outage_is_both", partial_total_outage_is_both },
     { "partial_no_addresses_not_unreachable", partial_no_addresses_not_unreachable },
+    { "nothing_derived_is_incomplete", nothing_derived_is_incomplete },
     { "partial_failure_with_funds_still_matters", partial_failure_with_funds_still_matters },
     { "partial_nothing_asked_is_all_unreachable", partial_nothing_asked_is_all_unreachable },
     { "cache_only_when_all_reachable", cache_only_when_all_reachable },
@@ -697,6 +822,7 @@ static const Case kCases[] = {
     { "rv_utxos_alone", rv_utxos_alone },
     { "rv_unreachable_dd_not_answered", rv_unreachable_dd_not_answered },
     { "rv_reachable_zero_answered", rv_reachable_zero_answered },
+    { "rv_failed_dd_scan_is_unanswered", rv_failed_dd_scan_is_unanswered },
     { "sweep_foreign_includes_native_own_excludes", sweep_foreign_includes_native_own_excludes },
     { "sweep_unfunded_not_swept", sweep_unfunded_not_swept },
     { "sweep_and_total_arguments", sweep_and_total_arguments },
@@ -707,10 +833,14 @@ static const Case kCases[] = {
     { "widen_paid_but_emptied_counts", widen_paid_but_emptied_counts },
     { "widen_round_bound_and_numbering", widen_round_bound_and_numbering },
     { "widen_unreachable_kept_unreachable", widen_unreachable_kept_unreachable },
+    { "widen_nothing_derived_is_incomplete", widen_nothing_derived_is_incomplete },
+    { "widen_used_begin_failure_is_unreachable", widen_used_begin_failure_is_unreachable },
+    { "widen_later_round_unreachable_replaces_rows", widen_later_round_unreachable_replaces_rows },
     { "round_bound_from_profiles", round_bound_from_profiles },
     { "used_highest_per_chain", used_highest_per_chain },
     { "used_coin_matching", used_coin_matching },
     { "used_script_matching", used_script_matching },
+    { "used_script_kinds", used_script_kinds },
     { "used_unparseable_tx_skipped", used_unparseable_tx_skipped },
     { "used_large_inputs", used_large_inputs },
     { "used_one_address_many_times", used_one_address_many_times },
@@ -726,7 +856,7 @@ int main(int argc, char **argv)
     }
     for (i = 0; i < n; i++) {
         if (strcmp(argv[1], kCases[i].name) != 0) continue;
-        printf("ARM: %s\n", RECOVERY_SCAN_UNFIXED ? "comparison (RECOVERY_SCAN_UNFIXED=1)" : "shipped");
+        printf("ARM: RECOVERY_SCAN_UNFIXED=%d (%s)\n", RECOVERY_SCAN_UNFIXED, RECOVERY_SCAN_UNFIXED ? "comparison" : "shipped");
         kCases[i].run();
         printf("RESULT %s %s\n", kCases[i].name, g_failed ? "fail" : "pass");
         return g_failed;
