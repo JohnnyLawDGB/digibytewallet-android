@@ -234,7 +234,11 @@ seed** in a way not described here is new, and is assessed as new.
   can show as unspendable until a later release settles it. A report that the hold happens is known; a
   report that it can be avoided, or that it loses funds, is not.
 - **Chain trust.** Choosing between competing chains by accumulated work is a scheduled structural
-  change. (4.1.3 cross-checks the compact-filter chain against the other connected peers.)
+  change. (4.1.3 cross-checks the compact-filter chain against the other connected peers; the
+  check is being strengthened.)
+- **Sync status and restarts.** Own-node status display can lag the node's actual state, and in
+  some cases a restart needs a rescan before the full history and balance show. The coins stay on
+  chain under the user's key.
 - **Wallets holding very many small coins.** A send whose coins would not fit in one transaction
   is refused, and the message reads as an insufficient balance; "send max" is refused the same way.
   A clearer message and a way to consolidate coins are planned.
@@ -414,3 +418,4 @@ not listed. Anonymity, or no answer, never affects payment.*
 - **2026-10-24 — one reporter, several addresses.** A person or team sending from several addresses
   counts as one reporter for the per-wave cap and duplicate decisions. Applied from the 2026-10-24
   intake on.
+- **2026-11-10 — known issues for 4.1.4 refreshed.**

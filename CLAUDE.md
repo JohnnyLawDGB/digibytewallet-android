@@ -184,6 +184,12 @@ is read at every triage. When you change something that exists in more than one 
 every copy or delete all but one. When you finish work, push it. And before declaring something
 missing, check **the thing itself, not its container**.
 
+**An intake starts where the last one stopped (2026-11-08).** Each intake's search window opens at
+the previous intake's cut timestamp, not at a remembered date, and an intake is complete only
+when every thread and advisory in that window is matched against the private records by ID. The
+2026-11-01 intake took two reports and skipped the threads before them; some sat unanswered for
+over a week.
+
 ### Re-derive an inherited value before you use it (2026-10-10)
 
 The recurring defect on this project is not a wrong value, it is a **borrowed** one: a number,
