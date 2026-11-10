@@ -1,9 +1,11 @@
 // Host KAT for BRAmountParse.h, carrying Android's DgbAmountTest.kt case for case with its
 // values (the Kotlin DgbAmount is the reference these were written against).
 //
-// Built twice by run.sh:
-//   -DAMOUNT_PARSE_VIA_DOUBLE_UNFIXED  the old double conversion: every RED case fails
-//   (default)                          the exact parser: every case passes
+// Built three times by run.sh:
+//   -DAMOUNT_PARSE_VIA_DOUBLE_UNFIXED      the old double conversion: every RED case fails
+//   -DAMOUNT_PARSE_COMMA_THOUSANDS_UNFIXED the lone comma always the point: only
+//                                          comma_before_three_digits_refused fails
+//   (default)                              the exact parser: every case passes
 
 #include "BRAmountParse.h"
 #include <stdio.h>
@@ -69,7 +71,24 @@ int main(void)
 
     begin("lone_comma_is_the_decimal_point");
     expect("0,29", 1, 29000000LL); expect("0,00014100", 1, 14100LL); expect("1,5", 1, 150000000LL);
+    expect("12,3456", 1, 1234560000LL);
     expect("1,2,3", 0, 0); expect("1,234,567", 0, 0);
+    end_case();
+
+    // A lone comma (no dot) before EXACTLY three digits: a thousand or one? Refused. The three are
+    // the digit run right after the comma, surrounding whitespace dropped, whatever follows it.
+    begin("comma_before_three_digits_refused");
+    expect("1,000", 0, 0); expect("25,500", 0, 0); expect("0,123", 0, 0); expect("1,234", 0, 0);
+    expect(" 1,000 ", 0, 0); expect("1,000e2", 0, 0); expect("1,000E-2", 0, 0); expect(",123", 0, 0);
+    expect("0,000", 0, 0); expect("+1,000", 0, 0);
+    end_case();
+
+    // ...and only then: not three digits after the comma, or commas around a dot.
+    begin("comma_not_before_three_digits_kept");
+    expect("1,0000", 1, 100000000LL); expect("1,23", 1, 123000000LL); expect("1,0001", 1, 100010000LL);
+    expect("1,00e2", 1, 10000000000LL); expect("1,5e3", 1, 150000000000LL); expect("1,", 1, 100000000LL);
+    expect("1,000.50", 1, 100050000000LL); expect("1,234,567.8", 1, 123456780000000LL);
+    expect("1,000.0", 1, 100000000000LL);
     end_case();
 
     begin("absurd_magnitude_refused_without_materialising");

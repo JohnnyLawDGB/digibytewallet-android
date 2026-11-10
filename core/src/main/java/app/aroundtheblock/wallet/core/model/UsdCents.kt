@@ -42,8 +42,8 @@ object UsdCents {
         val text = asciiDigits(input)
         var start = 0
         var end = text.length
-        while (start < end && isAsciiSpace(text[start])) start++
-        while (end > start && isAsciiSpace(text[end - 1])) end--
+        while (start < end && DgbAmount.isAsciiSpace(text[start])) start++
+        while (end > start && DgbAmount.isAsciiSpace(text[end - 1])) end--
 
         var commas = 0
         var dots = 0
@@ -92,13 +92,10 @@ object UsdCents {
         return value
     }
 
-    /** BRAmountParse.h's _BRAmountIsSpace. */
-    private fun isAsciiSpace(c: Char): Boolean =
-        c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\u000C' || c == '\u000B'
-
     /**
      * Every Unicode decimal digit (general category Nd: Arabic-Indic, Extended Arabic-Indic,
-     * Devanagari, full width...) as its ASCII digit; nothing else changes. iOS FiatText.asciiDigits:
+     * Devanagari, full width...) as its ASCII digit; nothing else changes. Typed DGB text gets the
+     * same mapping ([DgbAmount.toSats]). iOS FiatText.asciiDigits:
      * the Arabic decimal and thousands separators (U+066B, U+066C) are NOT mapped, so "٥٫٥" is no
      * amount on either platform; fractions and numerals (½, Ⅻ) are not decimal digits.
      */

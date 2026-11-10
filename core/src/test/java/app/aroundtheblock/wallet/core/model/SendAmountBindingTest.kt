@@ -31,7 +31,7 @@ class SendAmountBindingTest {
     @Test fun `the approval text is written from the integer that is sent`() {
         val typed = listOf(
             "0.1", "1.5", "0.00000029", "1234.5",
-            "1,234", "1,234.5", "0,29", "1.50", "01.5", "  0.29 ", "1e2", "1.100000000",
+            "1,2345", "1,234.5", "0,29", "1.50", "01.5", "  0.29 ", "1e2", "1.100000000",
         )
         for (text in typed) {
             val approved = dgb(text)
@@ -42,8 +42,10 @@ class SendAmountBindingTest {
     }
 
     @Test fun `each spelling of an amount is approved as the same text`() {
-        assertEquals("1.234", dgb("1,234")!!.amountText)
-        assertEquals(123_400_000L, dgb("1,234")!!.sats)
+        assertEquals("1.2345", dgb("1,2345")!!.amountText)
+        assertEquals(123_450_000L, dgb("1,2345")!!.sats)
+        assertEquals("0.29", dgb("\u0660,\u0662\u0669")!!.amountText) // Arabic-Indic digits, decimal comma
+        assertEquals("1234.5", dgb("\u06f1\u06f2\u06f3\u06f4.\u06f5")!!.amountText) // Persian digits
         assertEquals("1234.5", dgb("1,234.5")!!.amountText)
         assertEquals("1.5", dgb("1.50")!!.amountText)
         assertEquals("100", dgb("1e2")!!.amountText)
@@ -51,7 +53,8 @@ class SendAmountBindingTest {
     }
 
     @Test fun `text that is not a positive amount is never approved`() {
-        for (text in listOf("", "   ", "abc", "0", "0.0", "-1", "1,2,3", "1,234,567", "1.2.3", "0.000000001", "NaN")) {
+        for (text in listOf("", "   ", "abc", "0", "0.0", "-1", "1,2,3", "1,234,567", "1.2.3", "0.000000001", "NaN",
+            "1,000", "1,234", "25,500", "0,123", "\u0661,\u0660\u0660\u0660", "\u0665\u066b\u0665")) {
             assertNull(text, dgb(text))
         }
     }

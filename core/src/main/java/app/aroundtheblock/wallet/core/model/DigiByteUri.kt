@@ -78,8 +78,10 @@ data class DigiByteUri(
             if (assetAmount != null && assetAmount <= 0L) return null
 
             // Exact decimal conversion: a double would turn 5.00001234 into 500001233 sats and
-            // change a dust code. An amount that cannot be represented is dropped, not rounded.
-            val amountSats = params["amount"]?.let { DgbAmount.toSats(it) }
+            // change a dust code. An amount that cannot be represented, or whose comma is ambiguous
+            // ("1,000"), is dropped, not rounded. Read as the core's BRPaymentUriParse reads it (iOS):
+            // ASCII digits only, no mapping as for typed text.
+            val amountSats = params["amount"]?.let { DgbAmount.toSatsAscii(it) }
 
             return DigiByteUri(
                 address = address,

@@ -63,6 +63,17 @@ int main(void)
     ok = parse("digibyte:DTest123?amount=1.123456789") && eqs(U.address, "DTest123") && ! U.hasAmount;
     result("unrepresentable_amount_dropped", ok, NULL);
 
+    // An ambiguous comma ("1,000": a thousand or one?) is no amount (BRAmountParseDGB), so it is
+    // dropped like any other: the URI parses and the amount is left to the person. Digits are read
+    // as decoded, ASCII only. DigiByteUriTest.an_ambiguous_comma_amount_is_dropped_and_digits_are_not_mapped.
+    ok = parse("digibyte:DTest123?amount=1,000") && eqs(U.address, "DTest123") && ! U.hasAmount && U.amount == 0 &&
+         parse("digibyte:DTest123?amount=1%2C000") && eqs(U.address, "DTest123") && ! U.hasAmount &&
+         parse("digibyte:DTest123?amount=0,123") && ! U.hasAmount &&
+         parse("digibyte:DTest123?amount=\xD9\xA1") && ! U.hasAmount &&
+         parse("digibyte:DTest123?amount=0,29") && U.hasAmount && U.amount == 29000000 &&
+         parse("digibyte:DTest123?amount=1,000.5") && U.hasAmount && U.amount == 100050000000LL;
+    result("ambiguous_comma_amount_dropped", ok, NULL);
+
     ok = parse("digibyte:DTest123?label=Coffee%20Shop&message=Order%20%231") &&
          U.hasLabel && eqs(U.label, "Coffee Shop") && U.hasMessage && eqs(U.message, "Order #1");
     result("label_message_percent_decoded", ok, U.label);

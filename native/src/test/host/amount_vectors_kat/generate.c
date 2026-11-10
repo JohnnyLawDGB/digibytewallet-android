@@ -1,0 +1,308 @@
+// Vectors for BRAmountParse.h: the header's answers for DGB text -> satoshis (BRAmountParseDGB) and
+// satoshis -> text (BRAmountFormatDGB) on a fixed corpus, so a platform's mirror can be held to
+// exactly what the core computes. Android's DgbAmountVectorsTest reads this file on the host JVM;
+// nothing on that side computes an answer of its own for a line here. iOS calls the header itself
+// (Policy/AmountText.swift, PaymentRequest.swift, WalletSend.swift). Typed text is first mapped to
+// ASCII digits on both platforms (FiatText.asciiDigits, UsdCents.asciiDigits), which a line of the
+// header's answers cannot express: these lines are the header's reading of the text AS GIVEN, which
+// is also how a payment URI's amount is read. DgbAmountVectorsTest covers the mapping on top.
+//
+// Like fiat_vectors_kat, these are the header written down, not an independent source: the
+// independent expectations are the hand-written values in amount_parse_kat (DgbAmountTest's cases).
+// amount_vectors_kat/run.sh checks this file is current, and that the old double conversion
+// (-DAMOUNT_PARSE_VIA_DOUBLE_UNFIXED) writes a different one.
+//
+// Regenerate, from the android repo root:
+//   cc -std=c99 -I native/src/main/jni/digibytewallet-core -o /tmp/amount_vectors \
+//      native/src/test/host/amount_vectors_kat/generate.c \
+//   && /tmp/amount_vectors > native/src/test/host/amount_vectors_kat/vectors.txt
+
+#include "BRAmountParse.h"
+
+#include <inttypes.h>
+#include <stdio.h>
+#include <string.h>
+
+#define I64MAX INT64_C(9223372036854775807)
+
+// Text as one token: "..." with every byte outside '!'..'~', and '"' and '\', written \xHH.
+static void quoted(const char *s, size_t len)
+{
+    putchar('"');
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)s[i];
+        if (c < 0x21 || c > 0x7e || c == '"' || c == '\\') printf("\\x%02x", c);
+        else putchar(c);
+    }
+    putchar('"');
+}
+
+// A deterministic 64-bit LCG (Knuth's MMIX constants), so the corpus is the same on every host.
+static uint64_t g_lcg = UINT64_C(0x9e3779b97f4a7c15);
+static uint64_t next(void)
+{
+    g_lcg = g_lcg * UINT64_C(6364136223846793005) + UINT64_C(1442695040888963407);
+    return g_lcg >> 11;
+}
+
+static void parseLen(const char *s, size_t len)
+{
+    int64_t sats = 0;
+    printf("parse ");
+    quoted(s, len);
+    if (BRAmountParseDGB(s, len, &sats)) printf(" %" PRId64 "\n", sats);
+    else printf(" -\n");
+}
+
+static void parse(const char *s) { parseLen(s, strlen(s)); }
+
+static void formatLine(int64_t sats)
+{
+    char out[40];
+    size_t n = BRAmountFormatDGB(sats, out, sizeof(out));
+    printf("format %" PRId64 " ", sats);
+    quoted(out, n);
+    printf("\n");
+}
+
+// "5" with `ws` before it, after it, and on both sides; and `ws` alone.
+static void around(const char *ws)
+{
+    char b[64];
+    snprintf(b, sizeof(b), "%s5", ws); parse(b);
+    snprintf(b, sizeof(b), "5%s", ws); parse(b);
+    snprintf(b, sizeof(b), "%s0.29%s", ws, ws); parse(b);
+    snprintf(b, sizeof(b), "1%s000", ws); parse(b);
+    parse(ws);
+}
+
+// sats written several ways a person or a QR might write them; every one names the same amount.
+static void spellings(int64_t sats)
+{
+    char plain[40], b[96], g[96];
+    size_t n = BRAmountFormatDGB(sats, plain, sizeof(plain)), dot, i, k;
+    if (! n) return;
+    parse(plain);
+    for (dot = 0; dot < n && plain[dot] != '.'; dot++) {}
+    // eight decimals, trailing zeros typed
+    {
+        size_t fd = dot < n ? n - dot - 1 : 0;
+        snprintf(b, sizeof(b), "%s%s", plain, dot < n ? "" : ".");
+        for (k = fd; k < 8; k++) strcat(b, "0");
+        parse(b);
+        if (fd < 8) { strcat(b, "0"); parse(b); }   // nine typed decimals, the ninth a zero
+    }
+    // grouping commas in the whole part, with a point (or ".0" when there is none)
+    for (i = 0, k = 0; i < dot; i++) {
+        g[k++] = plain[i];
+        if ((dot - i - 1) % 3 == 0 && i + 1 < dot) g[k++] = ',';
+    }
+    g[k] = '\0';
+    snprintf(b, sizeof(b), "%s%s", g, dot < n ? plain + dot : ".0"); parse(b);
+    snprintf(b, sizeof(b), "%s%s", g, dot < n ? plain + dot : ""); parse(b);   // no point: refused when 2+ commas
+    // the lone decimal comma
+    if (dot < n) {
+        snprintf(b, sizeof(b), "%.*s,%s", (int)dot, plain, plain + dot + 1); parse(b);
+    }
+    // the satoshi count with an exponent, and the same with an explicit sign and leading zeros
+    snprintf(b, sizeof(b), "%" PRId64 "e-8", sats); parse(b);
+    snprintf(b, sizeof(b), "+00%" PRId64 "E-08", sats); parse(b);
+    snprintf(b, sizeof(b), "%" PRId64 "0e-9", sats); parse(b);
+    snprintf(b, sizeof(b), " \t%s\n", plain); parse(b);
+    snprintf(b, sizeof(b), "-%s", plain); parse(b);
+    // one satoshi either side
+    if (sats > 0) { BRAmountFormatDGB(sats - 1, b, sizeof(b)); parse(b); }
+    if (sats < I64MAX) { BRAmountFormatDGB(sats + 1, b, sizeof(b)); parse(b); }
+}
+
+int main(void)
+{
+    size_t i;
+
+    printf("# BRAmountParse.h vectors: the header's answers, written down. Generated by\n");
+    printf("# native/src/test/host/amount_vectors_kat/generate.c; do not edit (amount_vectors_kat checks it is current).\n");
+    printf("# Text is one token: \"...\", every byte outside '!'..'~' (and '\"', '\\\\') written \\xHH; it is UTF-8\n");
+    printf("# where it is valid UTF-8 (a reader decodes it, so an invalid byte reaches it as U+FFFD: refused either way).\n");
+    printf("# parse <text> <sats>     BRAmountParseDGB; '-' = not an amount\n");
+    printf("# format <sats> <text>    BRAmountFormatDGB\n");
+
+    // ---- empty, and whitespace: ASCII's six only -----------------------------------------------
+    parse(""); parse(" "); parse("   "); parse("\t"); parse("\n"); parse("\r\n"); parse("\f"); parse("\v");
+    parse(" \t\n\r\f\v5 \t\n\r\f\v");
+    around(" "); around("\t"); around("\n"); around("\r"); around("\f"); around("\v");
+    // Not whitespace to the core. Kotlin's trim() takes every one of the first group (Char.isWhitespace:
+    // Character.isWhitespace || isSpaceChar), so these are where the old Android reader said yes.
+    around("\xc2\xa0");                 // U+00A0 no-break space
+    around("\xe1\x9a\x80");             // U+1680 ogham space mark
+    around("\xe2\x80\x80"); around("\xe2\x80\x82"); around("\xe2\x80\x83"); around("\xe2\x80\x87");
+    around("\xe2\x80\x89"); around("\xe2\x80\x8a");   // U+2000, 2002, 2003, 2007 (figure), 2009, 200A
+    around("\xe2\x80\xa8"); around("\xe2\x80\xa9");   // U+2028 line, U+2029 paragraph separator
+    around("\xe2\x80\xaf");             // U+202F narrow no-break space (the French grouping space)
+    around("\xe2\x81\x9f");             // U+205F medium mathematical space
+    around("\xe3\x80\x80");             // U+3000 ideographic space
+    around("\x1c"); around("\x1d"); around("\x1e"); around("\x1f");   // the ASCII separators
+    // ...and these Kotlin never trimmed either.
+    around("\xc2\x85");                 // U+0085 next line
+    around("\xe2\x80\x8b");             // U+200B zero-width space
+    around("\xef\xbb\xbf");             // U+FEFF byte-order mark
+    around("\xe1\xa0\x8e");             // U+180E Mongolian vowel separator
+    around("\x01"); around("\x7f");
+    parseLen("\0", 1); parseLen("5\0", 2); parseLen("\0" "5", 2); parseLen("1\0" "5", 3);
+    parseLen(" 5 \0", 4);
+
+    // ---- digits: ASCII only (typed text is mapped to ASCII before the header reads it) ----------
+    parse("\xd9\xa1");                                  // U+0661 Arabic-Indic one
+    parse("\xd9\xa0.\xd9\xa5");                         // ٠.٥
+    parse("\xd9\xa1\xd9\xa2\xd9\xa3");                  // ١٢٣
+    parse("1\xd9\xa1"); parse("\xd9\xa1" "1");          // mixed
+    parse("\xd9\xa5\xd9\xab\xd9\xa5");                  // ٥٫٥: the Arabic decimal separator
+    parse("5\xd9\xab" "5"); parse("1\xd9\xac" "000");   // U+066B, U+066C with ASCII digits
+    parse("1\xd8\x8c" "5");                             // U+060C Arabic comma
+    parse("\xdb\xb1\xdb\xb2");                          // Extended Arabic-Indic (Persian) ۱۲
+    parse("\xe0\xa5\xa7.\xe0\xa5\xab");                 // Devanagari १.५
+    parse("\xe0\xa5\xa6.\xe0\xa5\xa8\xe0\xa5\xaf");     // Devanagari ०.२९
+    parse("\xef\xbc\x91\xef\xbc\x92");                  // full width １２
+    parse("\xf0\x9d\x9f\x8f");                          // U+1D7CF mathematical bold one
+    parse("\xc2\xbd"); parse("\xe2\x85\xab");           // ½, Ⅻ
+    parse("1e\xd9\xa2");                                // an Arabic-Indic exponent digit
+    parse("\xef\xbc\x8e" "5"); parse("1\xef\xbc\x8c" "5");   // full-width point and comma
+    parse("\xd9\xa1,\xd9\xa0\xd9\xa0\xd9\xa0");             // ١,٠٠٠: once mapped, "1,000"
+    parse("\xd9\xa0,\xd9\xa2\xd9\xa9");                      // ٠,٢٩: once mapped, "0,29"
+    parse("1,\xd9\xa0\xd9\xa0\xd9\xa0"); parse("1,00\xd9\xa0");   // mixed after a comma
+
+    // ---- bytes that are not UTF-8 ---------------------------------------------------------------
+    parse("\xff"); parse("5\xff"); parse("\xff" "5"); parse("\xc2"); parse("5\xc2");
+    parse("\xc0\xb0"); parse("\xe0\x80\xb5"); parse("\xed\xa0\x80"); parse("\x80"); parse("1\xa0");
+
+    // ---- separators -------------------------------------------------------------------------------
+    {
+        static const char *t[] = {
+            "1,234.5", "1,234,567.5", "1,234,567.50000000", "0,29", "0,00014100", "1,234", "1,2,3", "1,234,567",
+            ",5", "5,", ",", ",,", ".", "..", ",.", ".,", "1,,5", "1,,5.0", "1.2,3", "1.5,", ",1.5", "1,5,",
+            "1.,5", "1,.5", "1,000,000.00000001", "-,5", "+,5", ",+5.0", ",-5.0", "1e1,0.0", "1,e5", "1e5,",
+            "1e,5", "1,5e2", "1,5e-1", "0,000000001", "0,00000001", "12,34,56.7", "1,2.3,4", "1.2.3", ",,,1.0",
+            "1.0,,,", " 0,5 ", "0 ,5", ".,5", "5.,", "1,2", "1,23456789", "1,234567891",
+            // A lone comma before EXACTLY three digits is ambiguous ("1,000": a thousand or one?).
+            "1,000", "25,500", "0,123", " 1,000 ", "\t1,000\n", "1,000e2", "1,000E-2", "1,000e", ",123",
+            "0,000", "-0,000", "+1,000", "-1,000", "1,000 ", "1, 000", "1 ,000", "1,000,", "1,000x",
+            "1,0000", "1,00", "1,0", "1,0001", "1,00e2", "1,5e3", "12,3456", "1,", "1,000.50",
+            "1,234,567.8", "1,000.0", "1,000,000", "999,999", "21,000", "0,100", "0,10", "0,1000",
+        };
+        for (i = 0; i < sizeof(t) / sizeof(t[0]); i++) parse(t[i]);
+    }
+
+    // ---- decimals ----------------------------------------------------------------------------------
+    {
+        static const char *t[] = {
+            "0.00000001", "0.000000001", "0.00000000", "0.000000000", "0.0000000000000000000000", "1.12345678",
+            "1.123456789", "1.100000000", "1.1000000000000000000000", "1.00000000", "1.000000000000000000000",
+            "0.000000010", "0.0000000100000", "0.0000000000000000000000000000000000001", ".00000001", ".000000001",
+            "1.", "5.", ".5", "0.", ".0", "00.", ".00", "0.29", "0.57", "2.3", "10.7", "19.99", "5.00001234",
+            "1.000000005", "0.99999999", "0.999999999", "12345678.12345678", "12345678.123456789",
+        };
+        for (i = 0; i < sizeof(t) / sizeof(t[0]); i++) parse(t[i]);
+    }
+
+    // ---- the supply and the Long ceiling ----------------------------------------------------------------
+    {
+        static const char *t[] = {
+            "21000000000", "21000000000.00000001", "21,000,000,000", "21,000,000,000.0", "2.1e10", "21e9",
+            "92233720368.54775807", "92233720368.54775808", "92233720368.5477580700", "92233720368.547758070",
+            "92233720368.547758071", "92233720368", "92233720369", "92233720367.99999999", "92,233,720,368.54775807",
+            "92233720368,54775807", "9223372036854775807e-8", "9223372036854775808e-8", "9223372036854775806e-8",
+            "0.9223372036854775807e11", "9.223372036854775807e10", "9.223372036854775808e10",
+            "92233720368.54775807e0", "922337203685.4775807e-1", "92233720368547758.07e-6",
+            "99999999999999999", "99999999999", "100000000000", "1e11", "1e10", "9e10", "9.3e10",
+            "18446744073709551615e-8", "18446744073709551616e-8", "9223372036854775807", "-92233720368.54775807",
+            "-92233720368.54775808", "92233720368.547758079", "0092233720368.54775807",
+        };
+        for (i = 0; i < sizeof(t) / sizeof(t[0]); i++) parse(t[i]);
+    }
+
+    // ---- leading zeros, signs --------------------------------------------------------------------------
+    {
+        static const char *t[] = {
+            "007", "00.01", "000000000000000000000000000000000001", "0001e2", "-0001", "+00", "0", "00", "000.000",
+            "+1", "-1", "-0", "+0", "-0.0", "-.0", "+.5", "-0e5", "-0.000000001", "--1", "++1", "+-1", "-+1", "1-",
+            "1+", "+", "-", "+.", "-.", " -5", "- 5", "+ 5", "5 -", "1+2", "1-2", "\xe2\x88\x92" "1", "\xef\xbc\x8b" "1",
+        };
+        for (i = 0; i < sizeof(t) / sizeof(t[0]); i++) parse(t[i]);
+    }
+
+    // ---- exponents ------------------------------------------------------------------------------------------
+    {
+        static const char *t[] = {
+            "1e2", "1E2", "1e+2", "1e-2", "1e-8", "1e-9", "15e-8", "1.5e-8", "1.5e-7", "1e", "1e+", "1e-", "e5", "E5",
+            ".e5", "5.e3", "5.E-3", ".5e1", "1e2.5", "1ee2", "1e2e3", "1e 2", "1 e2", "1e0", "1e-0", "1e+0", "0e0",
+            "1e00000000000000002", "1e-00000000000000008", "1e10", "1e11", "1e+10", "100000000000e-11",
+            "100000000000e-19", "100000000000e-20", "1E-8", "1e2147483647", "1e2147483648", "1e-2147483648",
+            "1e-2147483649", "1e9999999999", "1e99999999999", "1e50000000", "1e999999999", "1e-50000000",
+            "0e2147483647", "0e2147483648", "0e2147483649", "0e-2147483647", "0e-2147483648", "0e-2147483649",
+            "0.0e2147483649", "0.0e-2147483647", "0.0e-2147483648", "0.00e2147483650", "-0e2147483648",
+            "0e9999999999", "0e00000000002147483648", "0.5e2147483648", "1e+-2", "1e-+2", "1e2-", "1e2+", "e",
+            "1.5e", "1,5e", "1d", "1f", "1.5D", "1.5F", "1e2d", "NaN", "nan", "Infinity", "-Infinity", "inf",
+            "0x10", "0X1A", "0x1p3", "0x1.8p1", "0b1", "1_000", "1 000", "5 DGB", "$5", "abc", "DGB", "1.2.3",
+        };
+        for (i = 0; i < sizeof(t) / sizeof(t[0]); i++) parse(t[i]);
+    }
+
+    // ---- length: no limit on the text, a bound on what it can mean ----------------------------------------
+    {
+        static char t[20100];
+        memset(t, '0', 300); memcpy(t + 300, "1", 2); parse(t);                       // 300 leading zeros
+        memcpy(t, "1.", 2); memset(t + 2, '0', 400); t[402] = '\0'; parse(t);         // 1. then 400 zeros
+        memcpy(t, "0.", 2); memset(t + 2, '0', 400); memcpy(t + 402, "1", 2); parse(t);   // 401 decimals
+        memcpy(t, "1", 1); memset(t + 1, '0', 1000); memcpy(t + 1001, "e-1000", 7); parse(t);   // 1 DGB
+        memcpy(t, "1", 1); memset(t + 1, '0', 1000); memcpy(t + 1001, "e-1001", 7); parse(t);   // 0.1 DGB
+        memcpy(t, "1", 1); memset(t + 1, '0', 1000); memcpy(t + 1001, "1e-1000", 8); parse(t);  // 2 significant
+        memset(t, '9', 10000); t[10000] = '\0'; parse(t);
+        memcpy(t, "0.", 2); memset(t + 2, '0', 20000); t[20002] = '\0'; parse(t);   // zero, 20000 decimals
+        parse("1234567890123456789e-8"); parse("12345678901234567890e-8"); parse("1234567890123456789e-9");
+        parse("123456789012345678901234e-16"); parse("1234567890123456789012345e-17");
+        parse("10000000000000000000000000e-18"); parse("1000000000000000000000001e-16");
+        parse("100000000000000000000000000000e-30"); parse("0.10000000000000000000000000000");
+        parse("00000000000000000000000000000000000000000000000000.00000001");
+    }
+
+    // ---- random text over the characters the parser treats specially ---------------------------------------
+    {
+        static const char alpha[] = "0123456789000111.,.,+-eE \t";
+        char b[24];
+        for (i = 0; i < 4000; i++) {
+            size_t len = 1 + next() % 14, k;
+            for (k = 0; k < len; k++) {
+                uint64_t r = next();
+                b[k] = (r % 3) ? (char)('0' + (r >> 8) % 10) : alpha[(r >> 8) % (sizeof(alpha) - 1)];
+            }
+            b[len] = '\0';
+            parse(b);
+        }
+    }
+
+    // ---- amounts written every way, at every magnitude -------------------------------------------------------
+    {
+        static const int64_t named[] = { 0, 1, 9, 10, 99, 100, 12345678, 29000000, 57000000, 99999999, 100000000,
+                                         100000001, 150000000, 500001234, 123456789, 123450000000LL,
+                                         2100000000000000000LL, 2100000000000000001LL, I64MAX, I64MAX - 1,
+                                         922337203685477580LL, 1000000000000000000LL };
+        for (i = 0; i < sizeof(named) / sizeof(named[0]); i++) spellings(named[i]);
+        for (i = 0; i < 400; i++) {
+            uint64_t r = next();
+            int digits = 1 + (int)(next() % 19);
+            uint64_t mod = 1;
+            for (int k = 0; k < digits; k++) mod *= 10;
+            int64_t sats = (int64_t)(r % mod);
+            if (sats < 0) sats = -sats;
+            spellings(sats);
+        }
+    }
+
+    // ---- format ---------------------------------------------------------------------------------------------
+    {
+        static const int64_t s[] = { 0, 1, 9, 10, 99, 100, 101, 12345678, 29000000, 99999999, 100000000, 100000001,
+                                     123456789, 500001234, 123450000000LL, 2100000000000000000LL, I64MAX, I64MAX - 1 };
+        for (i = 0; i < sizeof(s) / sizeof(s[0]); i++) formatLine(s[i]);
+        for (i = 0; i < 200; i++) formatLine((int64_t)(next() % (uint64_t)I64MAX));
+    }
+    return 0;
+}
