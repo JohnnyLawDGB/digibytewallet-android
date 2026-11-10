@@ -18,7 +18,9 @@
 //   independent_profiles  every profile and format, four seeds, first 10 + 10, against
 //                      vectors/recovery-derivation/independent.txt (an implementation independent of the core).
 //   address_probes     BRRecoveryAddressForKey refuses, without asserting, a NULL key, a buffer below
-//                      BR_RECOVERY_ADDRESS_SLOT and P2WPKH of an uncompressed key.
+//                      BR_RECOVERY_ADDRESS_SLOT, P2WPKH of an uncompressed key, a key with neither public key
+//                      nor secret (probed as the process's FIRST secp256k1 use, where the core's context is
+//                      still NULL), and P2WPKH / P2SH-P2WPKH of an off-curve public key (zero hash160).
 //   GUARDS (every arm): profile_count, hard_bit, seed_match, seed_bounds, phrase_with_nul, derive_refusals,
 //                      slot_positions, independent_vectors, caller_seed_untouched, address_probes.
 //
@@ -496,6 +498,23 @@ static void case_independent_profiles(const char *path)
     end("independent_profiles");
 }
 
+// Set at the top of main, before anything touches secp256k1: what a zeroed BRKey encoded to, per format.
+static int g_zeroKeyFirstUse[BR_DERIVATION_FORMAT_COUNT];
+static int g_zeroKeyFirstUseRan = 0;
+
+static void probe_zero_key_first_use(void)
+{
+    char buf[BR_RECOVERY_ADDRESS_SLOT];
+    BRKey zero;
+
+    memset(&zero, 0, sizeof(zero));
+    for (int f = 0; f < BR_DERIVATION_FORMAT_COUNT; f++) {
+        memset(buf, 'x', sizeof(buf));
+        g_zeroKeyFirstUse[f] = BRRecoveryAddressForKey(&zero, f, buf, sizeof(buf)) || buf[0];
+    }
+    g_zeroKeyFirstUseRan = 1;
+}
+
 // BRRecoveryAddressForKey refuses what the core's encoders would assert on (asserts are live in this build:
 // an assert here aborts the run and the case never reports).
 static void case_address_probes(void)
@@ -526,6 +545,48 @@ static void case_address_probes(void)
         failf("address_probes", "P2WPKH of an uncompressed key was encoded");
     if (! BRRecoveryAddressForKey(&uncomp, BR_DERIVATION_FORMAT_P2PKH, buf, sizeof(buf)) || buf[0] != 'D')
         failf("address_probes", "P2PKH of an uncompressed key was not encoded");
+    // A key with neither public key nor secret: refused (first use measured at the top of main, again here).
+    if (! g_zeroKeyFirstUseRan) failf("address_probes", "the first-use probe did not run");
+    for (int f = 0; f < BR_DERIVATION_FORMAT_COUNT; f++) {
+        BRKey zero;
+
+        if (g_zeroKeyFirstUse[f]) failf("address_probes", "format %d: a zeroed key was encoded (first secp256k1 use)", f);
+        memset(&zero, 0, sizeof(zero));
+        memset(buf, 'x', sizeof(buf));
+        if (BRRecoveryAddressForKey(&zero, f, buf, sizeof(buf)) || buf[0]) failf("address_probes", "format %d: a zeroed key was encoded", f);
+    }
+    // A secret set by hand, no public key: still encoded, the same as BRKeySetSecret's key.
+    for (int f = 0; f < BR_DERIVATION_FORMAT_COUNT; f++) {
+        BRKey hand;
+        char want[BR_RECOVERY_ADDRESS_SLOT];
+
+        memset(&hand, 0, sizeof(hand));
+        hand.secret = secret;
+        hand.compressed = 1;
+        if (! BRRecoveryAddressForKey(&comp, f, want, sizeof(want)) || ! BRRecoveryAddressForKey(&hand, f, buf, sizeof(buf)) ||
+            strcmp(want, buf)) failf("address_probes", "format %d: a hand-set secret did not encode as its key", f);
+        BRKeyClean(&hand);
+    }
+    // An off-curve public key (BRKeySetPubKey keeps the bytes and returns 0; its hash160 reads as zero): refused
+    // in every format.
+    {
+        BRKey off;
+        uint8_t pub[33] = { 0x02 };
+        int found = 0;
+
+        for (int x = 1; x < 256 && ! found; x++) {
+            pub[32] = (uint8_t)x;
+            if (! BRKeySetPubKey(&off, pub, sizeof(pub))) found = 1;
+        }
+        if (! found) failf("address_probes", "no off-curve x found");
+        else if (! UInt160IsZero(BRKeyHash160(&off))) failf("address_probes", "an off-curve key has a non-zero hash160");
+        for (int f = 0; found && f < BR_DERIVATION_FORMAT_COUNT; f++) {
+            memset(buf, 'x', sizeof(buf));
+            if (BRRecoveryAddressForKey(&off, f, buf, sizeof(buf)) || buf[0])
+                failf("address_probes", "format %d: an off-curve public key was encoded (%.40s)", f, buf);
+        }
+        BRKeyClean(&off);
+    }
     BRKeyClean(&comp);
     BRKeyClean(&uncomp);
     // The overflow bound: more slots than SIZE_MAX bytes hold is refused before anything is written. Only a
@@ -541,6 +602,7 @@ static void case_address_probes(void)
 
 int main(int argc, char **argv)
 {
+    probe_zero_key_first_use();   // first, while the core's secp256k1 context is still uninitialised
     begin();
     if (KOTLIN_PROFILE_COUNT != BR_DERIVATION_PROFILE_COUNT) failf("profile_count", "Kotlin %d, core %d", KOTLIN_PROFILE_COUNT, BR_DERIVATION_PROFILE_COUNT);
     {
