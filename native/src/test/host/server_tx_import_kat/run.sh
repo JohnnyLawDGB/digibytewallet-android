@@ -77,7 +77,12 @@ build() {
 }
 
 SAN_RE='ERROR: AddressSanitizer|ERROR: LeakSanitizer|runtime error:'
-export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1"
+# Leaks are checked only in the leak pass below. Every other arm runs with the leak checker off, whatever the caller's
+# environment sets (CI exports LSAN_OPTIONS=detect_leaks=1): KAT_RED_NO_DUP_CHECK leaks by construction (a record it
+# re-registers is neither kept nor freed), and a leak there is not the failure it must show. Every other sanitizer
+# report still counts as a fault in every arm.
+export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 detect_leaks=0"
+export LSAN_OPTIONS="detect_leaks=0"
 export UBSAN_OPTIONS="halt_on_error=1 print_stacktrace=1"
 FAIL=0
 
@@ -126,8 +131,8 @@ red KAT_RED_NO_DUP_CHECK "import_not_wallet_again dup_confirmed dup_confirmed_de
 # Every path frees what it parsed or hands it to the wallet: the bridge and the core alike.
 printf '#include <stdlib.h>\nint main(void){return 0;}\n' > "$BUILD_DIR/probe.c"
 if clang -fsanitize=address "$BUILD_DIR/probe.c" -o "$BUILD_DIR/probe" 2>/dev/null &&
-   ASAN_OPTIONS="detect_leaks=1 abort_on_error=0" "$BUILD_DIR/probe" >/dev/null 2>&1; then
-    OUT="$(ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 detect_leaks=1" timeout 120 "$BUILD_DIR/green" 2>&1)"; RC=$?
+   ASAN_OPTIONS="detect_leaks=1 abort_on_error=0" LSAN_OPTIONS="detect_leaks=1" "$BUILD_DIR/probe" >/dev/null 2>&1; then
+    OUT="$(ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 detect_leaks=1" LSAN_OPTIONS="detect_leaks=1" timeout 120 "$BUILD_DIR/green" 2>&1)"; RC=$?
     if [ "$RC" -eq 0 ] && ! <<<"$OUT" grep -Eq "$SAN_RE"; then
         echo "  [leaks] the green arm is leak-clean"
     else
@@ -136,7 +141,7 @@ if clang -fsanitize=address "$BUILD_DIR/probe.c" -o "$BUILD_DIR/probe" 2>/dev/nu
     build "$BUILD_DIR/red_KAT_RED_NO_FREE_REFUSED" -DKAT_RED_NO_FREE_REFUSED ||
         { echo "GATE FAILURE: the KAT_RED_NO_FREE_REFUSED arm did not build"; FAIL=1; }
     if [ -x "$BUILD_DIR/red_KAT_RED_NO_FREE_REFUSED" ]; then
-        OUT="$(ASAN_OPTIONS="halt_on_error=1 abort_on_error=0 detect_leaks=1" timeout 120 "$BUILD_DIR/red_KAT_RED_NO_FREE_REFUSED" 2>&1)"; RC=$?
+        OUT="$(ASAN_OPTIONS="halt_on_error=1 abort_on_error=0 detect_leaks=1" LSAN_OPTIONS="detect_leaks=1" timeout 120 "$BUILD_DIR/red_KAT_RED_NO_FREE_REFUSED" 2>&1)"; RC=$?
         if [ "$RC" -ne 0 ] && <<<"$OUT" grep -q "ERROR: LeakSanitizer" \
            && ! <<<"$OUT" grep -Eq "ERROR: AddressSanitizer|runtime error:" \
            && <<<"$OUT" grep -q "^PASS: server_tx_import_kat" && ! <<<"$OUT" grep -q "^SCENARIO-FAIL"; then
