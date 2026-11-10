@@ -86,6 +86,26 @@ class DgbAmountTest {
         assertEquals(0L, DgbAmount.toSats("0"))
     }
 
+    /**
+     * The text typed is the amount signed, and iOS reads it with the core's BRAmountParseDGB as typed.
+     * Kotlin's trim() took the no-break space and every other Unicode space, so "5 " was 5 DGB
+     * here and no amount on iOS. Non-ASCII digits were already refused (toBigDecimalOrNull screens
+     * for ASCII digits) and still are: DGB text is not digit-mapped on either platform.
+     */
+    @Test fun `only ASCII whitespace and ASCII digits, as the core and iOS read them`() {
+        assertEquals(500_000_000L, DgbAmount.toSats(" \t\n\r\u000C\u000B5 \t\n\r\u000C\u000B"))
+        assertNull(DgbAmount.toSats("5 ")) // no-break space
+        assertNull(DgbAmount.toSats(" 0.29")) // narrow no-break space
+        assertNull(DgbAmount.toSats("　5")) // ideographic space
+        assertNull(DgbAmount.toSats("\u001c5")) // U+001C..U+001F are separators, not whitespace
+        assertNull(DgbAmount.toSats("١")) // Arabic-Indic one
+        assertNull(DgbAmount.toSats("٠.٥"))
+        assertNull(DgbAmount.toSats("१.५")) // Devanagari
+        assertNull(DgbAmount.toSats("１")) // full width
+        assertNull(DgbAmount.toSats("1\u0000")) // an embedded NUL is a character
+        assertEquals("", UsdCents.previewForDgb("١", 0.01))
+    }
+
     @Test fun `format is plain decimal with no exponent and no grouping`() {
         assertEquals("0.29", DgbAmount.format(29_000_000L))
         assertEquals("5.00001234", DgbAmount.format(500_001_234L))

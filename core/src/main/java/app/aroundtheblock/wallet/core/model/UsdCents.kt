@@ -42,8 +42,8 @@ object UsdCents {
         val text = asciiDigits(input)
         var start = 0
         var end = text.length
-        while (start < end && isAsciiSpace(text[start])) start++
-        while (end > start && isAsciiSpace(text[end - 1])) end--
+        while (start < end && DgbAmount.isAsciiSpace(text[start])) start++
+        while (end > start && DgbAmount.isAsciiSpace(text[end - 1])) end--
 
         var commas = 0
         var dots = 0
@@ -91,10 +91,6 @@ object UsdCents {
         }
         return value
     }
-
-    /** BRAmountParse.h's _BRAmountIsSpace. */
-    private fun isAsciiSpace(c: Char): Boolean =
-        c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\u000C' || c == '\u000B'
 
     /**
      * Every Unicode decimal digit (general category Nd: Arabic-Indic, Extended Arabic-Indic,
