@@ -13,6 +13,8 @@
 #   SEAMS  both sides reach BRPeerManagerApplyServerHeight and BRTransactionIsSigned through recorders in the _main.c
 #          (-D renames on the bridge's and the core's unit only), so a scenario can force an answer the shipped
 #          manager or parser no longer gives (TAKEN; an unsigned parse) and every call is compared.
+#   RED    -DKAT_RED_NO_FREE_REFUSED (core side only, Linux only: needs LeakSanitizer): a tx the wallet refused is not
+#          freed. Every scenario passes; the leak checker must report a leak, and the green arm must be leak-clean.
 #   GATES  the bridge functions this suite compiles are the ones that ship (they are compiled, not copied); the
 #          header is included twice in one unit and compiles clean under -Wall -Wextra -Werror.
 set -uo pipefail   # NOT -e: a comparison arm's non-zero exit is captured
@@ -131,8 +133,21 @@ if clang -fsanitize=address "$BUILD_DIR/probe.c" -o "$BUILD_DIR/probe" 2>/dev/nu
     else
         echo "GATE FAILURE: the green arm under the leak checker (rc=$RC)"; <<<"$OUT" grep -E -A8 "$SAN_RE" | head -24; FAIL=1
     fi
+    build "$BUILD_DIR/red_KAT_RED_NO_FREE_REFUSED" -DKAT_RED_NO_FREE_REFUSED ||
+        { echo "GATE FAILURE: the KAT_RED_NO_FREE_REFUSED arm did not build"; FAIL=1; }
+    if [ -x "$BUILD_DIR/red_KAT_RED_NO_FREE_REFUSED" ]; then
+        OUT="$(ASAN_OPTIONS="halt_on_error=1 abort_on_error=0 detect_leaks=1" timeout 120 "$BUILD_DIR/red_KAT_RED_NO_FREE_REFUSED" 2>&1)"; RC=$?
+        if [ "$RC" -ne 0 ] && <<<"$OUT" grep -q "ERROR: LeakSanitizer" \
+           && ! <<<"$OUT" grep -Eq "ERROR: AddressSanitizer|runtime error:" \
+           && <<<"$OUT" grep -q "^PASS: server_tx_import_kat" && ! <<<"$OUT" grep -q "^SCENARIO-FAIL"; then
+            echo "  [red KAT_RED_NO_FREE_REFUSED] every scenario passes and the leak checker reports the unfreed tx"
+        else
+            echo "GATE FAILURE: the KAT_RED_NO_FREE_REFUSED arm (rc=$RC) did not show exactly a leak"
+            <<<"$OUT" grep -E "SCENARIO-FAIL|$SAN_RE" | head -8; FAIL=1
+        fi
+    fi
 else
-    echo "  [leaks] skipped: LeakSanitizer is not available here"
+    echo "  [leaks] skipped: LeakSanitizer is not available here (the green leak pass and KAT_RED_NO_FREE_REFUSED run on Linux)"
 fi
 
 if [ "$FAIL" -eq 0 ]; then

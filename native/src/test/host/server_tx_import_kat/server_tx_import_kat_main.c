@@ -19,6 +19,14 @@
 //
 // Comparison arms (server_tx_import_kat_core.c): KAT_RED_KEEP_UNPROVABLE and KAT_RED_NO_DUP_CHECK each change one call
 // in the core's procedure; run.sh requires each to fail exactly its scenarios and pass every other one.
+// KAT_RED_NO_FREE_REFUSED keeps the tx the wallet refused (import_refused_freed) unfreed; only the leak checker can
+// see that, so run.sh runs that arm only where LeakSanitizer exists (Linux) and requires a leak report from it.
+//
+// THE NOTE'S SCOPE. The bridge kept the unprovable-height note in one static for the whole process
+// (g_unprovableServerHeight), so a height noted before a wallet swap or a manager rebuild is still taken by the next
+// takeUnprovableServerHeight. BRServerTxUnprovableNote is caller-owned; the Android adoption must keep ONE static note
+// in the bridge, shared by registerRawTransaction, confirmTransaction and takeUnprovableServerHeight, so its scope stays
+// per-process. A note owned by the wallet or the manager would drop a noted height at a swap or rebuild.
 #include <assert.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -313,7 +321,7 @@ static Snap snapCore(UInt256 hash) { return snap(&g_fx[1], hash); }
 
 // ---- scenarios --------------------------------------------------------------------------------------------------
 enum { PRE_NONE, PRE_PENDING, PRE_CONFIRMED, PRE_FOREIGN_PENDING };
-enum { BYTES_WALLET, BYTES_FOREIGN, BYTES_UNSIGNED, BYTES_GARBAGE, BYTES_EMPTY, BYTES_NULL };
+enum { BYTES_WALLET, BYTES_FOREIGN, BYTES_UNSIGNED, BYTES_GARBAGE, BYTES_EMPTY, BYTES_NULL, BYTES_OVER };
 
 typedef struct {
     const char *name;
@@ -341,6 +349,8 @@ static Bytes bytesFor(int which, Fx *f, uint8_t seedByte)
         case BYTES_WALLET:   walletScript(f->w, spk, &spkLen); tx = payTx(spk, spkLen, 400000, seedByte, 1); break;
         case BYTES_FOREIGN:  foreignScript(spk, &spkLen);      tx = payTx(spk, spkLen, 400000, seedByte, 1); break;
         case BYTES_UNSIGNED: walletScript(f->w, spk, &spkLen); tx = payTx(spk, spkLen, 400000, seedByte, 0); break;
+        // pays the wallet, one output above MAX_MONEY: the wallet refuses it and keeps no record (it is freed)
+        case BYTES_OVER:     walletScript(f->w, spk, &spkLen); tx = payTx(spk, spkLen, MAX_MONEY + 1, seedByte, 1); break;
         case BYTES_GARBAGE:  r.len = 7; r.buf = malloc(r.len); memset(r.buf, 0xEE, r.len); return r;
         case BYTES_EMPTY:    r.len = 0; r.buf = malloc(1); return r;
         default:             return r;
@@ -566,6 +576,7 @@ int main(int argc, char **argv)
         { "import_unsigned_form",     PRE_NONE,      BYTES_UNSIGNED,1, 0, 0, H,           T,        -1, BR_SERVER_TX_IMPORTED,            0,      1, TX_UNCONFIRMED, 1 },
         { "import_unsigned",          PRE_NONE,      BYTES_WALLET,  1, 0, 0, H,           T,        -1, BR_SERVER_TX_UNSIGNED,            0,      0, 0,              0, 1 },
         { "import_not_wallet",        PRE_NONE,      BYTES_FOREIGN, 1, 0, 0, H,           T,        -1, BR_SERVER_TX_NOT_WALLET,          0,      1, TX_UNCONFIRMED, 0 },
+        { "import_refused_freed",     PRE_NONE,      BYTES_OVER,    1, 0, 0, H,           T,        -1, BR_SERVER_TX_NOT_WALLET,          0,      0, 0,              0 },
         { "import_not_wallet_again",  PRE_FOREIGN_PENDING, BYTES_FOREIGN, 1, 0, 0, H,     T,        -1, BR_SERVER_TX_ALREADY_PENDING,     0,      1, TX_UNCONFIRMED, 1 },
         { "import_rechecking",        PRE_NONE,      BYTES_WALLET,  1, 0, 0, H,           T,        -1, BR_SERVER_TX_IMPORTED,            0,      1, TX_UNCONFIRMED, 1 },
         { "import_no_filter_peer",    PRE_NONE,      BYTES_WALLET,  0, 0, 0, H,           T,        -1, BR_SERVER_TX_IMPORTED,            0,      1, TX_UNCONFIRMED, 1 },
