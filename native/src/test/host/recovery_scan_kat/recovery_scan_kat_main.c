@@ -37,7 +37,6 @@
 
 #include "BRRecoveryScan.h"
 
-#define BIG_BOUND_SECONDS 10.0
 
 static int g_failed = 0;
 
@@ -726,75 +725,157 @@ static void used_unparseable_tx_skipped(void)
     ck(BRRecoveryScanUsedHighest(&u, 0) == -1, "and they add nothing");
 }
 
-static void used_large_inputs(void)
+// ---- cost -------------------------------------------------------------------------------------
+// The lookup decides how many coins and outputs there are, so matching must stay O(n log n). Wall time
+// differs by machine (a CI runner under ASan is several times slower than a desktop), so the cost check
+// is a RATIO: the same workload at full size and at a tenth of every dimension, matching only (inputs are
+// built before the clock starts), each the fastest of a few runs, coins and outputs timed apart. Measured
+// on macOS under ASan: the header's matcher 10.4x (coins) and 10.1x (outputs, parsing included); a
+// linear-scan matcher (quadratic overall) 88.5x and 52.0x. COST_RATIO_BOUND sits between them.
+// COST_ABSOLUTE_BOUND is only a backstop against a hang (the quadratic matcher took 26 s and 36 s here).
+#define COST_RATIO_BOUND 40.0
+#define COST_ABSOLUTE_BOUND 60.0
+#define COST_REPEATS 3
+
+static double seconds(clock_t start) { return (double)(clock() - start) / CLOCKS_PER_SEC; }
+
+// A workload of D derived addresses (two thirds receive), U coin addresses and T transactions of O outputs.
+typedef struct {
+    size_t D, U, T, O;
+    char (*text)[76];
+    BRRecoveryScanAddress *a;
+    BRRecoveryScanSlot *s;
+    char (*coin)[76];
+    uint8_t **tx;
+    size_t *txLen;
+} Workload;
+
+static void workloadBuild(Workload *w, size_t D, size_t U, size_t T, size_t O)
 {
-    // A profile's widest windows in two encodings' worth of addresses (6000), 200000 coins the lookup
-    // names (most on addresses not ours) and 2000 transactions of 100 outputs.
-    const size_t D = 6000, U = 200000, T = 2000, O = 100;
-    char (*text)[76] = malloc(D * sizeof(*text)), addr[76];
-    BRRecoveryScanAddress *a = malloc(D * sizeof(*a));
-    BRRecoveryScanSlot *s = malloc(D * sizeof(*s));
+    size_t i, k, j, rx = 2 * D / 3, ch = D - rx;
     Out *outs = malloc(O * sizeof(*outs));
-    uint8_t *tx = malloc(64 + O * 40);
-    BRRecoveryScanUsed u;
-    size_t i, k, hits = 0, len;
-    clock_t start;
-    double secs;
+    memset(w, 0, sizeof(*w));
+    w->D = D; w->U = U; w->T = T; w->O = O;
+    w->text = malloc(D * sizeof(*w->text));
+    w->a = malloc(D * sizeof(*w->a));
+    w->s = malloc(D * sizeof(*w->s));
+    w->coin = malloc(U * sizeof(*w->coin));
+    w->tx = malloc(T * sizeof(*w->tx));
+    w->txLen = malloc(T * sizeof(*w->txLen));
+    // Receive addresses: two encodings' worth (tags 6 and 7) of rx/2 indices; change likewise of ch/2.
     for (i = 0; i < D; i++) {
-        int chain = i < 4000 ? 0 : 1;
-        int32_t idx = chain == 0 ? (int32_t)(i % 2000) : (int32_t)((i - 4000) % 1000);
-        addressOf(text[i], (uint8_t)(i < 2000 || (i >= 4000 && i < 5000) ? 6 : 7), chain, idx);
-        a[i].address = text[i]; a[i].chain = chain; a[i].index = idx;
+        int chain = i < rx ? 0 : 1;
+        size_t half = chain == 0 ? rx / 2 : ch / 2, off = chain == 0 ? i : i - rx;
+        int32_t idx = (int32_t)(off % half);
+        addressOf(w->text[i], (uint8_t)(off < half ? 6 : 7), chain, idx);
+        w->a[i].address = w->text[i]; w->a[i].chain = chain; w->a[i].index = idx;
     }
-    start = clock();
-    BRRecoveryScanUsedBegin(&u, a, D, s, D);
+    // One coin in 1000 names a receive address of tag 6, at 1499 down to 1300; the rest are strangers.
     for (k = 0; k < U; k++) {
-        // One in 1000 names a receive address of tag 6, at 1499 down to 1300; the rest are strangers.
-        if (k % 1000 == 0) addressOf(addr, 6, 0, (int32_t)(1499 - k / 1000));
-        else addressOf(addr, 8, 0, (int32_t)k);
-        hits += (size_t)BRRecoveryScanUsedMarkAddress(&u, addr);
+        if (k % 1000 == 0) addressOf(w->coin[k], 6, 0, (int32_t)(1499 - k / 1000));
+        else addressOf(w->coin[k], 8, 0, (int32_t)k);
     }
+    // The last transaction's last output pays change index 777 (tag 7); everything else pays strangers.
     for (k = 0; k < T; k++) {
-        size_t m = 0, j;
         for (j = 0; j < O; j++) {
             outs[j].sat = 1;
-            // The last transaction pays change index 777 (tag 7); everything else pays strangers.
             if (k == T - 1 && j == O - 1) outs[j].len = p2pkhScript(outs[j].script, 7, 1, 777);
             else outs[j].len = p2pkhScript(outs[j].script, 9, (int)(j & 1), (int32_t)(k * O + j));
         }
-        len = rawTx(tx, 64 + O * 40, outs, O);
-        BRRecoveryScanUsedMarkRawTx(&u, tx, len, &m);
-        hits += m;
+        w->tx[k] = malloc(64 + O * 40);
+        w->txLen[k] = rawTx(w->tx[k], 64 + O * 40, outs, O);
     }
-    secs = (double)(clock() - start) / CLOCKS_PER_SEC;
+    free(outs);
+}
+
+static void workloadFree(Workload *w)
+{
+    size_t k;
+    for (k = 0; k < w->T; k++) free(w->tx[k]);
+    free(w->txLen); free(w->tx); free(w->coin); free(w->s); free(w->a); free(w->text);
+}
+
+// Matches the workload into *u, the fastest of `repeats` runs, timed in two parts: *coins (Begin and the
+// coin addresses) and *outputs (the transactions, which also pays for parsing them). *hits from the last.
+static void workloadMatch(Workload *w, BRRecoveryScanUsed *u, int repeats, double *coins, double *outputs, size_t *hits)
+{
+    int r;
+    *coins = *outputs = -1;
+    for (r = 0; r < repeats; r++) {
+        size_t k, h = 0, m;
+        clock_t start = clock();
+        double t;
+        BRRecoveryScanUsedBegin(u, w->a, w->D, w->s, w->D);
+        for (k = 0; k < w->U; k++) h += (size_t)BRRecoveryScanUsedMarkAddress(u, w->coin[k]);
+        t = seconds(start);
+        if (*coins < 0 || t < *coins) *coins = t;
+        start = clock();
+        for (k = 0; k < w->T; k++) { m = 0; BRRecoveryScanUsedMarkRawTx(u, w->tx[k], w->txLen[k], &m); h += m; }
+        t = seconds(start);
+        if (*outputs < 0 || t < *outputs) *outputs = t;
+        *hits = h;
+    }
+}
+
+static void costCheck(const char *what, double full, double tenth)
+{
+    double ratio = full / (tenth > 1e-6 ? tenth : 1e-6);
+    ck(full < COST_ABSOLUTE_BOUND, "%s: full size in %.3f s (backstop %.0f s)", what, full, COST_ABSOLUTE_BOUND);
+    ck(ratio < COST_RATIO_BOUND, "%s: full %.4f s / tenth %.4f s = %.1fx (bound %.0fx; O(n log n) measured ~10x, quadratic 52-88x)",
+       what, full, tenth, ratio, COST_RATIO_BOUND);
+}
+
+static void used_large_inputs(void)
+{
+    // A profile's widest windows in two encodings' worth of addresses (6000), 200000 coins the lookup
+    // names (most on addresses not ours) and 2000 transactions of 100 outputs; then a tenth of each.
+    Workload full, tenth;
+    BRRecoveryScanUsed u;
+    size_t hits = 0, small = 0;
+    double cf, of, ct, ot;
+    workloadBuild(&full, 6000, 200000, 2000, 100);
+    workloadBuild(&tenth, 600, 20000, 200, 100);
+    workloadMatch(&tenth, &u, COST_REPEATS, &ct, &ot, &small);
+    workloadMatch(&full, &u, COST_REPEATS, &cf, &of, &hits);
     ck(hits == 201, "200 coins and one output matched (%zu)", hits);
     ck(BRRecoveryScanUsedHighest(&u, 0) == 1499, "receive: 1499 (%d)", BRRecoveryScanUsedHighest(&u, 0));
     ck(BRRecoveryScanUsedHighest(&u, 1) == 777, "change: 777, through the transaction (%d)", BRRecoveryScanUsedHighest(&u, 1));
-    ck(secs < BIG_BOUND_SECONDS, "in %.3f s (bound %.1f s)", secs, BIG_BOUND_SECONDS);
-    free(tx); free(outs); free(s); free(a); free(text);
+    costCheck("coins", cf, ct);
+    costCheck("outputs", of, ot);
+    workloadFree(&tenth); workloadFree(&full);
 }
 
-static void used_one_address_many_times(void)
+// Every derived entry is the same address, marked U times: one mark serves all.
+static double sameAddressRun(size_t D, size_t U, int repeats, int32_t *highest)
 {
-    // Every derived entry is the same address: one mark serves all, and marking it 100000 times stays
-    // O(log n) each.
-    const size_t D = 6000, U = 100000;
     char t[76];
     BRRecoveryScanAddress *a = malloc(D * sizeof(*a));
     BRRecoveryScanSlot *s = malloc(D * sizeof(*s));
     BRRecoveryScanUsed u;
+    double best = -1;
     size_t i;
-    clock_t start;
-    double secs;
+    int r;
     addressOf(t, 10, 0, 0);
     for (i = 0; i < D; i++) { a[i].address = t; a[i].chain = 0; a[i].index = (int32_t)i; }
-    start = clock();
-    BRRecoveryScanUsedBegin(&u, a, D, s, D);
-    for (i = 0; i < U; i++) BRRecoveryScanUsedMarkAddress(&u, t);
-    secs = (double)(clock() - start) / CLOCKS_PER_SEC;
-    ck(BRRecoveryScanUsedHighest(&u, 0) == (int32_t)(D - 1), "every copy used");
-    ck(secs < BIG_BOUND_SECONDS, "in %.3f s (bound %.1f s)", secs, BIG_BOUND_SECONDS);
+    for (r = 0; r < repeats; r++) {
+        clock_t start = clock();
+        double sec;
+        BRRecoveryScanUsedBegin(&u, a, D, s, D);
+        for (i = 0; i < U; i++) BRRecoveryScanUsedMarkAddress(&u, t);
+        sec = seconds(start);
+        if (best < 0 || sec < best) best = sec;
+    }
+    *highest = BRRecoveryScanUsedHighest(&u, 0);
     free(s); free(a);
+    return best;
+}
+
+static void used_one_address_many_times(void)
+{
+    int32_t hf = -1, ht = -1;
+    double tt = sameAddressRun(600, 10000, COST_REPEATS, &ht), tf = sameAddressRun(6000, 100000, COST_REPEATS, &hf);
+    ck(hf == 5999 && ht == 599, "every copy used (%d, %d)", hf, ht);
+    costCheck("one address 6000 times", tf, tt);
 }
 
 typedef struct { const char *name; void (*run)(void); } Case;
