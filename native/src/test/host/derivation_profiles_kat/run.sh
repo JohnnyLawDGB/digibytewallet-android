@@ -5,11 +5,14 @@
 # jni_derive.c (mnemonicToSeed, deriveAddresses) for every profile, seed and format, over the whole starting
 # window. See derivation_profiles_kat_main.c for the cases.
 #
-#   RED    -DDERIVATION_PROFILES_RED (the BIP49 profile written as P2WPKH): profile_5 MUST fail, every
+#   RED    -DDERIVATION_PROFILES_RED (the BIP49 profile written as P2WPKH): profile_5 and independent_profiles
+#          (the table no longer probes what independent.txt covers) MUST fail, every
 #          other case pass.
 #   RED    -DRECOVERY_SEED_NUL_RED (a passphrase with a NUL accepted): seed_nul_refused MUST fail, every
 #          other case pass.
-#   GREEN  every case passes, ALL PASS, exit 0.
+#   RED    -DRECOVERY_ENCODER_RED (P2SH-P2WPKH with the legacy script version byte): profile_5, all_formats
+#          and independent_profiles MUST fail, every other case pass.
+#   GREEN  every case passes, ALL PASS, exit 0; every compared slot holds an address.
 #   All three arms under ASan + UBSan (no recovery), 64-bit.
 #   CURRENT  the core's vectors/recovery-derivation/vectors.txt is what its generate.c prints today.
 #   SEAMS    each RED macro selects exactly one block in the core headers.
@@ -34,16 +37,21 @@ export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 symbolize=0"
 export UBSAN_OPTIONS="halt_on_error=1 print_stacktrace=1"
 SAN_RE='ERROR: (AddressSanitizer|LeakSanitizer)|runtime error:'
 
-for f in BRDerivationProfiles.h BRRecoveryDerive.h vectors/recovery-derivation/generate.c vectors/recovery-derivation/vectors.txt; do
+for f in BRDerivationProfiles.h BRRecoveryDerive.h vectors/recovery-derivation/generate.c vectors/recovery-derivation/vectors.txt \
+         vectors/recovery-derivation/independent.txt; do
     [ -s "$CORE_DIR/$f" ] || { echo "GATE FAILURE: $CORE_DIR/$f is missing (core older than the derivation push-down?)"; exit 1; }
 done
-VECTOR_FILES=("$CORE_DIR/vectors/derivation/abandon-about.txt" "$CORE_DIR/vectors/derivation/abandon-about-trezor.txt")
+# independent.txt first (independent_profiles), then the vectors/derivation files (independent_vectors).
+VECTOR_FILES=("$CORE_DIR/vectors/recovery-derivation/independent.txt"
+              "$CORE_DIR/vectors/derivation/abandon-about.txt" "$CORE_DIR/vectors/derivation/abandon-about-trezor.txt")
 
 # SEAMS: a -D that names nothing would build the shipped table and prove nothing.
 [ "$(grep -c '^#ifdef DERIVATION_PROFILES_RED$' "$CORE_DIR/BRDerivationProfiles.h")" -eq 1 ] ||
     gate_fail "DERIVATION_PROFILES_RED does not select exactly one block in BRDerivationProfiles.h"
 [ "$(grep -c '^#ifndef RECOVERY_SEED_NUL_RED$' "$CORE_DIR/BRRecoveryDerive.h")" -eq 1 ] ||
     gate_fail "RECOVERY_SEED_NUL_RED does not select exactly one block in BRRecoveryDerive.h"
+[ "$(grep -c '^#ifdef RECOVERY_ENCODER_RED$' "$CORE_DIR/BRRecoveryDerive.h")" -eq 1 ] ||
+    gate_fail "RECOVERY_ENCODER_RED does not select exactly one block in BRRecoveryDerive.h"
 
 # Android's table, as C.
 python3 -I "$SCRIPT_DIR/kotlin_profiles.py" "$KOTLIN" > "$BUILD_DIR/kotlin_profiles.h" ||
@@ -71,15 +79,16 @@ build() {
 
 ALL_CASES=(profile_count hard_bit seed_match seed_bounds seed_nul_refused phrase_with_nul
            profile_0 profile_1 profile_2 profile_3 profile_4 profile_5 profile_6
-           all_formats derive_refusals slot_positions independent_vectors caller_seed_untouched)
+           all_formats derive_refusals slot_positions independent_vectors independent_profiles
+           caller_seed_untouched address_probes)
 
-# $1 arm name, $2 binary, $3 the one case that must fail ("" = none).
+# $1 arm name, $2 binary, $3 the cases that must fail, space-separated ("" = none).
 check_arm() {
     local arm="$1" bin="$2" red="$3" out rc c
     out="$(timeout -k 5 300 "$bin" "${VECTOR_FILES[@]}" 2>&1)"; rc=$?
     <<<"$out" grep -Eq "$SAN_RE" && { gate_fail "[$arm] sanitizer report"; <<<"$out" grep -E "$SAN_RE" | head -3; }
     for c in "${ALL_CASES[@]}"; do
-        if [ "$c" = "$red" ]; then
+        if [[ " $red " == *" $c "* ]]; then
             if <<<"$out" grep -q "^RESULT $c fail$"; then echo "  [$arm $c] failed, as it must"
             else gate_fail "[$arm $c] did not fail in the comparison arm"; fi
         elif <<<"$out" grep -q "^RESULT $c pass$"; then :
@@ -91,18 +100,21 @@ check_arm() {
         <<<"$out" grep "independent addresses checked" | sed 's/^/  /'
     else
         [ $rc -ne 0 ] || gate_fail "[$arm] the comparison arm exited 0; it proves nothing"
-        <<<"$out" grep "^FAIL: $red" | head -2 | sed 's/^/      /'
+        for c in $red; do <<<"$out" grep "^FAIL: $c" | head -2 | sed 's/^/      /'; done
     fi
 }
 
 build "$BUILD_DIR/green" || { echo "GATE FAILURE: shipped arm did not compile"; exit 1; }
 build "$BUILD_DIR/profiles_red" -DDERIVATION_PROFILES_RED || { echo "GATE FAILURE: DERIVATION_PROFILES_RED arm did not compile"; exit 1; }
 build "$BUILD_DIR/seed_red" -DRECOVERY_SEED_NUL_RED || { echo "GATE FAILURE: RECOVERY_SEED_NUL_RED arm did not compile"; exit 1; }
+build "$BUILD_DIR/encoder_red" -DRECOVERY_ENCODER_RED || { echo "GATE FAILURE: RECOVERY_ENCODER_RED arm did not compile"; exit 1; }
 
-echo "--- COMPARISON ARM -DDERIVATION_PROFILES_RED: only profile_5 may fail ---"
-check_arm profiles_red "$BUILD_DIR/profiles_red" profile_5
+echo "--- COMPARISON ARM -DDERIVATION_PROFILES_RED: only profile_5 and independent_profiles may fail ---"
+check_arm profiles_red "$BUILD_DIR/profiles_red" "profile_5 independent_profiles"
 echo "--- COMPARISON ARM -DRECOVERY_SEED_NUL_RED: only seed_nul_refused may fail ---"
 check_arm seed_red "$BUILD_DIR/seed_red" seed_nul_refused
+echo "--- COMPARISON ARM -DRECOVERY_ENCODER_RED: only profile_5, all_formats, independent_profiles may fail ---"
+check_arm encoder_red "$BUILD_DIR/encoder_red" "profile_5 all_formats independent_profiles"
 echo "--- SHIPPED ARM: every case passes ---"
 check_arm green "$BUILD_DIR/green" ""
 
@@ -120,7 +132,7 @@ if "$CC" -w -include stdint.h -fsanitize=address,undefined -fno-sanitize-recover
 else gate_fail "generate.c did not compile"; fi
 
 if [ $FAIL -eq 0 ]; then
-    echo "PASS: derivation_profiles_kat (core table = Kotlin BUILT_INS; core = bridge for every profile, seed and format; two RED arms fail only their case; ASan+UBSan; vectors current)"
+    echo "PASS: derivation_profiles_kat (core table = Kotlin BUILT_INS; core = bridge for every profile, seed and format; three RED arms fail only their cases; ASan+UBSan; vectors current)"
     exit 0
 fi
 echo "FAIL: derivation_profiles_kat"

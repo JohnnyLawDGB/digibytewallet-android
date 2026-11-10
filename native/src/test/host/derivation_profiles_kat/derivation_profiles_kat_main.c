@@ -6,15 +6,23 @@
 // with the env below. Every comparison is slot for slot: a null bridge slot must be an empty core slot.
 //
 // Cases (RESULT <case> pass|fail):
-//   profile_<i>        RED under DERIVATION_PROFILES_RED for i = 5 only: the core's profile i equals Kotlin's
+//   profile_<i>        RED under DERIVATION_PROFILES_RED for i = 5 only (with independent_profiles): the core's profile i equals Kotlin's
 //                      field for field, and for each of four seeds and each format Kotlin probes it as, the
 //                      core's addresses (from the core's table) equal the bridge's (from Kotlin's table) over
 //                      the whole starting window, 200 receive + 100 change.
+//                      Every slot of both must hold an address: a shared regression that derives nothing
+//                      cannot pass by agreeing on empty slots.
 //   seed_nul_refused   RED under RECOVERY_SEED_NUL_RED: a passphrase with a NUL byte is refused by both.
-//   GUARDS (every arm): profile_count, hard_bit, seed_match, seed_bounds, phrase_with_nul, all_formats,
-//                      derive_refusals, slot_positions, independent_vectors, caller_seed_untouched.
+//   RED under RECOVERY_ENCODER_RED (P2SH-P2WPKH written with the legacy script version byte): profile_5,
+//                      all_formats and independent_profiles, the cases that encode format 2.
+//   independent_profiles  every profile and format, four seeds, first 10 + 10, against
+//                      vectors/recovery-derivation/independent.txt (an implementation independent of the core).
+//   address_probes     BRRecoveryAddressForKey refuses, without asserting, a NULL key, a buffer below
+//                      BR_RECOVERY_ADDRESS_SLOT and P2WPKH of an uncompressed key.
+//   GUARDS (every arm): profile_count, hard_bit, seed_match, seed_bounds, phrase_with_nul, derive_refusals,
+//                      slot_positions, independent_vectors, caller_seed_untouched, address_probes.
 //
-// argv: the independent vector files (core vectors/derivation/*.txt).
+// argv: vectors/recovery-derivation/independent.txt, then the vectors/derivation/*.txt files (all from the core).
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -158,6 +166,7 @@ static int bridge_seed(const void *phrase, size_t phraseLen, const void *pass, s
 }
 
 // Bridge and core over the same inputs. Returns 1 when they agree slot for slot (both refusing counts).
+static int g_requireAddresses = 0;   // set by the cases where every slot must hold an address
 static int same_addresses(const char *c, const uint8_t *seed, size_t seedLen,
                           const char *bHmac, const uint32_t *bPath, size_t bPathLen, int bFormat,
                           const char *cHmac, const uint32_t *cPath, size_t cPathLen, int cFormat,
@@ -175,6 +184,7 @@ static int same_addresses(const char *c, const uint8_t *seed, size_t seedLen,
         failf(c, "bridge %s, core %s", b ? "derived" : "refused", coreOk ? "derived" : "refused");
         agree = 0;
     }
+    else if (! b && g_requireAddresses) { failf(c, "both refused a derivation that must succeed"); agree = 0; }
     else if (b) {
         if ((size_t)((HObj *)b)->len != total) { failf(c, "bridge wrote %d slots, expected %zu", ((HObj *)b)->len, total); agree = 0; }
         for (size_t k = 0; agree && k < total; k++) {
@@ -182,7 +192,11 @@ static int same_addresses(const char *c, const uint8_t *seed, size_t seedLen,
             const char *bs = s ? s->data : "";
             const char *cs = out + k * BR_RECOVERY_ADDRESS_SLOT;
 
-            if (! s && cs[0]) { failf(c, "slot %zu: bridge null, core %s", k, cs); agree = 0; }
+            if (g_requireAddresses && (! s || ! s->data || ! ((char *)s->data)[0] || ! cs[0])) {
+                failf(c, "slot %zu: an empty slot (bridge \"%s\", core \"%s\")", k, bs, cs);
+                agree = 0;
+            }
+            else if (! s && cs[0]) { failf(c, "slot %zu: bridge null, core %s", k, cs); agree = 0; }
             else if (strcmp(bs, cs) != 0) { failf(c, "slot %zu: bridge %s, core %s", k, bs, cs); agree = 0; }
         }
     }
@@ -219,6 +233,7 @@ static void case_profile(size_t i)
     if (p->gapExternal != BR_DERIVATION_GAP_EXTERNAL_START || p->gapInternal != BR_DERIVATION_GAP_INTERNAL_START)
         failf(c, "gaps are not the START constants");
 
+    g_requireAddresses = 1;
     // What Android derives (Kotlin's table through the bridge) against what a core caller derives (the core's
     // table through the core), whole starting window, every seed, every format Kotlin probes.
     for (size_t s = 0; s < SEED_COUNT; s++) {
@@ -229,6 +244,7 @@ static void case_profile(size_t i)
                            p->hmacKey, p->path, p->pathLen, cf, k->gapExternal, k->gapInternal);
         }
     }
+    g_requireAddresses = 0;
     end(c);
 }
 
@@ -308,6 +324,7 @@ static void case_seeds(void)
 static void case_all_formats(void)
 {
     begin();
+    g_requireAddresses = 1;
     for (size_t i = 0; i < BR_DERIVATION_PROFILE_COUNT; i++) {
         const KotlinProfile *k = &KOTLIN_PROFILES[i];
 
@@ -317,6 +334,7 @@ static void case_all_formats(void)
                                k->pathLen, f, 40, 20);
         }
     }
+    g_requireAddresses = 0;
     end("all_formats");
 }
 
@@ -378,8 +396,8 @@ static void case_slot_positions(void)
 static void case_independent(int argc, char **argv)
 {
     begin();
-    if (argc < 2) failf("independent_vectors", "no vector files given");
-    for (int a = 1; a < argc; a++) {
+    if (argc < 3) failf("independent_vectors", "no vector files given");
+    for (int a = 2; a < argc; a++) {
         FILE *fp = fopen(argv[a], "r");
         char line[512], deriv[32], fmt[32], addr[128];
         unsigned chain, index;
@@ -416,6 +434,111 @@ static void case_independent(int argc, char **argv)
     end("independent_vectors");
 }
 
+
+// Every profile and format the core's table probes, against independent.txt (pure Python, its own hand-written
+// profile table). The only independent check of profiles 2-5.
+static void case_independent_profiles(const char *path)
+{
+    FILE *fp = path ? fopen(path, "r") : NULL;
+    char line[512], addr[128], hex[129];
+    unsigned s, prof, chain, index;
+    int fmt;
+    size_t checked = 0, seeds = 0, perCombo[BR_DERIVATION_PROFILE_COUNT][BR_DERIVATION_FORMAT_COUNT];
+    char out[20 * BR_RECOVERY_ADDRESS_SLOT];
+
+    begin();
+    memset(perCombo, 0, sizeof(perCombo));
+    if (! fp) { failf("independent_profiles", "cannot open %s", path ? path : "(none)"); end("independent_profiles"); return; }
+    while (fgets(line, sizeof(line), fp)) {
+        const BRDerivationProfile *p;
+
+        if (sscanf(line, "seed %u %128s", &s, hex) == 2) {
+            char mine[129];
+
+            if (s >= SEED_COUNT) { failf("independent_profiles", "seed %u out of range", s); continue; }
+            tohex(g_seeds[s], 64, mine);
+            if (strcmp(mine, hex)) failf("independent_profiles", "seed %u differs", s);
+            seeds++;
+            continue;
+        }
+        if (sscanf(line, "indep %u %u %d %u %u %127s", &s, &prof, &fmt, &chain, &index, addr) != 6) continue;
+        p = BRDerivationProfileAt(prof);
+        if (! p || s >= SEED_COUNT || fmt < 0 || fmt >= BR_DERIVATION_FORMAT_COUNT || chain > 1 || index >= 10) {
+            failf("independent_profiles", "bad line: %s", line);
+            continue;
+        }
+        if (! BRRecoveryDeriveAddresses(out, 20, g_seeds[s], 64, p->hmacKey, p->path, p->pathLen, 10, 10, fmt)) {
+            failf("independent_profiles", "core refused seed %u profile %u format %d", s, prof, fmt);
+            continue;
+        }
+        if (strcmp(out + (chain * 10 + index) * BR_RECOVERY_ADDRESS_SLOT, addr))
+            failf("independent_profiles", "seed %u profile %u format %d %u/%u: core %s, independent %s", s, prof, fmt,
+                  chain, index, out + (chain * 10 + index) * BR_RECOVERY_ADDRESS_SLOT, addr);
+        perCombo[prof][fmt]++;
+        checked++;
+    }
+    fclose(fp);
+    if (seeds != SEED_COUNT) failf("independent_profiles", "%zu seed lines, expected %zu", seeds, (size_t)SEED_COUNT);
+    // Coverage: every format every profile is probed as, 4 seeds x 20 addresses; nothing else.
+    for (size_t i = 0; i < BR_DERIVATION_PROFILE_COUNT; i++) {
+        const BRDerivationProfile *p = BRDerivationProfileAt(i);
+
+        for (int f = 0; f < BR_DERIVATION_FORMAT_COUNT; f++) {
+            int probed = 0;
+
+            for (size_t j = 0; j < p->formatCount; j++) if (p->formats[j] == f) probed = 1;
+            if (perCombo[i][f] != (probed ? SEED_COUNT * 20 : 0))
+                failf("independent_profiles", "profile %zu format %d: %zu independent addresses, expected %zu", i, f,
+                      perCombo[i][f], probed ? (size_t)SEED_COUNT * 20 : (size_t)0);
+        }
+    }
+    printf("   %s: %zu independent addresses checked\n", path, checked);
+    end("independent_profiles");
+}
+
+// BRRecoveryAddressForKey refuses what the core's encoders would assert on (asserts are live in this build:
+// an assert here aborts the run and the case never reports).
+static void case_address_probes(void)
+{
+    static const UInt256 secret = { .u8 = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+                                            21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32 } };
+    char buf[BR_RECOVERY_ADDRESS_SLOT];
+    BRKey comp, uncomp;
+
+    begin();
+    BRKeySetSecret(&comp, &secret, 1);
+    BRKeySetSecret(&uncomp, &secret, 0);
+    for (int f = 0; f < BR_DERIVATION_FORMAT_COUNT; f++) {
+        memset(buf, 'x', sizeof(buf));
+        if (BRRecoveryAddressForKey(NULL, f, buf, sizeof(buf)) || buf[0]) failf("address_probes", "format %d: a NULL key was encoded", f);
+        memset(buf, 'x', sizeof(buf));
+        if (BRRecoveryAddressForKey(&comp, f, buf, BR_RECOVERY_ADDRESS_SLOT - 1) || buf[0])
+            failf("address_probes", "format %d: a %d-byte buffer was accepted", f, BR_RECOVERY_ADDRESS_SLOT - 1);
+        if (BRRecoveryAddressForKey(&comp, f, buf, 0)) failf("address_probes", "format %d: a 0-byte buffer was accepted", f);
+        if (BRRecoveryAddressForKey(&comp, f, NULL, sizeof(buf))) failf("address_probes", "format %d: a NULL buffer was accepted", f);
+        if (! BRRecoveryAddressForKey(&comp, f, buf, sizeof(buf)) || ! buf[0] || strlen(buf) >= sizeof(buf))
+            failf("address_probes", "format %d: a compressed key in a full slot was not encoded", f);
+    }
+    if (BRRecoveryAddressForKey(&comp, -1, buf, sizeof(buf)) || BRRecoveryAddressForKey(&comp, 4, buf, sizeof(buf)) || buf[0])
+        failf("address_probes", "an unknown format was encoded");
+    memset(buf, 'x', sizeof(buf));
+    if (BRRecoveryAddressForKey(&uncomp, BR_DERIVATION_FORMAT_P2WPKH, buf, sizeof(buf)) || buf[0])
+        failf("address_probes", "P2WPKH of an uncompressed key was encoded");
+    if (! BRRecoveryAddressForKey(&uncomp, BR_DERIVATION_FORMAT_P2PKH, buf, sizeof(buf)) || buf[0] != 'D')
+        failf("address_probes", "P2PKH of an uncompressed key was not encoded");
+    BRKeyClean(&comp);
+    BRKeyClean(&uncomp);
+    // The overflow bound: more slots than SIZE_MAX bytes hold is refused before anything is written. Only a
+    // 32-bit size_t can reach it with int32_t gaps; on 64-bit the largest request is checked to pass the bound.
+    if (SIZE_MAX / BR_RECOVERY_ADDRESS_SLOT < (size_t)INT32_MAX * 2) {
+        if (BRRecoveryDeriveAddresses(buf, SIZE_MAX, g_seeds[0], 64, "Bitcoin seed", NULL, 0, INT32_MAX, INT32_MAX, 0))
+            failf("address_probes", "a slot count past SIZE_MAX bytes was accepted");
+    }
+    else if (BRRecoveryDeriveAddresses(buf, 0, g_seeds[0], 64, "Bitcoin seed", NULL, 0, INT32_MAX, INT32_MAX, 0))
+        failf("address_probes", "a request larger than its buffer was accepted");
+    end("address_probes");
+}
+
 int main(int argc, char **argv)
 {
     begin();
@@ -439,6 +562,8 @@ int main(int argc, char **argv)
     case_refusals();
     case_slot_positions();
     case_independent(argc, argv);
+    case_independent_profiles(argc > 1 ? argv[1] : NULL);
+    case_address_probes();
 
     begin();
     {
