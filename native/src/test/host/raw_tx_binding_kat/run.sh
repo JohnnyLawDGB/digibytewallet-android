@@ -4,17 +4,20 @@
 # the fee read-back, moved from Kotlin (core/.../recovery/RawTxBinding.kt, LegacySweepService.admit). See
 # raw_tx_binding_kat_main.c for what each case compares.
 #
-#   shipped     both seams =0: every case passes, under ASan + UBSan, 64-bit.
-#   id arm      -DRAW_TX_ID_UNFIXED=1: an id is reported for whatever the parser read (trailing bytes,
-#               truncations it tolerates, non-canonical varints). Each case meets its CASES expectation.
-#   binding arm -DRAW_TX_BINDING_UNFIXED=1: a parent whose computed id differs is read as the coin's
-#               parent; a coin with no readable parent is proven at the server's amount; the fee is
-#               answered for a transaction that does not spend exactly the given outpoints.
-#   CASES gives each case "<case>:<id arm>:<binding arm>", each fail (the arm cannot keep the rule) or
-#   pass (a guard: holds in that arm too); each arm must exit nonzero somewhere.
+#   shipped  every seam =0: every case passes, under ASan + UBSan, 64-bit.
+#   comparison arms, one defect each (BRRawTxBinding.h's MACRO CONVENTION):
+#     RAW_TX_ID_UNFIXED                      an id is reported for whatever the parser read (trailing bytes,
+#                                            truncations it tolerates, non-canonical varints);
+#     RAW_TX_BINDING_OTHER_TX_UNFIXED        a parent whose computed id differs is read as the coin's parent;
+#     RAW_TX_BINDING_TRUST_UNPROVEN_UNFIXED  a coin with no readable parent is proven at the server's amount;
+#     RAW_TX_FEE_OUTPOINTS_UNFIXED           the fee is answered without comparing the outpoints spent;
+#     RAW_TX_FEE_SET_UNFIXED                 the outpoints are compared as a count and a set (a repeated
+#                                            outpoint on both sides is accepted).
+#   CASES gives each case "<case>:<id>:<other tx>:<trust unproven>:<fee outpoints>:<fee set>", each fail (the
+#   arm cannot keep the rule) or pass (a guard: holds in that arm too); each arm must exit nonzero somewhere.
 #
 # Gates first: the bridge header this suite compiles is the one that ships, and the JNI accessor still
-# reaches it; the core header tests both seams by VALUE with an #ifndef default; the binding reads ids
+# reaches it; the core header tests every seam by VALUE with an #ifndef default; the binding reads ids
 # only through BRRawTxId; the header compiles clean under -Wall -Wextra -Wpedantic -Werror at c99/c11/c17,
 # included twice and linked from two units, and for iphoneos/iphonesimulator where an Xcode SDK exists.
 #
@@ -35,37 +38,41 @@ export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 detect_leaks=0"
 export UBSAN_OPTIONS="halt_on_error=1 print_stacktrace=1"
 SAN_RE='ERROR: AddressSanitizer|ERROR: LeakSanitizer|runtime error:'
 
+BINDING_SEAMS=(RAW_TX_BINDING_OTHER_TX_UNFIXED RAW_TX_BINDING_TRUST_UNPROVEN_UNFIXED RAW_TX_FEE_OUTPOINTS_UNFIXED RAW_TX_FEE_SET_UNFIXED)
+
 CASES=(
-    id_fixed_vectors:pass:pass
-    id_hostile_vectors:fail:pass
-    id_fuzz:fail:pass
-    rules_fuzz:fail:fail
-    fee_fuzz:pass:fail
-    genesis_parent_proves:pass:pass
-    segwit_parent_proves:pass:pass
-    witness_hashing_id_contradicts:pass:fail
-    other_tx_contradicts:pass:fail
-    amount_index_script_contradict:pass:pass
-    one_contradiction_refuses_profile:pass:pass
-    no_parent_or_unreadable_unproven:pass:fail
-    proven_carries_parent_script:pass:pass
-    fee_is_inputs_less_outputs:pass:pass
-    fee_needs_exact_outpoints:pass:fail
-    gate_amount_lower:pass:pass
-    gate_amount_higher:pass:pass
-    gate_other_tx:pass:fail
-    gate_missing_index:pass:pass
-    gate_other_script:pass:pass
-    gate_no_parent_held_back:pass:fail
-    gate_unreadable_held_back:pass:fail
-    gate_honest_sign_and_fee:pass:pass
-    gate_signed_not_exact_not_sent:pass:fail
-    gate_zero_refused_before_parent:pass:pass
-    gate_order:pass:pass
-    signer_values_from_parent_only:pass:fail
-    first_parent_and_listing:pass:fail
-    huge_amount_parent_unproven:pass:fail
-    large_inputs:pass:fail
+    id_fixed_vectors:pass:pass:pass:pass:pass
+    id_hostile_vectors:fail:pass:pass:pass:pass
+    id_fuzz:fail:pass:pass:pass:pass
+    rules_fuzz:fail:fail:fail:pass:pass
+    fee_fuzz:pass:pass:pass:fail:pass
+    genesis_parent_proves:pass:pass:pass:pass:pass
+    segwit_parent_proves:pass:pass:pass:pass:pass
+    witness_hashing_id_contradicts:pass:fail:pass:pass:pass
+    other_tx_contradicts:pass:fail:pass:pass:pass
+    amount_index_script_contradict:pass:pass:pass:pass:pass
+    one_contradiction_refuses_profile:pass:pass:pass:pass:pass
+    no_parent_or_unreadable_unproven:pass:pass:fail:pass:pass
+    proven_carries_parent_script:pass:pass:pass:pass:pass
+    fee_is_inputs_less_outputs:pass:pass:pass:pass:pass
+    fee_needs_exact_outpoints:pass:pass:pass:fail:pass
+    fee_repeated_outpoint_refused:pass:pass:pass:fail:fail
+    no_memory:pass:pass:pass:pass:pass
+    gate_amount_lower:pass:pass:pass:pass:pass
+    gate_amount_higher:pass:pass:pass:pass:pass
+    gate_other_tx:pass:fail:pass:pass:pass
+    gate_missing_index:pass:pass:pass:pass:pass
+    gate_other_script:pass:pass:pass:pass:pass
+    gate_no_parent_held_back:pass:pass:fail:pass:pass
+    gate_unreadable_held_back:pass:pass:fail:pass:pass
+    gate_honest_sign_and_fee:pass:pass:pass:pass:pass
+    gate_signed_not_exact_not_sent:pass:pass:pass:fail:pass
+    gate_zero_refused_before_parent:pass:pass:pass:pass:pass
+    gate_order:pass:pass:pass:pass:pass
+    signer_values_from_parent_only:pass:pass:fail:pass:pass
+    first_parent_and_listing:pass:pass:fail:pass:pass
+    huge_amount_parent_unproven:pass:pass:fail:pass:pass
+    large_inputs:pass:pass:fail:pass:pass
 )
 
 FAIL=0
@@ -80,7 +87,7 @@ HDR="$(cat "$HEADER")"
 for fn in BRRawTxId BRRawTxIdFromDisplayHex BRRawTxBindingCheck BRRawTxBindingAdmit BRRawTxBindingFeePaid; do
     grep -Eq "static inline [A-Za-z0-9_ ]+\*? ?$fn\(" <<<"$HDR" || gate_fail "$HEADER does not define $fn"
 done
-for m in RAW_TX_ID_UNFIXED RAW_TX_BINDING_UNFIXED; do
+for m in RAW_TX_ID_UNFIXED "${BINDING_SEAMS[@]}"; do
     grep -Eq "^[[:space:]]*#[[:space:]]*if[[:space:]]+!?$m" <<<"$HDR" || gate_fail "$HEADER does not test the value of $m"
     grep -Eq "^[[:space:]]*#[[:space:]]*ifndef[[:space:]]+$m" <<<"$HDR" || gate_fail "$HEADER gives $m no default"
     grep -Eq "^[[:space:]]*#[[:space:]]*ifdef[[:space:]]+$m" <<<"$HDR" && gate_fail "$HEADER selects an arm of $m by presence"
@@ -160,7 +167,9 @@ build() {   # <out> <extra flags...>
 
 build "$BUILD_DIR/green" || { echo "GATE FAILURE: the shipped arm did not compile."; exit 1; }
 build "$BUILD_DIR/red_id" -DRAW_TX_ID_UNFIXED=1 || { echo "GATE FAILURE: the id arm did not compile."; exit 1; }
-build "$BUILD_DIR/red_binding" -DRAW_TX_BINDING_UNFIXED=1 || { echo "GATE FAILURE: the binding arm did not compile."; exit 1; }
+for m in "${BINDING_SEAMS[@]}"; do
+    build "$BUILD_DIR/red_$m" "-D$m=1" || { echo "GATE FAILURE: the $m arm did not compile."; exit 1; }
+done
 
 known="$("$BUILD_DIR/green" list | sort | tr '\n' ' ')"
 listed="$(printf '%s\n' "${CASES[@]%%:*}" | sort | tr '\n' ' ')"
@@ -195,7 +204,8 @@ run_red() {   # <arm name> <binary> <field 2|3>
 }
 
 run_red "RAW_TX_ID_UNFIXED=1" "$BUILD_DIR/red_id" 2
-run_red "RAW_TX_BINDING_UNFIXED=1" "$BUILD_DIR/red_binding" 3
+f=3
+for m in "${BINDING_SEAMS[@]}"; do run_red "$m=1" "$BUILD_DIR/red_$m" $f; f=$((f + 1)); done
 
 echo "--- SHIPPED ARM: every case passes, no sanitizer report ---"
 for entry in "${CASES[@]}"; do
@@ -208,6 +218,6 @@ for entry in "${CASES[@]}"; do
     fi
 done
 
-[ $FAIL -eq 0 ] && echo "PASS: raw_tx_binding_kat (${#CASES[@]} cases: both comparison arms as expected, shipped arm clean under ASan + UBSan; portability)"
+[ $FAIL -eq 0 ] && echo "PASS: raw_tx_binding_kat (${#CASES[@]} cases: all five comparison arms as expected, shipped arm clean under ASan + UBSan; portability)"
 [ $FAIL -ne 0 ] && echo "FAIL: raw_tx_binding_kat"
 exit $FAIL

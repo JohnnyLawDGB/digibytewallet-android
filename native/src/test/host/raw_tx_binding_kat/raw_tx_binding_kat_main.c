@@ -15,14 +15,27 @@
 //   THE TESTS RawTxBindingTest, AmountProvenanceGateTest's parent cases (plus the order of the amount
 //             refusals before them) and SweepSignsProvenInputsSourceGateTest's intent, case for case, on real
 //             transactions built with the core.
+//   FAILURES  every allocation the header makes in a check is refused in turn: the answer is NO_MEMORY with
+//             no proof, never a verdict; a repeated outpoint on both sides of a fee is never answered.
 //   COST      large profiles (100k coins, 50k parents, a parent of 20k outputs, a fee over 20k inputs) must
 //             finish well inside what a quadratic loop would take.
 //
 // Usage: raw_tx_binding_kat list | <case>. Prints PASS:/FAIL: lines and "RESULT <case> pass|fail".
 
 #include "asset_tx_checks.h"   // the bridge's raw_tx_id, compiled as it ships
+#include <stdlib.h>
+
+// The header's own allocations go through these, so a case can fail the Nth one (no_memory). The parser's
+// allocations (BRTransaction.c, another unit) are not intercepted: the header cannot tell those apart.
+static long g_alloc_fail_at = 0, g_alloc_calls = 0;
+static void *kat_malloc(size_t n) { g_alloc_calls++; return (g_alloc_fail_at && g_alloc_calls == g_alloc_fail_at) ? NULL : malloc(n); }
+static void *kat_calloc(size_t c, size_t n) { g_alloc_calls++; return (g_alloc_fail_at && g_alloc_calls == g_alloc_fail_at) ? NULL : calloc(c, n); }
+#define malloc(n) kat_malloc(n)
+#define calloc(c, n) kat_calloc(c, n)
 #include "BRRawTxBinding.h"
 #include "BRRawTxBinding.h"    // twice: the include guard holds
+#undef malloc
+#undef calloc
 #include "BRCrypto.h"
 
 #include <stdio.h>
@@ -1055,7 +1068,9 @@ static void case_gate_order(void)
     BRRawTxBindingParent p = parent(a.id, a.b, a.n);
     BRRawTxProof pf[2]; BRRawTxBindingVerdict v;
     CHECK(BRRawTxBindingAdmit(0, u, 2, &p, 1, pf, &v) == BR_RAW_TX_REFUSE_UNREACHABLE, "unreachable first");
+    CHECK(v.outcome == BR_RAW_TX_BINDING_NOT_RUN && pf[0].state == BR_RAW_TX_PROOF_REFUSED, "the verdict says the binding did not run");
     CHECK(BRRawTxBindingAdmit(1, u, 2, &p, 1, pf, &v) == BR_RAW_TX_REFUSE_NON_POSITIVE && v.utxo == 1, "then the first non-positive coin");
+    CHECK(v.outcome == BR_RAW_TX_BINDING_NOT_RUN && pf[0].state == BR_RAW_TX_PROOF_REFUSED, "the verdict says the binding did not run");
     BRRawTxBindingUtxo ok[2] = { coin(a.id, 0, 500000, P2PKH), coin(a.id, 0, 500000, NULL) };
     CHECK(BRRawTxBindingAdmit(1, ok, 2, &p, 1, pf, &v) == BR_RAW_TX_ADMIT && v.provenCount == 2, "positive amounts with a reachable backend: admitted");
     CHECK(BRRawTxBindingAdmit(1, ok, 2, &p, 1, pf, NULL) == BR_RAW_TX_REFUSE_BAD_ARGUMENT, "no verdict: refused");
@@ -1121,6 +1136,77 @@ static void case_huge_amount_parent_unproven(void)
     BRRawTxProof pf; BRRawTxBindingVerdict v;
     CHECK(BRRawTxBindingCheck(&u, 1, &p, 1, &pf, &v) == BR_RAW_TX_BINDING_CHECKED && pf.state == BR_RAW_TX_PROOF_UNPROVEN, "unproven");
     free(b);
+}
+
+static void case_fee_repeated_outpoint_refused(void)
+{
+    // A spent list that repeats an outpoint cannot come from Android (its spent outpoints are a map's
+    // keys), but another adapter could pass one: an outpoint spent twice is never answered a fee, however
+    // the repeats line up.
+    UInt256 a = from_display("00000000000000000000000000000000000000000000000000000000000000aa");
+    UInt256 bb = from_display("00000000000000000000000000000000000000000000000000000000000000bb");
+    uint64_t pay = 100; size_t n; int64_t fee; uint8_t *b;
+    UInt256 t2[2] = { a, a }; uint32_t v2[2] = { 0, 0 };
+    BRRawTxBindingSpent aa[2] = { { a, 0, 1000 }, { a, 0, 1000 } };
+    b = spend(t2, v2, 2, &pay, 1, &n);
+    CHECK(BRRawTxBindingFeePaid(b, n, aa, 2, &fee) == 0, "inputs [A,A] against spent [A,A]: no fee (got %lld)", (long long)fee); free(b);
+    UInt256 t3[3] = { a, a, bb }; uint32_t v3[3] = { 0, 0, 1 };
+    BRRawTxBindingSpent abb[3] = { { a, 0, 1000 }, { bb, 1, 5000 }, { bb, 1, 5000 } };
+    b = spend(t3, v3, 3, &pay, 1, &n);
+    CHECK(BRRawTxBindingFeePaid(b, n, abb, 3, &fee) == 0, "inputs [A,A,B] against spent [A,B,B]: no fee (got %lld)", (long long)fee); free(b);
+    UInt256 t1[2] = { bb, a }; uint32_t v1[2] = { 1, 0 };
+    BRRawTxBindingSpent ab[2] = { { a, 0, 1000 }, { bb, 1, 5000 } };
+    b = spend(t1, v1, 2, &pay, 1, &n);
+    CHECK(BRRawTxBindingFeePaid(b, n, ab, 2, &fee) == 1 && fee == 5900, "inputs [B,A] against spent [A,B]: the order does not matter");
+    free(b);
+}
+
+static void case_no_memory(void)
+{
+    // Every allocation the header makes in a check -- its working space, each parent's re-serialization,
+    // each parent's script offsets -- fails in turn: the answer is NO_MEMORY with no proof written, never
+    // a verdict (in particular never an UNPROVEN coin); once none fails, the answer is the honest one.
+    Parent a = honest(0, 500000), b = honest(1, 300000);
+    BRRawTxBindingUtxo u[2] = { coin(a.id, 0, 500000, P2PKH), coin(b.id, 1, 300000, NULL) };
+    BRRawTxBindingParent p[2] = { parent(a.id, a.b, a.n), parent(b.id, b.b, b.n) };
+    BRRawTxProof pf[2]; BRRawTxBindingVerdict v;
+    long at;
+    for (at = 1; at < 64; at++) {
+        g_alloc_calls = 0; g_alloc_fail_at = at;
+        BRRawTxBindingOutcome oc = BRRawTxBindingCheck(u, 2, p, 2, pf, &v);
+        long calls = g_alloc_calls;
+        g_alloc_fail_at = 0;
+        if (calls < at) {   // nothing failed: the honest answer
+            CHECK(oc == BR_RAW_TX_BINDING_CHECKED && v.provenCount == 2, "with every allocation answered: checked, two proven");
+            break;
+        }
+        CHECK(oc == BR_RAW_TX_BINDING_NO_MEMORY && v.outcome == BR_RAW_TX_BINDING_NO_MEMORY
+              && pf[0].state == BR_RAW_TX_PROOF_NONE && pf[1].state == BR_RAW_TX_PROOF_NONE,
+              "allocation %ld failed: NO_MEMORY and no proof (got outcome %d, proofs %d %d)", at, oc, pf[0].state, pf[1].state);
+        g_alloc_calls = 0; g_alloc_fail_at = at;
+        BRRawTxAdmission ad = BRRawTxBindingAdmit(1, u, 2, p, 2, pf, &v);
+        g_alloc_fail_at = 0;
+        CHECK(ad == BR_RAW_TX_REFUSE_NO_MEMORY, "allocation %ld failed: admission refuses NO_MEMORY (got %d)", at, ad);
+    }
+    CHECK(at >= 6, "the check makes at least the five allocations named (made %ld)", at - 1);
+    // BRRawTxId and the fee: no answer when an allocation they make is refused, as the bridge gave none
+    // (checked only when the allocation was made: a comparison arm that skips the work makes none)
+    UInt256 id;
+    g_alloc_calls = 0; g_alloc_fail_at = 1;
+    int idr = BRRawTxId(a.b, a.n, &id);
+    g_alloc_fail_at = 0;
+    CHECK(g_alloc_calls == 0 || idr == 0, "BRRawTxId with its buffer refused: no id");
+    UInt256 t[1] = { from_display(a.id) }; uint32_t vo[1] = { 0 }; uint64_t pay = 400000; size_t n; int64_t fee;
+    uint8_t *s = spend(t, vo, 1, &pay, 1, &n);
+    BRRawTxBindingSpent sp[1] = { { t[0], 0, 500000 } };
+    for (long k = 1; k <= 2; k++) {
+        g_alloc_calls = 0; g_alloc_fail_at = k;
+        int ok = BRRawTxBindingFeePaid(s, n, sp, 1, &fee);
+        g_alloc_fail_at = 0;
+        CHECK(g_alloc_calls < k || (ok == 0 && fee == 0), "the fee with allocation %ld refused: no fee", k);
+    }
+    CHECK(BRRawTxBindingFeePaid(s, n, sp, 1, &fee) == 1 && fee == 100000, "and with every allocation answered, the fee");
+    free(s); free(a.b); free(b.b);
 }
 
 // ---- COST -------------------------------------------------------------------------------------
@@ -1217,6 +1303,8 @@ static const Case CASES[] = {
     { "proven_carries_parent_script", case_proven_carries_parent_script },
     { "fee_is_inputs_less_outputs", case_fee_is_inputs_less_outputs },
     { "fee_needs_exact_outpoints", case_fee_needs_exact_outpoints },
+    { "fee_repeated_outpoint_refused", case_fee_repeated_outpoint_refused },
+    { "no_memory", case_no_memory },
     { "gate_amount_lower", case_gate_amount_lower },
     { "gate_amount_higher", case_gate_amount_higher },
     { "gate_other_tx", case_gate_other_tx },
