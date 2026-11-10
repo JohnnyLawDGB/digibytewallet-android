@@ -100,6 +100,9 @@ object DigiDollarScan {
             for (txid in holding.txids) {
                 val outputs = outputsFor(txid)
                 if (outputs == null) { unreadable = true; continue }
+                // ONE-FAMILY: a DigiDollar transaction that also carries a DigiAsset tag is held from
+                // every send, this one included: its dollars are reported, never moved.
+                if (carriesDigiAssetTag(outputs)) { unreadable = true; continue }
                 for (outpoint in DigiDollarHolding.locateAll(outputs, address.taprootOutputKeyHex)) {
                     if (DigiDollarHolding.PrevOut(txid, outpoint.vout) in spent) continue
                     found += Holding(address, txid, outpoint.vout, outpoint.scriptPubKeyHex)
@@ -122,5 +125,17 @@ object DigiDollarScan {
         }
 
         return Result(cents, holdings, reachable, unlocatable)
+    }
+
+    private val decoder = app.aroundtheblock.wallet.core.asset.DigiAssetDecoder()
+
+    /** Any DigiAsset tag among the outputs (any carrier verdict but None); an unreadable script counts. */
+    private fun carriesDigiAssetTag(outputs: List<DigiDollarHolding.Output>): Boolean {
+        val scripts = outputs.sortedBy { it.vout }.map { o ->
+            o.scriptPubKeyHex.chunked(2).mapNotNull { it.toIntOrNull(16)?.toByte() }.toByteArray()
+                .takeIf { it.size * 2 == o.scriptPubKeyHex.length } ?: return true
+        }
+        return app.aroundtheblock.wallet.core.asset.DigiAssetCarrierRule.verdict(scripts, decoder) !=
+            app.aroundtheblock.wallet.core.asset.DigiAssetCarrierRule.Verdict.None
     }
 }

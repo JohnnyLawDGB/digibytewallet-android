@@ -76,6 +76,10 @@ class ForeignUtxoAssetClassifier(
                     val raw = fetchRawTx(utxo.txid)
                     when {
                         raw == null || raw.isEmpty() -> Verdict.UNKNOWN
+                        // ONE-FAMILY: a DigiDollar transaction that also carries a DigiAsset tag is
+                        // decided by neither family, so none of its outputs is swept or moved.
+                        isAssetTx(raw) && app.aroundtheblock.wallet.core.asset.OneFamily.rawTxMarksDigiDollar(raw) == true ->
+                            Verdict.UNKNOWN
                         isAssetTx(raw) -> Verdict.ASSET.copy(ruleState = ruleStateOf(utxo.txid))
                         else -> Verdict.PLAIN
                     }

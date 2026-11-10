@@ -756,8 +756,9 @@ object NativeBridge {
      *  [app.aroundtheblock.wallet.core.asset.AssetSpentState]: 0 = SPENT, 1 = HELD, -1 = UNDETECTED
      *  (funding tx unknown — leave the persisted flag unchanged), -2 = CONFLICTED (the
      *  funding tx is known but invalid, i.e. a stuck send that was re-sent; its outputs
-     *  will never exist on-chain). Reads the authoritative spentOutputs set plus
-     *  transaction validity, not the asset-UTXO array. */
+     *  will never exist on-chain), -3 = OTHER_FAMILY (ONE-FAMILY: a DigiDollar output, or an
+     *  output of a transaction marked both DigiDollar and DigiAsset). Reads the authoritative
+     *  spentOutputs set plus transaction validity, not the asset-UTXO array. */
     external fun outpointSpentState(txHashHex: String, vout: Int): Int
 
     /** Where the wallet's balance rule put each outpoint ("txidHex|vout", display order), one code

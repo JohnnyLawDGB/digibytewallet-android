@@ -562,6 +562,9 @@ class AssetManager(
     /** Seam for "does the transaction that created this txid have a data output". Null in
      *  production, where it reads the transaction's outputs through the bridge. */
     private val parentHasDataOutput: ((String) -> Boolean?)? = null,
+    /** Seam for ONE-FAMILY: whether [txid]:[vout] may be spent by no asset send (true), may be
+     *  (false), or cannot be judged (null). Null in production, where native answers. */
+    private val outpointOtherFamily: ((String, Int) -> Boolean?)? = null,
 ) {
 
     init {
@@ -577,7 +580,22 @@ class AssetManager(
         app.aroundtheblock.wallet.core.asset.send.AssetSendSelection(
             stackSource = assetStackSource,
             parentHasDataOutput = parentHasDataOutput ?: ::nativeParentHasDataOutput,
+            outpointOtherFamily = outpointOtherFamily ?: ::nativeOutpointOtherFamily,
         )
+    }
+
+    /**
+     * ONE-FAMILY for one outpoint, from native: true when native files it as DigiDollar or holds its
+     * dual-family transaction (OTHER_FAMILY), or when the wallet's copy of the transaction shows the same
+     * from its scripts; null when the probe fails; false otherwise, including a transaction native does not
+     * hold (nothing here to judge it by).
+     */
+    private fun nativeOutpointOtherFamily(txid: String, vout: Int): Boolean? {
+        val state = runCatching { NativeBridge.outpointSpentState(txid, vout) }.getOrNull() ?: return null
+        if (state == AssetSpentState.OTHER_FAMILY) return true
+        val lines = nativeOutputLines(txid)
+        if (lines.isNullOrEmpty()) return false
+        return OneFamily.outputHeld(lines, vout, decoder)
     }
 
     /** What the DigiAsset indexer says [txid]:[vout] holds; "no answer" when there is no source. */
@@ -811,6 +829,8 @@ class AssetManager(
             DigiAssetCarrierRule.Verdict.Undecided -> return "carrier:undecided"
             is DigiAssetCarrierRule.Verdict.Carrier -> v
         }
+        // ONE-FAMILY: a transaction that also carries a DigiDollar marking is credited to neither family.
+        if (OneFamily.scriptsMarkDigiDollar(scripts)) return "carrier:onefamily-digidollar"
         if (vout < 0 || vout >= scripts.size) return "carrier:no-such-output"
         val isOpReturn: (ByteArray) -> Boolean = { it.isNotEmpty() && it[0] == 0x6A.toByte() }
         if (isOpReturn(scripts[vout])) return "carrier:data-output"
@@ -1004,6 +1024,9 @@ class AssetManager(
             // rescues an outpoint native has merely never seen: here native has looked and
             // answered. Counting it is how one send's change gets counted twice.
             AssetSpentState.CONFLICTED -> false
+            // ONE-FAMILY: native files this output as DigiDollar, or holds its dual-family
+            // transaction from every send. It is never counted as an asset.
+            AssetSpentState.OTHER_FAMILY -> false
             // Native has NO record of this outpoint's funding transaction. That is the
             // ONLY answer left, and it does not distinguish a phantom from a holding
             // confirmed below the scan floor — the two are identical from here.

@@ -17,6 +17,7 @@
 #include "BRWallet.h"
 #include "BRInt.h"
 #include "asset_tx_checks.h"
+#include "one_family_gate.h"
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -185,6 +186,13 @@ NativeBridge_buildAndSignAssetTransferTx(
      * before it gets here; this is the last place it can be checked before signing. */
     if (ok && !tx_inputs_distinct(tx)) {
         LOGW("buildAndSignAssetTransferTx: an outpoint is listed more than once among the inputs");
+        ok = 0;
+    }
+
+    /* ONE-FAMILY: never sign a DigiDollar output, or an output of a dual-family transaction, into an
+     * asset send. The Kotlin selection refuses the same; this is the last place before signing. */
+    if (ok && !tx_inputs_one_family_ok(g_wallet, tx)) {
+        LOGW("buildAndSignAssetTransferTx: an input belongs to another token family (ONE-FAMILY)");
         ok = 0;
     }
 

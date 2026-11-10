@@ -13,6 +13,10 @@ import java.util.concurrent.ConcurrentHashMap
  *    recorded quantity ([AssetInputCheck]). An input that holds anything else is set aside and the
  *    send is planned again without it; an input nobody can vouch for stops the send.
  *
+ * And one from how the chain moves DigiDollar (ONE-FAMILY, [app.aroundtheblock.wallet.core.asset.OneFamily]):
+ * no coin the wallet files as DigiDollar, and no output of a transaction marked both DigiDollar and
+ * DigiAsset, is ever an asset input or a fee coin here. A coin that cannot be judged is left out too.
+ *
  * No native calls: the creating-transaction check is passed in, so this is testable on the JVM.
  */
 class AssetSendSelection(
@@ -20,6 +24,9 @@ class AssetSendSelection(
     /** True when the transaction that created [txid] has a data (OP_RETURN) output, false when it
      *  has none, null when it cannot be read. */
     private val parentHasDataOutput: (txid: String) -> Boolean?,
+    /** ONE-FAMILY: true when [txid]:[vout] may be spent by no asset send, false when it may, null when
+     *  it cannot be judged. Only `false` is offered. No default: a caller must answer it. */
+    private val outpointOtherFamily: (txid: String, vout: Int) -> Boolean?,
 ) {
 
     sealed interface Outcome {
@@ -49,6 +56,9 @@ class AssetSendSelection(
         feePerKb: Long,
     ): Outcome {
         val source = stackSource ?: return Outcome.Unverified
+        val offerable: (UtxoEntity) -> Boolean = { outpointOtherFamily(it.txid, it.vout) == false }
+        val assetUtxos = assetUtxos.filter(offerable)
+        val dgbUtxos = dgbUtxos.filter(offerable)
         val total = app.aroundtheblock.wallet.core.asset.AssetSums.saturating(assetUtxos.map { it.assetQuantity })
         if (total < quantity) return Outcome.NotPlanned("Not enough asset: need $quantity, have $total")
 

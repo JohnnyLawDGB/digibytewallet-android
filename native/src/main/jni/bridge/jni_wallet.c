@@ -1012,6 +1012,8 @@ NativeBridge_registerAssetOutpoint(JNIEnv *env, jobject thiz,
  *                     its inputs; i.e. a stuck send the user re-sent. Nothing ever
  *                     spends the abandoned attempt's own change, so spent-ness alone
  *                     reads HELD and the asset layer counts that change twice.)
+ *   -3 = OTHER_FAMILY (ONE-FAMILY: a DigiDollar output, or an output of a transaction marked
+ *                     both DigiDollar and DigiAsset -- never an asset holding)
  * The reconcile marks a Room asset row spent on 0, unspent on 1, and leaves it
  * unchanged on -1 (so a mid-sync wallet never hides a real holding). Uses
  * BRWalletOutpointSpent (the authoritative spentOutputs set), NOT the asset-UTXO
