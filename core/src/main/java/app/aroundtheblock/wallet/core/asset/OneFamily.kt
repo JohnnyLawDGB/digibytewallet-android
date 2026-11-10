@@ -75,6 +75,20 @@ internal object OneFamily {
             DigiAssetCarrierRule.verdict(scripts, decoder) != DigiAssetCarrierRule.Verdict.None
 
     /**
+     * The ONE-FAMILY answer for one outpoint from native's [AssetSpentState] [state] and the funding
+     * transaction's output [lines] (read only when needed): true held, false offerable, null cannot be
+     * judged -- native does not hold the funding transaction, the probe failed, or the lines are
+     * unreadable. A caller offers an outpoint only on false.
+     */
+    fun judgeFromNative(state: Int, vout: Int, decoder: DigiAssetDecoder, lines: () -> Array<out String?>?): Boolean? {
+        if (state == AssetSpentState.OTHER_FAMILY) return true
+        if (state == AssetSpentState.UNDETECTED || state == AssetSpentState.PROBE_ERROR) return null
+        val l = lines()
+        if (l.isNullOrEmpty()) return null
+        return outputHeld(l, vout, decoder)
+    }
+
+    /**
      * Output [vout] of the transaction listed by `"<vout>|<sats>|<scriptHex>"` [lines] may be spent by no
      * asset, plain or sweep send: the transaction is dual-family, or it is DigiDollar-marked and the output
      * has the token shape. Null when the lines cannot be read.

@@ -21,6 +21,13 @@
  *   [C] RED-THEN-GREEN on one check, GUARD on the rest. An ordinary DigiDollar receive: credited, spent by
  *       the DD builder (both arms); its asset state is OTHER_FAMILY and the signer refuses it (green only).
  *   [D] GUARD, both arms. An ordinary DigiAsset receive: HELD, and the signer accepts it.
+ *   [E] RED-THEN-GREEN. Marked DigiDollar only by an OP_RETURN (no nVersion marker), in both forms
+ *       DigiByte Core's FindDDOpReturn accepts, plus a lone carrier: the owned DGB output is held.
+ *   [F] RED-THEN-GREEN. A dual DGB output as the only fee coin of a DD send: refused cleanly (NULL).
+ *   [G] RED-THEN-GREEN. BRWalletMaxOutputAmount does not count a dual output.
+ *   [H] RED-THEN-GREEN. An unconfirmed dual tx: OTHER_FAMILY, refused by the signer.
+ *   [I] RED-THEN-GREEN. A dual tx below the DigiDollar activation floor: held, credited to neither.
+ *   [J] RED-THEN-GREEN. The signer refuses an input whose funding tx the wallet does not hold.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -218,6 +225,103 @@ static void caseD(void)
     BRWalletFree(w);
 }
 
+/* [E] marked only by an OP_RETURN (plain nVersion), in each form FindDDOpReturn accepts, with a lone
+ * DigiAsset carrier naming output 0: the owned 1 DGB output is held from every send. */
+static void caseE(const char *form, const uint8_t *opr, size_t oprLen)
+{
+    printf("[E] OP_RETURN-only DigiDollar marking (%s) + DigiAsset carrier\n", form);
+    BRWallet *w = newWallet();
+    BRTransaction *d = baseTx(2);
+    BRTransactionAddOutput(d, 0, g_tr, g_trLen);
+    BRTransactionAddOutput(d, 0, opr, oprLen);
+    BRTransactionAddOutput(d, 0, kDACarrier, sizeof(kDACarrier));
+    BRTransactionAddOutput(d, 100000000ULL, g_wpkh, g_wpkhLen);
+    check(BRDigiDollarTxType(d) == 0 && BRTxAssetCarrier(d, NULL) == DA_TX_CARRIER,
+          "E setup: no nVersion marker, carrier verdict CARRIER");
+    registerConfirmed(w, d);
+    if (BRWalletOutpointAssetState(w, d->txHash, 3) != -3) { printf("FAIL: E: an OP_RETURN-marked dual output is not OTHER_FAMILY\n"); g_fail++; }
+    else check(1, "E: the owned DGB output is OTHER_FAMILY");
+    if (BRWalletBalance(w) != 0 || BRWalletSelectableUTXOs(w, NULL, 0) != 0) { printf("FAIL: E: an OP_RETURN-marked dual output is a plain coin\n"); g_fail++; }
+    else check(1, "E: no plain coin, nothing selectable");
+    if (signerAccepts(w, d->txHash, 3)) { printf("FAIL: E: the asset signer accepts an OP_RETURN-marked dual output\n"); g_fail++; }
+    else check(1, "E: the asset signer refuses it");
+    BRWalletFree(w);
+}
+
+/* A dual-family tx in case A's shape at height h, registered in w. */
+static BRTransaction *dualAt(BRWallet *w, uint32_t h)
+{
+    BRTransaction *d = baseTx(DD_VERSION);
+    BRTransactionAddOutput(d, 0, g_tr, g_trLen);
+    BRTransactionAddOutput(d, 0, kDDOpReturnNonNull, sizeof(kDDOpReturnNonNull));
+    BRTransactionAddOutput(d, 0, kDACarrier, sizeof(kDACarrier));
+    BRTransactionAddOutput(d, 100000000ULL, g_wpkh, g_wpkhLen);
+    d->blockHeight = h;
+    finalize(d);
+    BRWalletRegisterTransaction(w, d);
+    return d;
+}
+
+/* [F] the dual tx's DGB output is the ONLY fee coin for a DD send: the send is refused cleanly.
+ * [G] BRWalletMaxOutputAmount does not count it. */
+static void caseFG(void)
+{
+    printf("[F] a dual DGB output as the only fee coin of a DD send; [G] the max output amount\n");
+    BRWallet *w = newWallet();
+    BRTransaction *o = baseTx(DD_VERSION);                       /* an ordinary $50 DD coin */
+    BRTransactionAddOutput(o, 0, g_tr, g_trLen);
+    BRTransactionAddOutput(o, 0, kDDOpReturn, sizeof(kDDOpReturn));
+    registerConfirmed(w, o);
+    BRTransaction *d = dualAt(w, g_H);
+    check(BRWalletDigiDollarBalance(w) >= DD_CENTS, "F setup: the ordinary DD coin is credited");
+    BRTransaction *s = BRWalletCreateDigiDollarTransfer(w, kRecip, DD_CENTS);
+    if (s && spendsTx(s, d->txHash)) { printf("FAIL: F: the DD send pays its fee from the dual-family tx\n"); g_fail++; }
+    else check(s == NULL, "F: with no other fee coin the DD send is refused (NULL, no crash)");
+    if (s) BRTransactionFree(s);
+    if (BRWalletMaxOutputAmount(w) != 0) { printf("FAIL: G: the max output amount counts the dual-family output\n"); g_fail++; }
+    else check(1, "G: the max output amount is 0");
+    BRWalletFree(w);
+}
+
+/* [H] an unconfirmed dual tx; [I] a dual tx below the DigiDollar activation floor. */
+static void caseHI(void)
+{
+    printf("[H] an unconfirmed dual-family tx\n");
+    BRWallet *w = newWallet();
+    BRTransaction *d = dualAt(w, TX_UNCONFIRMED);
+    if (BRWalletOutpointAssetState(w, d->txHash, 0) != -3 || BRWalletOutpointAssetState(w, d->txHash, 3) != -3) {
+        printf("FAIL: H: an unconfirmed dual output is not OTHER_FAMILY\n"); g_fail++;
+    } else check(1, "H: both owned outputs are OTHER_FAMILY");
+    if (signerAccepts(w, d->txHash, 0)) { printf("FAIL: H: the asset signer accepts an unconfirmed dual output\n"); g_fail++; }
+    else check(1, "H: the asset signer refuses it");
+    check(BRWalletDigiDollarBalance(w) == 0 && BRWalletBalance(w) == 0, "H guard: nothing credited while pending");
+    BRWalletFree(w);
+
+    printf("[I] a dual-family tx below the DigiDollar activation floor\n");
+    w = newWallet();
+    d = dualAt(w, BRNetworkDigiDollarActivationHeight() - 1000);
+    if (BRWalletOutpointAssetState(w, d->txHash, 0) != -3) { printf("FAIL: I: a below-floor dual output reads as an asset\n"); g_fail++; }
+    else check(1, "I: the DD-shaped output is OTHER_FAMILY");
+    if (BRWalletBalance(w) != 0) { printf("FAIL: I: a below-floor dual DGB output is a plain coin\n"); g_fail++; }
+    else check(BRWalletDigiDollarBalance(w) == 0, "I: credited to neither family");
+    BRWalletFree(w);
+}
+
+/* [J] the signer refuses an input whose funding tx the wallet does not hold. */
+static void caseJ(void)
+{
+    printf("[J] an input the wallet does not hold\n");
+    BRWallet *w = newWallet();
+    UInt256 unknown;
+    memset(unknown.u8, 0x99, 32);
+    check(BRWalletOutpointIsOneFamilyHeld(w, unknown, 0) == -1, "J: not held reads -1 (cannot be judged)");
+    if (signerAccepts(w, unknown, 0)) { printf("FAIL: J: the asset signer accepts an input the wallet does not hold\n"); g_fail++; }
+    else check(1, "J: the asset signer refuses it");
+    BRWalletFree(w);
+}
+
+static const uint8_t kDDOpReturnFormat1[] = { 0x6a, 0xbb, 0x02, 0x88, 0x13 };   /* OP_RETURN OP_DIGIDOLLAR ... */
+
 int main(void)
 {
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -237,6 +341,11 @@ int main(void)
     caseB();
     caseC();
     caseD();
+    caseE("\"DD\" push, not nulldata", kDDOpReturnNonNull, sizeof(kDDOpReturnNonNull));
+    caseE("OP_DIGIDOLLAR", kDDOpReturnFormat1, sizeof(kDDOpReturnFormat1));
+    caseFG();
+    caseHI();
+    caseJ();
     printf(g_fail ? "\n%d FAIL\n" : "\nPASS: one_family_kat\n", g_fail);
     return g_fail ? 1 : 0;
 }

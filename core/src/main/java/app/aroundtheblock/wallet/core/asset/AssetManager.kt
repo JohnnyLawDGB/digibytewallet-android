@@ -587,15 +587,12 @@ class AssetManager(
     /**
      * ONE-FAMILY for one outpoint, from native: true when native files it as DigiDollar or holds its
      * dual-family transaction (OTHER_FAMILY), or when the wallet's copy of the transaction shows the same
-     * from its scripts; null when the probe fails; false otherwise, including a transaction native does not
-     * hold (nothing here to judge it by).
+     * from its scripts; false when it shows neither; null -- cannot be judged, never offered -- when the
+     * probe fails, native does not hold the funding transaction, or its outputs cannot be read.
      */
     private fun nativeOutpointOtherFamily(txid: String, vout: Int): Boolean? {
         val state = runCatching { NativeBridge.outpointSpentState(txid, vout) }.getOrNull() ?: return null
-        if (state == AssetSpentState.OTHER_FAMILY) return true
-        val lines = nativeOutputLines(txid)
-        if (lines.isNullOrEmpty()) return false
-        return OneFamily.outputHeld(lines, vout, decoder)
+        return OneFamily.judgeFromNative(state, vout, decoder) { nativeOutputLines(txid) }
     }
 
     /** What the DigiAsset indexer says [txid]:[vout] holds; "no answer" when there is no source. */

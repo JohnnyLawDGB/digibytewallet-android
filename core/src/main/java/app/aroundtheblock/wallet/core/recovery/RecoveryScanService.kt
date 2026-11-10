@@ -150,6 +150,7 @@ class RecoveryScanService(
                 },
                 outputsFor = { utxoSource.fetchOutputs(it) },
                 inputsFor = { utxoSource.fetchInputs(it) },
+                versionFor = { utxoSource.fetchVersion(it) },
             )
             val usedExternal = used.filter { it.chain == 0 }.maxOfOrNull { it.index }
             val usedInternal = used.filter { it.chain == 1 }.maxOfOrNull { it.index }

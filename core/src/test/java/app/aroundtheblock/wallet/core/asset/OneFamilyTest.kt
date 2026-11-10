@@ -224,5 +224,97 @@ class OneFamilyTest {
         assertEquals(0L, r.unlocatableCents)
     }
 
+    // ── review round 2 ────────────────────────────────────────────────────────────────────────
+
+    private fun outs(lines: Array<String>) =
+        lines.map { l -> l.split("|").let { DigiDollarHolding.Output(it[0].toInt(), it[1].toLong(), it[2]) } }
+
+    private fun ddScanOf(
+        txs: Map<String, Array<String>>, cents: Long, unspent: Int,
+        inputs: Map<String, List<DigiDollarHolding.PrevOut>> = emptyMap(),
+    ) = runBlocking {
+        DigiDollarScan.assemble(
+            listOf(DigiDollarAddress("DD1x", xq, 0, 0)),
+            holdingFor = { DigiDollarHoldingResult(cents, unspent, txs.keys.toList()) },
+            outputsFor = { txs[it]?.let(::outs) },
+            inputsFor = { inputs[it] ?: emptyList() },
+        )
+    }
+
+    /** MEDIUM-1 (a). RED under the round-1 rule, which froze the whole address. */
+    @Test fun `an ordinary DigiDollar tx beside a dual one stays movable`() {
+        val r = ddScanOf(mapOf("ord" to ordinaryDd, "dual" to dual), cents = 10_000, unspent = 2)
+        assertEquals(listOf("ord"), r.holdings.map { it.txid })
+        assertEquals("only the dual tx's own cents are unlocatable", 5000L, r.unlocatableCents)
+        assertEquals(5000L, r.movableCents)
+    }
+
+    /** MEDIUM-1 (b). RED under the round-1 rule. A dual tx whose output is already spent, and the
+     *  spend-only tx that spent it, affect nothing. */
+    @Test fun `a past spent dual tx no longer affects anything`() {
+        val spend = arrayOf("0|0|5120" + "33".repeat(32), "1|0|$ddOpReturn")
+        val r = ddScanOf(
+            mapOf("dual" to dual, "spend" to spend, "ord" to ordinaryDd), cents = 5000, unspent = 1,
+            inputs = mapOf("spend" to listOf(DigiDollarHolding.PrevOut("dual", 0))),
+        )
+        assertEquals(listOf("ord"), r.holdings.map { it.txid })
+        assertEquals(0L, r.unlocatableCents)
+    }
+
+    /** MEDIUM-1 (c). RED under the round-1 rule: a DigiAsset-tagged tx with no DigiDollar marking
+     *  freezes nothing. */
+    @Test fun `a tagged non-DigiDollar tx freezes nothing`() {
+        val tagged = arrayOf("0|700|5120$xq", "1|0|$daCarrier")
+        val r = ddScanOf(mapOf("ord" to ordinaryDd, "tagged" to tagged), cents = 5000, unspent = 1)
+        assertEquals(listOf("ord"), r.holdings.map { it.txid })
+        assertEquals(0L, r.unlocatableCents)
+    }
+
+    /** MEDIUM-1: held cents that cannot be decoded fall back to the whole address. */
+    @Test fun `undecodable held cents make the whole address unlocatable`() {
+        val badDual = arrayOf("0|0|$ddToken", "1|0|6a024444" + "61", "2|0|$daCarrier")
+        val r = ddScanOf(mapOf("ord" to ordinaryDd, "dual" to badDual), cents = 10_000, unspent = 2)
+        assertTrue(r.holdings.isEmpty())
+        assertEquals(10_000L, r.unlocatableCents)
+    }
+
+    @Test fun `the cents decoder reads the transaction's own DD OP_RETURN`() {
+        assertEquals(5000L, DigiDollarHolding.outputCents(outs(dual), 0))
+        assertEquals(5000L, DigiDollarHolding.outputCents(outs(ordinaryDd), 0))
+        assertNull("not a token output", DigiDollarHolding.outputCents(outs(ordinaryDd), 2))
+    }
+
+    /** MEDIUM-2. RED without the OP_RETURN reading: plain nVersion, the marking only in a script. */
+    @Test fun `the classifier holds a dual tx marked only by a DigiDollar OP_RETURN`() {
+        fun classifyWith(scripts: List<ByteArray>?): ForeignUtxoAssetClassifier.Verdict {
+            val u = UtxoEntry("bb".repeat(32), 3, 100_000_000L, "D1", 1L)
+            val c = ForeignUtxoAssetClassifier(fetchRawTx = { rawWithVersion(2) }, isAssetTx = { true },
+                resolveRuleState = { app.aroundtheblock.wallet.core.asset.rules.TransferRuleState.NONE },
+                rawOutputScripts = { scripts })
+            return runBlocking { c.classify(listOf(u)) }.getValue(u)
+        }
+        val dd = ddOpReturnNonNull.hexBytes()
+        val opDigiDollar = "6abb028813".hexBytes()
+        val carrier = daCarrier.hexBytes()
+        assertEquals(ForeignUtxoAssetClassifier.Verdict.UNKNOWN, classifyWith(listOf(oursBytes, dd, carrier)))
+        assertEquals(ForeignUtxoAssetClassifier.Verdict.UNKNOWN, classifyWith(listOf(oursBytes, opDigiDollar, carrier)))
+        assertEquals("unread scripts are held", ForeignUtxoAssetClassifier.Verdict.UNKNOWN, classifyWith(null))
+        assertTrue("guard: an ordinary asset tx is still an asset", classifyWith(listOf(oursBytes, carrier)).carriesAsset)
+    }
+
+    /** LOW-1. RED under round 1, which offered an outpoint native does not hold. */
+    @Test fun `an outpoint native cannot judge is never offered`() {
+        val d = DigiAssetDecoder()
+        assertNull(OneFamily.judgeFromNative(AssetSpentState.UNDETECTED, 0, d) { ordinaryAsset })
+        assertNull(OneFamily.judgeFromNative(AssetSpentState.PROBE_ERROR, 0, d) { ordinaryAsset })
+        assertNull(OneFamily.judgeFromNative(AssetSpentState.HELD, 0, d) { null })
+        assertNull(OneFamily.judgeFromNative(AssetSpentState.HELD, 0, d) { emptyArray() })
+        assertEquals(true, OneFamily.judgeFromNative(AssetSpentState.OTHER_FAMILY, 0, d) { null })
+        assertEquals(true, OneFamily.judgeFromNative(AssetSpentState.HELD, 3, d) { dual })
+        assertEquals("guard", false, OneFamily.judgeFromNative(AssetSpentState.HELD, 0, d) { ordinaryAsset })
+        val out = select(listOf(sendRow("x", 5)), listOf(feeCoin("f"))) { txid, _ -> if (txid == "x") null else false }
+        assertTrue("an unjudged asset input was offered: $out", out is AssetSendSelection.Outcome.NotPlanned)
+    }
+
     private fun String.hexBytes() = ByteArray(length / 2) { substring(2 * it, 2 * it + 2).toInt(16).toByte() }
 }

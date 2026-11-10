@@ -12,6 +12,7 @@
 #include <errno.h>
 #include "coin_reservation.h"
 #include "jni_bridge.h"
+#include "one_family_gate.h"
 #include "BRDigiDollar.h"
 #include "BRNetwork.h"   /* BRNetworkIsTestnet() — runtime network for DD decode */
 #include "prepared_send.h"   /* the quote and the checks of a prepared DGB send (fee_quote_kat) */
@@ -269,6 +270,15 @@ NativeBridge_signTransaction(JNIEnv *env, jobject thiz,
 
     if (!tx) {
         LOGE("signTransaction: failed to parse transaction");
+        return NULL;
+    }
+
+    /* ONE-FAMILY: this generic signer never signs a DigiDollar output, an output of a dual-family
+     * transaction, or an input whose funding transaction the wallet does not hold. DigiDollar is
+     * sent only through sendApprovedDigiDollar. */
+    if (!tx_inputs_one_family_ok(g_wallet, tx)) {
+        LOGW("signTransaction: an input belongs to another token family or is not held (ONE-FAMILY)");
+        BRTransactionFree(tx);
         return NULL;
     }
 

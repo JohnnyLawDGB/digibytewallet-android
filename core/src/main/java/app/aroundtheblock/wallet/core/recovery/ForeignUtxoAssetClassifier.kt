@@ -40,6 +40,13 @@ class ForeignUtxoAssetClassifier(
      */
     private val resolveRuleState: suspend (txid: String) -> app.aroundtheblock.wallet.core.asset.rules.TransferRuleState =
         { app.aroundtheblock.wallet.core.asset.rules.TransferRuleState.UNKNOWN },
+    /**
+     * The output scripts of raw transaction bytes, in output order, or null when they were not read.
+     * ONE-FAMILY reads a "DD" or OP_DIGIDOLLAR OP_RETURN as a DigiDollar marking as well as the
+     * nVersion marker. Production wires `NativeBridge::getRawTransactionOutputs`, the parser
+     * [isAssetTx] uses; an asset transaction whose scripts come back unread is held (UNKNOWN).
+     */
+    private val rawOutputScripts: ((ByteArray) -> List<ByteArray>?)? = null,
 ) {
 
     /** What was learned about one outpoint. */
@@ -78,8 +85,7 @@ class ForeignUtxoAssetClassifier(
                         raw == null || raw.isEmpty() -> Verdict.UNKNOWN
                         // ONE-FAMILY: a DigiDollar transaction that also carries a DigiAsset tag is
                         // decided by neither family, so none of its outputs is swept or moved.
-                        isAssetTx(raw) && app.aroundtheblock.wallet.core.asset.OneFamily.rawTxMarksDigiDollar(raw) == true ->
-                            Verdict.UNKNOWN
+                        isAssetTx(raw) && marksDigiDollar(raw) -> Verdict.UNKNOWN
                         isAssetTx(raw) -> Verdict.ASSET.copy(ruleState = ruleStateOf(utxo.txid))
                         else -> Verdict.PLAIN
                     }
@@ -92,6 +98,15 @@ class ForeignUtxoAssetClassifier(
             out[utxo] = verdict
         }
         return out
+    }
+
+    /** ONE-FAMILY's DigiDollar marking: the nVersion marker, or a DigiDollar OP_RETURN among the outputs.
+     *  Scripts that a wired reader could not read count as marked (fail closed). */
+    private fun marksDigiDollar(raw: ByteArray): Boolean {
+        if (app.aroundtheblock.wallet.core.asset.OneFamily.rawTxMarksDigiDollar(raw) == true) return true
+        val reader = rawOutputScripts ?: return false
+        val scripts = reader(raw) ?: return true
+        return app.aroundtheblock.wallet.core.asset.OneFamily.scriptsMarkDigiDollar(scripts)
     }
 
     private suspend fun ruleStateOf(txid: String): app.aroundtheblock.wallet.core.asset.rules.TransferRuleState =

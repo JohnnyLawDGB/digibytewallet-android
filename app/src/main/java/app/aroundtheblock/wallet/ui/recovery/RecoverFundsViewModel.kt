@@ -141,6 +141,14 @@ class RecoverFundsViewModel @Inject constructor(
         // Walks the foreign transaction to its issuance and asks the proxy. Anything that does
         // not come back NONE stays on the old seed (see ForeignAssetTransferService.moveAssets).
         resolveRuleState = { txid -> assetManager.verifyTransferRulesForTx(txid) },
+        // ONE-FAMILY: a "DD" / OP_DIGIDOLLAR OP_RETURN marks a DigiDollar transaction as well as nVersion.
+        rawOutputScripts = { raw ->
+            val lines = app.aroundtheblock.wallet.core.bridge.NativeBridge.getRawTransactionOutputs(raw)
+            val scripts = lines?.map { line ->
+                line.split("|", limit = 3).getOrNull(2)?.let(app.aroundtheblock.wallet.core.recovery.DigiDollarHolding::hexBytes)
+            }
+            if (scripts == null || scripts.any { it == null }) null else scripts.filterNotNull()
+        },
     )
 
     /** Everything one recovery pass did: assets moved, DGB swept, dollars moved. */

@@ -39,6 +39,9 @@ interface UtxoSource {
      * transfer built from it spends an input that no longer exists.
      */
     suspend fun fetchInputs(txid: String): List<DigiDollarHolding.PrevOut>? = null
+
+    /** A transaction's nVersion, or null when unreadable (ONE-FAMILY's DigiDollar marker). */
+    suspend fun fetchVersion(txid: String): Int? = null
 }
 
 /** First implementation: the existing reconcile backend (api.digiscope.me). */
@@ -66,6 +69,11 @@ class ReconcileBackendUtxoSource(
                 val sats = parts[1].toLongOrNull() ?: return@mapNotNull null
                 DigiDollarHolding.Output(vout, sats, parts[2])
             }
+    }
+
+    override suspend fun fetchVersion(txid: String): Int? {
+        val raw = nodeClient.fetchRawTransaction(txid) ?: return null
+        return app.aroundtheblock.wallet.core.asset.OneFamily.rawTxVersion(raw)
     }
 
     /** Same native parser, reading the other end of the transaction. */

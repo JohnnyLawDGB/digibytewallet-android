@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # one_family_kat — ONE-FAMILY: an output belongs to at most one token family. See the _main.c.
-#   RED    -DONE_FAMILY_UNFIXED -DONE_FAMILY_SIGNER_UNFIXED: no cross-family exclusion. Cases A, B and C
+#   RED    -DONE_FAMILY_UNFIXED -DONE_FAMILY_SIGNER_UNFIXED: no cross-family exclusion. Cases A-C and E-J
 #          must FAIL on their named checks; every guard must still pass.
 #   GREEN  every check passes; no AddressSanitizer report.
 set -uo pipefail
@@ -39,6 +39,16 @@ RED_MUST_FAIL=(
     "^FAIL: B: the dual-family tx was credited as DigiDollar"
     "^FAIL: C: an ordinary DD output reads HELD for the asset layer"
     "^FAIL: C: the asset signer accepts a DD output"
+    "^FAIL: E: an OP_RETURN-marked dual output is not OTHER_FAMILY"
+    "^FAIL: E: an OP_RETURN-marked dual output is a plain coin"
+    "^FAIL: E: the asset signer accepts an OP_RETURN-marked dual output"
+    "^FAIL: F: the DD send pays its fee from the dual-family tx"
+    "^FAIL: G: the max output amount counts the dual-family output"
+    "^FAIL: H: an unconfirmed dual output is not OTHER_FAMILY"
+    "^FAIL: H: the asset signer accepts an unconfirmed dual output"
+    "^FAIL: I: a below-floor dual output reads as an asset"
+    "^FAIL: I: a below-floor dual DGB output is a plain coin"
+    "^FAIL: J: the asset signer accepts an input the wallet does not hold"
 )
 build "$BUILD_DIR/red" -DONE_FAMILY_UNFIXED -DONE_FAMILY_SIGNER_UNFIXED || { echo "GATE FAILURE: red did not build"; exit 1; }
 OUT="$(timeout -k 5 300 "$BUILD_DIR/red" 2>&1)"; RC=$?
@@ -47,7 +57,7 @@ red_ok=1
 <<<"$OUT" grep -qE "ERROR: (AddressSanitizer|LeakSanitizer)" && red_ok=0
 for want in "${RED_MUST_FAIL[@]}"; do <<<"$OUT" grep -q "$want" || { echo "  [red] did not fail: $want"; red_ok=0; }; done
 # Every other FAIL line in the red arm is a guard or a setup check breaking: not allowed.
-EXTRA="$(<<<"$OUT" grep "^FAIL" | grep -vE "^FAIL: (A|B|C): " )"
+EXTRA="$(<<<"$OUT" grep "^FAIL" | grep -vE "^FAIL: (A|B|C|E|F|G|H|I|J): " )"
 [ -z "$EXTRA" ] || { echo "  [red] an unexpected check failed: $EXTRA"; red_ok=0; }
 if [ "$red_ok" -eq 1 ]; then echo "  [red] ${#RED_MUST_FAIL[@]} named checks failed, as required; guards held"
 else echo "GATE FAILURE: the red arm (rc=$RC)"; <<<"$OUT" grep -E "FAIL|ERROR" | head -20; FAIL=1; fi
@@ -56,5 +66,5 @@ OUT="$(timeout -k 5 300 "$BUILD_DIR/green" 2>&1)"; RC=$?
 if [ "$RC" -eq 0 ] && ! <<<"$OUT" grep -qE "ERROR: (AddressSanitizer|LeakSanitizer)" && <<<"$OUT" grep -q "^PASS: one_family_kat"; then
     echo "  [green] all $(<<<"$OUT" grep -c '^PASS:') checks pass"
 else echo "GATE FAILURE: the green arm (rc=$RC)"; <<<"$OUT" grep -E "FAIL|ERROR" | head -20; FAIL=1; fi
-[ "$FAIL" -eq 0 ] && { echo "PASS: one_family_kat (A,B,C red-then-green; C,D guards; ASan)"; exit 0; }
+[ "$FAIL" -eq 0 ] && { echo "PASS: one_family_kat (A-C, E-J red-then-green; C,D guards; ASan)"; exit 0; }
 echo "FAIL: one_family_kat"; exit 1

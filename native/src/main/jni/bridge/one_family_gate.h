@@ -8,7 +8,8 @@
  * Invariant: no input of an asset send is an output the wallet holds as DigiDollar, or an output of a
  * transaction marked both DigiDollar and DigiAsset (BRWalletOutpointIsOneFamilyHeld). DigiByte Core lets
  * a transaction without the DigiDollar marker spend a DigiDollar output, so signing one burns the dollars
- * on it. An input the wallet does not hold is not judged here (the Kotlin selection judges it).
+ * on it. An input whose funding transaction the wallet does not hold cannot be judged, so it is refused
+ * too (fail closed).
  */
 #ifndef ONE_FAMILY_GATE_H
 #define ONE_FAMILY_GATE_H
@@ -24,7 +25,7 @@ static inline int tx_inputs_one_family_ok(BRWallet *wallet, const BRTransaction 
     return 1;   /* comparison arm, built only by the host KAT: the signer signs whatever is listed */
 #else
     for (size_t i = 0; i < tx->inCount; i++) {
-        if (BRWalletOutpointIsOneFamilyHeld(wallet, tx->inputs[i].txHash, tx->inputs[i].index)) return 0;
+        if (BRWalletOutpointIsOneFamilyHeld(wallet, tx->inputs[i].txHash, tx->inputs[i].index) != 0) return 0;
     }
     return 1;
 #endif
