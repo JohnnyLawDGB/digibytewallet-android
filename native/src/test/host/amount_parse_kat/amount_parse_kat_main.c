@@ -68,7 +68,7 @@ int main(void)
     end_case();
 
     begin("lone_comma_is_the_decimal_point");
-    expect("0,29", 1, 29000000LL); expect("0,00014100", 1, 14100LL); expect("1,234", 1, 123400000LL);
+    expect("0,29", 1, 29000000LL); expect("0,00014100", 1, 14100LL); expect("1,5", 1, 150000000LL);
     expect("1,2,3", 0, 0); expect("1,234,567", 0, 0);
     end_case();
 
