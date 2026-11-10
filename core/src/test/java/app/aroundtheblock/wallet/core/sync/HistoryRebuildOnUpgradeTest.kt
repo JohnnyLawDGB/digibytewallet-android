@@ -230,7 +230,7 @@ class HistoryRebuildOnUpgradeTest {
     }
 
     @Test fun summarize_countAboveTheCap_givesNoHint_andDoesNotThrow() {
-        val s = HistoryRebuildOnUpgrade.summarize(blob(Rec(1_000L, 1_400_000_000L, realTx), count = 10_001L))
+        val s = HistoryRebuildOnUpgrade.summarize(blob(Rec(1_000L, 1_400_000_000L, realTx), count = HistoryRebuildOnUpgrade.MAX_RECORDS + 1))   // TX-CKPT-CAP: the shared limit
         assertFalse("a non-zero count is not an empty cache", s.isEmpty)
         assertEquals(0, s.records)
         assertEquals(0L, s.minConfirmedHeight)

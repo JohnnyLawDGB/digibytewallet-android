@@ -65,8 +65,8 @@ object HistoryRebuildOnUpgrade {
      *  mempool, so holding the cache for it any longer buys nothing. */
     const val DEFER_CAP_MS = 14L * 24 * 60 * 60 * 1000
 
-    /** Same record cap as the native loader (jni_transaction_persist.c). */
-    const val MAX_RECORDS = 10_000L
+    /** Same record limit as the native loader: the shared one (TX-CKPT-CAP). */
+    const val MAX_RECORDS = SavedTransactionsCheckpoint.MAX_RECORDS
 
     /** TX_UNCONFIRMED (BRTransaction.h): the height of a record that is not in a block. */
     const val UNCONFIRMED_HEIGHT = 0x7fffffffL

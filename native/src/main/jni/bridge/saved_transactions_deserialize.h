@@ -23,8 +23,12 @@
 #include <stdlib.h>
 #include "BRInt.h"
 #include "BRTransaction.h"
+#include "BRSavedTransactions.h"
 
-#define SAVED_TRANSACTIONS_MAX_COUNT 10000
+/* TX-CKPT-CAP: the core's one limit, which its writer (BRWalletSerializeTransactions) also
+ * honours, so this reader accepts every count the wallet writes. A local 10,000 here, with no
+ * limit on the writer, dropped the whole checkpoint of a wallet past 10,000 transactions. */
+#define SAVED_TRANSACTIONS_MAX_COUNT BR_SAVED_TRANSACTIONS_MAX_COUNT
 #define SAVED_TRANSACTIONS_RECORD_HEADER_BYTES 12
 
 /* Parses a saved-transactions blob. On a sane count, allocates *outTxs (caller

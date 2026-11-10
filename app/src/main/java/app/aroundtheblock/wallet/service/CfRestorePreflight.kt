@@ -1,12 +1,28 @@
 package app.aroundtheblock.wallet.service
 
+import app.aroundtheblock.wallet.core.sync.SavedTransactionsCheckpoint
+
 internal enum class CfRestoreResetReason {
     MISSING_LEDGER,
     MISSING_TRANSACTION_CHECKPOINT,
     INVALID_LEDGER,
     INVALID_SAVED_BLOCKS,
     HEADER_WINDOW_MISSING,
+    /** TX-CKPT-CAP: the restored wallet holds fewer transactions than its checkpoint declares.
+     *  Android-only: [transactionCheckpointResetReason], not the core's BRCFRestorePreflight.h. */
+    TRANSACTION_CHECKPOINT_SHORT,
 }
+
+/**
+ * TX-CKPT-CAP, checked before [cfRestoreResetReason]: the stored scan frontier is only valid for a
+ * wallet that restored the history its transaction checkpoint declares. [shortRestoreRecorded] is
+ * [SavedTransactionsCheckpoint.KEY_SHORT_RESTORE], written by the restore when the reader loaded
+ * fewer records than the checkpoint declared. Resuming near the tip then would leave every older
+ * coin and record unseen until a manual rescan, so the headers, filters and ledger are rebuilt from
+ * the wallet's birth floor. No checkpoint at all is left to [cfRestoreResetReason].
+ */
+internal fun transactionCheckpointResetReason(shortRestoreRecorded: Boolean): CfRestoreResetReason? =
+    if (shortRestoreRecorded) CfRestoreResetReason.TRANSACTION_CHECKPOINT_SHORT else null
 
 internal fun cfRestoreResetReason(
     ledger: ByteArray?,

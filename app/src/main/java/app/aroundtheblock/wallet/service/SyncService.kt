@@ -26,6 +26,7 @@ import app.aroundtheblock.wallet.core.sync.CfScanLedgerStore
 import app.aroundtheblock.wallet.core.sync.FilterHeaderStore
 import app.aroundtheblock.wallet.core.sync.HistoryRebuildOnUpgrade
 import app.aroundtheblock.wallet.core.sync.SavedBlockStore
+import app.aroundtheblock.wallet.core.sync.SavedTransactionsCheckpoint
 import app.aroundtheblock.wallet.core.sync.KeepaliveAction
 import app.aroundtheblock.wallet.core.sync.keepaliveAction
 import app.aroundtheblock.wallet.core.db.dao.PeerDao
@@ -2243,12 +2244,29 @@ class SyncService : Service() {
         var blockBytes = SavedBlockStore.load(this@SyncService)
         val hasTransactionCheckpoint =
             prefs.getBoolean("transactions_checkpointed", false) || prefs.contains("saved_transactions")
-        val cfResetReason = cfRestoreResetReason(
-            savedLedger,
-            blockBytes,
-            hasReachedSynced,
-            hasTransactionCheckpoint,
-        )
+        // TX-CKPT-CAP: a restore that loaded fewer checkpointed transactions than the checkpoint
+        // declares (recorded by WalletManager.restoreFromDisk before the wallet was built) rebuilds
+        // from the birth floor rather than resuming near the tip without that history.
+        val shortRestoreDeclared = if (prefs.contains(SavedTransactionsCheckpoint.KEY_SHORT_RESTORE)) {
+            prefs.getLong(SavedTransactionsCheckpoint.KEY_SHORT_RESTORE, SavedTransactionsCheckpoint.UNREADABLE)
+        } else {
+            null
+        }
+        val cfResetReason = transactionCheckpointResetReason(shortRestoreDeclared != null)
+            ?: cfRestoreResetReason(
+                savedLedger,
+                blockBytes,
+                hasReachedSynced,
+                hasTransactionCheckpoint,
+            )
+        if (cfResetReason == CfRestoreResetReason.TRANSACTION_CHECKPOINT_SHORT) {
+            android.util.Log.w(
+                "SyncService",
+                "Transaction checkpoint declared $shortRestoreDeclared records and the restore loaded fewer " +
+                    "(now ${runCatching { NativeBridge.getTransactionCount() }.getOrDefault(-1)} held): " +
+                    "rebuilding from the birth floor, not resuming near the tip",
+            )
+        }
         if (cfResetReason != null) {
             // Capture the tip we are resetting FROM before the removes below clear it — the
             // breadcrumb below records how far back the reset threw the chain.
@@ -2263,6 +2281,8 @@ class SyncService : Service() {
                 .remove("saved_blocks_tip")
                 .remove("saved_filter_headers")
                 .remove("has_synced")
+                // TX-CKPT-CAP: the record is answered by this rebuild, and goes with it.
+                .remove(SavedTransactionsCheckpoint.KEY_SHORT_RESTORE)
                 .commit()
             SavedBlockStore.delete(this@SyncService)
             FilterHeaderStore.delete(this@SyncService)

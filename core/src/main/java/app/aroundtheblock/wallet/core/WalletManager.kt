@@ -12,6 +12,7 @@ import app.aroundtheblock.wallet.core.sync.FilterHeaderStore
 import app.aroundtheblock.wallet.core.sync.HistoryRebuildOnUpgrade
 import app.aroundtheblock.wallet.core.sync.clearTransactionCacheForRebuild
 import app.aroundtheblock.wallet.core.sync.SavedBlockStore
+import app.aroundtheblock.wallet.core.sync.SavedTransactionsCheckpoint
 import app.aroundtheblock.wallet.core.security.EncryptedData
 import app.aroundtheblock.wallet.core.security.KeyStoreManager
 import app.aroundtheblock.wallet.core.security.KeystoreKeyInvalidatedException
@@ -420,10 +421,11 @@ class WalletManager @Suppress("LongParameterList") constructor(
                 // validates hex first and returns null instead of throwing; the
                 // whole block is additionally wrapped so no other decode/native
                 // exception can escape either.
+                var loaded = 0
                 try {
                     val txBytes = decodeSavedTransactionsOrNull(savedTxHex)
                     if (txBytes != null) {
-                        val loaded = NativeBridge.loadSerializedTransactions(txBytes)
+                        loaded = NativeBridge.loadSerializedTransactions(txBytes)
                         android.util.Log.i("WalletManager", "Loaded $loaded saved transactions for restore")
                     } else {
                         android.util.Log.w("WalletManager", "Dropping corrupt saved_transactions blob (invalid hex) — continuing restore from seed")
@@ -431,6 +433,18 @@ class WalletManager @Suppress("LongParameterList") constructor(
                 } catch (e: Exception) {
                     android.util.Log.w("WalletManager", "saved_transactions restore failed — dropping and continuing", e)
                 }
+                // TX-CKPT-CAP: a load short of what the checkpoint declares is recorded before the wallet
+                // is built from it, so the sync start rebuilds from the birth floor (SyncService's CF
+                // preflight) instead of resuming near the tip without that history.
+                runCatching {
+                    if (SavedTransactionsCheckpoint.recordRestore(syncPrefs, savedTxHex, loaded.toLong())) {
+                        android.util.Log.w(
+                            "WalletManager",
+                            "Loaded $loaded of ${SavedTransactionsCheckpoint.declaredCount(savedTxHex)} checkpointed " +
+                                "transactions: recorded a short restore, the sync start rebuilds from the birth floor",
+                        )
+                    }
+                }.onFailure { android.util.Log.w("WalletManager", "short-restore record failed", it) }
             }
 
             // restoreWalletFromBytes builds the wallet from the records loaded just above (the only native
