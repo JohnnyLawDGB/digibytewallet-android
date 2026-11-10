@@ -228,13 +228,20 @@ duplicate: credit, no payment. A report that shows one of them reaching **DGB, D
 seed** in a way not described here is new, and is assessed as new.
 
 - **DigiAsset transactions with uncommon shapes.** Some valid but unusual DigiAsset layouts
-  (unrecognised instructions, several asset carriers in one transaction, issuance with transfer
-  rules, transfers whose result cannot be decided from the transaction alone) are handled by
+  (unrecognised instructions, several asset carriers or several data outputs in one transaction,
+  issuance with transfer rules, transactions that also carry DigiDollar outputs, transfers whose
+  result cannot be decided from the transaction alone) are handled by
   holding the affected outputs rather than spending them. The wallet fails closed: such an output
   can show as unspendable until a later release settles it. A report that the hold happens is known; a
   report that it can be avoided, or that it loses funds, is not.
 - **Chain trust.** Choosing between competing chains by accumulated work is a scheduled structural
-  change. (4.1.3 cross-checks the compact-filter chain against the other connected peers.)
+  change. (4.1.3 cross-checks the compact-filter chain against the other connected peers; how
+  often that check runs, which peers count toward it, and what a single peer can do on its own
+  are being tightened.)
+- **Own node and large histories.** A paired own node that stops serving compact filters part-way
+  is not yet shown as unavailable, and a wallet with a very long history can need a rescan after a
+  restart to show older coins. Both leave the coins on chain under the user's key; neither moves
+  them.
 - **Wallets holding very many small coins.** A send whose coins would not fit in one transaction
   is refused, and the message reads as an insufficient balance; "send max" is refused the same way.
   A clearer message and a way to consolidate coins are planned.
@@ -414,3 +421,5 @@ not listed. Anonymity, or no answer, never affects payment.*
 - **2026-10-24 — one reporter, several addresses.** A person or team sending from several addresses
   counts as one reporter for the per-wave cap and duplicate decisions. Applied from the 2026-10-24
   intake on.
+- **2026-11-10 — known issues for 4.1.4 refreshed.** Added the shapes and sync conditions most often
+  reported again in the November intake, so that a report restating one is recognised as known.

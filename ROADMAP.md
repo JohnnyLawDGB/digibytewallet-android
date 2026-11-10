@@ -19,6 +19,12 @@
 > - Already on `develop` since 4.1.3: the seeder, recovery-gap and stale-send rules moved into
 >   the shared core (#199, #202, #206, #207, #209, #214, #215).
 >
+> **Progress, 2026-11-10.** Restore with a passphrase is verified end to end: a 24-word phrase plus
+> a passphrase, restored through the current flow on an emulator, gives exactly the SegWit and
+> Taproot addresses an independent generator computes. The same check found that the
+> recovery-phrase screen in Settings never showed the passphrase. That is fixed on `develop` (#220)
+> and ships in 4.1.4. Still to land: the 24-word address vectors in the committed KAT set.
+>
 > **Unchanged:** the phase order below (sovereignty first). Choosing chains by accumulated work
 > is still the scheduled structural change under Phase 1.
 
