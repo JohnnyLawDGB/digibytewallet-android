@@ -67,6 +67,9 @@ CASES=(
     first_seen_order:fail
     plan_buffer_and_known_order:pass
     coverage_counts_the_plan:pass
+    coverage_needs_every_address_answered:pass
+    plan_first_seen_with_many_repeats:pass
+    large_inputs_are_n_log_n:pass
     pending_rule:pass
     pending_txids_from_wallet:pass
     distinct_outpoints:pass

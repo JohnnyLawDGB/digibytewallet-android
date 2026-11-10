@@ -8,8 +8,8 @@
 //               first-seen order.
 //   STEP        fetched -> decoded -> is the transaction asked for -> registered; the first failure is
 //               the outcome, and bytes that are not the transaction are never registered.
-//   COVERAGE    covered iff nothing unrecovered and every planned entry registered; a refused
-//               registration is unrecovered.
+//   COVERAGE    covered iff the node answered for every address asked (and some were asked), nothing
+//               unrecovered and every planned entry registered; a refused registration is unrecovered.
 //   PENDING     blockHeight == TX_UNCONFIRMED.
 //   DISTINCT    addresses trimmed, non-empty, once, first-seen; outpoints once, first row kept.
 //
@@ -29,6 +29,7 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <inttypes.h>
+#include <time.h>
 
 #include "BRReconcilePlan.h"
 #include "BRWallet.h"
@@ -129,7 +130,7 @@ static int contains(const UInt256 *set, size_t n, UInt256 h)
 static BRReconcileImportOutcome tally(size_t planned, const BRReconcileImportStep *s, size_t n)
 {
     BRReconcileImportOutcome o;
-    BRReconcileImportBegin(&o, planned);
+    BRReconcileImportBegin(&o, 3, 3, planned);   // the node answered for every address asked
     for (size_t i = 0; i < n; i++) BRReconcileImportRecord(&o, s[i]);
     return o;
 }
@@ -295,7 +296,7 @@ static void wide_wallet_can_still_achieve_coverage(void)
     for (i = 0; i < 150; i++) { h[i].txHash = wtx[i]; h[i].height = H; }
     h[150].txHash = missingTx->txHash; h[150].height = H;
     ck(k && BRReconcilePlanHistoryImport(h, 151, k, n, p, 151, &pn) == BR_RECONCILE_OK, "planned (%zu entries)", pn);
-    BRReconcileImportBegin(&o, pn);
+    BRReconcileImportBegin(&o, 1, 1, pn);
     for (i = 0; i < pn; i++) {
         int registered;
         if (BRWalletTransactionForHash(w, p[i].txHash)) registered = 0;   // the wallet's duplicate refusal
@@ -455,11 +456,118 @@ static void coverage_counts_the_plan(void)
     o = tally(1, bad, 1);
     ck(o.unrecovered == 1 && !BRReconcileImportCovered(&o), "an unknown step value is not recovered");
     ck(!BRReconcileImportCovered(NULL), "NULL is not covered");
-    BRReconcileImportBegin(NULL, 3);
+    BRReconcileImportBegin(NULL, 1, 1, 3);
     BRReconcileImportRecord(NULL, R);
     o.planned = SIZE_MAX; o.imported = SIZE_MAX; o.unrecovered = 0;
     BRReconcileImportRecord(&o, R);
     ck(o.imported == SIZE_MAX, "counts saturate");
+}
+
+// reconcileAddressHistory's early returns: no addresses, or a history request that failed, is never
+// covered, though its plan is empty.
+static void coverage_needs_every_address_answered(void)
+{
+    BRReconcileImportOutcome o;
+    BRReconcileImportBegin(&o, 0, 0, 0);
+    ck(!BRReconcileImportCovered(&o), "no addresses asked: not covered");
+    BRReconcileImportBegin(&o, 5, 0, 0);
+    ck(!BRReconcileImportCovered(&o), "the history request failed (0 of 5 answered), empty plan: not covered");
+    BRReconcileImportBegin(&o, 600, 500, 1);
+    BRReconcileImportRecord(&o, R);
+    ck(!BRReconcileImportCovered(&o), "one request of two failed (500 of 600 answered): not covered");
+    BRReconcileImportBegin(&o, 2, 3, 1);
+    BRReconcileImportRecord(&o, R);
+    ck(!BRReconcileImportCovered(&o), "more answered than asked: not covered");
+    BRReconcileImportBegin(&o, 600, 600, 0);
+    ck(BRReconcileImportCovered(&o), "every address answered, nothing missing: covered");
+}
+
+// One txid repeated dozens of times among others: the plan's order is where each txid was FIRST seen,
+// which only the index tie-break in the plan's txid sort keeps (the sort is not stable).
+static void plan_first_seen_with_many_repeats(void)
+{
+    BRReconcileHistoryTx h[200];
+    BRReconcilePlanTx p[200];
+    size_t n = 0, i, k = 0, bad = 0;
+    UInt256 t = tid(0x54, 0);
+    // 40 others, each once, and t at positions 3, 7, 11, ... (every fourth from 3): 3 + 4 * 39 = 159.
+    for (i = 0; i < 160; i++) {
+        if (i % 4 == 3) { h[i].txHash = t; h[i].height = 500; }
+        else { h[i].txHash = tid((uint8_t)(i % 7 + 1), (uint16_t)(i + 1)); h[i].height = (int64_t)i; }
+    }
+    ck(BRReconcilePlanHistoryImport(h, 160, NULL, 0, p, 200, &n) == BR_RECONCILE_OK && n == 121, "121 txids (n=%zu)", n);
+    for (i = 0; i < 160 && k < n; i++) {   // the plan is the history with every repeat of t after its first dropped
+        if (UInt256Eq(h[i].txHash, t) && i != 3) continue;
+        if (!UInt256Eq(p[k].txHash, h[i].txHash) || p[k].firstIndex != i) bad++;
+        k++;
+    }
+    ck(n == 121 && k == 121 && bad == 0, "every txid where it was first seen, t at position 3 (%zu out of place)", bad);
+    ck(n > 3 && UInt256Eq(p[3].txHash, t) && p[3].firstIndex == 3, "t is fourth, first seen at 3");
+}
+
+static double cpuSeconds(clock_t since) { return (double)(clock() - since) / CLOCKS_PER_SEC; }
+
+// Inputs the node chooses the size of, at 100000 rows: each list in well under the bound (O(n log n)).
+// The bound is CPU seconds under ASan + UBSan; the quadratic version took over 4 s for the outpoints alone.
+#define LARGE_N 100000u
+#define LARGE_BOUND_S 2.0
+static void large_inputs_are_n_log_n(void)
+{
+    BRUTXO *u = calloc(LARGE_N, sizeof(*u));
+    size_t *keep = calloc(LARGE_N, sizeof(*keep));
+    char (*store)[24] = calloc(LARGE_N, sizeof(*store));
+    const char **a = calloc(LARGE_N, sizeof(*a));
+    BRReconcileAddressSpan *spans = calloc(LARGE_N, sizeof(*spans));
+    BRReconcileHistoryTx *h = calloc(LARGE_N, sizeof(*h));
+    BRReconcilePlanTx *p = calloc(LARGE_N, sizeof(*p));
+    size_t n = 0, i, bad = 0;
+    clock_t t0;
+    double s;
+
+    ck(u && keep && store && a && spans && h && p, "buffers allocated");
+    if (!(u && keep && store && a && spans && h && p)) goto done;
+    // Outpoints: 50000 distinct (txid serial i / 2, output i % 2), each row twice: rows i and i + 50000.
+    for (i = 0; i < LARGE_N; i++) {
+        size_t j = i % (LARGE_N / 2);
+        u[i].hash = tid(0x61, (uint16_t)(j / 2));
+        u[i].hash.u8[2] = (uint8_t)(j >> 16);
+        u[i].n = (uint32_t)(j % 2);
+    }
+    t0 = clock();
+    BRReconcileStatus st = BRReconcileDistinctOutpoints(u, LARGE_N, keep, LARGE_N, &n);
+    s = cpuSeconds(t0);
+    for (i = 0; st == BR_RECONCILE_OK && i < n; i++) if (keep[i] != i) bad++;
+    ck(st == BR_RECONCILE_OK && n == LARGE_N / 2 && bad == 0, "outpoints: the first 50000 rows kept, in order (n=%zu)", n);
+    ck(s < LARGE_BOUND_S, "outpoints: %.3f s < %.1f s", s, LARGE_BOUND_S);
+
+    // Addresses: 50000 distinct, each twice (the repeat padded with whitespace).
+    for (i = 0; i < LARGE_N; i++) {
+        size_t j = i % (LARGE_N / 2);
+        snprintf(store[i], sizeof(store[i]), i < LARGE_N / 2 ? "dgb1q%06zu" : " dgb1q%06zu\t", j);
+        a[i] = store[i];
+    }
+    t0 = clock();
+    st = BRReconcileDistinctAddresses(a, LARGE_N, spans, LARGE_N, &n);
+    s = cpuSeconds(t0);
+    for (i = 0, bad = 0; st == BR_RECONCILE_OK && i < n; i++) if (spans[i].index != i || spans[i].offset != 0) bad++;
+    ck(st == BR_RECONCILE_OK && n == LARGE_N / 2 && bad == 0, "addresses: the first 50000 kept, in order (n=%zu)", n);
+    ck(s < LARGE_BOUND_S, "addresses: %.3f s < %.1f s", s, LARGE_BOUND_S);
+
+    // History: 50000 txids, each twice (at one height: this case times the plan, the height rule has its own).
+    for (i = 0; i < LARGE_N; i++) {
+        size_t j = i % (LARGE_N / 2);
+        h[i].txHash = tid(0x62, (uint16_t)j);
+        h[i].txHash.u8[2] = (uint8_t)(j >> 16);
+        h[i].height = 20;
+    }
+    t0 = clock();
+    st = BRReconcilePlanHistoryImport(h, LARGE_N, NULL, 0, p, LARGE_N, &n);
+    s = cpuSeconds(t0);
+    for (i = 0, bad = 0; st == BR_RECONCILE_OK && i < n; i++) if (p[i].firstIndex != i || p[i].height != 20) bad++;
+    ck(st == BR_RECONCILE_OK && n == LARGE_N / 2 && bad == 0, "history: 50000 planned, in first-seen order (n=%zu)", n);
+    ck(s < LARGE_BOUND_S, "history: %.3f s < %.1f s", s, LARGE_BOUND_S);
+done:
+    free(u); free(keep); free(store); free(a); free(spans); free(h); free(p);
 }
 
 static void pending_rule(void)
@@ -558,6 +666,9 @@ static const Case kCases[] = {
     { "first_seen_order", first_seen_order },
     { "plan_buffer_and_known_order", plan_buffer_and_known_order },
     { "coverage_counts_the_plan", coverage_counts_the_plan },
+    { "coverage_needs_every_address_answered", coverage_needs_every_address_answered },
+    { "plan_first_seen_with_many_repeats", plan_first_seen_with_many_repeats },
+    { "large_inputs_are_n_log_n", large_inputs_are_n_log_n },
     { "pending_rule", pending_rule },
     { "pending_txids_from_wallet", pending_txids_from_wallet },
     { "distinct_outpoints", distinct_outpoints },
