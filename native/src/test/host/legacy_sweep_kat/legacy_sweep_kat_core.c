@@ -42,8 +42,8 @@ BRLegacySweepResult kat_core_sweep_null_out(const uint8_t *seed, size_t seedLen)
     return BRLegacySweepBuildAndSign(NULL, seed, seedLen, "Bitcoin seed", NULL, 0, &in, 1, "x", 0, NULL);
 }
 
-int kat_core_from_proof(BRLegacySweepInput *in, const BRRawTxProof *proof, const BRRawTxBindingParent *parents,
-                        size_t parentCount)
+int kat_core_from_proof(BRLegacySweepInput *in, const BRRawTxBindingUtxo *utxo, const BRRawTxProof *proof,
+                        const BRRawTxBindingParent *parents, size_t parentCount)
 {
-    return BRLegacySweepInputFromProof(in, proof, parents, parentCount);
+    return BRLegacySweepInputFromProof(in, utxo, proof, parents, parentCount);
 }

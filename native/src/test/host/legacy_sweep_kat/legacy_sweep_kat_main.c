@@ -14,10 +14,15 @@
 //   boundary_*    each fee rule at, below and above its boundary: the size estimate, the 1000 floor, the 5% refusal
 //                 (at fee*20, one below and one above; a lone input exempt), dust at fee+546.
 //   refuse_*      every typed refusal: no inputs, seed length, script length (0, 128 accepted, 129), destination,
-//                 a script no derived key matches; uint64 wraparound of the fee and of totalIn handled alike.
+//                 a script no derived key matches; the two values that can wrap (the sum totalIn, the product
+//                 estSize * feePerKb) handled alike.
 //   gate_*        the bridge's signed-spend gate refusing: the bridge returns nothing, the core still signs (the gate
 //                 is the platform's) and the bytes the bridge gated are the core's.
-//   proof         amounts and scripts taken from BRRawTxBindingCheck proofs (BRLegacySweepInputFromProof).
+//   proof         outpoints, amounts and scripts taken from coins and their BRRawTxBindingCheck proofs
+//                 (BRLegacySweepInputFromProof); a vout outside 0..UINT32_MAX, another coin's parent, an unproven
+//                 proof and out-of-range indexes are refused.
+//   fee_rate_large a lone coin at a large fee rate signs, paying most of itself in fee (nothing bounds feePerKb;
+//                 the platform must).
 //   fuzz          KAT_FUZZ sweeps (default 2000; KAT_FUZZ_SEED varies them) over every derivation profile and format, 1..12 inputs, random and
 //                 boundary amounts and fee rates, mismatched and malformed scripts, bad destinations and seeds.
 //   keys_wiped    no block the core frees holds a derived private key or the seed (the allocation recorder below);
@@ -45,8 +50,8 @@ BRLegacySweepResult kat_core_sweep(const uint8_t *seed, size_t seedLen, const ch
                                    const char *dest, uint64_t feePerKb, BRLegacySweepFee *fee,
                                    uint8_t **serOut, size_t *serLenOut, BRTransaction **txOut);
 BRLegacySweepResult kat_core_sweep_null_out(const uint8_t *seed, size_t seedLen);
-int kat_core_from_proof(BRLegacySweepInput *in, const BRRawTxProof *proof, const BRRawTxBindingParent *parents,
-                        size_t parentCount);
+int kat_core_from_proof(BRLegacySweepInput *in, const BRRawTxBindingUtxo *utxo, const BRRawTxProof *proof,
+                        const BRRawTxBindingParent *parents, size_t parentCount);
 
 jstring JNICALL NativeBridge_buildAndSignLegacySweep(JNIEnv *env, jobject thiz, jbyteArray seedBytes, jstring hmacKey,
                                                      jintArray prefixPath, jobjectArray txidsHex, jintArray vouts,
@@ -668,7 +673,9 @@ int main(int argc, char **argv)
         agree(&s, BR_LEGACY_SWEEP_SIGN_FAILED, "the wrong HMAC key");
     }
     end();
-    begin("refuse_wraparound");   // the bridge's uint64 arithmetic, wrapped alike
+    // Only totalIn and estSize * feePerKb can wrap: fee <= (2^64 - 1) / 1000 (or the floor), so fee * 20 and fee + 546
+    // fit, and the dust rule leaves fee < totalIn, so the output never wraps.
+    begin("refuse_wraparound");
     {
         Sweep s = s2;
         BRLegacySweepInput in[2] = { two.in[0], two.in[1] };
@@ -676,7 +683,7 @@ int main(int argc, char **argv)
         in[0].amount = 1ull << 63; in[1].amount = 1ull << 63;   // totalIn wraps to 0
         agree(&s, BR_LEGACY_SWEEP_FEE_TOO_HIGH, "totalIn wraps to 0");
         in[0].amount = 10000000; in[1].amount = 10000000;
-        s.feePerKb = UINT64_MAX;                                // estSize * feePerKb wraps; fee * 20 wraps
+        s.feePerKb = UINT64_MAX;                                // estSize * feePerKb wraps
         { Both b = run_both(&s, 0);
           check((b.bridgeHex == NULL) == (b.coreHex == NULL) && (! b.coreHex || strcmp(b.coreHex, b.bridgeHex) == 0),
                 "feePerKb UINT64_MAX: both alike"); both_free(&b); }
@@ -684,7 +691,7 @@ int main(int argc, char **argv)
         { Both b = run_both(&s, 0);
           check((b.bridgeHex == NULL) == (b.coreHex == NULL) && (! b.coreHex || strcmp(b.coreHex, b.bridgeHex) == 0),
                 "feePerKb INT64_MAX: both alike"); both_free(&b); }
-        s.feePerKb = 0x0CCCCCCCCCCCCCCDull;   // fee * 20 wraps to a small number for 1 input's estSize... checked alike
+        s.feePerKb = 0x0CCCCCCCCCCCCCCDull;   // estSize * feePerKb wraps to a small product: a fee the rules then accept
         { Both b = run_both(&s, 0);
           check((b.bridgeHex == NULL) == (b.coreHex == NULL) && (! b.coreHex || strcmp(b.coreHex, b.bridgeHex) == 0),
                 "feePerKb near 2^64/20: both alike"); both_free(&b); }
@@ -741,21 +748,49 @@ int main(int argc, char **argv)
         BRLegacySweepInput in[2];
         memset(in, 0, sizeof(in));
         for (int i = 0; i < 2; i++) {
-            in[i].txHash = pid; in[i].vout = (uint32_t)i; in[i].chain = 0; in[i].index = (uint32_t)i;
-            check(kat_core_from_proof(&in[i], &pr[i], par, 1) == 1, "a PROVEN proof fills the input");
+            in[i].chain = 0; in[i].index = (uint32_t)i;   // the caller's; everything else from the coin and proof
+            check(kat_core_from_proof(&in[i], &u[i], &pr[i], par, 1) == 1, "a PROVEN proof fills the input");
         }
+        check(UInt256Eq(in[0].txHash, pid) && UInt256Eq(in[1].txHash, pid) && in[0].vout == 0 && in[1].vout == 1,
+              "the outpoint is the coin's");
         check(in[0].amount == 7000000 && in[1].amount == 8000000 && in[0].scriptLen == l0 &&
               memcmp(in[1].script, sp1, l1) == 0, "the parent's amount and script");
+        check(in[1].chain == 0 && in[1].index == 1, "chain and index stay the caller's");
         Sweep s = { g_seed, 64, "Bitcoin seed", m84, 3, in, 2, kDest, 100000 };
         agree(&s, BR_LEGACY_SWEEP_SIGNED, "a sweep of proven coins");
-        BRRawTxProof bad = pr[0]; BRLegacySweepInput t = in[0];
+        BRRawTxProof bad = pr[0]; BRLegacySweepInput t = in[0], t0 = in[0];
         bad.state = BR_RAW_TX_PROOF_UNPROVEN;
-        check(kat_core_from_proof(&t, &bad, par, 1) == 0 && t.amount == in[0].amount, "an UNPROVEN proof fills nothing");
+        check(kat_core_from_proof(&t, &u[0], &bad, par, 1) == 0, "an UNPROVEN proof fills nothing");
         bad = pr[0]; bad.parent = 1;
-        check(kat_core_from_proof(&t, &bad, par, 1) == 0, "a parent outside parents[] is refused");
+        check(kat_core_from_proof(&t, &u[0], &bad, par, 1) == 0, "a parent outside parents[] is refused");
         bad = pr[0]; bad.scriptOffset = pl;
-        check(kat_core_from_proof(&t, &bad, par, 1) == 0, "a script range past the parent is refused");
+        check(kat_core_from_proof(&t, &u[0], &bad, par, 1) == 0, "a script range past the parent is refused");
+        BRRawTxBindingUtxo cu = u[0];
+        cu.vout = -1;
+        check(kat_core_from_proof(&t, &cu, &pr[0], par, 1) == 0, "a vout of -1 is refused");
+        cu.vout = (int64_t)UINT32_MAX + 1;
+        check(kat_core_from_proof(&t, &cu, &pr[0], par, 1) == 0, "a vout of 2^32 is refused");
+        cu = u[0]; cu.txid = fill256(0x5a);
+        check(kat_core_from_proof(&t, &cu, &pr[0], par, 1) == 0, "a proof paired with another coin's txid is refused");
+        check(kat_core_from_proof(&t, NULL, &pr[0], par, 1) == 0, "no coin: refused");
+        check(memcmp(&t, &t0, sizeof(t)) == 0, "a refusal leaves the input untouched");
+        cu = u[0]; cu.vout = (int64_t)UINT32_MAX;   // the top of the range is accepted (the outpoint is the coin's)
+        check(kat_core_from_proof(&t, &cu, &pr[0], par, 1) == 1 && t.vout == UINT32_MAX, "a vout of 2^32 - 1 is taken");
         free(pb);
+    }
+    end();
+
+    // ── a large fee rate on a lone coin ────────────────────────────────────────────────────────────────────────────
+    begin("fee_rate_large");   // 10 DGB at 4.9e9 sat/kB: 204 * 4.9e9 / 1000 = 999600000 sat of fee, and it signs
+    {
+        Sweep s = s1;
+        BRLegacySweepInput in = one.in[0];
+        in.amount = 1000000000ull;
+        s.in = &in; s.feePerKb = 4900000000ull;
+        agree(&s, BR_LEGACY_SWEEP_SIGNED, "a lone coin at 4.9e9 sat/kB");
+        Both b = run_both(&s, 1);
+        check(b.fee.fee == 999600000ull && b.tx && b.tx->outputs[0].amount == 400000, "fee 9.996 DGB, output 0.004 DGB");
+        both_free(&b);
     }
     end();
 

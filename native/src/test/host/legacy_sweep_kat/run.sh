@@ -119,7 +119,7 @@ red() {
 }
 
 red BR_LEGACY_SWEEP_RED_SIZE \
-    "boundary_dust_above boundary_dust_at boundary_dust_below boundary_ratio_above boundary_ratio_at boundary_ratio_single_exempt boundary_size fuzz gate_refusal_is_bridge_side pinned_amount_guard_normal pinned_amount_guard_over_reported pinned_amount_guard_under_reported pinned_bip49_p2sh_p2wpkh pinned_foreign_taproot pinned_segwit_p2wpkh pinned_signedtx_p2pkh proof refuse_destination refuse_short_seed_signs refuse_wraparound"
+    "boundary_dust_above boundary_dust_at boundary_dust_below boundary_ratio_above boundary_ratio_at boundary_ratio_single_exempt boundary_size fee_rate_large fuzz gate_refusal_is_bridge_side pinned_amount_guard_normal pinned_amount_guard_over_reported pinned_amount_guard_under_reported pinned_bip49_p2sh_p2wpkh pinned_foreign_taproot pinned_segwit_p2wpkh pinned_signedtx_p2pkh proof refuse_destination refuse_short_seed_signs refuse_wraparound"
 red BR_LEGACY_SWEEP_RED_FLOOR \
     "boundary_floor_dust boundary_floor_edge boundary_floor_signs boundary_floor_zero_rate boundary_ratio_floor fuzz"
 red BR_LEGACY_SWEEP_RED_RATIO \
@@ -127,7 +127,7 @@ red BR_LEGACY_SWEEP_RED_RATIO \
 red BR_LEGACY_SWEEP_RED_RATIO_STRICT \
     "boundary_ratio_at boundary_ratio_floor fuzz"
 red BR_LEGACY_SWEEP_RED_RATIO_SINGLE \
-    "boundary_dust_above boundary_dust_at boundary_dust_below boundary_floor_dust boundary_floor_signs boundary_floor_zero_rate boundary_ratio_single_exempt fuzz pinned_foreign_taproot"
+    "boundary_dust_above boundary_dust_at boundary_dust_below boundary_floor_dust boundary_floor_signs boundary_floor_zero_rate boundary_ratio_single_exempt fee_rate_large fuzz pinned_foreign_taproot"
 red BR_LEGACY_SWEEP_RED_DUST \
     "boundary_dust_at boundary_floor_dust fuzz"
 red BR_LEGACY_SWEEP_RED_NO_WIPE "keys_wiped"
