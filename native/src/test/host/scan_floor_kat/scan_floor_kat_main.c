@@ -2,7 +2,8 @@
 // from chain).
 //
 //   kt_*      the Kotlin tests, case for case: RecoveryBirthHeightTest (cfBirthHeightToPersist);
-//             HistoryRebuildOnUpgradeTest's floor cases (lowerFloorTo, the run's floor step,
+//             HistoryRebuildOnUpgradeTest's framing cases (summarize -> BRSavedTransactionsFloorMinima)
+//             and its floor cases (lowerFloorTo, the run's floor step,
 //             clearFloorHint, markNotNeeded, the pending marker, armRerun); HistoryRebuildWiringTest's
 //             floorHintStep cases; WalletManagerHistoryRebuildTest's creationTimeForRestore case and
 //             its rebuild cases (the floor time kept, recorded sends forgotten);
@@ -17,22 +18,24 @@
 //   prop_*    on the real mainnet and testnet tables: a floor lowered to any height gives a time
 //             whose header anchor (BRRecoveryBirthCheckpointHeight) is at or below that height
 //   order_*   BRChainRebuild.h against the order of the calls in Android's source: WalletManager.kt
-//             (argv[2]), HistoryRebuildOnUpgrade.kt (argv[3]), ReconcileScreen.kt (argv[4])
+//             (argv[2]), HistoryRebuildOnUpgrade.kt (argv[3]), ReconcileScreen.kt (argv[4]),
+//             SyncService.kt (argv[5]); and the rebuild has no early return or throw
 //   vectors_* every line of the core's vectors/scan-floor/vectors.txt (argv[1]) agrees with the
 //             model (run.sh separately checks the file is the generator's current output)
 //
-// Built six ways by run.sh: the shipped headers and one comparison arm per RED seam
-// (SCAN_FLOOR_RAISE_RED, SCAN_FLOOR_ZERO_RED, SCAN_FLOOR_CHECKPOINT_RED, SCAN_FLOOR_STEP_RED,
-// CHAIN_REBUILD_ORDER_RED).
+// Built by run.sh as the shipped headers and one comparison arm per RED seam (listed there).
 
 #include "BRScanFloor.h"
 #include "BRScanFloor.h"        // twice: the include guard
 #include "BRChainRebuild.h"
 #include "BRChainRebuild.h"
 #include "BRCFRestorePreflight.h"
+#include "BRSavedTransactions.h"
+#include "BRSavedTransactions.h"
 #include "BRRecoveryDate.h"
 #include "checkpoint_time.h"     // the bridge's lookup (native/src/main/jni/bridge)
 
+#include <ctype.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -118,6 +121,35 @@ static KtStep kt_floorHintStep(int walletLoaded, int64_t anchor, int hasPersiste
     KtStep s = { 0, 0, 1, 1, 0 }; return s;
 }
 
+// HistoryRebuildOnUpgrade.summarize (CacheSummary). bytes == NULL is a null ByteArray.
+typedef struct { int64_t declaredCount; int32_t records; int64_t minHeight, minTime; } KtSummary;
+static int64_t kt_u32le(const uint8_t *b, int32_t off)
+{
+    return (int64_t)b[off] | ((int64_t)b[off + 1] << 8) | ((int64_t)b[off + 2] << 16) | ((int64_t)b[off + 3] << 24);
+}
+static KtSummary kt_summarize(const uint8_t *bytes, int32_t size)
+{
+    KtSummary empty = { 0, 0, 0, 0 };
+    const int64_t MAX_RECORDS = 10000, UNCONFIRMED_HEIGHT = 0x7fffffffLL;
+    if (bytes == NULL || size <= 4) return empty;
+    int64_t count = kt_u32le(bytes, 0);
+    if (count == 0) return empty;
+    if (count > MAX_RECORDS) { KtSummary s = { count, 0, 0, 0 }; return s; }
+    int64_t pos = 4; int32_t records = 0; int64_t minHeight = 0, minTime = 0, len = size, i = 0;
+    while (i < count && pos + 12 <= len) {
+        int64_t sz = kt_u32le(bytes, (int32_t)pos), height = kt_u32le(bytes, (int32_t)pos + 4), time = kt_u32le(bytes, (int32_t)pos + 8);
+        pos += 12;
+        if (pos + sz > len) break;
+        pos += sz;
+        records++;
+        if (height >= 1 && height < UNCONFIRMED_HEIGHT) { if (minHeight == 0 || height < minHeight) minHeight = height; }
+        if (height >= 1 && height <= UNCONFIRMED_HEIGHT && time > 0 && (minTime == 0 || time < minTime)) minTime = time;
+        i++;
+    }
+    KtSummary s = { count, records, minHeight, minTime };
+    return s;
+}
+
 // WalletManager.creationTimeForRestore
 static int64_t kt_creationTimeForRestore(int64_t stored, int64_t floorTime)
 {
@@ -142,6 +174,122 @@ static int floorEq(BRScanFloor f, int64_t h, int64_t t, int p) { return f.height
 static BRScanFloorStep st(int loaded, int64_t anchor, int64_t persisted, int64_t hint, int pending)
 {
     return BRScanFloorHintStep(loaded, anchor, persisted != NONE, persisted == NONE ? 0 : persisted, hint, pending);
+}
+
+// ---- kt_: HistoryRebuildOnUpgradeTest's framing cases (summarize) -------------------------------
+
+typedef struct { int64_t height, time; const uint8_t *body; uint32_t bodyLen; int64_t declaredSize; } Rec;
+static const uint8_t BODY3[] = { 0xa0, 0xa1, 0xa2 }, BODY2[] = { 9, 9 }, BODY1[] = { 1 }, BODY7[] = { 7 }, BODY23[] = { 2, 3 };
+#define R(h, t, b) { (h), (t), (b), sizeof(b), -1 }
+static size_t blobOf(uint8_t *out, const Rec *r, size_t n, int64_t count)
+{
+    size_t pos = 0;
+    #define PUT(v) do { uint32_t _v = (uint32_t)(v); out[pos++] = (uint8_t)_v; out[pos++] = (uint8_t)(_v >> 8); \
+                        out[pos++] = (uint8_t)(_v >> 16); out[pos++] = (uint8_t)(_v >> 24); } while (0)
+    PUT(count < 0 ? (int64_t)n : count);
+    for (size_t i = 0; i < n; i++) {
+        PUT(r[i].declaredSize < 0 ? (int64_t)r[i].bodyLen : r[i].declaredSize); PUT(r[i].height); PUT(r[i].time);
+        memcpy(out + pos, r[i].body, r[i].bodyLen); pos += r[i].bodyLen;
+    }
+    #undef PUT
+    return pos;
+}
+static BRSavedTransactionsFloor minima(const uint8_t *b, size_t len)
+{
+    BRSavedTransactionsFloor f;
+    BRSavedTransactionsFloorMinima(b, len, &f);
+    return f;
+}
+static int isEmpty(BRSavedTransactionsFloor f) { return f.declaredCount == 0; }
+
+static void kt_summarize_empty_and_zero_count(void)
+{
+    int ok = 1; uint8_t b[64] = { 0 };
+    const uint8_t three[] = { 1, 0, 0 }, four[] = { 1, 0, 0, 0 };
+    CHECK(isEmpty(minima(NULL, 0)));
+    CHECK(isEmpty(minima(b, 0)));
+    CHECK(isEmpty(minima(three, 3)));
+    CHECK(isEmpty(minima(four, 4)));
+    size_t n = blobOf(b, NULL, 0, -1);
+    CHECK(isEmpty(minima(b, n + 20)));
+    result("kt_summarize_empty_and_zero_count", ok);
+}
+static void kt_summarize_one_real_record(void)
+{
+    int ok = 1; uint8_t b[64]; Rec r[] = { R(21000000, 1650000000, BODY3) };
+    BRSavedTransactionsFloor f = minima(b, blobOf(b, r, 1, -1));
+    CHECK(f.records == 1 && f.minConfirmedHeight == 21000000 && f.minRecordTime == 1650000000);
+    result("kt_summarize_one_real_record", ok);
+}
+static void kt_summarize_mixed_heights_take_the_minimum_and_ignore_the_sentinel(void)
+{
+    int ok = 1; uint8_t b[256];
+    Rec r[] = { R(23000000, 1700000000, BODY3), R(0x7fffffffLL, 1550000000, BODY2), R(19500000, 1600000000, BODY1),
+                R(0, 500, BODY7), R(0xfffffff0LL, 400, BODY7), R(20000000, 0, BODY23) };
+    BRSavedTransactionsFloor f = minima(b, blobOf(b, r, 6, -1));
+    CHECK(f.records == 6 && f.minConfirmedHeight == 19500000);
+    CHECK(f.minRecordTime == 1550000000);          // heights 0 and above the sentinel give no time
+    result("kt_summarize_mixed_heights_take_the_minimum_and_ignore_the_sentinel", ok);
+}
+static void kt_summarize_all_unconfirmed_gives_no_height_but_a_time(void)
+{
+    int ok = 1; uint8_t b[64]; Rec r[] = { R(0x7fffffffLL, 1700000000, BODY3), R(0x7fffffffLL, 1690000000, BODY1) };
+    BRSavedTransactionsFloor f = minima(b, blobOf(b, r, 2, -1));
+    CHECK(! isEmpty(f) && f.records == 2 && f.minConfirmedHeight == 0 && f.minRecordTime == 1690000000);
+    result("kt_summarize_all_unconfirmed_gives_no_height_but_a_time", ok);
+}
+static void kt_summarize_unconfirmed_time_below_lowers_only_the_time(void)
+{
+    int ok = 1; uint8_t b[64];
+    Rec r[] = { R(22000000, 1690000000, BODY3), R(0x7fffffffLL, 1600000000, BODY1), R(0x7fffffffLL, 0, BODY23) };
+    BRSavedTransactionsFloor f = minima(b, blobOf(b, r, 3, -1));
+    CHECK(f.minConfirmedHeight == 22000000 && f.minRecordTime == 1600000000);
+    result("kt_summarize_unconfirmed_time_below_lowers_only_the_time", ok);
+}
+static void kt_summarize_truncated_mid_record_keeps_whole_records(void)
+{
+    int ok = 1; uint8_t b[64]; Rec r[] = { R(22000000, 1690000000, BODY3), R(18000000, 1500000000, BODY3) };
+    size_t n = blobOf(b, r, 2, -1);
+    BRSavedTransactionsFloor f = minima(b, n - 2);
+    CHECK(f.records == 1 && f.minConfirmedHeight == 22000000);
+    CHECK(minima(b, 4 + 12 + sizeof(BODY3) + 6).minConfirmedHeight == 22000000);   // cut inside the second header
+    result("kt_summarize_truncated_mid_record_keeps_whole_records", ok);
+}
+static void kt_summarize_size_past_the_end_stops_without_a_hint(void)
+{
+    int ok = 1; uint8_t b[64];
+    Rec r[] = { R(22000000, 1690000000, BODY3), { 10000000, 1400000000, BODY2, sizeof(BODY2), 0xffffffffLL } };
+    BRSavedTransactionsFloor f = minima(b, blobOf(b, r, 2, -1));
+    CHECK(f.records == 1 && f.minConfirmedHeight == 22000000 && f.minRecordTime == 1690000000);
+    result("kt_summarize_size_past_the_end_stops_without_a_hint", ok);
+}
+static void kt_summarize_count_above_the_cap_gives_no_hint(void)
+{
+    int ok = 1; uint8_t b[64]; Rec r[] = { R(1000, 1400000000, BODY3) };
+    BRSavedTransactionsFloor f = minima(b, blobOf(b, r, 1, 10001));
+    CHECK(! isEmpty(f) && f.records == 0 && f.minConfirmedHeight == 0);
+    const uint8_t huge[] = { 0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0 };
+    f = minima(huge, sizeof(huge));
+    CHECK(f.minConfirmedHeight == 0 && ! isEmpty(f));     // decide(): a non-empty cache runs
+    result("kt_summarize_count_above_the_cap_gives_no_hint", ok);
+}
+static void kt_summarize_never_fails_on_arbitrary_bytes(void)
+{
+    int ok = 1; uint64_t x = 7;
+    for (int it = 0; it < 2000; it++) {
+        uint8_t *b; size_t n;
+        x ^= x << 13; x ^= x >> 7; x ^= x << 17;
+        n = (size_t)(x % 64);
+        b = malloc(n ? n : 1);                            // exact-size buffer: ASan sees any overread
+        for (size_t i = 0; i < n; i++) { x ^= x << 13; x ^= x >> 7; x ^= x << 17; b[i] = (uint8_t)x; }
+        if (n >= 4 && (x & 1)) { b[0] = 3; b[1] = 0; b[2] = 0; b[3] = 0; }
+        BRSavedTransactionsFloor f = minima(b, n);
+        KtSummary k = kt_summarize(b, (int32_t)n);
+        CHECK(f.declaredCount == k.declaredCount && (int64_t)f.records == k.records &&
+              f.minConfirmedHeight == k.minHeight && f.minRecordTime == k.minTime);
+        free(b);
+    }
+    result("kt_summarize_never_fails_on_arbitrary_bytes", ok);
 }
 
 // ---- kt_: RecoveryBirthHeightTest ------------------------------------------------------------
@@ -233,9 +381,15 @@ static void kt_lowerFloorTo_ignores_a_non_positive_height(void)
 static void kt_markNotNeeded_forgets_the_floor_only_when_asked(void)
 {
     int ok = 1; BRScanFloor f = { 5, 6, 0 };
-    CHECK(floorEq(f, 5, 6, 0));                                   // markNotNeeded(c): the record is not touched
-    BRScanFloorForget(&f);
-    CHECK(f.height == 0 && f.time == 0);
+    // markNotNeeded(c), same wallet: the rebuild's own floor steps over an empty cache keep 5/6
+    // (it is a different wallet only that forgets them), and the floor record is in the kept list
+    BRScanFloorFromDiscardedCache(&f, 0, 0, NULL, 0);
+    CHECK(floorEq(f, 5, 6, 1));
+    int kept = 0;
+    for (int i = 0; i < BR_CHAIN_REBUILD_KEPT_COUNT; i++) kept |= BRChainRebuildKept[i] == BR_CHAIN_REBUILD_KEEP_FLOOR_RECORD;
+    CHECK(kept);
+    BRScanFloorForget(&f);                                        // markNotNeeded(c, forgetFloor = true)
+    CHECK(floorEq(f, 0, 0, 0));
     result("kt_markNotNeeded_forgets_the_floor_only_when_asked", ok);
 }
 static void kt_clearFloorHint_forgets_only_the_height(void)
@@ -418,10 +572,21 @@ static void kt_creationTimeForRestore_lowers_to_the_floor_time_only(void)
 // rebuildFromChainRescan_armsTheRebuild_...: the floor time stays across the rebuild and its rerun
 static void kt_rebuild_arms_the_rerun_and_keeps_the_floor_time(void)
 {
+    // floor_time 8; writeCache() puts oneRecordHex back (one record: height 0x014c4b40, time
+    // 0x62b8e080) before the rebuild and again between its clear and the exit; lookup { 0L }.
+    static const uint8_t oneRecord[] = { 1, 0, 0, 0, 2, 0, 0, 0, 0x40, 0x4b, 0x4c, 0x01, 0x80, 0xe0, 0xb8, 0x62, 0xab, 0xcd };
     int ok = 1; BRScanFloor f = { 0, 8, 0 };
+    BRSavedTransactionsFloor m = minima(oneRecord, sizeof(oneRecord));
+    CHECK(m.records == 1 && m.minConfirmedHeight == 21777216 && m.minRecordTime == 1656283264);
     CHECK(BRChainRebuildMustPrecede(0, BR_CHAIN_REBUILD_ARM_RERUN, BR_CHAIN_REBUILD_CLEAR_TX_CACHE));
-    BRScanFloorFromDiscardedCache(&f, 0, 0, NULL, 0);             // the rerun, lookup { 0L }
-    CHECK(f.time >= 1 && f.time <= 8);
+    CHECK(BRChainRebuildMustPrecede(0, BR_CHAIN_REBUILD_FLOOR_FROM_CACHE, BR_CHAIN_REBUILD_CLEAR_TX_CACHE));
+    BRScanFloorFromDiscardedCache(&f, m.minConfirmedHeight, m.minRecordTime, NULL, 0);   // FLOOR_FROM_CACHE
+    CHECK(floorEq(f, 21777216, 8, 1));
+    BRScanFloorFromDiscardedCache(&f, m.minConfirmedHeight, m.minRecordTime, NULL, 0);   // RERUN_ON_LOAD
+    CHECK(floorEq(f, 21777216, 8, 1));                                                   // same wallet: time 8 stays
+    BRScanFloor e = { 0, 8, 0 };
+    BRScanFloorFromDiscardedCache(&e, 0, 0, NULL, 0);                                     // no cache written back
+    CHECK(floorEq(e, 0, 8, 1));
     result("kt_rebuild_arms_the_rerun_and_keeps_the_floor_time", ok);
 }
 static void kt_rebuild_still_forgets_recorded_sends(void)
@@ -546,7 +711,6 @@ static void edge_rebuild_names_and_bounds(void)
         const char *n = BRChainRebuildStepName((BRChainRebuildStep)k);
         CHECK(n != NULL && n[0]);
         for (int j = 0; j < k; j++) CHECK(strcmp(n, BRChainRebuildStepName((BRChainRebuildStep)j)) != 0);
-        CHECK(BRChainRebuildContinuesAfterFailure((BRChainRebuildStep)k) == 1);
     }
     CHECK(BRChainRebuildStepName((BRChainRebuildStep)BR_CHAIN_REBUILD_STEP_KINDS) == NULL);
     CHECK(BRChainRebuildStepName((BRChainRebuildStep)-1) == NULL);
@@ -590,6 +754,103 @@ static void edge_rebuild_invariants(void)
     CHECK(BRChainRebuildStepAt(1, 0) == BR_CHAIN_REBUILD_LOWER_FLOOR_TO);
     for (int i = 0; i < BRChainRebuildStepCount(0); i++) CHECK(BRChainRebuildStepAt(1, i + 1) == BRChainRebuildStepAt(0, i));
     result("edge_rebuild_invariants", ok);
+}
+
+
+static void edge_failure_rules(void)
+{
+    int ok = 1;
+    for (int k = 0; k < BR_CHAIN_REBUILD_STEP_KINDS; k++) {
+        int stops = k == BR_CHAIN_REBUILD_LOWER_FLOOR_TO || k == BR_CHAIN_REBUILD_STOP_SYNC ||
+                    k == BR_CHAIN_REBUILD_ARM_RERUN || k == BR_CHAIN_REBUILD_FLOOR_FROM_CACHE;
+        CHECK(BRChainRebuildContinuesAfterFailure((BRChainRebuildStep)k) == ! stops);
+    }
+    // every step that stops the rebuild comes before every clear
+    for (int from = 0; from <= 1; from++)
+        for (int i = 0; i < BRChainRebuildStepCount(from); i++) {
+            int k = BRChainRebuildStepAt(from, i);
+            if (BRChainRebuildContinuesAfterFailure((BRChainRebuildStep)k)) continue;
+            CHECK(BRChainRebuildMustPrecede(from, (BRChainRebuildStep)k, BR_CHAIN_REBUILD_CLEAR_TX_CACHE));
+        }
+    result("edge_failure_rules", ok);
+}
+static void edge_reload_steps(void)
+{
+    int ok = 1;
+    for (int k = 0; k < BR_CHAIN_REBUILD_RELOAD_COUNT; k++) {
+        const char *n = BRChainRebuildReloadStepName((BRChainRebuildReloadStep)k);
+        CHECK(n != NULL);
+        for (int j = 0; n && j < k; j++) CHECK(strcmp(n, BRChainRebuildReloadStepName((BRChainRebuildReloadStep)j)) != 0);
+        int c = 0;
+        for (int i = 0; i < BR_CHAIN_REBUILD_RELOAD_COUNT; i++) c += BRChainRebuildReloadStepAt(i) == k;
+        CHECK(c == 1);
+    }
+    CHECK(BRChainRebuildReloadStepAt(-1) == -1 && BRChainRebuildReloadStepAt(BR_CHAIN_REBUILD_RELOAD_COUNT) == -1);
+    CHECK(BRChainRebuildReloadStepName((BRChainRebuildReloadStep)BR_CHAIN_REBUILD_RELOAD_COUNT) == NULL);
+    CHECK(BRChainRebuildReloadStepAt(0) == BR_CHAIN_REBUILD_RERUN_ON_LOAD);
+    CHECK(BRChainRebuildReloadStepAt(BR_CHAIN_REBUILD_RELOAD_COUNT - 1) == BR_CHAIN_REBUILD_SYNC_START_FLOOR_STEP);
+    result("edge_reload_steps", ok);
+}
+
+// A rebuild run as the sequence says, on the real mainnet table, reaches a confirmed transaction
+// the cache held below the wallet's birth anchor (a default creation time), with the record's time
+// later than its block. Steps the model does not need are no-ops.
+static void prop_rebuild_reaches_a_cached_tx_below_the_birth_anchor(void)
+{
+    int ok = 1;
+    const BRCheckPoint *cp = BRMainNetCheckpoints;
+    size_t n = sizeof(BRMainNetCheckpoints) / sizeof(*BRMainNetCheckpoints);
+    for (int from = 0; from <= 1; from++)
+        for (size_t c = 1; c + 1 < n; c += 7) {
+            int64_t txHeight = (int64_t)cp[c].height + 10;
+            int64_t storedCreation = BR_SCAN_FLOOR_DEFAULT_RESTORE_CREATION_TIME;
+            int64_t birth = BRRecoveryBirthCheckpointHeight(cp, n, (uint32_t)storedCreation);
+            if (txHeight >= birth) continue;
+            uint8_t cache[64]; Rec r[] = { R(txHeight, 1800000000, BODY3) };
+            size_t cacheLen = blobOf(cache, r, 1, -1);
+            BRScanFloor rec = { 0, 0, 0 };
+            int hasStored = 1, synced = 1; int64_t stored = birth, arm = -1, anchor = birth;
+            for (int i = 0; i < BRChainRebuildStepCount(from); i++) {
+                BRSavedTransactionsFloor m;
+                switch (BRChainRebuildStepAt(from, i)) {
+                    case BR_CHAIN_REBUILD_LOWER_FLOOR_TO: BRScanFloorLowerTo(&rec, birth - 1, cp, n); break;
+                    case BR_CHAIN_REBUILD_FLOOR_FROM_CACHE:
+                        BRSavedTransactionsFloorMinima(cache, cacheLen, &m);
+                        BRScanFloorFromDiscardedCache(&rec, m.minConfirmedHeight, m.minRecordTime, cp, n);
+                        break;
+                    case BR_CHAIN_REBUILD_CLEAR_TX_CACHE: cacheLen = 0; break;
+                    case BR_CHAIN_REBUILD_CLEAR_SYNC_STATE: synced = 0; break;
+                    case BR_CHAIN_REBUILD_SET_FLOOR_AT_BIRTH: hasStored = BRScanFloorBirthToPersist(birth, &stored); break;
+                    case BR_CHAIN_REBUILD_RELOAD:
+                        for (int j = 0; j < BR_CHAIN_REBUILD_RELOAD_COUNT; j++) {
+                            switch (BRChainRebuildReloadStepAt(j)) {
+                                case BR_CHAIN_REBUILD_RERUN_ON_LOAD:
+                                    BRSavedTransactionsFloorMinima(cache, cacheLen, &m);
+                                    BRScanFloorFromDiscardedCache(&rec, m.minConfirmedHeight, m.minRecordTime, cp, n);
+                                    break;
+                                case BR_CHAIN_REBUILD_RESTORE_AT_FLOOR_TIME:
+                                    anchor = BRRecoveryBirthCheckpointHeight(cp, n, (uint32_t)BRScanFloorRestoreCreationTime(storedCreation, rec.time));
+                                    break;
+                                case BR_CHAIN_REBUILD_SYNC_START_FLOOR_STEP: {
+                                    BRScanFloorStep s = BRScanFloorHintStep(1, anchor, hasStored, stored, rec.height, rec.pending);
+                                    if (s.setBirth) { hasStored = 1; stored = s.birth; }
+                                    if (s.removeBirth) hasStored = 0;
+                                    if (s.clearHint) BRScanFloorApplied(&rec);
+                                    arm = BRCFRestoreArmHeight(synced, 0, anchor, hasStored, stored);
+                                    break;
+                                }
+                                default: break;
+                            }
+                        }
+                        break;
+                    default: break;
+                }
+            }
+            if (! (arm >= 0 && arm <= txHeight))
+                printf("  from=%d tx at %lld (birth %lld): the scan arms at %lld\n", from, (long long)txHeight, (long long)birth, (long long)arm);
+            CHECK(arm >= 0 && arm <= txHeight);
+        }
+    result("prop_rebuild_reaches_a_cached_tx_below_the_birth_anchor", ok);
 }
 
 // ---- model_ ------------------------------------------------------------------------------------
@@ -645,6 +906,32 @@ static void model_agrees_floor_rules(void)
         if (! ok) printf("  at a=%lld b=%lld c=%lld d=%lld table=%d\n", (long long)a, (long long)b, (long long)c, (long long)d, table);
     }
     result("model_agrees_floor_rules", ok);
+}
+
+static void model_agrees_minima(void)
+{
+    int ok = 1;
+    static const int64_t HS[] = { 0, 1, 1000, 19500000, 0x7ffffffeLL, 0x7fffffffLL, 0x80000000LL, 0xfffffff0LL, 0xffffffffLL };
+    static const int64_t TS[] = { 0, 1, 500, 1550000000, 0xffffffffLL };
+    for (int round = 0; round < 20000 && ok; round++) {
+        uint8_t b[512]; Rec r[8]; size_t nr = (size_t)(rnd() % 8);
+        for (size_t i = 0; i < nr; i++) {
+            r[i].height = HS[rnd() % 9]; r[i].time = TS[rnd() % 5];
+            r[i].body = BODY3; r[i].bodyLen = (uint32_t)(rnd() % 4);
+            r[i].declaredSize = (rnd() % 8) ? -1 : (int64_t)(rnd() % 6);
+        }
+        int64_t count = (rnd() % 5) ? -1 : (int64_t)(rnd() % 12) + ((rnd() & 1) ? 9995 : 0);
+        size_t len = blobOf(b, r, nr, count);
+        if (rnd() & 1) len = (size_t)(rnd() % (len + 1));
+        uint8_t *exact = malloc(len ? len : 1);
+        memcpy(exact, b, len);
+        BRSavedTransactionsFloor f = minima(exact, len);
+        KtSummary k = kt_summarize(exact, (int32_t)len);
+        CHECK(f.declaredCount == k.declaredCount && (int64_t)f.records == k.records &&
+              f.minConfirmedHeight == k.minHeight && f.minRecordTime == k.minTime);
+        free(exact);
+    }
+    result("model_agrees_minima", ok);
 }
 
 static void model_agrees_checkpoint_time_on_the_real_tables(void)
@@ -765,11 +1052,17 @@ static void order_matches_android_source(const char *wmPath, const char *hrPath,
             key[BR_CHAIN_REBUILD_RELOAD][0] = LONG_MAX; key[BR_CHAIN_REBUILD_RELOAD][1] = 0;
             key[BR_CHAIN_REBUILD_LOWER_FLOOR_TO][0] = -2; key[BR_CHAIN_REBUILD_LOWER_FLOOR_TO][1] = 0;
 
+            // FLOOR_FROM_CACHE has no call in Android's source yet: its adoption PR adds the step and
+            // its token here. Until then the order is checked without it.
+            printf("  floorFromCache: not in Android's source yet; order checked without it\n");
             for (int fromHeight = 0; fromHeight <= 1; fromHeight++) {
-                for (int i = 1; i < BRChainRebuildStepCount(fromHeight); i++) {
-                    int a = BRChainRebuildStepAt(fromHeight, i - 1), b = BRChainRebuildStepAt(fromHeight, i);
+                int seq[BR_CHAIN_REBUILD_STEP_KINDS], m = 0;
+                for (int i = 0; i < BRChainRebuildStepCount(fromHeight); i++)
+                    if (BRChainRebuildStepAt(fromHeight, i) != BR_CHAIN_REBUILD_FLOOR_FROM_CACHE) seq[m++] = BRChainRebuildStepAt(fromHeight, i);
+                for (int i = 1; i < m; i++) {
+                    int a = seq[i - 1], b = seq[i];
                     int inOrder = key[a][0] < key[b][0] || (key[a][0] == key[b][0] && key[a][1] < key[b][1]);
-                    if (! inOrder) printf("  %s runs before %s here, not in Android's source\n",
+                    if (! inOrder) printf("  the header runs %s before %s; Android's source does not\n",
                                           BRChainRebuildStepName((BRChainRebuildStep)a), BRChainRebuildStepName((BRChainRebuildStep)b));
                     CHECK(inOrder);
                 }
@@ -793,6 +1086,94 @@ static void order_matches_android_source(const char *wmPath, const char *hrPath,
     result("order_matches_android_source", ok);
 }
 
+
+// The reload's sub-steps against Android's next start: the rerun, then the load that skips the
+// cache while in progress, then the restore time, all in restoreFromDisk; the floor step before
+// the scan start in SyncService.
+static void order_reload_matches_android_source(const char *wmPath, const char *ssPath)
+{
+    int ok = 1;
+    char *wm = slurp(wmPath), *ss = slurp(ssPath);
+    CHECK(wm && ss);
+    if (wm && ss) {
+        const char *e1, *e2;
+        const char *load = span(wm, "fun restoreFromDisk(", "\n    fun ", &e1);
+        const char *sync = span(ss, "HistoryRebuildOnUpgrade.floorHint(this@SyncService)", NULL, &e2);
+        CHECK(load && sync);
+        if (load && sync) {
+            long at[BR_CHAIN_REBUILD_RELOAD_COUNT];
+            at[BR_CHAIN_REBUILD_RERUN_ON_LOAD] = posIn(load, e1, "HistoryRebuildOnUpgrade.beforeWalletLoad(context)");
+            at[BR_CHAIN_REBUILD_LOAD_SKIPS_CACHE] = posIn(load, e1, "if (HistoryRebuildOnUpgrade.isInProgress(context))");
+            at[BR_CHAIN_REBUILD_RESTORE_AT_FLOOR_TIME] = posIn(load, e1, "creationTimeForRestore(creationTime, HistoryRebuildOnUpgrade.floorTime(context))");
+            at[BR_CHAIN_REBUILD_SYNC_START_FLOOR_STEP] = (long)(e1 - load) + 1;   // SyncService, after the load
+            for (int i = 0; i < BR_CHAIN_REBUILD_RELOAD_COUNT; i++) CHECK(at[i] >= 0);
+            for (int i = 1; i < BR_CHAIN_REBUILD_RELOAD_COUNT; i++) {
+                int a = BRChainRebuildReloadStepAt(i - 1), b = BRChainRebuildReloadStepAt(i);
+                if (! (at[a] < at[b])) printf("  the header runs %s before %s; Android's source does not\n",
+                    BRChainRebuildReloadStepName((BRChainRebuildReloadStep)a), BRChainRebuildReloadStepName((BRChainRebuildReloadStep)b));
+                CHECK(at[a] < at[b]);
+            }
+            long step = posIn(sync, e2, "floorHintStep(");
+            long arm = posIn(sync, e2, "compactFilterBirthHeight(");
+            CHECK(step >= 0 && arm > step);
+        }
+    }
+    free(wm); free(ss);
+    result("order_reload_matches_android_source", ok);
+}
+
+// rebuildFromChainRescan and rebuildFromChainRescanFrom run to the end: no return, throw, check,
+// require, error or !! outside comments and strings, so every step after a failure still runs.
+static void stripCommentsAndStrings(char *b, size_t n)
+{
+    for (size_t i = 0; i < n; i++) {
+        if (b[i] == '/' && i + 1 < n && b[i + 1] == '/') { while (i < n && b[i] != '\n') b[i++] = ' '; }
+        else if (b[i] == '/' && i + 1 < n && b[i + 1] == '*') {
+            while (i + 1 < n && ! (b[i] == '*' && b[i + 1] == '/')) b[i++] = ' ';
+            if (i + 1 < n) { b[i] = b[i + 1] = ' '; i++; }
+        } else if (b[i] == '"') {
+            b[i++] = ' ';
+            while (i < n && b[i] != '"') { if (b[i] == '\\' && i + 1 < n) b[i++] = ' '; b[i++] = ' '; }
+            if (i < n) b[i] = ' ';
+        }
+    }
+}
+static int hasWord(const char *s, const char *e, const char *w)
+{
+    size_t wl = strlen(w);
+    for (const char *p = s; p && p + wl <= e; p++) {
+        if (strncmp(p, w, wl) != 0) continue;
+        int before = p == s || ! (isalnum((unsigned char)p[-1]) || p[-1] == '_');
+        int after = p + wl >= e || ! (isalnum((unsigned char)p[wl]) || p[wl] == '_') || w[wl - 1] == '(' || w[wl - 1] == '!';
+        if (before && after) return 1;
+    }
+    return 0;
+}
+static void order_rebuild_has_no_early_exit(const char *wmPath)
+{
+    int ok = 1;
+    char *wm = slurp(wmPath);
+    CHECK(wm != NULL);
+    if (wm) {
+        stripCommentsAndStrings(wm, strlen(wm));
+        const char *names[] = { "fun rebuildFromChainRescan() {", "fun rebuildFromChainRescanFrom(height: Long) {" };
+        for (int f = 0; f < 2; f++) {
+            const char *e;
+            const char *b = span(wm, names[f], "\n    }\n", &e);
+            CHECK(b != NULL);
+            if (! b) continue;
+            static const char *exits[] = { "return", "throw", "check(", "require(", "error(", "!!" };
+            for (size_t i = 0; i < sizeof(exits) / sizeof(*exits); i++) {
+                int found = hasWord(b + strlen(names[f]), e, exits[i]);
+                if (found) printf("  %s has `%s`\n", names[f], exits[i]);
+                CHECK(! found);
+            }
+        }
+    }
+    free(wm);
+    result("order_rebuild_has_no_early_exit", ok);
+}
+
 // ---- vectors_ ----------------------------------------------------------------------------------
 
 static void vectors_match_the_model(const char *path)
@@ -803,7 +1184,7 @@ static void vectors_match_the_model(const char *path)
     BRCheckPoint cp[64]; size_t ncp = 0;
     long lines = 0, seen[16] = { 0 };
     char line[512];
-    int rebuildIdx = 0, fromIdx = 0, keptIdx = 0;
+    int rebuildIdx = 0, fromIdx = 0, keptIdx = 0, reloadIdx = 0;
     while (f && fgets(line, sizeof(line), f)) {
         long long a, b, c, d, e, r1, r2, r3; int p, w, q;
         char s1[64], s2[64];
@@ -845,6 +1226,18 @@ static void vectors_match_the_model(const char *path)
         } else if (sscanf(line, "rebuild %lld %63s", &a, s2) == 2) {
             CHECK(a == rebuildIdx && strcmp(s2, BRChainRebuildStepName((BRChainRebuildStep)BRChainRebuildStepAt(0, rebuildIdx))) == 0);
             rebuildIdx++; seen[10]++;
+        } else if (strncmp(line, "minima ", 7) == 0) {
+            char hex[1024]; long long dc, rc, mh, mt;
+            if (sscanf(line, "minima %1023s %lld %lld %lld %lld", hex, &dc, &rc, &mh, &mt) == 5) {
+                uint8_t bb[512]; size_t bl = 0;
+                if (strcmp(hex, "empty") != 0) for (; hex[2 * bl] && bl < sizeof(bb); bl++) { unsigned v; sscanf(hex + 2 * bl, "%2x", &v); bb[bl] = (uint8_t)v; }
+                KtSummary k = kt_summarize(bl ? bb : NULL, (int32_t)bl);
+                CHECK(k.declaredCount == dc && k.records == rc && k.minHeight == mh && k.minTime == mt);
+                seen[12]++;
+            } else CHECK(0);
+        } else if (sscanf(line, "reload %lld %63s", &a, s2) == 2) {
+            CHECK(a == reloadIdx && strcmp(s2, BRChainRebuildReloadStepName((BRChainRebuildReloadStep)BRChainRebuildReloadStepAt(reloadIdx))) == 0);
+            reloadIdx++; seen[13]++;
         } else if (sscanf(line, "kept %lld %63s", &a, s2) == 2) {
             CHECK(a == keptIdx && keptIdx < BR_CHAIN_REBUILD_KEPT_COUNT && strcmp(s2, BRChainRebuildKeepName(BRChainRebuildKept[keptIdx])) == 0);
             keptIdx++; seen[11]++;
@@ -854,13 +1247,23 @@ static void vectors_match_the_model(const char *path)
     }
     if (f) fclose(f);
     CHECK(rebuildIdx == BRChainRebuildStepCount(0) && fromIdx == BRChainRebuildStepCount(1) && keptIdx == BR_CHAIN_REBUILD_KEPT_COUNT);
-    for (int i = 0; i < 12; i++) CHECK(seen[i] > 0);
+    CHECK(reloadIdx == BR_CHAIN_REBUILD_RELOAD_COUNT);
+    for (int i = 0; i < 14; i++) CHECK(seen[i] > 0);
     printf("  %ld vector lines\n", lines);
     result("vectors_match_the_model", ok);
 }
 
 int main(int argc, char **argv)
 {
+    kt_summarize_empty_and_zero_count();
+    kt_summarize_one_real_record();
+    kt_summarize_mixed_heights_take_the_minimum_and_ignore_the_sentinel();
+    kt_summarize_all_unconfirmed_gives_no_height_but_a_time();
+    kt_summarize_unconfirmed_time_below_lowers_only_the_time();
+    kt_summarize_truncated_mid_record_keeps_whole_records();
+    kt_summarize_size_past_the_end_stops_without_a_hint();
+    kt_summarize_count_above_the_cap_gives_no_hint();
+    kt_summarize_never_fails_on_arbitrary_bytes();
     kt_birth_real_checkpoint_height_persisted();
     kt_birth_zero_never_persisted();
     kt_birth_negative_not_persisted();
@@ -908,10 +1311,16 @@ int main(int argc, char **argv)
     edge_restore_time_bounds();
     edge_rebuild_names_and_bounds();
     edge_rebuild_invariants();
+    edge_failure_rules();
+    edge_reload_steps();
     model_agrees_floor_rules();
+    model_agrees_minima();
     model_agrees_checkpoint_time_on_the_real_tables();
     prop_lowered_floor_time_anchors_at_or_below_the_height();
+    prop_rebuild_reaches_a_cached_tx_below_the_birth_anchor();
     order_matches_android_source(argc > 2 ? argv[2] : NULL, argc > 3 ? argv[3] : NULL, argc > 4 ? argv[4] : NULL);
+    order_reload_matches_android_source(argc > 2 ? argv[2] : NULL, argc > 5 ? argv[5] : NULL);
+    order_rebuild_has_no_early_exit(argc > 2 ? argv[2] : NULL);
     vectors_match_the_model(argc > 1 ? argv[1] : NULL);
     if (! g_failed) printf("ALL PASS\n");
     return g_failed;
