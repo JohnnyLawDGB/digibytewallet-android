@@ -11,11 +11,14 @@
 //   spend_guard_kat        sg_A..sg_C
 //   recovery_spend_gate_kat rg_A..rg_E (rg_B on a wallet built as spend_guard_kat builds it: a registered send spends
 //                          the coin)
-// Added: the TTL boundary, renewal and re-claim after expiry; the capacity at 512/513, with expired entries and with an
-// outpoint listed twice; double release, release of an unknown owner, release of one owner only; NULL and empty input
-// lists; clear; the gate's second spent-set check (a send registering between the first check and the claim, through a
-// recorder on the claim); and two concurrency scenarios: two threads claiming one coin, round after round (exactly one
-// must win each round), and four threads claiming and releasing overlapping coins (no coin may be held by two at once).
+// Added: the TTL boundary, renewal and re-claim after expiry; a backward step of now (held claims keep their expiry; a
+// renewal expires TTL after the stepped now) and a NaN now (the table is dropped); the capacity at 512/513, with
+// expired entries and with an outpoint listed twice; double release, release of an unknown owner, release of one owner
+// only; NULL and empty input lists; clear; the gate's second spent-set check (a send registering between the first
+// check and the claim, through a recorder on the claim), including a re-check that fails on a renewal, which releases
+// the txid's earlier claim too; and two concurrency scenarios: two threads claiming one coin, round after round
+// (exactly one must win each round), and four threads claiming and releasing overlapping coins (no coin may be held by
+// two at once).
 //
 // Comparison arms (run.sh): each -D reaches the core's side only and must fail exactly its scenarios.
 #include <math.h>
@@ -193,6 +196,21 @@ static void reclaim_after_expiry(const Impl *I, Trace *t)   // the owner re-clai
 }
 static void reclaim_by_other_after_expiry(const Impl *I, Trace *t)   // another owner takes it; the first is refused
 { put(t, I->claim(A, XY, 2, T)); put(t, I->claim(B, YZ, 2, T + 60)); put(t, I->claim(A, XY, 2, T + 60)); }
+
+static void backwards_now(const Impl *I, Trace *t)   // a backward step keeps a held claim to its own expiry
+{
+    put(t, I->claim(A, XY, 2, T + 100));
+    put(t, I->claim(B, YZ, 2, T));                                  // stepped back: A still holds Y
+    put(t, I->claim(B, YZ, 2, nextafter(T + 160.0, 0.0)));          // A's expiry is where it was
+    put(t, I->claim(B, YZ, 2, T + 160));
+}
+static void backwards_renew(const Impl *I, Trace *t)   // a renewal after the step expires TTL after the stepped now
+{
+    put(t, I->claim(A, XY, 2, T + 100)); put(t, I->claim(A, XY, 2, T));
+    put(t, I->claim(B, YZ, 2, nextafter(T + 60.0, 0.0))); put(t, I->claim(B, YZ, 2, T + 60));
+}
+static void nan_now(const Impl *I, Trace *t)   // a NaN now drops the table; its own entries lapse at the next claim
+{ put(t, I->claim(A, XY, 2, T)); put(t, I->claim(B, YZ, 2, (double)NAN)); put(t, I->claim(C, YZ, 2, T)); put(t, I->claim(D, X1, 1, T)); }
 
 static void cap_fill(const Impl *I, Trace *t)   // full: a fresh coin refused; the owner's renewal granted
 {
@@ -381,13 +399,30 @@ static void gate_recheck(const Impl *I, Trace *t)   // spent between the first c
     BRTransactionFree(x); BRTransactionFree(y); BRWalletFree(f.w);
 }
 
+static int g_registerOnCall = 0;   // registerConflict fires on this claim call (1-based), counted by g_claimCalls
+static void registerOnNthClaim(void *p) { if (g_claimCalls == g_registerOnCall) registerConflict(p); else g_afterClaim = registerOnNthClaim; }
+static void gate_recheck_drops_earlier(const Impl *I, Trace *t)   // a failed re-check releases the txid's earlier claim too
+{
+    Fixture f = fixture();
+    Registrar reg = { f.w, f.r2 };
+    BRTransaction *x = spend(f.r2, 0, 0x70), *y = spend(f.r2, 0, 0x71);
+    g_claimCalls = 0; g_registerOnCall = 2; g_afterClaim = registerOnNthClaim; g_afterClaimArg = &reg;
+    put(t, I->gate(f.w, x, T));                                               // passes; x holds R2:0
+    put(t, I->claim(y->txHash, y->inputs, y->inCount, T));                    // y refused: x holds it
+    put(t, I->gate(f.w, x, T + 1));                                           // x again: renewed, then spent meanwhile
+    put(t, g_claimCalls == 2 && BRWalletOutpointSpent(f.w, f.r2, 0) == 1);   // setup check: the conflict did register
+    g_afterClaim = NULL;
+    put(t, I->claim(y->txHash, y->inputs, y->inCount, T + 1));                // x's claim, earlier one included, is gone
+    BRTransactionFree(x); BRTransactionFree(y); BRWalletFree(f.w);
+}
+
 // ---- runner ---------------------------------------------------------------------------------------------------------
 typedef struct { const char *name; void (*run)(const Impl *, Trace *); const char *want; } Scenario;
 #define S(n, w) { #n, n, w }
 static const Scenario kScenarios[] = {
     S(cr_A, "10"), S(cr_B, "101"), S(cr_C, "11"), S(cr_D, "101"), S(cr_E, "101"), S(cr_F, "01"),
     S(ttl_boundary, "101"), S(ttl_renew_extends, "1101"), S(reclaim_after_expiry, "1101"),
-    S(reclaim_by_other_after_expiry, "110"),
+    S(reclaim_by_other_after_expiry, "110"), S(backwards_now, "1001"), S(backwards_renew, "1101"), S(nan_now, "1111"),
     S(cap_fill, "1011"), S(cap_511_plus_1, "110"), S(cap_expiry_frees, "11"), S(cap_dup_inputs, "101"),
     S(dup_inputs_one_entry, "101"),
     S(double_release, "110"), S(release_unknown, "101"), S(release_one_owner, "1101"), S(partial_refusal, "1011"),
@@ -395,7 +430,7 @@ static const Scenario kScenarios[] = {
     S(conc_two_threads, "11"), S(conc_stress, "111"),
     S(sg_A, "0"), S(sg_B, "1"), S(sg_C, "00"),
     S(rg_A, "10"), S(rg_D, "101"), S(rg_C, "1011"), S(rg_B, "01"), S(rg_E, "00"),
-    S(gate_wallet_ok, "101"), S(gate_recheck, "011"),
+    S(gate_wallet_ok, "101"), S(gate_recheck, "011"), S(gate_recheck_drops_earlier, "10011"),
 };
 
 int main(void)

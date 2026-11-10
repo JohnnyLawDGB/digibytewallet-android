@@ -136,16 +136,16 @@ else
 fi
 
 # ── RED ──────────────────────────────────────────────────────────────────────────────────────────────────────────
-red BR_COIN_RESERVATION_UNFIXED=1 "cr_A cr_B cr_D cr_E cr_F ttl_boundary ttl_renew_extends reclaim_after_expiry \
+red BR_COIN_RESERVATION_UNFIXED=1 "backwards_now backwards_renew gate_recheck_drops_earlier cr_A cr_B cr_D cr_E cr_F ttl_boundary ttl_renew_extends reclaim_after_expiry \
     reclaim_by_other_after_expiry cap_fill cap_511_plus_1 cap_dup_inputs dup_inputs_one_entry double_release \
     release_unknown release_one_owner partial_refusal own_plus_fresh null_and_empty conc_two_threads conc_stress rg_A rg_D rg_C \
     gate_wallet_ok"
-red BR_COIN_RESERVATION_RED_TTL_INCLUSIVE "ttl_boundary ttl_renew_extends reclaim_after_expiry \
+red BR_COIN_RESERVATION_RED_TTL_INCLUSIVE "backwards_now backwards_renew ttl_boundary ttl_renew_extends reclaim_after_expiry \
     reclaim_by_other_after_expiry cap_expiry_frees"
 red BR_COIN_RESERVATION_RED_CAP_OFF_BY_ONE "cr_F cap_fill cap_511_plus_1 cap_expiry_frees cap_dup_inputs"
-red BR_SPEND_GUARD_UNFIXED=1 "sg_A sg_C rg_B gate_recheck"
-red BR_SIGNED_SPEND_GATE_UNFIXED=1 "rg_A rg_D rg_C rg_B rg_E gate_wallet_ok gate_recheck"
-red BR_SIGNED_SPEND_GATE_RED_NO_RECHECK "gate_recheck"
+red BR_SPEND_GUARD_UNFIXED=1 "sg_A sg_C rg_B gate_recheck gate_recheck_drops_earlier"
+red BR_SIGNED_SPEND_GATE_UNFIXED=1 "rg_A rg_D rg_C rg_B rg_E gate_wallet_ok gate_recheck gate_recheck_drops_earlier"
+red BR_SIGNED_SPEND_GATE_RED_NO_RECHECK "gate_recheck gate_recheck_drops_earlier"
 
 if [ "$HAVE_TSAN" -eq 1 ]; then
     build "$BUILD_DIR/red_NO_LOCK" TSAN -DBR_COIN_RESERVATION_RED_NO_LOCK || { echo "GATE FAILURE: the NO_LOCK arm did not build"; FAIL=1; }
