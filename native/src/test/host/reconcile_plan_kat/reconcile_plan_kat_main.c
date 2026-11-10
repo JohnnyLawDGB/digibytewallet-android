@@ -508,9 +508,10 @@ static void plan_first_seen_with_many_repeats(void)
 static double cpuSeconds(clock_t since) { return (double)(clock() - since) / CLOCKS_PER_SEC; }
 
 // Inputs the node chooses the size of, at 100000 rows: each list in well under the bound (O(n log n)).
-// The bound is CPU seconds under ASan + UBSan; the quadratic version took over 4 s for the outpoints alone.
+// The bound is CPU seconds under ASan + UBSan, set for a slow runner: about 0.4-0.8 s per list on an M-series
+// Mac, against 86 s for the quadratic outpoint loop this replaced.
 #define LARGE_N 100000u
-#define LARGE_BOUND_S 2.0
+#define LARGE_BOUND_S 10.0
 static void large_inputs_are_n_log_n(void)
 {
     BRUTXO *u = calloc(LARGE_N, sizeof(*u));
@@ -624,6 +625,9 @@ static void distinct_addresses(void)
     ck(n == 4 && out[2].index == 7 && out[3].index == 8, "an interior space and a case difference are other addresses");
     ck(BRReconcileDistinctAddresses(a, 9, out, 3, &n) == BR_RECONCILE_BUFFER_TOO_SMALL && n == 0, "cap 3 of 4: too small");
     ck(BRReconcileDistinctAddresses(NULL, 1, out, 9, &n) == BR_RECONCILE_NULL_ARGUMENT && n == 0, "NULL list refused");
+    const char *pre[] = { "dgb1qaaa", "dgb1qaaab", "dgb1qaaa", "dgb1qaaab " };
+    ck(BRReconcileDistinctAddresses(pre, 4, out, 9, &n) == BR_RECONCILE_OK && n == 2 && out[0].index == 0 && out[1].index == 1,
+       "an address that is a strict prefix of another is another address: both kept (n=%zu)", n);
     size_t off = 9, len = 9;
     BRReconcileAddressTrim(NULL, &off, &len);
     ck(off == 0 && len == 0, "trim of NULL is empty");
