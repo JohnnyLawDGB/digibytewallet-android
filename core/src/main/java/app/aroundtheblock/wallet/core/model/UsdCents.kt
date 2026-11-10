@@ -94,7 +94,8 @@ object UsdCents {
 
     /**
      * Every Unicode decimal digit (general category Nd: Arabic-Indic, Extended Arabic-Indic,
-     * Devanagari, full width...) as its ASCII digit; nothing else changes. iOS FiatText.asciiDigits:
+     * Devanagari, full width...) as its ASCII digit; nothing else changes. Typed DGB text gets the
+     * same mapping ([DgbAmount.toSats]). iOS FiatText.asciiDigits:
      * the Arabic decimal and thousands separators (U+066B, U+066C) are NOT mapped, so "٥٫٥" is no
      * amount on either platform; fractions and numerals (½, Ⅻ) are not decimal digits.
      */

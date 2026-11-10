@@ -22,7 +22,7 @@ sealed class ApprovedSend {
 
     /**
      * The amount as the confirmation shows it: plain decimal, written from the integer. Never the
-     * typed text — "1,234", "1.234" and "1.2340" are one amount and are approved in one spelling.
+     * typed text — "1,2340", "1.234" and "1.2340" are one amount and are approved in one spelling.
      */
     abstract val amountText: String
 

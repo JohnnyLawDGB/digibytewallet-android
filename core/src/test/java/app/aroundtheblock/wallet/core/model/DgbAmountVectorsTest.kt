@@ -9,10 +9,12 @@ import java.math.BigDecimal
 import java.math.RoundingMode
 
 /**
- * [DgbAmount] gives exactly the core's answers (BRAmountParse.h, which iOS calls with the text as
- * typed): every line of `native/src/test/host/amount_vectors_kat/vectors.txt`, which the header
- * itself wrote (amount_vectors_kat/generate.c; the KAT fails when the file is not current). Nothing
- * here computes an expected value of its own.
+ * [DgbAmount.toSatsAscii] gives exactly the core's answers (BRAmountParse.h): every line of
+ * `native/src/test/host/amount_vectors_kat/vectors.txt`, which the header itself wrote
+ * (amount_vectors_kat/generate.c; the KAT fails when the file is not current). Nothing here computes
+ * an expected value of its own. [DgbAmount.toSats], the reader for typed text, is that after the
+ * digit mapping iOS also applies (UsdCents.asciiDigits, FiatText.asciiDigits); the last test holds
+ * the two readers together on every vector.
  *
  * Covered: ASCII and Unicode whitespace around and inside an amount, non-ASCII digits (Arabic-Indic,
  * Persian, Devanagari, full width) and separators, bytes that are not UTF-8, embedded NULs, the
@@ -20,7 +22,8 @@ import java.math.RoundingMode
  * exponents up to and past the int bound, long text, 4,000 random strings over the characters the
  * parser treats specially, and ~400 amounts each written a dozen ways.
  *
- * One answer per line, with no allowance, and no mapping of the text first: iOS maps none for DGB.
+ * One answer per line, with no allowance, and no mapping of the text first (a payment URI's amount
+ * is read this way on both platforms).
  */
 class DgbAmountVectorsTest {
 
@@ -67,7 +70,7 @@ class DgbAmountVectorsTest {
         for (f in vectors) {
             counts[f[0]] = (counts[f[0]] ?: 0) + 1
             when (f[0]) {
-                "parse" -> assertEquals(shown(f), if (f[2] == "-") null else f[2].toLong(), DgbAmount.toSats(text(f[1])))
+                "parse" -> assertEquals(shown(f), if (f[2] == "-") null else f[2].toLong(), DgbAmount.toSatsAscii(text(f[1])))
                 "format" -> assertEquals(shown(f), text(f[2]), DgbAmount.format(f[1].toLong()))
                 else -> error("unknown vector kind: ${shown(f)}")
             }
@@ -88,32 +91,113 @@ class DgbAmountVectorsTest {
             "1.123456789" to "-", "1.100000000" to "110000000", "0.000000000" to "0",
             "92233720368.54775807" to "9223372036854775807", "92233720368.54775808" to "-",
             "21000000000" to "2100000000000000000", "0e2147483647" to "0", "0e2147483648" to "-",
-            "0,29" to "29000000", "1,234" to "123400000", "1,2,3" to "-", "-0" to "0", "-1" to "-", "" to "-",
+            "0,29" to "29000000", "1,234" to "-", "1,2,3" to "-", "-0" to "0", "-1" to "-", "" to "-",
+            "1,000" to "-", "25,500" to "-", "0,123" to "-", " 1,000 " to "-", "1,000e2" to "-", ",123" to "-",
+            "12,3456" to "1234560000", "1,0000" to "100000000", "1,000.50" to "100050000000",
+            "1,234,567.8" to "123456780000000", "١,٠٠٠" to "-", "٠,٢٩" to "-",
         )
         for ((input, answer) in want) assertEquals("vector for \"$input\"", answer, parsed[input])
     }
 
     /**
-     * Funds safety of the port: on every vector, the reader it replaced (trim(), the separator rewrite,
-     * then Kotlin's toBigDecimalOrNull, kept here as [bigDecimalReader]) either gives the same
-     * satoshis or refuses what the core accepts. Where only the old reader accepted, the text is one
-     * the core reads as no amount, and the only kinds there are: Unicode whitespace around it, or a
-     * zero whose exponent is beyond an int. No vector that both accept changes value.
+     * Funds safety, on every vector: the reader for typed text as it is now ([DgbAmount.toSats]: the
+     * digit mapping, then the core's rule) against the reader Android shipped before the port
+     * ([bigDecimalReader]: trim(), the separator rewrite, Kotlin's toBigDecimalOrNull). Where they
+     * differ, one of them says "no amount", never a different number, and the reason is one of:
+     *  - now REFUSED: Unicode whitespace around it, or a zero whose exponent is beyond an int (the
+     *    port to BRAmountParseDGB), or a lone comma (no dot) before exactly three digits ("1,000":
+     *    a thousand or one?);
+     *  - now ACCEPTED: the text has a non-ASCII decimal digit, read as its ASCII digit, and the
+     *    answer is the core's for the mapped text.
+     * And against the core's own answer (the vector, as a payment URI's amount is read): they differ
+     * only where a mapped digit made an amount of what the core, reading it as given, refuses.
      */
     @Test
-    fun noVectorChangesValueFromTheReaderItReplaced() {
-        var nowRefused = 0
+    fun noVectorChangesValueOnlyTheRefusalsAndTheMappedDigits() {
+        var spaceOrZero = 0
+        var comma = 0
+        var digits = 0
         for (f in vectors.filter { it[0] == "parse" }) {
             val input = text(f[1])
             val core = if (f[2] == "-") null else f[2].toLong()
+            val now = DgbAmount.toSats(input)
             val old = bigDecimalReader(input)
-            if (old == core) continue
-            assertEquals("${shown(f)}: the core refuses it, and the old reader said ${old ?: "no"}", null, core)
-            val unicodeSpace = input.any { it.isWhitespace() && !DgbAmount.isAsciiSpace(it) }
-            assertTrue("${shown(f)}: only the old reader accepts it, and it is not whitespace or a zero", unicodeSpace || old == 0L)
-            nowRefused++
+
+            if (now != core) {
+                assertEquals("${shown(f)}: VALUE CHANGED from the core's $core to $now", null, core)
+                assertTrue("${shown(f)}: only the typed reader accepts it, and it has no non-ASCII digit", hasNonAsciiDigit(input))
+            }
+            if (now == old) continue
+            assertTrue("${shown(f)}: VALUE CHANGED from $old to $now", now == null || old == null)
+            if (now == null) {
+                val unicodeSpace = input.any { it.isWhitespace() && !DgbAmount.isAsciiSpace(it) }
+                when {
+                    commaBeforeThree(UsdCents.asciiDigits(input)) -> comma++
+                    unicodeSpace || old == 0L -> spaceOrZero++
+                    else -> error("${shown(f)}: newly refused (was $old), and it is not a comma before three digits, whitespace or a zero")
+                }
+            } else {
+                assertTrue("${shown(f)}: newly accepted, and it has no non-ASCII decimal digit", hasNonAsciiDigit(input))
+                assertEquals("${shown(f)}: newly accepted, and not as its ASCII digits read", DgbAmount.toSatsAscii(UsdCents.asciiDigits(input)), now)
+                digits++
+            }
         }
-        assertTrue("the corpus carries Unicode-space amounts the old reader accepted ($nowRefused)", nowRefused > 0)
+        assertTrue("the corpus carries Unicode-space amounts the old reader accepted ($spaceOrZero)", spaceOrZero > 0)
+        assertTrue("the corpus carries ambiguous-comma amounts the old reader accepted ($comma)", comma >= 30)
+        assertTrue("the corpus carries amounts in local digits the old reader refused ($digits)", digits >= 5)
+    }
+
+    /**
+     * The same rule off the corpus: 300,000 seeded random strings over digits (ASCII and four local
+     * scripts), the separators, signs, exponents and spaces. Where the typed reader and the old one
+     * differ, one says "no amount", for one of the reasons above; no string changes value.
+     */
+    @Test
+    fun noRandomTextChangesValue() {
+        val alphabet = ("0123456789" + "0001112229" + ",,,..+-eE \t" + "\u00a0" +
+            "\u0660\u0661\u0662\u0665\u0669" + "\u06f0\u06f1\u06f9" + "\u0966\u0967\u096f" +
+            "\uff10\uff11\uff19" + "\u066b\u066c").toList()
+        val rnd = java.util.Random(0x2026_1110L)
+        var comma = 0
+        var digits = 0
+        repeat(300_000) {
+            val sb = StringBuilder()
+            repeat(1 + rnd.nextInt(12)) { sb.append(alphabet[rnd.nextInt(alphabet.size)]) }
+            val input = sb.toString()
+            val now = DgbAmount.toSats(input)
+            val old = bigDecimalReader(input)
+            if (now == old) return@repeat
+            assertTrue("\"$input\": VALUE CHANGED from $old to $now", now == null || old == null)
+            if (now == null) {
+                val unicodeSpace = input.any { it.isWhitespace() && !DgbAmount.isAsciiSpace(it) }
+                assertTrue("\"$input\": newly refused (was $old) for no reason the rule names",
+                    commaBeforeThree(UsdCents.asciiDigits(input)) || unicodeSpace || old == 0L)
+                if (commaBeforeThree(UsdCents.asciiDigits(input))) comma++
+            } else {
+                assertTrue("\"$input\": newly accepted, and it has no non-ASCII decimal digit", hasNonAsciiDigit(input))
+                assertEquals("\"$input\"", DgbAmount.toSatsAscii(UsdCents.asciiDigits(input)), now)
+                digits++
+            }
+        }
+        assertTrue("random text reached the comma rule ($comma)", comma > 100)
+        assertTrue("random text reached the digit mapping ($digits)", digits > 1000)
+    }
+
+    /** No dot, exactly one comma, and a run of exactly three ASCII digits right after it, in the trimmed text. */
+    private fun commaBeforeThree(input: String): Boolean {
+        val t = input.trim { DgbAmount.isAsciiSpace(it) }
+        if ('.' in t || t.count { it == ',' } != 1) return false
+        return t.substringAfter(',').takeWhile { it in '0'..'9' }.length == 3
+    }
+
+    private fun hasNonAsciiDigit(input: String): Boolean {
+        var i = 0
+        while (i < input.length) {
+            val cp = input.codePointAt(i)
+            if (cp > 0x7f && Character.getType(cp) == Character.DECIMAL_DIGIT_NUMBER.toInt()) return true
+            i += Character.charCount(cp)
+        }
+        return false
     }
 
     /** DgbAmount.toSats before the port to BRAmountParseDGB (develop c30ae3918). */

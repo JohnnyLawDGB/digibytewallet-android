@@ -11,6 +11,9 @@
 #                 MUST write different parse answers and the same format answers: the vectors can
 #                 tell the exact parser from the double one, so a mirror that converts through a
 #                 double cannot pass them.
+#   COMMA         generate.c built with -DAMOUNT_PARSE_COMMA_THOUSANDS_UNFIXED (a lone comma always the
+#                 point) MUST write different parse answers, and on every line that differs the
+#                 header's answer is '-': the ambiguous-comma rule only refuses, it never changes a value.
 #   CORPUS        the inputs the Android port was judged on are present: Unicode spaces (where the old
 #                 Kotlin reader said yes), Arabic-Indic digits, nine decimals, the Long ceiling, the
 #                 int exponent bound.
@@ -32,9 +35,11 @@ VEC="$SCRIPT_DIR/vectors.txt"
 FAIL=0
 
 [ -f "$GEN" ] && [ -f "$VEC" ] || { echo "GATE FAILURE: generate.c or vectors.txt missing"; exit 1; }
-grep -q "AMOUNT_PARSE_VIA_DOUBLE_UNFIXED" "$CORE_DIR/BRAmountParse.h" 2>/dev/null \
-    || { echo "GATE FAILURE: $CORE_DIR/BRAmountParse.h missing or has no RED seam"; exit 1; }
-echo "  [seam] BRAmountParse.h carries AMOUNT_PARSE_VIA_DOUBLE_UNFIXED"
+for seam in AMOUNT_PARSE_VIA_DOUBLE_UNFIXED AMOUNT_PARSE_COMMA_THOUSANDS_UNFIXED; do
+    grep -q "$seam" "$CORE_DIR/BRAmountParse.h" 2>/dev/null \
+        || { echo "GATE FAILURE: $CORE_DIR/BRAmountParse.h missing or has no $seam seam"; exit 1; }
+    echo "  [seam] BRAmountParse.h carries $seam"
+done
 
 build() {   # <out> [flags...]
     local out="$1"; shift
@@ -47,6 +52,7 @@ build "$BUILD_DIR/gen_o2" -O2 || { echo "GATE FAILURE: -O2 generator did not com
 # No UBSan on the RED arm: the old double conversion's out-of-range cast is the undefined behaviour
 # it is being shown to have; the gate asserts its wrong answers, not its UB report.
 build "$BUILD_DIR/gen_red" -DAMOUNT_PARSE_VIA_DOUBLE_UNFIXED || { echo "GATE FAILURE: RED generator did not compile"; exit 1; }
+build "$BUILD_DIR/gen_comma" -DAMOUNT_PARSE_COMMA_THOUSANDS_UNFIXED || { echo "GATE FAILURE: COMMA generator did not compile"; exit 1; }
 
 if ! "$BUILD_DIR/gen" > "$BUILD_DIR/vectors.txt" 2> "$BUILD_DIR/gen.err"; then
     echo "GATE FAILURE: generator failed"; head -5 "$BUILD_DIR/gen.err"; FAIL=1
@@ -72,6 +78,20 @@ n="$(diff <(grep '^parse ' "$VEC") <(grep '^parse ' "$BUILD_DIR/vectors_red.txt"
 cmp -s <(grep '^format ' "$VEC") <(grep '^format ' "$BUILD_DIR/vectors_red.txt") && echo "  [red format] GUARD held" \
     || { echo "  [red format] GATE FAILURE: the RED seam changed format, which it does not touch"; FAIL=1; }
 
+"$BUILD_DIR/gen_comma" > "$BUILD_DIR/vectors_comma.txt"
+# Lines are in the same order in both files, so a paste pairs each input with both answers.
+changed="$(paste -d '\n' <(grep '^parse ' "$VEC") <(grep '^parse ' "$BUILD_DIR/vectors_comma.txt") \
+    | paste - - | awk -F '\t' '$1 != $2' )"
+n="$(printf '%s' "$changed" | grep -c . || true)"
+if [ "$n" -gt 0 ]; then
+    echo "  [comma] $n answers differ, as they must"
+    bad="$(printf '%s\n' "$changed" | awk -F '\t' '$1 !~ / -$/' | head -3)"
+    [ -z "$bad" ] && echo "  [comma] every one is a refusal: no value changed" \
+        || { echo "  [comma] GATE FAILURE: the rule changed a value, not only refused:"; echo "$bad" | cut -c1-200 | sed 's/^/      /'; FAIL=1; }
+else
+    echo "  [comma] GATE FAILURE: the comma seam writes the same answers"; FAIL=1
+fi
+
 # Inputs the port was judged on, with the header's answer for each.
 while IFS= read -r want; do
     grep -qxF "$want" "$VEC" && echo "  [corpus] $want" || { echo "  [corpus] GATE FAILURE: no line '$want'"; FAIL=1; }
@@ -89,7 +109,18 @@ parse "0e2147483647" 0
 parse "0e2147483648" -
 parse "0,29" 29000000
 parse "1,2,3" -
+parse "1,000" -
+parse "25,500" -
+parse "0,123" -
+parse "1,000e2" -
+parse "\x201,000\x20" -
+parse "1,234" -
+parse "12,3456" 1234560000
+parse "1,0000" 100000000
+parse "1,000.50" 100050000000
+parse "1,234,567.8" 123456780000000
+parse "\xd9\xa1,\xd9\xa0\xd9\xa0\xd9\xa0" -
 EOF
 
-[ $FAIL -eq 0 ] && echo "amount_vectors_kat: GATE HELD (vectors current; the double conversion fails them)"
+[ $FAIL -eq 0 ] && echo "amount_vectors_kat: GATE HELD (vectors current; the double conversion fails them; the comma rule only refuses)"
 exit $FAIL

@@ -2,7 +2,10 @@
 // satoshis -> text (BRAmountFormatDGB) on a fixed corpus, so a platform's mirror can be held to
 // exactly what the core computes. Android's DgbAmountVectorsTest reads this file on the host JVM;
 // nothing on that side computes an answer of its own for a line here. iOS calls the header itself
-// (Policy/AmountText.swift, PaymentRequest.swift, WalletSend.swift), with no mapping of the text.
+// (Policy/AmountText.swift, PaymentRequest.swift, WalletSend.swift). Typed text is first mapped to
+// ASCII digits on both platforms (FiatText.asciiDigits, UsdCents.asciiDigits), which a line of the
+// header's answers cannot express: these lines are the header's reading of the text AS GIVEN, which
+// is also how a payment URI's amount is read. DgbAmountVectorsTest covers the mapping on top.
 //
 // Like fiat_vectors_kat, these are the header written down, not an independent source: the
 // independent expectations are the hand-written values in amount_parse_kat (DgbAmountTest's cases).
@@ -147,7 +150,7 @@ int main(void)
     parseLen("\0", 1); parseLen("5\0", 2); parseLen("\0" "5", 2); parseLen("1\0" "5", 3);
     parseLen(" 5 \0", 4);
 
-    // ---- digits: ASCII only, and no platform maps any other ------------------------------------
+    // ---- digits: ASCII only (typed text is mapped to ASCII before the header reads it) ----------
     parse("\xd9\xa1");                                  // U+0661 Arabic-Indic one
     parse("\xd9\xa0.\xd9\xa5");                         // ٠.٥
     parse("\xd9\xa1\xd9\xa2\xd9\xa3");                  // ١٢٣
@@ -163,6 +166,9 @@ int main(void)
     parse("\xc2\xbd"); parse("\xe2\x85\xab");           // ½, Ⅻ
     parse("1e\xd9\xa2");                                // an Arabic-Indic exponent digit
     parse("\xef\xbc\x8e" "5"); parse("1\xef\xbc\x8c" "5");   // full-width point and comma
+    parse("\xd9\xa1,\xd9\xa0\xd9\xa0\xd9\xa0");             // ١,٠٠٠: once mapped, "1,000"
+    parse("\xd9\xa0,\xd9\xa2\xd9\xa9");                      // ٠,٢٩: once mapped, "0,29"
+    parse("1,\xd9\xa0\xd9\xa0\xd9\xa0"); parse("1,00\xd9\xa0");   // mixed after a comma
 
     // ---- bytes that are not UTF-8 ---------------------------------------------------------------
     parse("\xff"); parse("5\xff"); parse("\xff" "5"); parse("\xc2"); parse("5\xc2");
@@ -176,6 +182,11 @@ int main(void)
             "1.,5", "1,.5", "1,000,000.00000001", "-,5", "+,5", ",+5.0", ",-5.0", "1e1,0.0", "1,e5", "1e5,",
             "1e,5", "1,5e2", "1,5e-1", "0,000000001", "0,00000001", "12,34,56.7", "1,2.3,4", "1.2.3", ",,,1.0",
             "1.0,,,", " 0,5 ", "0 ,5", ".,5", "5.,", "1,2", "1,23456789", "1,234567891",
+            // A lone comma before EXACTLY three digits is ambiguous ("1,000": a thousand or one?).
+            "1,000", "25,500", "0,123", " 1,000 ", "\t1,000\n", "1,000e2", "1,000E-2", "1,000e", ",123",
+            "0,000", "-0,000", "+1,000", "-1,000", "1,000 ", "1, 000", "1 ,000", "1,000,", "1,000x",
+            "1,0000", "1,00", "1,0", "1,0001", "1,00e2", "1,5e3", "12,3456", "1,", "1,000.50",
+            "1,234,567.8", "1,000.0", "1,000,000", "999,999", "21,000", "0,100", "0,10", "0,1000",
         };
         for (i = 0; i < sizeof(t) / sizeof(t[0]); i++) parse(t[i]);
     }

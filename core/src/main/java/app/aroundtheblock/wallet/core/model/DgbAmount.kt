@@ -13,20 +13,28 @@ import java.math.BigDecimal
  * conversion that pays what was shown.
  *
  * The text a person types here is the amount that gets signed, so it must mean the same number
- * of satoshis on Android and iOS. The C source of truth is the core's BRAmountParse.h, which iOS
- * calls directly (Policy/AmountText.swift, PaymentRequest.swift, WalletSend.swift) with the text as
- * typed: unlike dollar text ([UsdCents.asciiDigits]), DGB text has no digit mapping on either
- * platform. [toSats] is BRAmountParseDGB line for line (docs/ios-port/push-down-recipe.md), and
- * DgbAmountVectorsTest holds it to the header's own answers, written down by
- * native/src/test/host/amount_vectors_kat.
+ * of satoshis on Android and iOS. The C source of truth is the core's BRAmountParse.h. [toSatsAscii]
+ * is BRAmountParseDGB line for line (docs/ios-port/push-down-recipe.md), and DgbAmountVectorsTest
+ * holds it to the header's own answers, written down by native/src/test/host/amount_vectors_kat.
+ * [toSats], the reader for typed text, first maps every Unicode decimal digit to ASCII
+ * ([UsdCents.asciiDigits], the mapping dollar text gets) and then calls it: iOS does the same
+ * (Policy/AmountText.swift, WalletSend.swift, FiatText.previewForDgb, all through
+ * FiatText.asciiDigits). A payment URI's amount is read by [toSatsAscii] with no mapping, as the
+ * core's BRPaymentUriParse reads it on iOS.
  *
  * Input is untrusted text, sometimes parsed on the main thread straight off a QR code:
- *  - only ASCII whitespace (space, tab, LF, CR, FF, VT) surrounds an amount, and only ASCII digits
- *    make one: Arabic-Indic and other decimal digits, the no-break space and other Unicode spaces
- *    are refused, as on iOS;
+ *  - only ASCII whitespace (space, tab, LF, CR, FF, VT) surrounds an amount: the no-break space and
+ *    other Unicode spaces are refused, as on iOS;
+ *  - typed text: Arabic-Indic, Persian, Devanagari, full-width and every other decimal digit
+ *    (category Nd) is read as its ASCII digit; the Arabic decimal and thousands separators
+ *    (U+066B, U+066C) are not mapped and are refused. The core itself reads ASCII digits only;
  *  - a dot is the decimal point and commas around it are grouping ("1,234.5");
  *  - a LONE comma with no dot is the decimal point ("0,29" — seven of the app's languages and
  *    the platform decimal keyboard write it that way; stripping it read 29 DGB for a shown 0,29);
+ *  - except that a lone comma followed by EXACTLY three digits is ambiguous and refused ("1,000"
+ *    is a thousand in English and one in German; "25,500", "0,123"). The three are the run of ASCII
+ *    digits right after the comma once surrounding whitespace is dropped, whatever follows it (end
+ *    of text, an exponent): " 1,000 ", "1,000e2" and ",123" are refused, "1,0000" and "1,00e2" are not;
  *  - several commas with no dot are ambiguous and refused;
  *  - the number follows java.math.BigDecimal's grammar: an optional sign, digits with an optional
  *    point ("5", "5.", ".5"), an optional exponent ("1e2" is 100 DGB) that fits an int;
@@ -47,13 +55,22 @@ object DgbAmount {
     private const val MAX_SATS_DIGITS = 19
 
     /**
-     * Satoshis for a DGB amount typed or scanned as text, or null when it is not one.
+     * Satoshis for a DGB amount typed as text, or null when it is not one: every Unicode decimal
+     * digit mapped to ASCII ([UsdCents.asciiDigits]), then [toSatsAscii]. As iOS reads a typed
+     * amount (FiatText.asciiDigits, then BRAmountParseDGB).
+     */
+    fun toSats(input: String): Long? = toSatsAscii(UsdCents.asciiDigits(input))
+
+    /**
+     * Satoshis for DGB text exactly as the core reads it, with no digit mapping, or null when it is
+     * not an amount. A payment URI's amount= is read this way (BRPaymentUriParse).
      *
      * BRAmountParseDGB, line for line. The C reads UTF-8 bytes and this reads UTF-16 chars; the
      * answer is the same because every character it accepts is ASCII, and every non-ASCII character
-     * (each of whose UTF-8 bytes is >= 0x80) is refused wherever it appears.
+     * (each of whose UTF-8 bytes is >= 0x80) is refused wherever it appears — and it ends a run of
+     * digits after a comma in both.
      */
-    fun toSats(input: String): Long? {
+    fun toSatsAscii(input: String): Long? {
         val text = input
         var start = 0
         var end = text.length
@@ -82,13 +99,18 @@ object DgbAmount {
 
         // BigDecimal grammar: [+-] (digits [. digits*] | . digits) [(e|E) [+-] digits], read after
         // the one separator rule: commas are grouping around a point, a lone comma IS the point,
-        // and several commas with no point are ambiguous.
+        // and several commas with no point, or a lone comma before exactly three digits, are
+        // ambiguous.
         for (i in start until end) {
             var c = text[i]
 
             if (c == ',') {
                 if (dots > 0) continue
-                if (commas == 1) c = '.' else return null
+                if (commas != 1) return null
+                var j = i + 1
+                while (j < end && text[j] in '0'..'9') j++
+                if (j - (i + 1) == 3) return null // "1,000": a thousand or one? Refused.
+                c = '.'
             }
             if (inExponent) {
                 if ((c == '+' || c == '-') && signAllowed) {
@@ -169,8 +191,9 @@ object DgbAmount {
 
     /**
      * The separator rule as a text rewrite, for [AssetQuantity] (which has no core counterpart yet):
-     * dot-decimal text with no commas, or null when the commas are ambiguous. [toSats] and
-     * [UsdCents.parse] apply the same rule inside their ports of the core's parsers.
+     * dot-decimal text with no commas, or null when the commas are ambiguous. [UsdCents.parse]
+     * applies the same rule inside its port of the core's parser; [toSatsAscii] applies it too, and
+     * also refuses a lone comma before exactly three digits, which this rewrite does not.
      */
     internal fun normalizeSeparators(s: String): String? {
         val commas = s.count { it == ',' }
