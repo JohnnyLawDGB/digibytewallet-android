@@ -64,11 +64,14 @@ static BRRecoveryUtxo row(const char *hex, uint32_t vout, int64_t sats, int64_t 
 #define UNCONF     row("6bd35c442896c27f", 0, 6000, 0)
 #define OTHER      row("ac3cbb77c252e78d", 0, 500000000, 0)
 
+// The rules' answer for in[0..n), copied to kept[0..k): the working space (2n) is the helper's.
 static size_t dedup(const BRRecoveryUtxo *in, size_t n, size_t *kept)
 {
-    size_t k = 99;
-    BRRecoveryUtxoStatus s = BRRecoveryUtxoDedup(in, n, kept, n ? n : 1, &k);
+    size_t k = 99, cap = BRRecoveryUtxoWorkCapacity(n), *work = malloc((cap ? cap : 1) * sizeof(size_t));
+    BRRecoveryUtxoStatus s = BRRecoveryUtxoDedup(in, n, work, cap, &k);
     ck(s == BR_RECOVERY_UTXO_OK, "dedup status OK (got %d)", (int)s);
+    if (s == BR_RECOVERY_UTXO_OK && k) memcpy(kept, work, k * sizeof(size_t));
+    free(work);
     return k;
 }
 
@@ -194,9 +197,11 @@ static void txid_last_byte_differs(void)
 
 static size_t select_(int fmt, const BRRecoveryUtxo *in, size_t n, size_t *kept)
 {
-    size_t k = 99;
-    BRRecoveryUtxoStatus s = BRRecoveryUtxoSelect(fmt, in, n, kept, n, &k);
+    size_t k = 99, cap = BRRecoveryUtxoWorkCapacity(n), *work = malloc((cap ? cap : 1) * sizeof(size_t));
+    BRRecoveryUtxoStatus s = BRRecoveryUtxoSelect(fmt, in, n, work, cap, &k);
     ck(s == BR_RECOVERY_UTXO_OK, "select status OK (got %d)", (int)s);
+    if (s == BR_RECOVERY_UTXO_OK && k) memcpy(kept, work, k * sizeof(size_t));
+    free(work);
     return k;
 }
 
@@ -316,24 +321,27 @@ static void end_to_end_observed(void)
 static void buffer_too_small(void)
 {
     BRRecoveryUtxo in[] = { row("aa", 0, 1, 1), row("bb", 0, 1, 1), row("aa", 0, 1, 1) };
-    size_t kept[3] = { 0 }, k = 99;
-    ck(BRRecoveryUtxoDedup(in, 3, kept, 1, &k) == BR_RECOVERY_UTXO_BUFFER_TOO_SMALL && k == 0, "two outpoints in room for one");
-    ck(BRRecoveryUtxoDedup(in, 3, kept, 2, &k) == BR_RECOVERY_UTXO_OK && k == 2, "room for exactly two is enough");
+    size_t kept[6] = { 0 }, k = 99;
+    ck(BRRecoveryUtxoWorkCapacity(3) == 6, "three rows need room for 6 indices");
+    ck(BRRecoveryUtxoWorkCapacity(SIZE_MAX / 2 + 1) == 0, "a count whose working space overflows needs an impossible 0");
+    ck(BRRecoveryUtxoDedup(in, 3, kept, 5, &k) == BR_RECOVERY_UTXO_BUFFER_TOO_SMALL && k == 0, "room for 5 of the 6 is too small");
+    ck(BRRecoveryUtxoDedup(in, 3, kept, 6, &k) == BR_RECOVERY_UTXO_OK && k == 2 && kept[0] == 0 && kept[1] == 1,
+       "room for 6 is enough: two outpoints, rows 0 and 1");
     k = 99;
-    ck(BRRecoveryUtxoSelect(BR_RECOVERY_FORMAT_P2TR, in, 3, kept, 1, &k) == BR_RECOVERY_UTXO_BUFFER_TOO_SMALL && k == 0,
+    ck(BRRecoveryUtxoSelect(BR_RECOVERY_FORMAT_P2TR, in, 3, kept, 5, &k) == BR_RECOVERY_UTXO_BUFFER_TOO_SMALL && k == 0,
        "select reports it too, with a count of 0");
-    ck(BRRecoveryUtxoSelect(BR_RECOVERY_FORMAT_P2TR, in, 3, kept, 1, NULL) == BR_RECOVERY_UTXO_NULL_ARGUMENT,
+    ck(BRRecoveryUtxoSelect(BR_RECOVERY_FORMAT_P2TR, in, 3, kept, 6, NULL) == BR_RECOVERY_UTXO_NULL_ARGUMENT,
        "select: no count pointer");
 }
 
 static void null_arguments(void)
 {
     BRRecoveryUtxo in[] = { row("aa", 0, 1, 1) };
-    size_t kept[1], k = 99;
+    size_t kept[2], k = 99;
     int64_t t = 5;
-    ck(BRRecoveryUtxoDedup(in, 1, kept, 1, NULL) == BR_RECOVERY_UTXO_NULL_ARGUMENT, "no count pointer");
-    ck(BRRecoveryUtxoDedup(NULL, 1, kept, 1, &k) == BR_RECOVERY_UTXO_NULL_ARGUMENT && k == 0, "no rows with a count");
-    ck(BRRecoveryUtxoDedup(in, 1, NULL, 1, &k) == BR_RECOVERY_UTXO_NULL_ARGUMENT, "no buffer with a count");
+    ck(BRRecoveryUtxoDedup(in, 1, kept, 2, NULL) == BR_RECOVERY_UTXO_NULL_ARGUMENT, "no count pointer");
+    ck(BRRecoveryUtxoDedup(NULL, 1, kept, 2, &k) == BR_RECOVERY_UTXO_NULL_ARGUMENT && k == 0, "no rows with a count");
+    ck(BRRecoveryUtxoDedup(in, 1, NULL, 2, &k) == BR_RECOVERY_UTXO_NULL_ARGUMENT, "no buffer with a count");
     ck(BRRecoveryUtxoTotal(NULL, 0, NULL, 1, &t) == BR_RECOVERY_UTXO_NULL_ARGUMENT && t == 0, "total: no rows");
     ck(BRRecoveryUtxoTotal(in, 1, NULL, 1, NULL) == BR_RECOVERY_UTXO_NULL_ARGUMENT, "total: no out pointer");
     ck(BRRecoverySweepAdmit(1, NULL, 0, NULL, 1, NULL) == BR_RECOVERY_SWEEP_REFUSE_BAD_ARGUMENT, "admit: no rows with a count");
@@ -358,6 +366,78 @@ static void bad_index(void)
     int64_t t = 5;
     ck(BRRecoveryUtxoTotal(in, 1, idx, 1, &t) == BR_RECOVERY_UTXO_BAD_INDEX && t == 0, "total: index 1 of 1 row");
     ck(BRRecoverySweepAdmit(1, in, 1, idx, 1, &off) == BR_RECOVERY_SWEEP_REFUSE_BAD_ARGUMENT, "admit: index 1 of 1 row");
+}
+
+
+// ---- at the size the server can send -----------------------------------------------------------
+// The server decides the row count, so the rule must not be quadratic. Expectations are built from the
+// construction, not from the header. The bound is generous for ASan + UBSan on a slow runner (about 0.35 s
+// on an M-series Mac); the earlier quadratic fold took 33 s here.
+#include <time.h>
+#define BIG_BOUND_SECONDS 5.0
+
+static BRRecoveryUtxo bigRow(size_t g, int64_t height)
+{
+    BRRecoveryUtxo u;
+    size_t t = g / 3;   // three outpoints per txid: vout 0, 1, 2
+    memset(&u, 0, sizeof(u));
+    u.txid[0] = (uint8_t)(t >> 16); u.txid[1] = (uint8_t)(t >> 8); u.txid[31] = (uint8_t)t;
+    u.txid[2] = 0x5a;
+    u.vout = (uint32_t)(g % 3);
+    u.amount = (int64_t)g + 1;
+    u.blockHeight = height;
+    return u;
+}
+
+// 200,000 rows: 20,000 outpoints seen 10 times each, row i naming outpoint i % 20000 for its (i / 20000)th
+// time. Outpoint g's confirmed copy is its (g % 11)th sighting; g % 11 == 10 has none. So the answer
+// lists outpoints 0..19999 in order (rows 0..19999 are their first sightings), and outpoint g's kept row
+// is (g % 11) * 20000 + g, or g when it has no confirmed copy.
+static void many_rows_many_duplicates(void)
+{
+    const size_t G = 20000, D = 10, n = G * D;
+    BRRecoveryUtxo *in = malloc(n * sizeof(*in));
+    size_t cap = BRRecoveryUtxoWorkCapacity(n), *kept = malloc(cap * sizeof(size_t)), k = 0, i, bad = 0;
+    clock_t start;
+    double secs;
+    BRRecoveryUtxoStatus s;
+
+    for (i = 0; i < n; i++) {
+        size_t g = i % G, o = i / G;
+        in[i] = bigRow(g, (o == g % (D + 1)) ? (int64_t)(1000 + o) : 0);
+    }
+    start = clock();
+    s = BRRecoveryUtxoDedup(in, n, kept, cap, &k);
+    secs = (double)(clock() - start) / CLOCKS_PER_SEC;
+    ck(s == BR_RECOVERY_UTXO_OK && k == G, "200000 rows, 20000 outpoints kept (got %zu)", k);
+    for (i = 0; i < k && i < G; i++) {
+        size_t c = i % (D + 1), want = (c < D) ? c * G + i : i;
+        if (kept[i] != want && bad++ < 3) ck(0, "outpoint %zu: kept row %zu, want %zu", i, kept[i], want);
+    }
+    ck(bad == 0, "every outpoint in first-seen order, as its confirmed copy (%zu wrong)", bad);
+    ck(secs < BIG_BOUND_SECONDS, "in %.3f s (bound %.1f s)", secs, BIG_BOUND_SECONDS);
+    free(kept);
+    free(in);
+}
+
+// One outpoint seen 2,500 times among 2,500 other coins (rows 1, 3, 5, ...), confirmed only at its
+// 1,001st sighting (row 2001); the unconfirmed ones on either side change nothing. It stands second, as
+// row 2001; every other coin keeps its own row, in order.
+static void confirmed_after_many_unconfirmed(void)
+{
+    const size_t n = 5000, A = 1;   // outpoint A's index into bigRow; the others use 2 + i
+    BRRecoveryUtxo *in = malloc(n * sizeof(*in));
+    size_t cap = BRRecoveryUtxoWorkCapacity(n), *kept = malloc(cap * sizeof(size_t)), k = 0, i, bad = 0;
+    BRRecoveryUtxoStatus s;
+
+    for (i = 0; i < n; i++) in[i] = (i % 2) ? bigRow(A, i == 2001 ? 24106618 : 0) : bigRow(2 + i, 100);
+    s = BRRecoveryUtxoDedup(in, n, kept, cap, &k);
+    ck(s == BR_RECOVERY_UTXO_OK && k == 2501, "2501 outpoints (got %zu)", k);
+    ck(k > 1 && kept[0] == 0 && kept[1] == 2001, "the repeated outpoint stands second, as row 2001 (got %zu)", k > 1 ? kept[1] : 0);
+    for (i = 2; i < k; i++) if (kept[i] != 2 * (i - 1)) bad++;
+    ck(bad == 0, "the other coins keep their rows in order (%zu wrong)", bad);
+    free(kept);
+    free(in);
 }
 
 static const struct { const char *name; void (*run)(void); } kCases[] = {
@@ -389,6 +469,8 @@ static const struct { const char *name; void (*run)(void); } kCases[] = {
     { "null_arguments", null_arguments },
     { "total_overflow", total_overflow },
     { "bad_index", bad_index },
+    { "many_rows_many_duplicates", many_rows_many_duplicates },
+    { "confirmed_after_many_unconfirmed", confirmed_after_many_unconfirmed },
 };
 
 int main(int argc, char **argv)

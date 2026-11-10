@@ -72,6 +72,8 @@ CASES=(
     null_arguments:pass
     total_overflow:pass
     bad_index:pass
+    many_rows_many_duplicates:fail
+    confirmed_after_many_unconfirmed:fail
 )
 
 # ---- the seam is real ----------------------------------------------------------------------
@@ -122,8 +124,8 @@ cat > "$BUILD_DIR/strict2.c" <<'EOF'
 #include "BRRecoveryUtxo.h"
 #include "BRRecoveryUtxo.h"
 int strict_tu1(void);
-int main(void) { size_t k = 0; BRRecoveryUtxo u[1] = {{{0}, 0, 1, 1}}; size_t kept[1];
-    return (BRRecoveryUtxoSelect(0, u, 1, kept, 1, &k) == BR_RECOVERY_UTXO_OK && k == 1 && strict_tu1()) ? 0 : 1; }
+int main(void) { size_t k = 0; BRRecoveryUtxo u[1] = {{{0}, 0, 1, 1}}; size_t kept[2];
+    return (BRRecoveryUtxoSelect(0, u, 1, kept, 2, &k) == BR_RECOVERY_UTXO_OK && k == 1 && strict_tu1()) ? 0 : 1; }
 EOF
 cp "$BUILD_DIR/strict2.c" "$BUILD_DIR/strict2.cpp"
 strict_ok=1
