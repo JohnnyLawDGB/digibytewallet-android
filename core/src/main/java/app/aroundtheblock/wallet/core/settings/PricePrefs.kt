@@ -13,9 +13,13 @@ import kotlinx.coroutines.flow.asStateFlow
  * Its own SharedPreferences file, not network-suffixed (a UI choice, like [BalancePrivacyPrefs]).
  * The key is iOS's (`price_fetch_enabled`). [enabled] is one flow for the process, so the home
  * screen hears the switch without a restart.
+ *
+ * A wallet wipe or restore does NOT touch it (owner decision, 2026-11-09): like the own node and
+ * the balance mask it is a device setting. The wipe drops only the cached price (Room's price
+ * cache, deleted with the database), so the flow and the file never disagree after a wipe.
  */
 object PricePrefs {
-    /** Cleared by a wallet wipe (WalletDataEraser.eraseLeftoverState), so the next wallet starts on. */
+    /** Kept by a wallet wipe: WalletDataEraser does not clear it (WalletWipeTest holds that). */
     const val PREFS = "dgb_price"
     const val KEY_ENABLED = "price_fetch_enabled"
 
@@ -32,15 +36,6 @@ object PricePrefs {
     fun enabled(ctx: Context): StateFlow<Boolean> = state(ctx).asStateFlow()
 
     fun isEnabled(ctx: Context): Boolean = state(ctx).value
-
-    /**
-     * After a wipe has cleared [PREFS]: the next read in this process reads the file again (default
-     * on). A flow already handed out keeps its value; it is not set to on here, as that would start
-     * a price fetch, and a write to the price cache, after the wipe erased the database.
-     */
-    fun forget() {
-        synchronized(this) { state = null }
-    }
 
     fun setEnabled(ctx: Context, on: Boolean) {
         ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)

@@ -280,9 +280,9 @@ class AndroidWalletDataEraser internal constructor(
         val diag = clearPrefs("dgb_diag")
         // The log-tag key: the next wallet's logs must not correlate with this one's (4.1.3, review R7).
         val logTag = clearPrefs(LogTag.PREFS)
-        // Settings → Display → Show prices: the next wallet starts with prices on, as iOS's wipe does.
-        val prices = clearPrefs(app.aroundtheblock.wallet.core.settings.PricePrefs.PREFS)
-            .also { app.aroundtheblock.wallet.core.settings.PricePrefs.forget() }
+        // NOT Settings → Display → Show prices (PricePrefs, "dgb_price"): a device setting, like the
+        // own node (dgb_settings) and the balance mask (dgb_privacy), it survives a wipe or a restore
+        // (owner decision, 2026-11-09). The cached price itself is in the database erased above.
         // ONE key, not the file: dgb_settings also holds the language and the network selection.
         val scanFloor = step("scan floor") {
             val settings = context.getSharedPreferences("dgb_settings", Context.MODE_PRIVATE)
@@ -292,7 +292,7 @@ class AndroidWalletDataEraser internal constructor(
             if (!landed) readWhatTheFileHolds("dgb_settings", settings, held)
             landed
         }
-        return filterPeers && dandelionPeers && reconcile && assetBackfill && assetHeal && diag && logTag && prices && scanFloor
+        return filterPeers && dandelionPeers && reconcile && assetBackfill && assetHeal && diag && logTag && scanFloor
     }
 
     override fun eraseHubSession(): Boolean = step("hub session") { hubTokenStore().clearConfirmed() }

@@ -4,6 +4,7 @@ import android.util.Log
 import app.aroundtheblock.wallet.core.digiscope.HubTokenStore
 import app.aroundtheblock.wallet.core.security.KeyStoreManager
 import app.aroundtheblock.wallet.core.security.PinManager
+import app.aroundtheblock.wallet.core.settings.PricePrefs
 import app.aroundtheblock.wallet.core.sync.CfAbandonmentStore
 import app.aroundtheblock.wallet.core.sync.CfScanLedgerStore
 import app.aroundtheblock.wallet.core.sync.FilterHeaderStore
@@ -350,7 +351,7 @@ class WalletWipeTest {
             "dgb_sync_data", "dgb_bloom_peers", "dgb_filter_peers", "dgb_dandelion_peers",
             "dgb_reconcile", "dgb_cf_abandonment", "dgb_history_rebuild",
         )
-        val sharedStores = listOf("dgb_watched_addrs", "dgb_outgoing_tx", "dgb_asset_backfill", "dgb_asset_heal", "dgb_db_key", "dgb_diag", "dgb_log_tag", "dgb_price")
+        val sharedStores = listOf("dgb_watched_addrs", "dgb_outgoing_tx", "dgb_asset_backfill", "dgb_asset_heal", "dgb_db_key", "dgb_diag", "dgb_log_tag")
 
         fun files(): List<File> = networks.flatMap { net ->
             listOf(
@@ -369,6 +370,10 @@ class WalletWipeTest {
                 seed("app_language", "de")
                 seed("dgb_network_testnet", false)
             }
+            // Device settings a wipe keeps: Settings → Display → Show prices, turned OFF here so a
+            // wipe that reset it (to the default, on) would be seen, and the balance mask.
+            prefs.prefsFor(PricePrefs.PREFS).seed(PricePrefs.KEY_ENABLED, false)
+            prefs.prefsFor("dgb_privacy").seed("balance_hidden", true)
             hubLegacy.seed(HubTokenStore.KEY_JWT, "plaintext-token")
             hubSecure.seed(HubTokenStore.KEY_JWT, "token")
             files().forEach { it.writeBytes(byteArrayOf(1, 2, 3)) }
@@ -400,6 +405,25 @@ class WalletWipeTest {
         // The settings store is NOT wallet state: the language and the network selection stay.
         assertEquals("de", d.prefs.prefsFor("dgb_settings").getString("app_language", null))
         assertTrue(d.prefs.prefsFor("dgb_settings").contains("dgb_network_testnet"))
+    }
+
+    @Test fun `a wipe keeps the Show prices switch but not the cached price`() = runTest {
+        val d = Device().apply { populate() }
+
+        val report = d.walletManager().wipeWallet()
+
+        assertTrue("a wipe that kept only device settings must still verify: $report", report.verified)
+        // Owner decision, 2026-11-09: the switch survives a wipe or a restore, as the own node and
+        // the balance mask do. Off before the wipe, off after it — not reset to the default (on).
+        val price = d.prefs.prefsFor(PricePrefs.PREFS)
+        assertTrue("the wipe removed the Show prices switch", price.contains(PricePrefs.KEY_ENABLED))
+        assertFalse("the wipe turned Show prices back on", price.getBoolean(PricePrefs.KEY_ENABLED, true))
+        assertEquals(false, price.durable[PricePrefs.KEY_ENABLED])
+        assertTrue("the wipe changed the balance mask", d.prefs.prefsFor("dgb_privacy").getBoolean("balance_hidden", false))
+        // The cached price is NOT a setting: it is Room's price_cache, in the wallet database, and
+        // every file of that database is gone on both networks.
+        val dbFiles = networks.flatMap { net -> listOf("", "-journal", "-shm", "-wal").map { d.ctx.getDatabasePath("wallet$net.db$it") } }
+        assertEquals("the price cache (wallet database) survived the wipe", emptyList<File>(), dbFiles.filter { it.exists() })
     }
 
     @Test fun `a failed commit makes the wipe report failure`() = runTest {
