@@ -1122,8 +1122,11 @@ static void order_reload_matches_android_source(const char *wmPath, const char *
     result("order_reload_matches_android_source", ok);
 }
 
-// rebuildFromChainRescan and rebuildFromChainRescanFrom run to the end: no return, throw, check,
-// require, error or !! outside comments and strings, so every step after a failure still runs.
+// Once the first clear has run, rebuildFromChainRescan and rebuildFromChainRescanFrom run to the
+// end: no return, throw, check, require, error or !! (outside comments and strings) after the first
+// clear call, so every later step still runs. Before it, an early stop is allowed (the steps the
+// clears depend on stop the rebuild; BRChainRebuildContinuesAfterFailure). The first clear call is
+// clearTransactionCacheForRebuild in the rebuild, and the call to the rebuild in the "from" variant.
 static void stripCommentsAndStrings(char *b, size_t n)
 {
     for (size_t i = 0; i < n; i++) {
@@ -1157,15 +1160,19 @@ static void order_rebuild_has_no_early_exit(const char *wmPath)
     if (wm) {
         stripCommentsAndStrings(wm, strlen(wm));
         const char *names[] = { "fun rebuildFromChainRescan() {", "fun rebuildFromChainRescanFrom(height: Long) {" };
+        const char *firstClear[] = { "clearTransactionCacheForRebuild(context)", "rebuildFromChainRescan()" };
         for (int f = 0; f < 2; f++) {
             const char *e;
             const char *b = span(wm, names[f], "\n    }\n", &e);
             CHECK(b != NULL);
             if (! b) continue;
+            const char *from = strstr(b + strlen(names[f]), firstClear[f]);
+            CHECK(from != NULL && from < e);
+            if (! from || from >= e) continue;
             static const char *exits[] = { "return", "throw", "check(", "require(", "error(", "!!" };
             for (size_t i = 0; i < sizeof(exits) / sizeof(*exits); i++) {
-                int found = hasWord(b + strlen(names[f]), e, exits[i]);
-                if (found) printf("  %s has `%s`\n", names[f], exits[i]);
+                int found = hasWord(from, e, exits[i]);
+                if (found) printf("  %s has `%s` after its first clear\n", names[f], exits[i]);
                 CHECK(! found);
             }
         }
