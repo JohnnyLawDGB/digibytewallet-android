@@ -11,6 +11,8 @@
 #                 fail  the case fails: the arm cannot keep the rule
 #                 pass  a guard: holds in both arms
 #               and the arm must exit nonzero.
+#               One macro trips all three defects, so a case may fail through the dedup inversion
+#               rather than the defect it is named for (end_to_end_observed, the two large cases).
 #   shipped     -DRECOVERY_UTXO_UNFIXED=0: every case passes, exit 0.
 # Both arms under ASan + UBSan, 64-bit.
 #
