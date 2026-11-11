@@ -261,7 +261,7 @@ fun SecuritySettingsScreen(
                             iconTint = if (bound) DigiByteAccent else Color(0xFFFFAA00),
                             title = stringResource(R.string.sec_seed_key),
                             subtitle = stringResource(subtitle),
-                            onClick = {},
+                            onClick = null,
                         )
                     }
                 }
@@ -611,5 +611,6 @@ internal fun seedKeyStatusSubtitle(status: app.aroundtheblock.wallet.core.securi
         app.aroundtheblock.wallet.core.security.SeedKeyStatus.PENDING -> false to R.string.sec_seed_key_pending
         app.aroundtheblock.wallet.core.security.SeedKeyStatus.NO_LOCK_SCREEN -> false to R.string.sec_seed_key_no_lock
         app.aroundtheblock.wallet.core.security.SeedKeyStatus.LOCK_REMOVED -> false to R.string.sec_seed_key_lock_removed
+        app.aroundtheblock.wallet.core.security.SeedKeyStatus.CANNOT_BIND -> false to R.string.sec_seed_key_cannot_bind
         app.aroundtheblock.wallet.core.security.SeedKeyStatus.NO_WALLET, null -> null
     }

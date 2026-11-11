@@ -720,11 +720,12 @@
     <!-- KS-BIND: seed key bound to the device lock -->
     <string name="ksb_prompt_subtitle">Konfirmasi kunci layar Anda sekali agar kunci dompet dapat diikat padanya</string>
     <string name="ksb_notice_title">Ponsel ini tidak memiliki kunci layar</string>
-    <string name="ksb_notice_body">Dompet Anda terenkripsi di ponsel ini, tetapi kuncinya tidak dapat diikat ke kunci layar karena ponsel ini tidak memilikinya. Jadi hanya PIN dompet yang berada di antara aplikasi dan dana Anda. Atur PIN, pola, atau sandi di pengaturan Android: dompet akan mengikat kuncinya saat Anda membuka aplikasi berikutnya. Pengaturan keamanan menampilkan apakah kunci sudah terikat.</string>
+    <string name="ksb_notice_body">Dompet Anda terenkripsi di ponsel ini, tetapi kuncinya tidak dapat diikat ke kunci layar karena ponsel ini tidak memilikinya. Jadi hanya PIN dompet yang berada di antara aplikasi dan dana Anda. Atur PIN, pola, atau sandi di pengaturan Android: dompet akan mengikat kuncinya saat aplikasi berikutnya dimulai dan membuka dompet. Pengaturan keamanan menampilkan apakah kunci sudah terikat.</string>
     <string name="ksb_notice_ok">Saya mengerti</string>
     <string name="sec_seed_key">Kunci dompet</string>
     <string name="sec_seed_key_bound">Terikat ke kunci layar ponsel ini</string>
-    <string name="sec_seed_key_pending">Belum terikat: akan diikat ke kunci layar Anda saat Anda membuka dompet berikutnya</string>
+    <string name="sec_seed_key_pending">Belum terikat: akan diikat ke kunci layar Anda saat aplikasi berikutnya dimulai dan membuka dompet</string>
     <string name="sec_seed_key_no_lock">Tidak terikat: ponsel ini tidak memiliki kunci layar. Atur di pengaturan Android.</string>
-    <string name="sec_seed_key_lock_removed">Kunci layar telah dihapus: dompet ini akan memerlukan frasa pemulihannya saat dibuka berikutnya</string>
+    <string name="sec_seed_key_lock_removed">Kunci layar dihapus setelah dompet ini disiapkan, sehingga kuncinya tidak dapat dibuka lagi, bahkan dengan kunci layar baru. Selagi dompet masih terbuka, pastikan frasa pemulihan Anda sudah tercatat, atau pindahkan dana Anda sekarang: saat aplikasi berikutnya dimulai, dompet akan memerlukan frasa pemulihannya.</string>
+    <string name="sec_seed_key_cannot_bind">Tidak terikat: kunci dari kunci layar sebelumnya tidak berfungsi lagi, sehingga kunci dompet ini tidak dapat diikat pada instalasi ini. Menghapus dompet lalu memulihkannya dari frasa pemulihannya akan mengikatnya.</string>
 </resources>

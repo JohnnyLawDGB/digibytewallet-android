@@ -112,7 +112,8 @@ confirmed, before `createWallet`) and the restore's start button for a restore (
 its record *before* PIN setup, so a prompt at PIN setup would come too late). In both places no
 wallet is open yet, so the prompt's `onStop` locks nothing. Nothing here blocks onboarding: a
 declined prompt, no activity or any error lets the write go ahead, `sealRecord` falls back exactly
-as before, and the existing unlock-time migration still moves the wallet later. On API 28–29 the
+as before, and the existing migration still moves the wallet the next time the app opens the
+wallet's key. On API 28–29 the
 prompt allows `BIOMETRIC_WEAK`, and a weak-biometric success opens no Keystore window, so that case
 also falls back without crashing.
 
@@ -122,11 +123,53 @@ unchanged**: no new migration is added, and the unlock-time migration is untouch
 deleted by the probe, because nothing deletes a key outside the user's wipe. New creates then fall
 back to the legacy key until a wipe. This is recorded as an owner decision.
 
-`WalletManager.seedKeyStatus()` → `seedKeyStatusFor(hasWallet, recordBound, deviceSecure)` (pure):
-`BOUND`, `PENDING` (legacy key on a secure device; the next unlock moves it), `NO_LOCK_SCREEN`,
-`LOCK_REMOVED` (bound record, lock now gone: the recovery phrase is needed at the next unlock), and
-`NO_WALLET`.
+The decision is one function, `prepareSeedKeyThenPrompt(prepare, prompt)` in core
+(`SeedKeyPreparation.kt`): it runs the probe off the main thread and, on `NEEDS_DEVICE_CREDENTIAL`
+only, runs the prompt once and awaits it. The app's `prepareSeedKeyBeforeRecordWrite` only supplies
+the prompt (it needs an activity); the core tests call the same function with a fake prompt. The PIN
+keypad takes no input while the wallet is being created, so a second create cannot start in the gap
+the probe and prompt open; the restore button is guarded the same way.
 
-Tests: `SeedKeyBindingTest` (full API 26–37 × secure/insecure matrix, readiness and status matrices)
-and `SeedKeyBindAtCreationTest` (create and restore with the window open or lapsed, a declined
-prompt, no lock screen, refused keygen, an invalidated key, and an existing wallet left unchanged).
+Keystore auth failures are recognised anywhere in the cause chain (`keystoreAuthFailureOf`), since
+some vendor Keystores raise not-authenticated at `doFinal`, wrapped as an `IllegalBlockSizeException`
+whose cause is a `KeyStoreException`. Read only at the top level, that probe answered `UNAVAILABLE`
+and the create fell back without a prompt.
+
+**Status line.** `WalletManager.seedKeyStatus()` →
+`seedKeyStatusFor(hasWallet, recordBound, boundKey, deviceSecure)` (pure). The record alone is not
+evidence: removing the device lock invalidates the `_v2` key for good (API 31+ deletes it), and a
+lock set again later does not bring it back. So the key is asked too (`BoundKeyState`: a throwaway
+ENCRYPT that succeeds or refuses with not-authenticated is `USABLE`; absent or permanently
+invalidated is not; a Keystore that cannot be asked is `UNKNOWN`, which is not read as a removed
+lock). States: `BOUND` (bound record, key opens, device has a lock), `LOCK_REMOVED` (bound record
+whose key no longer opens, or no lock now: the text tells the user to check the phrase or move funds
+while the wallet is still open, since the next cold start needs the phrase), `PENDING` (legacy key
+on a secure device; moved the next time the app starts and opens the wallet's key: the warm unlock
+does not decrypt the seed, so it does not migrate), `CANNOT_BIND` (legacy record beside an
+invalidated leftover `_v2` key: the move can never happen on this install, so `PENDING` would be a
+false promise; a wipe and restore binds it), `NO_LOCK_SCREEN`, `NO_WALLET`. The row is not
+clickable.
+
+**No-lock notice.** Shown once per install. PIN setup marks it due when it finds no lock screen, and
+dismissing it acknowledges it for good (`NoScreenLockNoticeFlags`, `dgb_settings`). A notice that
+was due but never dismissed (the app was backgrounded while it was up and the lock screen took over)
+is shown again by `MainActivity` at the next unlock. A wallet that never passes through PIN setup is
+never marked, so existing wallets see nothing new.
+
+**Owner decision (flagged, not built).** Binding at creation is best effort. A declined or cancelled
+prompt, a weak-biometric success on API 28–29, a missing activity, a refused keygen or an
+invalidated leftover `_v2` key all land the new record on the legacy key, and setup says nothing
+(the status line reads `PENDING`, or `CANNOT_BIND` for the leftover key). Options: (a) accept the
+silent fallback (built); (b) show a short "not tied yet" notice whenever the readiness was
+`NEEDS_DEVICE_CREDENTIAL` and the record still landed legacy; (c) delete an invalidated `_v2` key
+that no stored record references (it wraps nothing), so new creates can bind. (c) touches the rule
+that nothing deletes a key outside the user's wipe, so it is the owner's.
+
+Tests: `SeedKeyBindingTest` (literal rows for API 26–37 × secure/insecure, readiness, and every
+record × key × lock status combination), `KeystoreAuthErrorMappingTest` (wrapped forms),
+`SeedKeyBindAtCreationTest` (through `prepareSeedKeyThenPrompt`: create and restore with the window
+open or lapsed, a declined prompt, no activity, a throwing probe, no lock screen, refused keygen, an
+invalidated key, an existing wallet left unchanged, and the status line against a deleted,
+invalidated, lapsed or unaskable key), the app's `SeedKeyBindingStepTest` (the shipped prompt
+decision with mocks) and `SeedKeyBindAtCreationWiringTest` (call order and awaiting at both call
+sites, notice flags, keypad guard, the status row).

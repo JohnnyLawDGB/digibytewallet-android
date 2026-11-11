@@ -17,6 +17,7 @@ import app.aroundtheblock.wallet.core.security.KeyStoreManager
 import app.aroundtheblock.wallet.core.security.KeystoreKeyInvalidatedException
 import app.aroundtheblock.wallet.core.security.KeystoreUserAuthRequiredException
 import app.aroundtheblock.wallet.core.security.AuthBoundProbe
+import app.aroundtheblock.wallet.core.security.BoundKeyState
 import app.aroundtheblock.wallet.core.security.SeedKeyReadiness
 import app.aroundtheblock.wallet.core.security.SeedKeyStatus
 import app.aroundtheblock.wallet.core.security.seedKeyReadinessFor
@@ -1055,12 +1056,43 @@ class WalletManager @Suppress("LongParameterList") constructor(
     /**
      * KS-BIND. Whether the stored seed is wrapped under the key bound to the device lock, for the
      * Security-settings status line and the no-lock-screen notice. Reads no secret.
+     *
+     * The record alone is not evidence: removing the device lock invalidates the auth-bound key for
+     * good (API 31+ deletes it), and a lock set again later does not bring it back. So the key is
+     * asked too ([boundKeyState]); only a key that still opens may be reported BOUND.
      */
-    fun seedKeyStatus(): SeedKeyStatus = seedKeyStatusFor(
-        hasWallet = hasSavedWallet(),
-        recordBound = seedIsAuthBound(),
-        deviceSecure = try { keyStoreManager.isDeviceSecure() } catch (e: Exception) { false },
-    )
+    fun seedKeyStatus(): SeedKeyStatus {
+        if (!hasSavedWallet()) return SeedKeyStatus.NO_WALLET
+        return seedKeyStatusFor(
+            hasWallet = true,
+            recordBound = seedIsAuthBound(),
+            boundKey = boundKeyState(),
+            deviceSecure = try { keyStoreManager.isDeviceSecure() } catch (e: Exception) { false },
+        )
+    }
+
+    /**
+     * KS-BIND. What the auth-bound key answers to a throwaway ENCRYPT: it encrypts (window open), or
+     * refuses with not-authenticated (window lapsed) — both mean it still opens; a permanently
+     * invalidated or absent key never will. Writes nothing and reads no secret; never prompts.
+     */
+    private fun boundKeyState(): BoundKeyState {
+        when (keyStoreManager.authBoundKeyExists()) {
+            null -> return BoundKeyState.UNKNOWN
+            false -> return BoundKeyState.ABSENT
+            true -> {}
+        }
+        return try {
+            keyStoreManager.encryptAuthBound(ByteArray(16))
+            BoundKeyState.USABLE
+        } catch (e: KeystoreUserAuthRequiredException) {
+            BoundKeyState.USABLE
+        } catch (e: KeystoreKeyInvalidatedException) {
+            BoundKeyState.INVALIDATED
+        } catch (e: Exception) {
+            BoundKeyState.UNKNOWN
+        }
+    }
 
     private fun sealRecord(mnemonicBytes: ByteArray, passphrase: ByteArray?): SealedRecord {
         if (keyStoreManager.createAuthBoundKey()) {

@@ -725,11 +725,12 @@
     <!-- KS-BIND: seed key bound to the device lock -->
     <string name="ksb_prompt_subtitle">Cüzdan anahtarının ekran kilidine bağlanabilmesi için ekran kilidinizi bir kez onaylayın</string>
     <string name="ksb_notice_title">Bu telefonda ekran kilidi yok</string>
-    <string name="ksb_notice_body">Cüzdanınız bu telefonda şifreli, ancak bu telefonda ekran kilidi olmadığı için anahtarı bir ekran kilidine bağlanamıyor. Bu durumda uygulama ile fonlarınız arasında yalnızca cüzdan PIN’i durur. Android ayarlarında bir PIN, desen veya şifre belirleyin: cüzdan, uygulamanın kilidini bir sonraki açışınızda anahtarı ona bağlar. Anahtarın bağlı olup olmadığını güvenlik ayarları gösterir.</string>
+    <string name="ksb_notice_body">Cüzdanınız bu telefonda şifreli, ancak bu telefonda ekran kilidi olmadığı için anahtarı bir ekran kilidine bağlanamıyor. Bu durumda uygulama ile fonlarınız arasında yalnızca cüzdan PIN’i durur. Android ayarlarında bir PIN, desen veya şifre belirleyin: uygulama bir sonraki başlayışında cüzdanı açtığında cüzdan anahtarı ona bağlar. Anahtarın bağlı olup olmadığını güvenlik ayarları gösterir.</string>
     <string name="ksb_notice_ok">Anladım</string>
     <string name="sec_seed_key">Cüzdan anahtarı</string>
     <string name="sec_seed_key_bound">Bu telefonun ekran kilidine bağlı</string>
-    <string name="sec_seed_key_pending">Henüz bağlı değil: cüzdanın kilidini bir sonraki açışınızda ekran kilidinize bağlanacak</string>
+    <string name="sec_seed_key_pending">Henüz bağlı değil: uygulama bir sonraki başlayışında cüzdanı açtığında ekran kilidinize bağlanacak</string>
     <string name="sec_seed_key_no_lock">Bağlı değil: bu telefonda ekran kilidi yok. Android ayarlarından bir tane belirleyin.</string>
-    <string name="sec_seed_key_lock_removed">Ekran kilidi kaldırıldı: bu cüzdanın bir sonraki kilit açmada kurtarma ifadesine ihtiyacı olacak</string>
+    <string name="sec_seed_key_lock_removed">Bu cüzdan kurulduktan sonra ekran kilidi kaldırıldı, bu yüzden anahtarı yeni bir kilitle bile artık açılmıyor. Cüzdan hâlâ açıkken kurtarma ifadenizin yazılı olduğunu kontrol edin veya fonlarınızı şimdi taşıyın: uygulama bir sonraki başlayışında cüzdanın kurtarma ifadesine ihtiyacı olacak.</string>
+    <string name="sec_seed_key_cannot_bind">Bağlı değil: önceki bir ekran kilidinden kalan anahtar artık çalışmıyor, bu yüzden bu cüzdanın anahtarı bu kurulumda bağlanamıyor. Cüzdanı silip kurtarma ifadesinden geri yüklemek onu bağlar.</string>
 </resources>

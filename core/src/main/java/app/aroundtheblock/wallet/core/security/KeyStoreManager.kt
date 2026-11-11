@@ -5,9 +5,7 @@ import android.content.Context
 import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyInfo
-import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.security.keystore.KeyProperties
-import android.security.keystore.UserNotAuthenticatedException
 import android.util.Log
 import java.security.KeyStore
 import javax.crypto.Cipher
@@ -144,6 +142,14 @@ class KeyStoreManager(
         false
     }
 
+    /** KS-BIND: whether a key is stored under the auth-bound alias; null when the Keystore could not
+     *  be asked (unlike [hasAuthBoundKey], a hiccup is not reported as "absent"). */
+    fun authBoundKeyExists(): Boolean? = try {
+        keyStore.containsAlias(authAlias)
+    } catch (e: Exception) {
+        null
+    }
+
     /**
      * Create the auth-bound key per [seedKeyBindingFor]. Returns true when the key
      * exists (created now or before). NEVER throws — a device where binding cannot
@@ -215,13 +221,8 @@ class KeyStoreManager(
         }
     }
 
-    private inline fun <T> mapAuthErrors(block: () -> T): T = try {
-        block()
-    } catch (e: UserNotAuthenticatedException) {
-        throw KeystoreUserAuthRequiredException(e)
-    } catch (e: KeyPermanentlyInvalidatedException) {
-        throw KeystoreKeyInvalidatedException(e)
-    }
+    // KS-BIND: the whole cause chain is read, not only the top-level exception (see keystoreAuthFailureOf).
+    private inline fun <T> mapAuthErrors(block: () -> T): T = mapKeystoreAuthErrors(block)
 
     fun isKeyValid(): Boolean {
         return try {

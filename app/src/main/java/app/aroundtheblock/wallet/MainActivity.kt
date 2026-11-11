@@ -369,6 +369,32 @@ class MainActivity : FragmentActivity() {
                     )
                 }
 
+                // KS-BIND: the no-screen-lock notice that PIN setup marked due but that was never
+                // dismissed (the app went to the background while it was up, and the lock screen
+                // took over). Shown again once the wallet is unlocked behind its PIN, and only while
+                // the device still has no lock screen. Never shown to a wallet that was not set up
+                // on this build: only PIN setup marks it due.
+                var showNoLockNotice by remember { mutableStateOf(false) }
+                androidx.compose.runtime.LaunchedEffect(walletState) {
+                    if (walletState !is app.aroundtheblock.wallet.core.WalletState.Unlocked) return@LaunchedEffect
+                    while (!pinManager.pinKnownToExist()) kotlinx.coroutines.delay(500)
+                    if (!app.aroundtheblock.wallet.ui.onboarding.NoScreenLockNoticeFlags.isDue(this@MainActivity)) return@LaunchedEffect
+                    val status = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        runCatching { walletManager.seedKeyStatus() }.getOrNull()
+                    }
+                    if (status == app.aroundtheblock.wallet.core.security.SeedKeyStatus.NO_LOCK_SCREEN &&
+                        !app.aroundtheblock.wallet.ui.onboarding.NoScreenLockNoticeFlags.onScreen
+                    ) {
+                        showNoLockNotice = true
+                    }
+                }
+                if (showNoLockNotice && !showBatteryPrompt) {
+                    app.aroundtheblock.wallet.ui.onboarding.NoScreenLockNotice(onDismiss = {
+                        app.aroundtheblock.wallet.ui.onboarding.NoScreenLockNoticeFlags.acknowledge(this@MainActivity)
+                        showNoLockNotice = false
+                    })
+                }
+
                 AppNavigation(
                     walletManager = walletManager,
                     pinManager = pinManager,

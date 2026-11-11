@@ -9,6 +9,7 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkStatic
 import io.mockk.unmockkStatic
+import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -26,9 +27,13 @@ import java.security.MessageDigest
  * none, the record says so (status NO_LOCK_SCREEN) and nothing prompts. Existing wallets are
  * unchanged: the readiness probe writes nothing to a stored record.
  *
- * Each test drives what the record-writing step does: ask [WalletManager.prepareSeedKeyForNewRecord];
- * on NEEDS_DEVICE_CREDENTIAL show the one prompt (here: [Harness.deviceCredentialPrompt], which opens
- * the fake auth window); then create or recover.
+ * Each test drives what the record-writing step does, through the SAME function the app calls
+ * ([prepareSeedKeyThenPrompt]): ask [WalletManager.prepareSeedKeyForNewRecord]; on
+ * NEEDS_DEVICE_CREDENTIAL run the one prompt (here: [Harness.deviceCredentialPrompt], which opens the
+ * fake auth window); then create or recover.
+ *
+ * The status line is checked against the KEY, not only the record: a bound record whose key no
+ * longer opens is LOCK_REMOVED even after a new lock is set.
  */
 class SeedKeyBindAtCreationTest {
 
@@ -69,9 +74,13 @@ class SeedKeyBindAtCreationTest {
         /** The device-credential prompt succeeding: a device auth event opens the window. */
         fun deviceCredentialPrompt() { prompts++; authWindowOpen = true }
 
-        /** The record-writing step's preamble, as PIN setup / the restore's start run it. */
-        fun prepareAsTheStepDoes(wm: WalletManager): SeedKeyReadiness =
-            wm.prepareSeedKeyForNewRecord().also { if (it == SeedKeyReadiness.NEEDS_DEVICE_CREDENTIAL) deviceCredentialPrompt() }
+        /** The record-writing step's preamble: the shipped [prepareSeedKeyThenPrompt], with a fake prompt. */
+        fun prepareAsTheStepDoes(wm: WalletManager, withActivity: Boolean = true): SeedKeyReadiness = runBlocking {
+            prepareSeedKeyThenPrompt(
+                prepare = { wm.prepareSeedKeyForNewRecord() },
+                prompt = if (withActivity) ({ deviceCredentialPrompt() }) else null,
+            )
+        }
 
         val walletManager = WalletManager(
             context = keyTestContext(prefs, root, seedStore),
@@ -171,6 +180,69 @@ class SeedKeyBindAtCreationTest {
         assertEquals("the probe changed a stored record", before, LinkedHashMap(h.held))
         assertFalse("the probe decrypted the stored seed", h.vault.events.any { it == "decrypt:$LEGACY_ALIAS" })
         assertEquals(SeedKeyStatus.PENDING, h.walletManager.seedKeyStatus())
+    }
+
+    @Test fun `KS-BIND no activity for the prompt - no prompt, legacy fallback`() {
+        val h = Harness(windowOpen = false)
+        assertEquals(SeedKeyReadiness.NEEDS_DEVICE_CREDENTIAL, h.prepareAsTheStepDoes(h.walletManager, withActivity = false))
+        assertEquals(0, h.prompts)
+        assertTrue(h.walletManager.createWallet(phrase))
+        assertTrue(h.recordIsLegacy())
+    }
+
+    @Test fun `KS-BIND a throwing probe answers UNAVAILABLE and never prompts`() {
+        val h = Harness(windowOpen = false)
+        val r = runBlocking { prepareSeedKeyThenPrompt(prepare = { error("probe blew up") }, prompt = { h.deviceCredentialPrompt() }) }
+        assertEquals(SeedKeyReadiness.UNAVAILABLE, r)
+        assertEquals(0, h.prompts)
+    }
+
+    @Test fun `KS-BIND bound record with the window lapsed is still BOUND`() {
+        val h = Harness(windowOpen = true)
+        h.prepareAsTheStepDoes(h.walletManager)
+        assertTrue(h.walletManager.createWallet(phrase))
+        h.authWindowOpen = false
+        assertEquals("a lapsed window does not mean the key is gone", SeedKeyStatus.BOUND, h.walletManager.seedKeyStatus())
+    }
+
+    @Test fun `KS-BIND lock removed then set again - the deleted key reads LOCK_REMOVED, not BOUND`() {
+        val h = Harness(windowOpen = true)
+        h.prepareAsTheStepDoes(h.walletManager)
+        assertTrue(h.walletManager.createWallet(phrase))
+        assertTrue(h.recordIsBound())
+        // API 31+: removing the device lock deletes the auth-bound key; the new lock is secure again.
+        h.vault.keys.remove(BOUND_ALIAS)
+        assertEquals(SeedKeyStatus.LOCK_REMOVED, h.walletManager.seedKeyStatus())
+    }
+
+    @Test fun `KS-BIND lock removed then set again - the invalidated key reads LOCK_REMOVED, not BOUND`() {
+        val h = Harness(windowOpen = true)
+        h.prepareAsTheStepDoes(h.walletManager)
+        assertTrue(h.walletManager.createWallet(phrase))
+        // API 26-30: the key stays but every init throws permanently-invalidated.
+        h.vault.failure = { _, alias, _ ->
+            if (alias == BOUND_ALIAS) KeystoreKeyInvalidatedException(RuntimeException("invalidated")) else null
+        }
+        assertEquals(SeedKeyStatus.LOCK_REMOVED, h.walletManager.seedKeyStatus())
+    }
+
+    @Test fun `KS-BIND a Keystore that cannot be asked is not reported as a removed lock`() {
+        val h = Harness(windowOpen = true)
+        h.prepareAsTheStepDoes(h.walletManager)
+        assertTrue(h.walletManager.createWallet(phrase))
+        every { h.ksm.authBoundKeyExists() } returns null
+        assertEquals(SeedKeyStatus.BOUND, h.walletManager.seedKeyStatus())
+    }
+
+    @Test fun `KS-BIND legacy record beside an invalidated leftover key is CANNOT_BIND, not PENDING`() {
+        val h = Harness(windowOpen = false)
+        assertTrue(h.walletManager.createWallet(phrase))   // lapsed window, no prompt: legacy
+        assertTrue(h.recordIsLegacy())
+        assertTrue("precondition: the bound key exists", BOUND_ALIAS in h.vault.keys)
+        h.vault.failure = { _, alias, _ ->
+            if (alias == BOUND_ALIAS) KeystoreKeyInvalidatedException(RuntimeException("invalidated")) else null
+        }
+        assertEquals("PENDING promises a move that can never happen", SeedKeyStatus.CANNOT_BIND, h.walletManager.seedKeyStatus())
     }
 
     @Test fun `KS-BIND no wallet stored - status is NO_WALLET`() {

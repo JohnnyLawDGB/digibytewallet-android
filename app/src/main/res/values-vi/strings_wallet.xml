@@ -720,11 +720,12 @@
     <!-- KS-BIND: seed key bound to the device lock -->
     <string name="ksb_prompt_subtitle">Xác nhận khóa màn hình một lần để khóa ví có thể được gắn với nó</string>
     <string name="ksb_notice_title">Điện thoại này không có khóa màn hình</string>
-    <string name="ksb_notice_body">Ví của bạn được mã hóa trên điện thoại này, nhưng khóa của ví không thể gắn với khóa màn hình vì điện thoại này không có. Khi đó chỉ còn mã PIN của ví ngăn giữa ứng dụng và tiền của bạn. Hãy đặt mã PIN, hình mở khóa hoặc mật khẩu trong cài đặt Android: ví sẽ gắn khóa với nó vào lần tới bạn mở khóa ứng dụng. Cài đặt bảo mật cho biết khóa đã được gắn hay chưa.</string>
+    <string name="ksb_notice_body">Ví của bạn được mã hóa trên điện thoại này, nhưng khóa của ví không thể gắn với khóa màn hình vì điện thoại này không có. Khi đó chỉ còn mã PIN của ví ngăn giữa ứng dụng và tiền của bạn. Hãy đặt mã PIN, hình mở khóa hoặc mật khẩu trong cài đặt Android: ví sẽ gắn khóa với nó vào lần tới ứng dụng khởi động và mở ví. Cài đặt bảo mật cho biết khóa đã được gắn hay chưa.</string>
     <string name="ksb_notice_ok">Tôi đã hiểu</string>
     <string name="sec_seed_key">Khóa ví</string>
     <string name="sec_seed_key_bound">Đã gắn với khóa màn hình của điện thoại này</string>
-    <string name="sec_seed_key_pending">Chưa gắn: sẽ được gắn với khóa màn hình vào lần tới bạn mở khóa ví</string>
+    <string name="sec_seed_key_pending">Chưa gắn: sẽ được gắn với khóa màn hình vào lần tới ứng dụng khởi động và mở ví</string>
     <string name="sec_seed_key_no_lock">Chưa gắn: điện thoại này không có khóa màn hình. Hãy đặt trong cài đặt Android.</string>
-    <string name="sec_seed_key_lock_removed">Khóa màn hình đã bị gỡ: ví này sẽ cần cụm từ khôi phục vào lần mở khóa tới</string>
+    <string name="sec_seed_key_lock_removed">Khóa màn hình đã bị gỡ sau khi ví này được thiết lập, nên khóa của ví không còn mở được nữa, kể cả với khóa màn hình mới. Khi ví vẫn đang mở, hãy kiểm tra rằng cụm từ khôi phục đã được ghi lại, hoặc chuyển tiền của bạn ngay: lần tới ứng dụng khởi động, ví sẽ cần cụm từ khôi phục.</string>
+    <string name="sec_seed_key_cannot_bind">Chưa gắn: một khóa còn lại từ khóa màn hình trước không còn hoạt động, nên khóa của ví này không thể gắn trên bản cài đặt này. Xóa ví rồi khôi phục từ cụm từ khôi phục sẽ gắn được.</string>
 </resources>

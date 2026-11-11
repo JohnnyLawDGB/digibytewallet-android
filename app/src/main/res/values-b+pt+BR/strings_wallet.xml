@@ -730,11 +730,12 @@
     <!-- KS-BIND: seed key bound to the device lock -->
     <string name="ksb_prompt_subtitle">Confirme o bloqueio de tela uma vez para que a chave da carteira possa ser vinculada a ele</string>
     <string name="ksb_notice_title">Este celular não tem bloqueio de tela</string>
-    <string name="ksb_notice_body">Sua carteira está criptografada neste celular, mas a chave dela não pode ser vinculada a um bloqueio de tela, porque este celular não tem nenhum. Assim, só o PIN da carteira fica entre o app e seus fundos. Defina um PIN, padrão ou senha nas configurações do Android: a carteira vincula a chave a ele na próxima vez que você desbloquear o app. As configurações de segurança mostram se a chave está vinculada.</string>
+    <string name="ksb_notice_body">Sua carteira está criptografada neste celular, mas a chave dela não pode ser vinculada a um bloqueio de tela, porque este celular não tem nenhum. Assim, só o PIN da carteira fica entre o app e seus fundos. Defina um PIN, padrão ou senha nas configurações do Android: a carteira vincula a chave a ele na próxima vez que o app iniciar e abrir a carteira. As configurações de segurança mostram se a chave está vinculada.</string>
     <string name="ksb_notice_ok">Entendi</string>
     <string name="sec_seed_key">Chave da carteira</string>
     <string name="sec_seed_key_bound">Vinculada ao bloqueio de tela deste celular</string>
-    <string name="sec_seed_key_pending">Ainda não vinculada: será vinculada ao seu bloqueio de tela na próxima vez que você desbloquear a carteira</string>
+    <string name="sec_seed_key_pending">Ainda não vinculada: será vinculada ao seu bloqueio de tela na próxima vez que o app iniciar e abrir a carteira</string>
     <string name="sec_seed_key_no_lock">Não vinculada: este celular não tem bloqueio de tela. Defina um nas configurações do Android.</string>
-    <string name="sec_seed_key_lock_removed">O bloqueio de tela foi removido: esta carteira vai precisar da frase de recuperação no próximo desbloqueio</string>
+    <string name="sec_seed_key_lock_removed">O bloqueio de tela foi removido depois que esta carteira foi configurada, então a chave dela não abre mais, mesmo com um novo bloqueio. Enquanto a carteira ainda está aberta, confira se a frase de recuperação está anotada ou mova seus fundos agora: na próxima vez que o app iniciar, a carteira vai precisar da frase de recuperação.</string>
+    <string name="sec_seed_key_cannot_bind">Não vinculada: uma chave de um bloqueio de tela anterior não funciona mais, então a chave desta carteira não pode ser vinculada nesta instalação. Apagar a carteira e restaurá-la pela frase de recuperação faz o vínculo.</string>
 </resources>

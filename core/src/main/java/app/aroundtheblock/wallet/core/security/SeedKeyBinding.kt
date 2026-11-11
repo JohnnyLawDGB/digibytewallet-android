@@ -98,30 +98,122 @@ fun seedKeyReadinessFor(deviceSecure: Boolean, probe: AuthBoundProbe): SeedKeyRe
     else -> SeedKeyReadiness.UNAVAILABLE
 }
 
+/**
+ * What the auth-bound `_v2` key itself answers, as opposed to what the stored record says. The
+ * record can say "bound" while the key is gone: removing the device lock invalidates the key for
+ * good (API 31+ deletes it outright), and setting a new lock does not bring it back.
+ */
+enum class BoundKeyState {
+    /** No key under the auth-bound alias. */
+    ABSENT,
+
+    /** The key encrypts, or refuses only because the auth window has lapsed: it still opens. */
+    USABLE,
+
+    /** The key is permanently invalidated ([KeystoreKeyInvalidatedException]): it never opens again. */
+    INVALIDATED,
+
+    /** The Keystore could not be asked just now; no evidence either way. */
+    UNKNOWN,
+}
+
 /** Whether the stored seed key is bound to the device lock, for the Security-settings status line. */
 enum class SeedKeyStatus {
     /** No wallet record is stored. */
     NO_WALLET,
 
-    /** The seed is wrapped under the auth-bound key. */
+    /** The seed is wrapped under the auth-bound key, and that key still opens. */
     BOUND,
 
-    /** The seed is on the legacy key on a device that has a lock screen: the next unlock moves it. */
+    /** The seed is on the legacy key on a device that has a lock screen: the next time the app
+     *  opens its key (for example after a restart) it is moved. */
     PENDING,
 
     /** The seed is on the legacy key because the device has no secure lock screen. */
     NO_LOCK_SCREEN,
 
-    /** The seed is wrapped under the auth-bound key but the device lock is gone: the key is
-     *  invalidated and the wallet needs its recovery phrase at the next unlock. */
+    /** The seed is wrapped under the auth-bound key but that key no longer opens (the device lock
+     *  was removed, even if a new one was set since): the wallet needs its recovery phrase at the
+     *  next cold start. */
     LOCK_REMOVED,
+
+    /** The seed is on the legacy key on a secure device, but an auth-bound key left over from an
+     *  earlier lock is invalidated, so the move can never happen on this install: PENDING would be
+     *  a promise that cannot come true. */
+    CANNOT_BIND,
 }
 
-/** Pure: the status line, from what is stored and whether the device is secure now. */
-fun seedKeyStatusFor(hasWallet: Boolean, recordBound: Boolean, deviceSecure: Boolean): SeedKeyStatus = when {
+/**
+ * Pure: the status line, from what is stored, what the auth-bound key answers, and whether the
+ * device is secure now. BOUND is claimed only when the record is bound AND the key still opens AND
+ * the device has a lock: the record alone is not evidence (KS-BIND).
+ */
+fun seedKeyStatusFor(
+    hasWallet: Boolean,
+    recordBound: Boolean,
+    boundKey: BoundKeyState,
+    deviceSecure: Boolean,
+): SeedKeyStatus = when {
     !hasWallet -> SeedKeyStatus.NO_WALLET
-    recordBound && deviceSecure -> SeedKeyStatus.BOUND
-    recordBound -> SeedKeyStatus.LOCK_REMOVED
-    deviceSecure -> SeedKeyStatus.PENDING
-    else -> SeedKeyStatus.NO_LOCK_SCREEN
+    recordBound -> when {
+        !deviceSecure -> SeedKeyStatus.LOCK_REMOVED
+        boundKey == BoundKeyState.ABSENT || boundKey == BoundKeyState.INVALIDATED -> SeedKeyStatus.LOCK_REMOVED
+        else -> SeedKeyStatus.BOUND
+    }
+    !deviceSecure -> SeedKeyStatus.NO_LOCK_SCREEN
+    boundKey == BoundKeyState.INVALIDATED -> SeedKeyStatus.CANNOT_BIND
+    else -> SeedKeyStatus.PENDING
+}
+
+/** How a Keystore failure bears on the auth-bound key, if it does at all. */
+enum class KeystoreAuthFailure { AUTH_REQUIRED, INVALIDATED }
+
+/**
+ * Classify [t] by walking its cause chain (KS-BIND). Some vendor Keystores do not raise
+ * `UserNotAuthenticatedException` at `cipher.init` but at `doFinal`, wrapped as an
+ * `IllegalBlockSizeException` whose cause is a `KeyStoreException` ("Key user not authenticated").
+ * Read only at the top level, that answered "unavailable", and a create whose auth window had
+ * lapsed fell back to the legacy key without a prompt.
+ */
+fun keystoreAuthFailureOf(t: Throwable): KeystoreAuthFailure? {
+    var cur: Throwable? = t
+    val seen = HashSet<Throwable>()
+    var depth = 0
+    while (cur != null && depth < MAX_CAUSE_DEPTH && seen.add(cur)) {
+        when {
+            cur is KeystoreUserAuthRequiredException -> return KeystoreAuthFailure.AUTH_REQUIRED
+            cur is KeystoreKeyInvalidatedException -> return KeystoreAuthFailure.INVALIDATED
+            cur is android.security.keystore.UserNotAuthenticatedException -> return KeystoreAuthFailure.AUTH_REQUIRED
+            cur is android.security.keystore.KeyPermanentlyInvalidatedException -> return KeystoreAuthFailure.INVALIDATED
+            cur.javaClass.simpleName == "KeyStoreException" -> {
+                val msg = cur.message?.lowercase().orEmpty()
+                if ("user not authenticated" in msg) return KeystoreAuthFailure.AUTH_REQUIRED
+                if ("permanently invalidated" in msg) return KeystoreAuthFailure.INVALIDATED
+            }
+        }
+        cur = cur.cause
+        depth++
+    }
+    return null
+}
+
+private const val MAX_CAUSE_DEPTH = 8
+
+/**
+ * Run [block] and map an auth failure anywhere in a thrown exception's cause chain to the typed
+ * [KeystoreUserAuthRequiredException] / [KeystoreKeyInvalidatedException]; anything else is
+ * rethrown unchanged.
+ */
+inline fun <T> mapKeystoreAuthErrors(block: () -> T): T = try {
+    block()
+} catch (e: KeystoreUserAuthRequiredException) {
+    throw e
+} catch (e: KeystoreKeyInvalidatedException) {
+    throw e
+} catch (e: Exception) {
+    when (keystoreAuthFailureOf(e)) {
+        KeystoreAuthFailure.AUTH_REQUIRED -> throw KeystoreUserAuthRequiredException(e)
+        KeystoreAuthFailure.INVALIDATED -> throw KeystoreKeyInvalidatedException(e)
+        null -> throw e
+    }
 }

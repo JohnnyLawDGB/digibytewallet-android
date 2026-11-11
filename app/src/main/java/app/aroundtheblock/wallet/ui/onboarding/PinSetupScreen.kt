@@ -137,7 +137,6 @@ fun PinSetupScreen(
                                                                         app.aroundtheblock.wallet.core.bridge.NativeBridge.startSync()
                                                                     }
                                                                 }
-                                                                isPinSaving = false
                                                                 val proceed: () -> Unit = {
                                                                     if (biometricAvailable && activity != null) {
                                                                         step = PinStep.BIOMETRIC
@@ -148,12 +147,20 @@ fun PinSetupScreen(
                                                                         }
                                                                     }
                                                                 }
-                                                                // KS-BIND: a device with no secure lock screen is told so, once,
-                                                                // here at setup; Security settings keeps the status line.
+                                                                // KS-BIND: a device with no secure lock screen is told so, once
+                                                                // per install (NoScreenLockNoticeFlags), here at setup; Security
+                                                                // settings keeps the status line. Marked due first, so a notice
+                                                                // lost to the lock screen is shown again at the next unlock.
                                                                 val status = withContext(Dispatchers.IO) {
                                                                     runCatching { walletManager.seedKeyStatus() }.getOrNull()
                                                                 }
-                                                                if (status == app.aroundtheblock.wallet.core.security.SeedKeyStatus.NO_LOCK_SCREEN) {
+                                                                // Only now: the keypad stays closed until the wallet exists and
+                                                                // the next screen (or the notice) is decided.
+                                                                isPinSaving = false
+                                                                if (status == app.aroundtheblock.wallet.core.security.SeedKeyStatus.NO_LOCK_SCREEN &&
+                                                                    NoScreenLockNoticeFlags.markDueIfUnacknowledged(context)
+                                                                ) {
+                                                                    NoScreenLockNoticeFlags.onScreen = true
                                                                     afterNotice = proceed
                                                                     showNoScreenLockNotice = true
                                                                 } else {
@@ -251,7 +258,14 @@ fun PinSetupScreen(
         }
 
         if (showNoScreenLockNotice) {
+            // Leaving this screen with the notice up (backgrounded, lock screen took over) clears
+            // onScreen, so MainActivity shows the still-due notice again at the next unlock.
+            androidx.compose.runtime.DisposableEffect(Unit) {
+                NoScreenLockNoticeFlags.onScreen = true
+                onDispose { NoScreenLockNoticeFlags.onScreen = false }
+            }
             NoScreenLockNotice(onDismiss = {
+                NoScreenLockNoticeFlags.acknowledge(context)
                 showNoScreenLockNotice = false
                 val next = afterNotice
                 afterNotice = null
@@ -333,9 +347,12 @@ private fun PinEntryContent(
         }
 
         // Numeric keypad
+        // While the PIN is being saved and the wallet created, the keypad takes no input: a backspace
+        // and a digit would re-enter the CONFIRM branch and start a second create (KS-BIND widened
+        // that gap with the seed-key probe and its prompt).
         NumericKeypad(
-            onDigit = onDigit,
-            onBackspace = onBackspace
+            onDigit = { if (!isPinSaving) onDigit(it) },
+            onBackspace = { if (!isPinSaving) onBackspace() }
         )
     }
 }
