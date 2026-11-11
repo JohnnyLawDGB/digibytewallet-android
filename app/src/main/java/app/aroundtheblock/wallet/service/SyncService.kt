@@ -3416,7 +3416,9 @@ class SyncService : Service() {
             // The decision is the core's (BROwnNodeHealthObserve, shared with iOS): 3 SERVING;
             // 1 (in the pool, not connected) CONNECTING until the node has gone 60 s without a
             // connection, then DARK, so an exclusive node that never answers no longer reads
-            // "Connecting…" forever; 0 and 2 DARK (2 is a node without peerblockfilters=1).
+            // "Connecting…" forever; 0 and 2 DARK. 2 is connected but not serving compact
+            // filters now: it never answered (a node without peerblockfilters=1) or a
+            // cfheaders/cfilters request to it stalled (OWNNODE-LIVE, BRCFServedClock).
             // elapsedRealtime: monotonic and counts deep sleep; the core starts a new run after
             // a gap of more than 120 s between polls, so a frozen loop is not counted as dialling.
             val key = pinned?.let { "${it.first}:${it.second}" } ?: ""
@@ -4269,9 +4271,10 @@ class SyncService : Service() {
         /** Own-node pairing health, as last observed by [refreshOwnNodeHealth]. UNPAIRED
          *  when the own-node toggle is off (also the default at process start). DARK
          *  covers both "not in the native peer pool at all" (0 UNKNOWN — unreachable,
-         *  never dialed) AND the deliberate case of a peer that connects but never
-         *  answers cfheaders (2 CONNECTED_NOT_SERVING — a node missing
-         *  peerblockfilters=1). Surfacing that misconfiguration as dark/⚠ rather than
+         *  never dialed) AND the deliberate case of a peer that connects but is not
+         *  serving compact filters now (2 CONNECTED_NOT_SERVING — a node missing
+         *  peerblockfilters=1, or one whose cfheaders/cfilters request stalled,
+         *  OWNNODE-LIVE). Surfacing that misconfiguration as dark/⚠ rather than
          *  a soft "connecting" is the point: it's the failure mode operators actually
          *  hit when pairing a node they forgot to reconfigure. */
         enum class OwnNodeHealth { UNPAIRED, CONNECTING, SERVING, DARK }
