@@ -230,7 +230,7 @@ class HistoryRebuildOnUpgradeTest {
     }
 
     @Test fun summarize_countAboveTheCap_givesNoHint_andDoesNotThrow() {
-        val s = HistoryRebuildOnUpgrade.summarize(blob(Rec(1_000L, 1_400_000_000L, realTx), count = 10_001L))
+        val s = HistoryRebuildOnUpgrade.summarize(blob(Rec(1_000L, 1_400_000_000L, realTx), count = HistoryRebuildOnUpgrade.MAX_RECORDS + 1))   // TX-CKPT-CAP: the shared limit
         assertFalse("a non-zero count is not an empty cache", s.isEmpty)
         assertEquals(0, s.records)
         assertEquals(0L, s.minConfirmedHeight)
@@ -289,7 +289,7 @@ class HistoryRebuildOnUpgradeTest {
         val out = HistoryRebuildOnUpgrade.runAtProcessStart(c, now + 1)
 
         assertEquals(OutcomeKind.NOT_NEEDED, out.kind)
-        assertTrue(syncPrefs(c).contains("saved_transactions"))
+        assertTrue(SavedTransactionsStore.exists(c))
     }
 
     @Test fun run_interruptedAfterTheInProgressCommit_completesOnTheNextLaunch() {
@@ -384,7 +384,7 @@ class HistoryRebuildOnUpgradeTest {
 
         assertEquals(OutcomeKind.DEFERRED, HistoryRebuildOnUpgrade.runAtProcessStart(c, now).kind)
         assertEquals(now, HistoryRebuildOnUpgrade.readState(c).deferredSinceMs)
-        assertTrue(syncPrefs(c).contains("saved_transactions"))
+        assertTrue(SavedTransactionsStore.exists(c))
 
         HistoryRebuildOnUpgrade.resetProcessStateForTest()
         assertEquals(OutcomeKind.DEFERRED, HistoryRebuildOnUpgrade.runAtProcessStart(c, now + 1_000L).kind)
@@ -393,7 +393,7 @@ class HistoryRebuildOnUpgradeTest {
 
         HistoryRebuildOnUpgrade.resetProcessStateForTest()
         assertEquals(OutcomeKind.RAN, HistoryRebuildOnUpgrade.runAtProcessStart(c, now + DEFER_CAP_MS).kind)
-        assertFalse(syncPrefs(c).contains("saved_transactions"))
+        assertFalse(SavedTransactionsStore.exists(c))
         assertNotNull(OutgoingTxStore(c).lookup("cc33"))
     }
 
@@ -413,7 +413,7 @@ class HistoryRebuildOnUpgradeTest {
         // The send settles later in the same process; the wallet is loaded again.
         OutgoingTxStore(c).markSettled("ee55")
         assertEquals(OutcomeKind.DEFERRED, HistoryRebuildOnUpgrade.beforeWalletLoad(c, now + 1).kind)
-        assertTrue("no clear under a running session", syncPrefs(c).contains("saved_transactions"))
+        assertTrue("no clear under a running session", SavedTransactionsStore.exists(c))
 
         // The next process start runs it.
         HistoryRebuildOnUpgrade.resetProcessStateForTest()
@@ -424,7 +424,7 @@ class HistoryRebuildOnUpgradeTest {
         val c = ctx()
         seedEarlierBuild(c)
         assertEquals(OutcomeKind.RAN, HistoryRebuildOnUpgrade.beforeWalletLoad(c, now).kind)
-        assertFalse(syncPrefs(c).contains("saved_transactions"))
+        assertFalse(SavedTransactionsStore.exists(c))
     }
 
     @Test fun markNotNeeded_stampsDone_andForgetsTheFloorOnlyWhenAsked() {
@@ -476,7 +476,7 @@ class HistoryRebuildOnUpgradeTest {
         assertEquals("the first deferral stands", now, HistoryRebuildOnUpgrade.readState(c).deferredSinceMs)
         HistoryRebuildOnUpgrade.resetProcessStateForTest()
         assertEquals(OutcomeKind.DEFERRED, HistoryRebuildOnUpgrade.runAtProcessStart(c, now + day, lookupNone).kind)
-        assertTrue(syncPrefs(c).contains("saved_transactions"))
+        assertTrue(SavedTransactionsStore.exists(c))
         HistoryRebuildOnUpgrade.resetProcessStateForTest()
         assertEquals(OutcomeKind.RAN, HistoryRebuildOnUpgrade.runAtProcessStart(c, now + DEFER_CAP_MS, lookupNone).kind)
     }

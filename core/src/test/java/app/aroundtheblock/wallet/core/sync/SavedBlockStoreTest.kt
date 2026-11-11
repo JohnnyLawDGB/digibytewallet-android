@@ -187,12 +187,14 @@ class SavedBlockStoreTest {
         assertArrayEquals(bytes, second)
     }
 
-    @Test fun noMigrationWhenFileAlreadyExists_legacyHexIsIgnored() {
+    @Test fun legacyHexBesideAFileIsTheNewerCopy() {
         val ctx = fakeCtx()
         SavedBlockStore.write(ctx, byteArrayOf(7, 7, 7), SavedBlockStore.currentEpoch())
-        // A stale/mismatched legacy blob must never override an already-migrated file.
+        // STORE-DURABILITY: every landed write removes the legacy key, so a readable key beside the
+        // file was written after it, by an older build after a downgrade: it is the newer copy.
         ctx.getSharedPreferences("dgb_sync_data", 0).edit().putString("saved_blocks", "aabb").apply()
-        assertArrayEquals(byteArrayOf(7, 7, 7), SavedBlockStore.load(ctx))
+        assertArrayEquals(byteArrayOf(0xaa.toByte(), 0xbb.toByte()), SavedBlockStore.load(ctx))
+        assertNull(ctx.getSharedPreferences("dgb_sync_data", 0).getString("saved_blocks", null))
     }
 
     @Test fun malformedLegacyHexIsDroppedNotMigrated() {

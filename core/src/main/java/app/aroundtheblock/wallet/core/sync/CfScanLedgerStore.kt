@@ -18,6 +18,11 @@ import java.io.File
  * Persistence is only a restore optimization — the native ledger is authoritative in
  * memory — so best-effort I/O is acceptable. Unlike FilterHeaderStore, there is no
  * legacy SharedPreferences blob to migrate; this store is new.
+ *
+ * STORE-DURABILITY: every write goes through [DurableFile] (tmp, fsync, rename, directory
+ * fsync), reports whether it landed, and never removes the previous file when it fails.
+ * Since the recreate path (`flushLiveStateBeforeRecreate`, [RecreateSequence]) restores the
+ * last PERSISTED snapshot, a lost or torn file costs a resume far behind the tip.
  */
 object CfScanLedgerStore {
     private const val FILE_BASE = "saved_cf_ledger"
@@ -34,35 +39,26 @@ object CfScanLedgerStore {
     fun currentEpoch(): Long = epoch
 
     /**
-     * Persist the ledger as raw bytes, atomically (tmp write + rename) — UNLESS a
+     * Persist the ledger as raw bytes, durably ([DurableFile]: tmp, fsync, rename, directory fsync) — UNLESS a
      * [delete] has run since `snapshotEpoch` was taken, in which case the write is
      * dropped so a stale pre-reset ledger can't be resurrected after the file was
-     * already deleted. Serialized with [delete] on [ioLock]. Best-effort.
+     * already deleted. Serialized with [delete] on [ioLock]. Returns [StoreWrite.LANDED]
+     * when the file now holds [bytes], [StoreWrite.OBSOLETE] for a dropped stale snapshot (not a
+     * failure), and [StoreWrite.FAILED] with the previous file kept as it was (STORE-DURABILITY).
      */
-    fun write(ctx: Context, bytes: ByteArray, snapshotEpoch: Long) {
-        synchronized(ioLock) {
-            if (epoch != snapshotEpoch) return // a delete() invalidated this snapshot
-            writeLocked(ctx, bytes)
-        }
-    }
-
-    private fun writeLocked(ctx: Context, bytes: ByteArray) {
-        val f = file(ctx)
-        val tmp = tmpFile(ctx)
-        runCatching {
-            tmp.writeBytes(bytes)
-            if (!tmp.renameTo(f)) { f.delete(); if (!tmp.renameTo(f)) tmp.delete() }
-        }.onFailure { runCatching { tmp.delete() } }
+    fun write(ctx: Context, bytes: ByteArray, snapshotEpoch: Long): StoreWrite = synchronized(ioLock) {
+        if (epoch != snapshotEpoch) return StoreWrite.OBSOLETE // a delete() invalidated this snapshot
+        if (DurableFile.write(file(ctx), tmpFile(ctx), bytes)) StoreWrite.LANDED else StoreWrite.FAILED
     }
 
     /**
-     * Load the ledger for restore: returns the file bytes, or null if none is
-     * persisted yet / the read failed.
+     * Load the ledger for restore: the file's bytes; with no file, a complete tmp file (a write that
+     * synced but was killed before its rename) is recovered. Null if none is persisted / the read failed.
      */
-    fun load(ctx: Context): ByteArray? {
+    fun load(ctx: Context): ByteArray? = synchronized(ioLock) {
         val f = file(ctx)
-        if (!f.exists()) return null
-        return runCatching { f.readBytes() }.getOrNull()
+        if (f.exists()) return runCatching { f.readBytes() }.getOrNull()
+        DurableFile.recoverTmp(f, tmpFile(ctx), ::isComplete)
     }
 
     /** Delete the persisted ledger (file and tmp). Used on re-anchor / reset. Bumps
@@ -71,8 +67,7 @@ object CfScanLedgerStore {
     fun delete(ctx: Context) {
         synchronized(ioLock) {
             epoch++
-            runCatching { file(ctx).delete() }
-            runCatching { tmpFile(ctx).delete() }
+            runCatching { DurableFile.delete(file(ctx), tmpFile(ctx)) }
         }
     }
 
@@ -87,9 +82,40 @@ object CfScanLedgerStore {
         WALLET_NETWORK_SUFFIXES.map { net ->
             val bin = File(ctx.filesDir, "$FILE_BASE$net.bin")
             val tmp = File(ctx.filesDir, "$FILE_BASE$net.bin.tmp")
-            runCatching { bin.delete() }
-            runCatching { tmp.delete() }
+            DurableFile.delete(bin, tmp)
             !bin.exists() && !tmp.exists()
         }.all { it }
     }
+
+    /**
+     * Whether [b] is a whole ledger as BRCFScanLedgerSerialize writes it (the versions
+     * BRCFScanLedgerParse reads, 1 to 3): magic "CFL1", version, a 24-byte (v1) or 28-byte header
+     * ending in the outstanding count, its entries (5 bytes, 6 from v3), the parked count and its
+     * entries (4 bytes, 6 from v3), ending exactly at its length. Only decides whether a tmp file may
+     * be recovered; the native parser still validates what it is handed.
+     */
+    internal fun isComplete(b: ByteArray): Boolean {
+        val len = b.size.toLong()
+        if (len < 24L || b.u32(0) != LEDGER_MAGIC) return false
+        val version = b.u32(4)
+        if (version !in 1L..LEDGER_VERSION_MAX) return false
+        val header = if (version >= 2L) 28L else 24L
+        if (len < header) return false
+        val outEntry = if (version >= 3L) 6L else 5L
+        val parkedEntry = if (version >= 3L) 6L else 4L
+        val parkedAt = header + b.u32(header - 4L) * outEntry
+        if (parkedAt + 4L > len) return false
+        return parkedAt + 4L + b.u32(parkedAt) * parkedEntry == len
+    }
+
+    internal const val LEDGER_MAGIC = 0x43464C31L // "CFL1", BRCFScanLedger.c
+
+    /** The newest ledger version BRCFScanLedgerParse reads (BR_CF_RESTORE_LEDGER_VERSION_MAX); pinned to the C
+     *  header by StoreBlobCompletenessTest, so a version bump fails a test instead of silently ending tmp recovery. */
+    internal const val LEDGER_VERSION_MAX = 3L
+
+    private fun ByteArray.u32(at: Long): Long = (this[at.toInt()].toLong() and 0xffL) or
+        ((this[at.toInt() + 1].toLong() and 0xffL) shl 8) or
+        ((this[at.toInt() + 2].toLong() and 0xffL) shl 16) or
+        ((this[at.toInt() + 3].toLong() and 0xffL) shl 24)
 }

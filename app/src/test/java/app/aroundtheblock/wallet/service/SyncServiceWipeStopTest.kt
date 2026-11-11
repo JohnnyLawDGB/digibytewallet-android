@@ -64,7 +64,13 @@ class SyncServiceWipeStopTest {
         val onDestroy = body("onDestroy")
         val branches = service.branchesOn("!stoodDownForWipe", onDestroy)
         assertTrue("onDestroy has no branch for a service that did not stand down", branches.isNotEmpty())
-        for (write in listOf("persistBlocks", "flushFilterHeaders", "persistPeerPenalties")) {
+        // STORE-DURABILITY: the block window and CF state are flushed through the bounded
+        // off-main-thread teardown flush, which writes the window and the CF state.
+        val teardown = body("flushForTeardownBounded")
+        for (write in listOf("flushLastBlockWindow", "flushFilterHeaders")) {
+            assertTrue("the teardown flush no longer writes through $write", service.calls(write, teardown).isNotEmpty())
+        }
+        for (write in listOf("flushForTeardownBounded", "persistPeerPenalties")) {
             val calls = service.calls(write, onDestroy)
             assertTrue("scanner is blind: onDestroy no longer calls $write", calls.isNotEmpty())
             val outside = calls.filterNot { c -> branches.any { c.range.first in it } }
@@ -125,7 +131,9 @@ class SyncServiceWipeStopTest {
      */
     @Test fun `the service's writers write nothing once it stood down`() {
         val writes = listOf(".commit()", ".apply()", "Store.write(")
-        for (writer in listOf("persistBlocks", "flushFilterHeaders", "persistPeerPenalties", "persistWalletTransactionsCheckpoint", "startFilterHeaderWriter")) {
+        // The coalesced writer and flushFilterHeaders write the CF state only through flushCfState
+        // (STORE-DURABILITY, pinned by StoreDurabilityCallerGateTest), so it is the writer read here.
+        for (writer in listOf("persistBlocks", "flushCfState", "persistPeerPenalties", "persistWalletTransactionsCheckpoint")) {
             val code = text(body(writer))
             val firstWrite = writes.map { code.indexOf(it) }.filter { it >= 0 }.minOrNull()
                 ?: error("scanner is blind: $writer writes nothing")
@@ -135,17 +143,24 @@ class SyncServiceWipeStopTest {
                 code.substring(lastRead, firstWrite).contains("stoodDownForWipe"),
             )
         }
-        // The wallet's transaction set, wherever the service writes it.
+        // The wallet's transaction set, wherever the service writes it: through the one writer
+        // (WalletTxPersister, TX-CKPT-CAP), which asks the abort check after its native read and
+        // before its file write; every service call must hand it the stood-down flag.
         val written = service.written
-        val sites = Regex("""putString\(\s*"saved_transactions"""").findAll(written).map { it.range.first }.toList()
+        val sites = Regex("""\.persistCheckpoint\b""").findAll(written).map { it.range.first }.toList()
         assertTrue("scanner is blind: found ${sites.size} writes of the transaction set", sites.size >= 3)
         for (site in sites) {
-            val read = written.lastIndexOf("getSerializedTransactions()", site)
-            assertTrue("scanner is blind: no native read before the write at $site", read >= 0)
+            val call = service.code.substring(site, minOf(service.code.length, site + 120))
             assertTrue(
                 "the transaction set is written without asking whether the service stood down (at $site)",
-                service.code.substring(read, site).contains("stoodDownForWipe"),
+                Regex("""persistCheckpoint\s*\{\s*stoodDownForWipe\s*}""").containsMatchIn(call),
             )
         }
+        val persister = java.io.File(java.io.File("..").canonicalFile, "core/src/main/java/app/aroundtheblock/wallet/core/WalletTxPersister.kt").readText()
+        val fn = persister.substring(persister.indexOf("fun persistCheckpoint("))
+        val read = fn.indexOf("source.serialized()")
+        val abort = fn.indexOf("if (shouldAbort()) return Result.ABORTED")
+        val write = fn.indexOf("SavedTransactionsStore.write(")
+        assertTrue("the writer must ask the abort check after its native read and before its write", read in 0 until abort && abort < write)
     }
 }

@@ -8,10 +8,11 @@ import app.aroundtheblock.wallet.core.asset.OrphanSendPredicate
 import app.aroundtheblock.wallet.core.bridge.NativeBridge
 import app.aroundtheblock.wallet.core.model.SyncFrontierSession
 import app.aroundtheblock.wallet.core.model.SyncState
-import app.aroundtheblock.wallet.core.sync.FilterHeaderStore
 import app.aroundtheblock.wallet.core.sync.HistoryRebuildOnUpgrade
 import app.aroundtheblock.wallet.core.sync.clearTransactionCacheForRebuild
 import app.aroundtheblock.wallet.core.sync.SavedBlockStore
+import app.aroundtheblock.wallet.core.sync.SavedTransactionsCheckpoint
+import app.aroundtheblock.wallet.core.sync.SavedTransactionsStore
 import app.aroundtheblock.wallet.core.security.EncryptedData
 import app.aroundtheblock.wallet.core.security.KeyStoreManager
 import app.aroundtheblock.wallet.core.security.KeystoreKeyInvalidatedException
@@ -404,33 +405,62 @@ class WalletManager @Suppress("LongParameterList") constructor(
             runCatching { HistoryRebuildOnUpgrade.beforeWalletLoad(context) }
                 .onFailure { android.util.Log.w(HistoryRebuildOnUpgrade.TAG, "history rebuild check failed; retried next launch", it) }
             // A rebuild that started clearing and did not finish leaves a partial cache: do not load it.
-            val savedTxHex = if (HistoryRebuildOnUpgrade.isInProgress(context)) {
+            // TX-CKPT-CAP: the checkpoint is a file of raw bytes (SavedTransactionsStore), migrated once
+            // from the legacy dgb_sync_data hex key, so no 50 MB string is pinned in the prefs map here.
+            val rebuildInProgress = HistoryRebuildOnUpgrade.isInProgress(context)
+            val savedTx = if (rebuildInProgress) {
                 android.util.Log.w(HistoryRebuildOnUpgrade.TAG, "history rebuild in progress; not loading the transaction cache")
                 null
             } else {
-                syncPrefs.getString("saved_transactions", null)
+                runCatching { SavedTransactionsStore.load(context) }
+                    .onFailure { android.util.Log.w("WalletManager", "transaction checkpoint read failed", it) }
+                    .getOrElse { ByteArray(0) }   // present but unreadable: recorded as a short restore below
             }
-            if (savedTxHex != null) {
-                // A bad tx cache must NEVER abort the restore or block the seed load
-                // below — it's just a cache re-derivable from chain. The naive
-                // chunked(2).map { it.toInt(16) } decoder this replaces threw
-                // NumberFormatException on any non-hex byte, and that throw escaped
-                // this function's try/finally (only seedBytes is zeroed there),
-                // crashing startup on a corrupt blob. decodeSavedTransactionsOrNull
-                // validates hex first and returns null instead of throwing; the
-                // whole block is additionally wrapped so no other decode/native
-                // exception can escape either.
+            // TX-CKPT-CAP: the flag says a checkpoint of this many records landed; no file beside it means
+            // the file was lost, and the restore is short (never a near-tip resume with no history).
+            val checkpointedCount = if (syncPrefs.getBoolean("transactions_checkpointed", false)) {
+                syncPrefs.getLong(SavedTransactionsStore.KEY_COUNT, 0L)
+            } else {
+                0L
+            }
+            if (savedTx == null && !rebuildInProgress && checkpointedCount > 0L) {
+                runCatching {
+                    if (SavedTransactionsCheckpoint.recordRestore(syncPrefs, null, 0L, checkpointedCount)) {
+                        android.util.Log.w(
+                            "WalletManager",
+                            "Transaction checkpoint of $checkpointedCount records is missing: recorded a short " +
+                                "restore, the sync start rebuilds from the birth floor",
+                        )
+                    }
+                }.onFailure { android.util.Log.w("WalletManager", "short-restore record failed", it) }
+            }
+            if (savedTx != null) {
+                // A bad tx cache must NEVER abort the restore or block the seed load below — it is a
+                // cache re-derivable from chain; nothing here may throw past this block. An unreadable
+                // one (an empty array) loads nothing and is recorded as short.
+                var loaded = 0
                 try {
-                    val txBytes = decodeSavedTransactionsOrNull(savedTxHex)
-                    if (txBytes != null) {
-                        val loaded = NativeBridge.loadSerializedTransactions(txBytes)
+                    if (savedTx.size >= 4) {
+                        loaded = NativeBridge.loadSerializedTransactions(savedTx)
                         android.util.Log.i("WalletManager", "Loaded $loaded saved transactions for restore")
                     } else {
-                        android.util.Log.w("WalletManager", "Dropping corrupt saved_transactions blob (invalid hex) — continuing restore from seed")
+                        android.util.Log.w("WalletManager", "Unreadable transaction checkpoint — the restore continues without it")
                     }
                 } catch (e: Exception) {
-                    android.util.Log.w("WalletManager", "saved_transactions restore failed — dropping and continuing", e)
+                    android.util.Log.w("WalletManager", "saved transactions restore failed — dropping and continuing", e)
                 }
+                // TX-CKPT-CAP: a load short of what the checkpoint declares is recorded before the wallet
+                // is built from it, so the sync start rebuilds from the birth floor (SyncService's CF
+                // preflight) instead of resuming near the tip without that history.
+                runCatching {
+                    if (SavedTransactionsCheckpoint.recordRestore(syncPrefs, savedTx, loaded.toLong())) {
+                        android.util.Log.w(
+                            "WalletManager",
+                            "Loaded $loaded of ${SavedTransactionsCheckpoint.declaredCount(savedTx)} checkpointed " +
+                                "transactions: recorded a short restore, the sync start rebuilds from the birth floor",
+                        )
+                    }
+                }.onFailure { android.util.Log.w("WalletManager", "short-restore record failed", it) }
             }
 
             // restoreWalletFromBytes builds the wallet from the records loaded just above (the only native
@@ -1432,6 +1462,15 @@ class WalletManager @Suppress("LongParameterList") constructor(
         // seed-fingerprint-mismatch restore (restoreFromDisk) would inherit the
         // PREVIOUS wallet's saved-blocks window from disk.
         SavedBlockStore.delete(context)
+        // TX-CKPT-CAP: the transaction checkpoint moved out of dgb_sync_data too; a new wallet must
+        // not restore the previous wallet's history from it.
+        SavedTransactionsStore.delete(context)
+        // STORE-DURABILITY review: the scan ledger records which heights were evaluated for ONE wallet,
+        // so after a seed change it is the wrong wallet's record; the header chain goes with it. Deleted
+        // here, through delete() (epoch bump, tmp first), rather than left to the next start's restore
+        // preflight to find (HEADER_WINDOW_MISSING) once the block window above is gone.
+        app.aroundtheblock.wallet.core.sync.FilterHeaderStore.delete(context)
+        app.aroundtheblock.wallet.core.sync.CfScanLedgerStore.delete(context)
         // A new wallet (create, recover, seed change): every record cached from here on is
         // written by this build, so the one-time rebuild after an update has nothing to do. The
         // floor a previous wallet's rebuild recorded does not belong to this one.
@@ -1479,26 +1518,4 @@ class WalletManager @Suppress("LongParameterList") constructor(
 
     private fun hexToBytes(hex: String): ByteArray =
         hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
-}
-
-/**
- * Validate + hex-decode the `saved_transactions` restore blob for
- * [WalletManager.restoreFromDisk]. Pure and side-effect-free so it's testable
- * without constructing a [WalletManager] (which would require mocking
- * `NativeBridge`'s JNI surface).
- *
- * Reuses [FilterHeaderStore.decodeHexOrNull]'s hex-validity guard (odd length
- * or a non-hex character -> `null`) instead of the throwing
- * `chunked(2).map { it.toInt(16) }` decoder it replaces in `restoreFromDisk` —
- * that decoder threw [NumberFormatException] on any corrupt byte, and nothing
- * in `restoreFromDisk` caught it (only `finally { seedBytes.fill(0) }` ran), so
- * a corrupt tx cache crashed the whole restore instead of just being dropped.
- *
- * @return the decoded bytes, or `null` if [hex] is `null` or malformed. The
- *   caller drops a `null` result and continues restoring the wallet from the
- *   seed — the tx cache is just a cache, re-derivable from chain.
- */
-internal fun decodeSavedTransactionsOrNull(hex: String?): ByteArray? {
-    if (hex == null) return null
-    return FilterHeaderStore.decodeHexOrNull(hex)
 }
