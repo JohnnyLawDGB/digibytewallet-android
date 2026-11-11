@@ -738,9 +738,9 @@
     <string name="send_fail_try_again">Try again</string>
     <string name="rf_splitting_for_assets">Preparing to move %1$d DigiAssets: splitting your DGB so each one can pay its own transfer fee. This waits for one confirmation, usually under a minute.</string>
     <!-- K1-RECOVERY: the DGB split for the assets' fees was refused or failed; no asset moved, but the plain DGB was still swept. %1$s is the FULL amount (with " DGB") the old wallet must then hold, not the shortfall; %2$d is a coin count. -->
-    <string name="rf_fanout_short">Your DigiAssets stayed in the old wallet: moving them needs %1$s there for fees. Your DGB was moved. To move the assets, send %1$s to the old wallet and run Recover funds again.</string>
-    <string name="rf_fanout_unread">Your DigiAssets stayed in the old wallet: moving them needs %1$s there for fees. Your DGB was moved, except %2$d coin(s) that could not be checked, which stayed in the old wallet. To move the assets, send %1$s to the old wallet and run Recover funds again.</string>
-    <string name="rf_fanout_failed">Your DigiAssets were not moved: the step that splits DGB for their transfer fees could not be completed. They are still on the old phrase. Try again later.</string>
+    <string name="rf_fanout_short">Your DigiAssets stayed in the old wallet: moving them needs %1$s there for fees. Your DGB was moved. To move the assets, send %1$s to the old wallet in one transaction and run Recover funds again.</string>
+    <string name="rf_fanout_unread">Your DigiAssets stayed in the old wallet: moving them needs %1$s there for fees. Your DGB was moved, except %2$d coin(s) that could not be checked, which stayed in the old wallet. To move the assets, send %1$s to the old wallet in one transaction and run Recover funds again.</string>
+    <string name="rf_fanout_failed">Your DigiAssets stayed in the old wallet: the step that splits DGB for their transfer fees could not be completed. Your DGB was moved. The assets are still on the old phrase; run Recover funds again and it will name the amount the old wallet needs.</string>
     <string name="rf_nothing_moved">Nothing was moved</string>
     <string name="rf_dd_fee_floor">Needs %1$s for the network fee: this wallet has %2$s.</string>
     <string name="rf_dd_found">%1$s in DigiDollar found</string>

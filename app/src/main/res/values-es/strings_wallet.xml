@@ -609,9 +609,9 @@
     <string name="send_fail_unknown">No se pudo enviar la transacción.</string>
     <string name="send_fail_try_again">Reintentar</string>
     <string name="rf_splitting_for_assets">Preparando el traslado de %1$d DigiAssets: se dividen tus DGB para que cada uno pueda pagar su propia comisión de transferencia. Espera una confirmación, normalmente menos de un minuto.</string>
-    <string name="rf_fanout_short">Tus DigiAssets se quedaron en la billetera antigua: moverlos requiere %1$s allí para las comisiones. Tus DGB se movieron. Para mover los activos, envía %1$s a la billetera antigua y vuelve a ejecutar Recuperar fondos.</string>
-    <string name="rf_fanout_unread">Tus DigiAssets se quedaron en la billetera antigua: moverlos requiere %1$s allí para las comisiones. Tus DGB se movieron, salvo %2$d moneda(s) que no se pudieron comprobar y siguen en la billetera antigua. Para mover los activos, envía %1$s a la billetera antigua y vuelve a ejecutar Recuperar fondos.</string>
-    <string name="rf_fanout_failed">Tus DigiAssets no se movieron: no se pudo completar el paso que divide los DGB para sus comisiones de transferencia. Siguen en la frase antigua. Inténtalo más tarde.</string>
+    <string name="rf_fanout_short">Tus DigiAssets se quedaron en la billetera antigua: moverlos requiere %1$s allí para las comisiones. Tus DGB se movieron. Para mover los activos, envía %1$s a la billetera antigua en una sola transacción y vuelve a ejecutar Recuperar fondos.</string>
+    <string name="rf_fanout_unread">Tus DigiAssets se quedaron en la billetera antigua: moverlos requiere %1$s allí para las comisiones. Tus DGB se movieron, salvo %2$d moneda(s) que no se pudieron comprobar y siguen en la billetera antigua. Para mover los activos, envía %1$s a la billetera antigua en una sola transacción y vuelve a ejecutar Recuperar fondos.</string>
+    <string name="rf_fanout_failed">Tus DigiAssets se quedaron en la billetera antigua: no se pudo completar el paso que divide los DGB para sus comisiones de transferencia. Tus DGB se movieron. Los activos siguen en la frase antigua; vuelve a ejecutar Recuperar fondos y te indicará la cantidad que necesita la billetera antigua.</string>
     <string name="rf_nothing_moved">No se movió nada</string>
     <string name="rf_dd_fee_floor">Necesita %1$s de comisión de red: esta cartera tiene %2$s.</string>
     <string name="rf_dd_found">Se encontraron %1$s en DigiDollar</string>

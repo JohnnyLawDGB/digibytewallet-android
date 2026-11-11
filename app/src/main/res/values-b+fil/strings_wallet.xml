@@ -604,9 +604,9 @@
     <string name="send_fail_unknown">Hindi naipadala ang transaksyon.</string>
     <string name="send_fail_try_again">Subukan ulit</string>
     <string name="rf_splitting_for_assets">Inihahanda ang paglipat ng %1$d DigiAssets: hinahati ang iyong DGB para makabayad ang bawat isa ng sarili nitong transfer fee. Naghihintay ng isang kumpirmasyon, karaniwang wala pang isang minuto.</string>
-    <string name="rf_fanout_short">Naiwan ang iyong DigiAssets sa lumang wallet: para mailipat sila, kailangan ng %1$s doon para sa fees. Nailipat na ang iyong DGB. Para mailipat ang assets, magpadala ng %1$s sa lumang wallet at patakbuhin muli ang Recover funds.</string>
-    <string name="rf_fanout_unread">Naiwan ang iyong DigiAssets sa lumang wallet: para mailipat sila, kailangan ng %1$s doon para sa fees. Nailipat na ang iyong DGB, maliban sa %2$d coin na hindi masuri at naiwan sa lumang wallet. Para mailipat ang assets, magpadala ng %1$s sa lumang wallet at patakbuhin muli ang Recover funds.</string>
-    <string name="rf_fanout_failed">Hindi nailipat ang iyong DigiAssets: hindi natapos ang hakbang na naghahati ng DGB para sa kanilang transfer fee. Nasa lumang phrase pa rin sila. Subukan muli mamaya.</string>
+    <string name="rf_fanout_short">Naiwan ang iyong DigiAssets sa lumang wallet: para mailipat sila, kailangan ng %1$s doon para sa fees. Nailipat na ang iyong DGB. Para mailipat ang assets, magpadala ng %1$s sa lumang wallet sa iisang transaksyon at patakbuhin muli ang Recover funds.</string>
+    <string name="rf_fanout_unread">Naiwan ang iyong DigiAssets sa lumang wallet: para mailipat sila, kailangan ng %1$s doon para sa fees. Nailipat na ang iyong DGB, maliban sa %2$d coin na hindi masuri at naiwan sa lumang wallet. Para mailipat ang assets, magpadala ng %1$s sa lumang wallet sa iisang transaksyon at patakbuhin muli ang Recover funds.</string>
+    <string name="rf_fanout_failed">Naiwan ang iyong DigiAssets sa lumang wallet: hindi natapos ang hakbang na naghahati ng DGB para sa kanilang transfer fee. Nailipat na ang iyong DGB. Nasa lumang phrase pa rin ang assets; patakbuhin muli ang Recover funds at sasabihin nito ang halagang kailangan ng lumang wallet.</string>
     <string name="rf_nothing_moved">Walang nailipat</string>
     <string name="rf_dd_fee_floor">Kailangan ng %1$s na bayad sa network: ang wallet na ito ay may %2$s.</string>
     <string name="rf_dd_found">Nakita ang %1$s na DigiDollar</string>

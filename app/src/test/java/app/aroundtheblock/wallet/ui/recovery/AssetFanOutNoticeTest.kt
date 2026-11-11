@@ -91,6 +91,20 @@ class AssetFanOutNoticeTest {
         assertTrue("the result screen does not render the notice", screen.contains("assetFanOutNotice(assetFanOut)"))
     }
 
+    /** K1-RECOVERY r4: the figure is sized for ONE coin (a second payment adds an input fee and the
+     *  next run is refused again), and a failed split must not end on a bare "try again later". */
+    @Test
+    fun `the English copy asks for one transaction and says what happened on a failed split`() {
+        val xml = source("app/src/main/res/values/strings_wallet.xml")
+        fun text(name: String) = Regex("""<string name="$name">(.*?)</string>""").find(xml)!!.groupValues[1]
+        listOf("rf_fanout_short", "rf_fanout_unread").forEach {
+            assertTrue("$it must ask for one transaction", text(it).contains("in one transaction"))
+        }
+        val failed = text("rf_fanout_failed")
+        assertTrue(failed.contains("Your DGB was moved") && failed.contains("still on the old phrase"))
+        assertTrue("a bare 'try again later' is not an answer", !failed.contains("Try again later"))
+    }
+
     private fun source(path: String): String =
         listOf(path, "../$path").map { File(it) }.firstOrNull { it.exists() }?.readText()
             ?: throw IllegalStateException("$path not found")
