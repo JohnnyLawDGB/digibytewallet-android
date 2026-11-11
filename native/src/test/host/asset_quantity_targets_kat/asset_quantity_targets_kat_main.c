@@ -15,8 +15,9 @@
 //       asserts implicitChange, which targetsOutput reads; the case holds the model's implicitChange
 //       to the literal and the last output's answer to what follows from it), and the assertions on
 //       these functions in DigiAssetDecoderTest (decoder_unclassifiable), AssetInputUnitsTest
-//       (input_units_last_output) and UnbackedAssetCreditTest (uncountable_bound). Where a Kotlin
-//       test decodes a script, the script is decoded here with BRAssetDecode.h. The cases without
+//       (input_units_last_output), UnbackedAssetCreditTest (uncountable_bound) and
+//       ForeignAssetTransferPlanTest (targeting_recovery_layout). Where a Kotlin test decodes a
+//       script, the script is decoded here with BRAssetDecode.h. The cases without
 //       one of those prefixes are this suite's own, for rules the Kotlin tests reach only through
 //       their random streams; their expectations are read off the Kotlin source and held to the
 //       model as well.
@@ -962,6 +963,36 @@ static void hold_every_credited_output(void)
 // The Kotlin test asks AssetManager's walk, which asks targetsOutput with the units it resolved: null
 // where the inputs are not known, the total where they are. The header there is version 3, opcode 0x15
 // (0x01 with 100 units for the issuance), and the first non-OP_RETURN output is 0.
+
+// ForeignAssetTransferPlanTest: the recovery move's layout is change (vout 0), OP_RETURN (vout 1),
+// marker (vout 2, last). The receiving wallet reads it with inputUnits = null and
+// firstNonOpReturnVout = 0: the change is not held, the marker is. The plan sends its 10 units to
+// the marker, or 1 unit when the quantity is unknown (0); the scripts are what DigiAssetEncoder
+// writes for those instructions, and the same headers are also built by hand.
+static void targeting_recovery_layout(void)
+{
+    static const char *SCRIPTS[] = { "6a0644410315020a", "6a06444103150201" };
+    static const int64_t UNITS[] = { 10, 1 };
+    Inst marker[] = { ti(2, 10) }, one[] = { ti(2, 1) };
+    Header built[2];
+    size_t i;
+
+    built[0] = transfer(marker, 1);
+    built[1] = transfer(one, 1);
+
+    for (i = 0; i < N(SCRIPTS); i++) {
+        Header h;
+
+        if (! decode(SCRIPTS[i], &h)) return;
+        ck(h.operation == M_TRANSFER && h.version == 3 && h.n == 1 && h.insts[0].out == 2 && h.insts[0].amount == UNITS[i] &&
+           ! h.insts[0].range && ! h.insts[0].percent && ! h.insts[0].skip,
+           "%s is a version 3 transfer of %lld units to output 2", SCRIPTS[i], (long long)UNITS[i]);
+        targets("the recovery move's change", &h, 0, someInt(0), none(), 3, 0);
+        targets("the recovery move's marker", &h, 2, someInt(0), none(), 3, 1);
+        targets("the recovery move's change, built by hand", &built[i], 0, someInt(0), none(), 3, 0);
+        targets("the recovery move's marker, built by hand", &built[i], 2, someInt(0), none(), 3, 1);
+    }
+}
 
 static void targeting_named_outputs(void)
 {
@@ -1978,6 +2009,7 @@ static const Case CASES[] = {
     { "targeting_last_output_beside_percent", targeting_last_output_beside_percent },
     { "targeting_issuance_change", targeting_issuance_change }, { "targeting_unnamed_middle_output", targeting_unnamed_middle_output },
     { "targeting_remainder", targeting_remainder }, { "targeting_settled_totals", targeting_settled_totals },
+    { "targeting_recovery_layout", targeting_recovery_layout },
     { "never_wraps_unclassifiable", never_wraps_unclassifiable }, { "never_wraps_range_consumption", never_wraps_range_consumption },
     { "never_wraps_remainder_bounded", never_wraps_remainder_bounded }, { "never_wraps_negative_amount", never_wraps_negative_amount },
     { "never_wraps_sum", never_wraps_sum }, { "never_wraps_wrapping_range", never_wraps_wrapping_range },

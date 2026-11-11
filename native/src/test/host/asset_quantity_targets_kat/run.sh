@@ -3,7 +3,7 @@
 # units on: BRAssetTargetsOutput, BRAssetDestroys, BRAssetMayVoid, BRAssetIssuanceMayCreditLastOutput,
 # BRAssetAssignedUnits and BRAssetConsumptionUncountable. Moved from Kotlin core/.../asset/AssetTxQuantity.kt
 # (targetsOutput, destroys, mayVoid, issuanceMayCreditLastOutput, assignedUnits, consumptionUncountable);
-# the Kotlin tests' assertions on them (AssetHoldCoversCreditedOutputsTest, AssetInputTargetingTest,
+# the Kotlin tests' assertions on them (AssetHoldCoversCreditedOutputsTest, AssetInputTargetingTest, ForeignAssetTransferPlanTest,
 # AssetImplicitChangeTest, AssetArithmeticNeverWrapsTest, DigiAssetDecoderTest, AssetInputUnitsTest,
 # UnbackedAssetCreditTest) run here value for value, beside a line-for-line C model of the Kotlin (with
 # AssetTransferAllocator under it) that the header is compared with over fixed pseudo-random inputs.
@@ -73,6 +73,7 @@ CASES=(
     targeting_unnamed_middle_output:-
     targeting_remainder:32
     targeting_settled_totals:32
+    targeting_recovery_layout:-
     never_wraps_unclassifiable:512
     never_wraps_range_consumption:32
     never_wraps_remainder_bounded:32,64
