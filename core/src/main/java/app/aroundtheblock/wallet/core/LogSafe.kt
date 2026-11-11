@@ -11,10 +11,13 @@ package app.aroundtheblock.wallet.core
  * no more than [max] characters of the input. A caught throwable from a remote parse is logged as its
  * class name and `text(message)`, never passed to Log: its message and stack trace quote the input.
  *
- * `LogRedactionSourceGateTest` checks this by source pattern, not by data flow: it follows the reads it
- * names (JSON fields, HTTP bodies, WebSocket strings, metadata fields, exception messages) through
- * assignments in one function, and passes what it cannot trace -- a value handed in from another
- * function, a field not on its list. It catches the common forms; it does not prove the invariant.
+ * `LogRedactionSourceGateTest` checks this with a name-based heuristic over source text, not by data
+ * flow: it follows the reads it names (JSON fields, HTTP bodies, WebSocket strings, metadata fields,
+ * exception messages) through assignments in one function, and separately refuses a raw
+ * `${x.message}` in any string literal, so a message carried in a callback string or a list is
+ * escaped where it is built. It passes what it cannot trace -- a value handed in from another function,
+ * a field or name not on its lists, a message stored as a plain value (not a template) and logged
+ * elsewhere. It catches the common forms; it does not prove the invariant.
  *
  * Escapes: `\n` `\r` `\t` by name, a backslash as `\\` (so a backslash sequence in the input cannot pass
  * for one of these), every other control, line/paragraph separator, format character (bidi override,

@@ -430,6 +430,84 @@ class LogRedactionSourceGateTest {
         assertTrue("allowed forms flagged: $overFlagged", overFlagged.isEmpty())
     }
 
+    /**
+     * ASSET-LOG-CRLF: no string built anywhere in core/ or app/ main sources -- not only inside a Log
+     * call -- carries an exception's message raw. A string handed to a callback, added to a list or
+     * stored in a result is logged later by a sink that cannot know it holds remote text (OkHttp and
+     * org.json quote what they failed on), so the message is escaped where the string is built.
+     */
+    @Test
+    fun `ASSET-LOG-CRLF no string anywhere carries a raw exception message`() {
+        val violations = mutableListOf<String>()
+        listOf("core/src/main/java", "app/src/main/java").forEach { root ->
+            findSourceRoot(root).walkTopDown().filter { it.extension == "kt" }.forEach { file ->
+                rawMessageStrings(file.readText()).forEach { violations.add("${file.name}: $it") }
+            }
+        }
+        assertTrue("strings carrying an exception message raw (use LogSafe.text):\n" +
+            violations.joinToString("\n"), violations.isEmpty())
+    }
+
+    /** The string-builder rule flags a raw message in any string and passes LogSafe and lengths. */
+    @Test
+    fun `ASSET-LOG-CRLF string rule flags a message built outside a Log call`() {
+        val d = '$'
+        val flagged = mapOf(
+            "callback builder" to "fun f() { try { g() } catch (e: Exception) { onFailure(\"down: ${d}{e.message}\") } }",
+            "list entry" to "fun f() { try { g() } catch (t: Throwable) { failures += \"flush: ${d}{t.message}\" } }",
+            "safe call" to "fun f() { val s = \"x ${d}{err?.localizedMessage}\" }",
+            "elvis" to "fun f() { val s = \"x ${d}{e.message ?: \"none\"}\" }",
+            "concat" to "fun f() { val s = \"x \" + e.message }",
+        )
+        val missed = flagged.filter { (_, src) -> rawMessageStrings(src).isEmpty() }.keys
+        assertTrue("forms the string rule does not see: $missed", missed.isEmpty())
+        val allowed = listOf(
+            "fun f() { onFailure(\"down: ${d}{e::class.java.simpleName}: ${d}{LogSafe.text(e.message)}\") }",
+            "fun f() { val s = \"len ${d}{e.message?.length}\" }",
+            "fun f() { val s = \"chat ${d}{event.messageId}\" }",
+            "/** e.g. \"x ${d}{e.message}\" */",
+            "fun f() { // \"x ${d}{e.message}\"\n}",
+        )
+        val overFlagged = allowed.filter { rawMessageStrings(it).isNotEmpty() }
+        assertTrue("allowed forms flagged: $overFlagged", overFlagged.isEmpty())
+    }
+
+    private fun rawMessageStrings(content: String): List<String> {
+        val message = Regex("""\.(message|localizedMessage)\b(?!\s*\??\.length)""")
+        val template = Regex("""\$\{((?:[^{}]|\{[^{}]*\})*)\}""")
+        val concat = Regex(""""\s*\+\s*[\w.?]+\.(?:message|localizedMessage)\b""")
+        val out = mutableListOf<String>()
+        content.lines().forEach { raw ->
+            val line = raw.substringBefore("//").trim()
+            if (line.startsWith("*") || line.startsWith("/*")) return@forEach
+            template.findAll(line).forEach { m ->
+                if (message.containsMatchIn(stripLogSafe(m.groupValues[1]))) out.add(m.value)
+            }
+            concat.findAll(line).forEach { out.add(it.value) }
+        }
+        return out
+    }
+
+    /** [expr] with every `LogSafe.text(...)` call taken out, so what it escapes is not counted. */
+    private fun stripLogSafe(expr: String): String {
+        val sb = StringBuilder()
+        var i = 0
+        while (i < expr.length) {
+            if (expr.startsWith("LogSafe.text(", i)) {
+                var depth = 0
+                var j = i + "LogSafe.text".length
+                do {
+                    if (expr[j] == '(') depth++ else if (expr[j] == ')') depth--
+                    j++
+                } while (depth > 0 && j < expr.length)
+                i = j
+            } else {
+                sb.append(expr[i]); i++
+            }
+        }
+        return sb.toString()
+    }
+
     /** Per function, like [txRowLogs]: a name is remote text only in the function that read it. */
     private fun remoteTextLogs(content: String, remoteParams: Set<String> = emptySet()): List<String> {
         val sinks = injectedLoggerNames(content)

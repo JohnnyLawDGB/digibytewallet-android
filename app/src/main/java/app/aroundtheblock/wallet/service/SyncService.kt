@@ -3368,7 +3368,7 @@ class SyncService : Service() {
                 return
             }
             is OwnNodeAddress.Result.Unresolved -> {
-                android.util.Log.w("SyncService", "custom node DNS resolve failed: ${node.host} (${found.reason})")
+                android.util.Log.w("SyncService", "custom node DNS resolve failed: ${node.host} (${LogSafe.text(found.reason)})")
                 NativeBridge.clearPinnedPeer()
                 ownNodePinned = false; ownNodePinnedAddr = null
                 return
