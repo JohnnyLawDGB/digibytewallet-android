@@ -607,6 +607,9 @@
     <string name="send_fail_unknown">Não foi possível enviar a transação.</string>
     <string name="send_fail_try_again">Tentar de novo</string>
     <string name="rf_splitting_for_assets">Preparando para mover %1$d DigiAssets: seus DGB estão sendo divididos para que cada um pague sua própria taxa de transferência. Aguarda uma confirmação, normalmente menos de um minuto.</string>
+    <string name="rf_fanout_short">Seus DigiAssets não foram movidos: dar a cada um sua própria taxa de transferência exige %1$s a mais do que a carteira antiga tem. Eles continuam na frase antiga. Adicione DGB a ela e execute Recuperar fundos novamente.</string>
+    <string name="rf_fanout_unread">Seus DigiAssets não foram movidos: %1$d moedas DGB da carteira antiga não puderam ser verificadas, então faltam %2$s ao DGB comprovado para dar a cada ativo sua própria taxa de transferência. Eles continuam na frase antiga. Tente novamente mais tarde.</string>
+    <string name="rf_fanout_failed">Seus DigiAssets não foram movidos: a etapa que divide os DGB para as taxas de transferência não pôde ser concluída. Eles continuam na frase antiga. Tente novamente mais tarde.</string>
     <string name="rf_nothing_moved">Nada foi movido</string>
     <string name="rf_dd_fee_floor">Precisa de %1$s de taxa de rede: esta carteira tem %2$s.</string>
     <string name="rf_dd_found">%1$s em DigiDollar encontrados</string>

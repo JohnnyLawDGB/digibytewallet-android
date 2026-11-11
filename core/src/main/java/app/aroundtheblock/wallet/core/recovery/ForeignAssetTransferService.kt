@@ -247,7 +247,9 @@ class ForeignAssetTransferService(
                 is ForeignAssetFanOut.Result.NotNeeded -> Unit
 
                 is ForeignAssetFanOut.Result.Refused -> {
-                    // K1-RECOVERY: the detail names exact sats and outpoints; it is for the screen.
+                    // K1-RECOVERY: the detail names exact sats and outpoints, so the log line carries
+                    // only a count; the refusal itself (shortfall, unread inputs) is returned and the
+                    // Recover-funds screen tells the user (RecoverFundsScreen.assetFanOutNotice).
                     log('w', "fan-out refused: not enough plain DGB to split " +
                         "(${fan.unreadInputs.size} input(s) unread)")
                     return@withContext Result(

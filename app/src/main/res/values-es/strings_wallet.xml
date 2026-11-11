@@ -609,6 +609,9 @@
     <string name="send_fail_unknown">No se pudo enviar la transacción.</string>
     <string name="send_fail_try_again">Reintentar</string>
     <string name="rf_splitting_for_assets">Preparando el traslado de %1$d DigiAssets: se dividen tus DGB para que cada uno pueda pagar su propia comisión de transferencia. Espera una confirmación, normalmente menos de un minuto.</string>
+    <string name="rf_fanout_short">Tus DigiAssets no se movieron: dar a cada uno su propia comisión de transferencia requiere %1$s más de lo que tiene la billetera antigua. Siguen en la frase antigua. Añade DGB a ella y vuelve a ejecutar Recuperar fondos.</string>
+    <string name="rf_fanout_unread">Tus DigiAssets no se movieron: no se pudieron comprobar %1$d monedas DGB de la billetera antigua, así que al DGB comprobado le faltan %2$s para dar a cada activo su propia comisión de transferencia. Siguen en la frase antigua. Inténtalo más tarde.</string>
+    <string name="rf_fanout_failed">Tus DigiAssets no se movieron: no se pudo completar el paso que divide los DGB para sus comisiones de transferencia. Siguen en la frase antigua. Inténtalo más tarde.</string>
     <string name="rf_nothing_moved">No se movió nada</string>
     <string name="rf_dd_fee_floor">Necesita %1$s de comisión de red: esta cartera tiene %2$s.</string>
     <string name="rf_dd_found">Se encontraron %1$s en DigiDollar</string>

@@ -612,6 +612,9 @@
     <string name="send_fail_unknown">Die Transaktion konnte nicht gesendet werden.</string>
     <string name="send_fail_try_again">Erneut versuchen</string>
     <string name="rf_splitting_for_assets">Vorbereitung zum Verschieben von %1$d DigiAssets: Ihre DGB werden aufgeteilt, damit jedes seine eigene Übertragungsgebühr zahlen kann. Wartet auf eine Bestätigung, meist unter einer Minute.</string>
+    <string name="rf_fanout_short">Ihre DigiAssets wurden nicht verschoben: Damit jedes seine eigene Übertragungsgebühr hat, werden %1$s mehr benötigt, als die alte Wallet enthält. Sie liegen weiterhin auf der alten Phrase. Fügen Sie dort DGB hinzu und starten Sie „Guthaben wiederherstellen“ erneut.</string>
+    <string name="rf_fanout_unread">Ihre DigiAssets wurden nicht verschoben: %1$d DGB-Münzen der alten Wallet konnten nicht geprüft werden, daher fehlen dem nachweisbaren DGB %2$s, um jedem Asset seine eigene Übertragungsgebühr zu geben. Sie liegen weiterhin auf der alten Phrase. Versuchen Sie es später erneut.</string>
+    <string name="rf_fanout_failed">Ihre DigiAssets wurden nicht verschoben: Der Schritt, der DGB für ihre Übertragungsgebühren aufteilt, konnte nicht abgeschlossen werden. Sie liegen weiterhin auf der alten Phrase. Versuchen Sie es später erneut.</string>
     <string name="rf_nothing_moved">Nichts wurde verschoben</string>
     <string name="rf_dd_fee_floor">Benötigt %1$s Netzwerkgebühr: diese Wallet hat %2$s.</string>
     <string name="rf_dd_found">%1$s in DigiDollar gefunden</string>

@@ -604,6 +604,9 @@
     <string name="send_fail_unknown">लेनदेन नहीं भेजा जा सका।</string>
     <string name="send_fail_try_again">पुनः प्रयास करें</string>
     <string name="rf_splitting_for_assets">%1$d DigiAssets भेजने की तैयारी: आपके DGB को बाँटा जा रहा है ताकि हर एक अपना स्थानांतरण शुल्क चुका सके। एक पुष्टि की प्रतीक्षा, आमतौर पर एक मिनट से कम।</string>
+    <string name="rf_fanout_short">आपके DigiAssets नहीं भेजे गए: हर एक को अपना ट्रांसफ़र शुल्क देने के लिए पुराने वॉलेट में मौजूद राशि से %1$s और चाहिए। वे अभी भी पुराने फ़्रेज़ पर हैं। उसमें DGB जोड़ें और फ़ंड रिकवर करें फिर से चलाएँ।</string>
+    <string name="rf_fanout_unread">आपके DigiAssets नहीं भेजे गए: पुराने वॉलेट के %1$d DGB कॉइन जाँचे नहीं जा सके, इसलिए प्रमाणित DGB में हर एसेट को अपना ट्रांसफ़र शुल्क देने के लिए %2$s कम है। वे अभी भी पुराने फ़्रेज़ पर हैं। बाद में फिर कोशिश करें।</string>
+    <string name="rf_fanout_failed">आपके DigiAssets नहीं भेजे गए: उनके ट्रांसफ़र शुल्क के लिए DGB बाँटने वाला चरण पूरा नहीं हो सका। वे अभी भी पुराने फ़्रेज़ पर हैं। बाद में फिर कोशिश करें।</string>
     <string name="rf_nothing_moved">कुछ भी स्थानांतरित नहीं हुआ</string>
     <string name="rf_dd_fee_floor">नेटवर्क शुल्क के लिए %1$s चाहिए: इस वॉलेट में %2$s है।</string>
     <string name="rf_dd_found">%1$s DigiDollar मिले</string>

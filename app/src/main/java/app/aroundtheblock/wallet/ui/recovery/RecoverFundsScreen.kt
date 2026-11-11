@@ -199,6 +199,7 @@ fun RecoverFundsScreen(
                         outcomes = s.outcomes,
                         assetMoves = s.assetMoves,
                         digiDollar = s.digiDollar,
+                        assetFanOut = s.assetFanOut,
                     )
                     is RecoverFundsViewModel.UiState.Error ->
                         if (mode == RecoverMode.AnotherPhrase)
@@ -750,6 +751,7 @@ private fun ResultBody(
     outcomes: List<LegacySweepService.SweepOutcome>,
     assetMoves: List<app.aroundtheblock.wallet.core.recovery.ForeignAssetTransferService.Move>,
     digiDollar: app.aroundtheblock.wallet.core.recovery.DigiDollarTransferService.Result? = null,
+    assetFanOut: app.aroundtheblock.wallet.core.recovery.ForeignAssetTransferService.FanOut? = null,
 ) {
     LazyColumn(
         modifier = Modifier
@@ -800,6 +802,10 @@ private fun ResultBody(
             item { AssetMoveSection(assetMoves) }
         }
 
+        // K1-RECOVERY: the DGB split for the assets' fees was refused or failed, so no asset moved.
+        // Said in the user's language, with the shortfall, instead of nothing at all.
+        assetFanOutNotice(assetFanOut)?.let { notice -> item { AssetFanOutCard(notice) } }
+
         // Reported whenever there is anything to say — including dollars we found and could not
         // move. A recovery that empties a wallet of DGB while staying silent about its DigiDollar
         // is "no funds found" about money that exists.
@@ -820,6 +826,46 @@ private fun ResultBody(
                 )
             }
         }
+    }
+}
+
+/** Why no DigiAsset moved when the DGB split for their fees did not go out (K1-RECOVERY). */
+internal data class AssetFanOutNotice(val kind: Kind, val shortfallSat: Long = 0L, val unreadCount: Int = 0) {
+    enum class Kind { SHORT_OF_DGB, COINS_UNREAD, FAILED }
+}
+
+/** The notice for [fan], or null when the split was not needed or went out. */
+internal fun assetFanOutNotice(
+    fan: app.aroundtheblock.wallet.core.recovery.ForeignAssetTransferService.FanOut?,
+): AssetFanOutNotice? = when (fan) {
+    is app.aroundtheblock.wallet.core.recovery.ForeignAssetTransferService.FanOut.Refused ->
+        if (fan.unreadInputs.isEmpty()) AssetFanOutNotice(AssetFanOutNotice.Kind.SHORT_OF_DGB, fan.shortfallSat)
+        else AssetFanOutNotice(AssetFanOutNotice.Kind.COINS_UNREAD, fan.shortfallSat, fan.unreadInputs.size)
+    is app.aroundtheblock.wallet.core.recovery.ForeignAssetTransferService.FanOut.Failed ->
+        AssetFanOutNotice(AssetFanOutNotice.Kind.FAILED)
+    else -> null
+}
+
+@Composable
+private fun AssetFanOutCard(notice: AssetFanOutNotice) {
+    Card(
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = CARD)
+    ) {
+        Text(
+            text = when (notice.kind) {
+                AssetFanOutNotice.Kind.SHORT_OF_DGB ->
+                    stringResource(R.string.rf_fanout_short, formatSatToDgb(notice.shortfallSat))
+                AssetFanOutNotice.Kind.COINS_UNREAD ->
+                    stringResource(R.string.rf_fanout_unread, notice.unreadCount, formatSatToDgb(notice.shortfallSat))
+                AssetFanOutNotice.Kind.FAILED -> stringResource(R.string.rf_fanout_failed)
+            },
+            color = AMBER,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+        )
     }
 }
 
