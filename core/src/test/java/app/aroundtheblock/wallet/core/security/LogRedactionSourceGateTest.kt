@@ -153,6 +153,171 @@ class LogRedactionSourceGateTest {
         return out
     }
 
+    /** K1-RECOVERY: the collector sees a call through a sink the file injects, in both shapes the
+     *  recovery services use, and does not take an unrelated `log(` for one. */
+    @Test
+    fun `the log collector sees calls through an injected logger`() {
+        val twoArg = "class S(private val log: (level: Char, message: String) -> Unit) {\n" +
+            "  fun f() { log('w',\n    \"x ${'$'}destAddress\") }\n}"
+        val stmts = collectLogStatements(twoArg)
+        assertTrue(stmts.toString(), stmts.size == 1 && stmts[0].contains("destAddress"))
+        val oneArg = "class S(private val log: (String) -> Unit) { fun f() { log(\"y ${'$'}{inputs.totalIn}\") } }"
+        assertTrue(collectLogStatements(oneArg).toString(), collectLogStatements(oneArg).single().contains("totalIn"))
+        val named = "class S(private val progressLogger: (String) -> Unit) { fun f() { progressLogger(\"z\") } }"
+        assertTrue(collectLogStatements(named).toString(), collectLogStatements(named).size == 1)
+        // No sink declared, or a method that merely shares the name: not a log statement.
+        assertTrue(collectLogStatements("val y = Math.log(2.0) + log(3.0)").isEmpty())
+        assertTrue(collectLogStatements("class S(private val log: (String) -> Unit) { val y = Math.log(2.0) }").isEmpty())
+        assertTrue(collectLogStatements("class S(val onDialog: (String) -> Unit) { fun f() { onDialog(\"a\") } }").isEmpty())
+        // A local log function, and the call spelled `this.log(` or `log.invoke(`.
+        val localFun = "class S { fun f() { log(\"a\"); this.log(\"b\") }\n private fun log(msg: String) { Log.i(T, msg) } }"
+        assertTrue(collectLogStatements(localFun).toString(), collectLogStatements(localFun).count { !it.startsWith("Log.") } == 2)
+        val invoked = "class S(private val log: (String) -> Unit) { fun f() { log.invoke(\"c\") } }"
+        assertTrue(collectLogStatements(invoked).toString(), collectLogStatements(invoked).single().contains("\"c\""))
+        assertTrue(collectLogStatements("class S { fun f() { logHardwareBacking(k) } private fun logHardwareBacking(k: Key) {} }").isEmpty())
+    }
+
+    /**
+     * K1-RECOVERY: no log line from a recovery, sweep or foreign-transfer path -- direct `Log.x(` or an
+     * injected sink, both ship in release -- carries an address, an exact amount (sats, a fee, change,
+     * cents, asset units), an outpoint, a txid or a script. The free-text `detail` of a refusal is
+     * barred too: it is written for the user's screen and carries amounts and outpoints. Allowed: a
+     * count (`.size`), the keyed tag (`LogTag.tx` / `LogTag.outpoint`), a reason enum, a profile label.
+     */
+    @Test
+    fun `K1-RECOVERY no recovery or sweep log line carries an address, amount, outpoint, txid or script`() {
+        val violations = mutableListOf<String>()
+        recoverySources().forEach { file ->
+            val text = file.readText()
+            val carriers = carrierNames(text)
+            collectLogStatements(text).forEach { stmt ->
+                val bad = recoveryLeaks(stmt, carriers) + exceptionLeaks(stmt)
+                if (bad.isNotEmpty()) violations.add("${file.name}: $bad in $stmt")
+            }
+        }
+        assertTrue("K1-RECOVERY log statements carrying chain or amount data:\n" + violations.joinToString("\n"),
+            violations.isEmpty())
+    }
+
+    /** The recovery rule must flag each class it names and pass the shapes it allows. */
+    @Test
+    fun `K1-RECOVERY rule flags each leak class and passes counts and tags`() {
+        val d = '$'
+        listOf(
+            "log('i', \"-> ${d}destAddress\")",
+            "log(\"${d}{inputs.totalIn} sat in\")",
+            "log(\"fee ${d}feeSat sat\")",
+            "log('i', \"change ${d}{r.plan.outputs.first().amountSat} sats\")",
+            "log('w', \"${d}{utxo.txid}:${d}{utxo.vout}: not moved\")",
+            "log('w', \"${d}op: not moved\")",
+            "log('w', \"${d}{v.outpoint}: ${d}{v.detail}\")",
+            "log(\"txid=${d}{txid ?: \"not relayed\"}\")",
+            "log('i', \"pool ${d}{feePool.sumOf { it.amountSat }} sats\")",
+            "log('i', \"script ${d}{out.scriptPubKeyHex}\")",
+            "log('i', \"planned ${d}{r.plan.assetUnits} unit(s)\")",
+            // A whole carrier object: its toString() prints every field.
+            "log('w', \"not moved: ${d}utxo\")",
+            "log('w', \"plan ${d}{r.plan}\")",
+            "log('w', \"held ${d}{partition.assetBearing}\")",
+            // `allowed` is anchored: a count beside a value does not excuse the value.
+            "log('i', \"${d}{destAddress + xs.size}\")",
+        ).forEach { assertTrue("not flagged: $it", recoveryLeaks(it).isNotEmpty()) }
+        // A name declared with a carrier type is a carrier whatever it is called.
+        assertTrue(recoveryLeaks("log(\"${d}coin\")", carrierNames("val coin: UtxoEntry = x")).isNotEmpty())
+        assertTrue(recoveryLeaks("log(\"${d}coin\")", carrierNames("fun f(coin: ForeignAssetTransferPlan.Spend)")).isNotEmpty())
+        // An exception's message (org.json quotes the offending value) or its stack trace.
+        assertTrue(exceptionLeaks("Log.w(TAG, \"x ${d}{t.message}\")").isNotEmpty())
+        assertTrue(exceptionLeaks("Log.w(TAG, \"x ${d}{t::class.java.simpleName}\", t)").isNotEmpty())
+        assertTrue(exceptionLeaks("Log.w(TAG, \"x ${d}{t::class.java.simpleName}\")").isEmpty())
+        listOf(
+            "log('i', \"${d}{LogTag.outpoint(item.outpoint)}: MOVED in ${d}{LogTag.tx(txid)}\")",
+            "log('i', \"pool ${d}{feePool.size} outpoint(s)\")",
+            "log('i', \"${d}{fan.plan.outputs.count { it.isFeeOutput }} fee output(s)\")",
+            "log('w', \"profile=${d}{result.profile.label}: refused — ${d}{r.reason}\")",
+            "log('w', \"not moved — transfer rules ${d}ruleState\")",
+            "log('w', \"${d}{LogTag.outpoint(RawTxBinding.outpoint(utxo))}: not moved\")",
+            "log('w', \"(${d}{fan.unreadInputs.size} input(s) unread)\")",
+            "log('w', \"not moved — holding check ${d}holding\")",
+        ).forEach { assertTrue("wrongly flagged: $it -> ${recoveryLeaks(it)}", recoveryLeaks(it).isEmpty()) }
+    }
+
+    /** Every Kotlin file on a recovery, sweep or foreign-transfer path: the core recovery package, the
+     *  app's recovery UI, and any other file whose name says recover or sweep. */
+    private fun recoverySources(): List<File> {
+        val files = listOf("core/src/main/java", "app/src/main/java").flatMap { root ->
+            findSourceRoot(root).walkTopDown().filter { it.extension == "kt" }.filter { f ->
+                val path = f.invariantSeparatorsPath
+                path.contains("/core/recovery/") || path.contains("/ui/recovery/") ||
+                    Regex("""(?i)(recover|sweep)""").containsMatchIn(f.name) ||
+                    // The reconcile client parses node answers that carry addresses and amounts, and
+                    // an org.json failure quotes the value it choked on (K1-RECOVERY round 2).
+                    f.name in SHARED_CLIENTS
+            }.toList()
+        }
+        // The gate must be looking at the services it was written for.
+        listOf("ForeignAssetTransferService.kt", "LegacySweepService.kt", "DigiDollarTransferService.kt",
+            "RecoverFundsViewModel.kt", "DgbNodeClient.kt").forEach { n ->
+            assertTrue("$n is not in the K1-RECOVERY scope", files.any { it.name == n })
+        }
+        return files
+    }
+
+    /** The interpolated expressions of [stmt] that name chain or amount data. */
+    private fun recoveryLeaks(stmt: String, carriers: Set<String> = emptySet()): List<String> {
+        val leak = Regex(
+            """(?i)(address|addr\b|txid|txhash|outpoint|^op$|vout|script|sat|amount|fee|change|totalIn|cents|units|balance|detail|hex)"""
+        )
+        // Anchored: the WHOLE expression is a count, an emptiness check or a keyed tag. Unanchored,
+        // `${destAddress + xs.size}` passed because `.size` appeared somewhere in it.
+        val allowed = Regex(
+            """^\s*[\w.]+\.(size|count)(\(\)|\s*\{[^{}]*\})?\s*$|^\s*[\w.]+\.(isEmpty|isNotEmpty)\(\)\s*$|""" +
+                """^\s*LogTag\.(tx|outpoint)\(.*\)\s*$"""
+        )
+        // A whole carrier object (`$utxo`, `${r.plan}`): its data-class toString() prints every field.
+        val lastSegment = Regex("""^\s*(?:[\w]+\.)*(\w+)\s*$""")
+        val isCarrier = { e: String ->
+            lastSegment.find(e)?.groupValues?.get(1)?.let { it in carriers || it in CARRIER_NAMES } == true
+        }
+        val exprs = mutableListOf<String>()
+        Regex("""\$(?!\{)([A-Za-z_]\w*)""").findAll(stmt).forEach { exprs.add(it.groupValues[1]) }
+        // `${...}` with nested braces (`${xs.sumOf { it.amountSat }}`) read to the balancing brace.
+        var i = stmt.indexOf("\${")
+        while (i >= 0) {
+            var depth = 0; var j = i + 1
+            while (j < stmt.length) {
+                when (stmt[j]) { '{' -> depth++; '}' -> depth-- }
+                if (depth == 0) break
+                j++
+            }
+            exprs.add(stmt.substring(i + 2, minOf(j, stmt.length)))
+            i = stmt.indexOf("\${", j)
+        }
+        return exprs.filter { (leak.containsMatchIn(it) && !allowed.containsMatchIn(it)) || isCarrier(it) }
+    }
+
+    /**
+     * Names [content] declares with a carrier type -- a data class whose toString() prints an address,
+     * an amount or an outpoint: `coin: UtxoEntry`, `val s = ForeignAssetTransferPlan.Spend(...)`.
+     * Read from the declaration text; there is no type resolution here, so [CARRIER_NAMES] covers the
+     * names this code gives carriers in lambdas and loops.
+     */
+    private fun carrierNames(content: String): Set<String> {
+        val types = CARRIER_TYPES.joinToString("|")
+        val declared = Regex("""\b(\w+)\s*:\s*(?:[\w]+\.)*(?:$types)\b(?!\s*\()""")
+        val built = Regex("""\b(?:val|var)\s+(\w+)\s*=\s*(?:[\w]+\.)*(?:$types)\(""")
+        return (declared.findAll(content) + built.findAll(content)).map { it.groupValues[1] }.toSet()
+    }
+
+    /** An exception's message (org.json quotes the value it failed on), its stack trace as text, or the
+     *  throwable passed as a log argument (Log prints its message and trace). Class names are fine. */
+    private fun exceptionLeaks(stmt: String): List<String> {
+        val out = mutableListOf<String>()
+        Regex("""\$\{?\s*\w+\??\.(message|localizedMessage|cause)\b|stackTraceToString\(""").findAll(stmt)
+            .forEach { out.add(it.value) }
+        Regex(""",\s*(t|e|ex|err|error|throwable|cause)\s*\)\s*$""").find(stmt)?.let { out.add("throwable ${it.groupValues[1]}") }
+        return out
+    }
+
     /** The gate above must see what it is meant to see. */
     @Test
     fun `the txid gate collects a multi-line log call and Log_wtf`() {
@@ -201,11 +366,15 @@ class LogRedactionSourceGateTest {
 
     // Per function: a name is a transaction value only in the function that read it (one SyncService
     // function's `raw` is a serialized transaction, another's is a host:port).
-    private fun txRowLogs(content: String): List<String> =
-        Regex("""(?=\n[ \t]*(?:(?:private|internal|public|override|suspend|inline|protected)\s+)*fun\s)""")
-            .split(content).flatMap { txRowLogsIn(it) }
+    // The file's injected sinks are declared once (a constructor parameter), so they are read from the
+    // whole file and handed to each function's search.
+    private fun txRowLogs(content: String): List<String> {
+        val sinks = injectedLoggerNames(content)
+        return Regex("""(?=\n[ \t]*(?:(?:private|internal|public|override|suspend|inline|protected)\s+)*fun\s)""")
+            .split(content).flatMap { txRowLogsIn(it, sinks) }
+    }
 
-    private fun txRowLogsIn(content: String): List<String> {
+    private fun txRowLogsIn(content: String, sinks: Set<String>): List<String> {
         val assign = Regex("""\b(?:val|var)\s+(\w+)\s*(?::[^=\n]+)?=([^\n]*)""")
         val tainted = mutableSetOf<String>()
         var grew = true
@@ -224,7 +393,7 @@ class LogRedactionSourceGateTest {
         // A count, or the short prefix this codebase logs instead of a txid (`.take(12)`), is not a row.
         val shortened = Regex("""\.(size|count|isEmpty|isNotEmpty|length)\b|\.(take|takeLast)\(""")
         val out = mutableListOf<String>()
-        collectLogStatements(content).forEach { stmt ->
+        collectLogStatements(content, sinks).forEach { stmt ->
             val bare = Regex("""\$(?!\{)([A-Za-z_]\w*)""").findAll(stmt).map { it.groupValues[1] }
             val braced = Regex("""\$\{([^{}]*)\}""").findAll(stmt).map { it.groupValues[1] }
                 .filter { !shortened.containsMatchIn(it) }
@@ -241,7 +410,7 @@ class LogRedactionSourceGateTest {
                         if (depth == 0) break
                         i++
                     }
-                    collectLogStatements(content.substring(m.range.last, minOf(i + 1, content.length)))
+                    collectLogStatements(content.substring(m.range.last, minOf(i + 1, content.length)), sinks)
                         .filter { Regex("""\$\{?it\b""").containsMatchIn(it) }
                         .forEach { out.add(it) }
                 }
@@ -251,9 +420,21 @@ class LogRedactionSourceGateTest {
 
     // Multi-line Log.x( ... ) calls are common in this codebase, so a line-based grep would miss
     // an argument on the next line. Collect each call from `Log.x(` to its balancing paren.
-    private fun collectLogStatements(content: String): List<String> {
+    //
+    // K1-RECOVERY: a service that logs through an INJECTED sink (`private val log: (Char, String) -> Unit`,
+    // `log: (String) -> Unit`) never writes `Log.x(` at its call sites, so a gate that matched only that
+    // text saw none of its lines. Every file is therefore also searched for calls to any logger it
+    // declares itself (see [injectedLoggerNames]); a call to one is a log statement like any other.
+    private fun collectLogStatements(content: String, names: Set<String> = injectedLoggerNames(content)): List<String> {
+        // `(?<![.\w])`: the injected `log(`, not `Math.log(` or `catalog(`.
+        // `this.log(` and `log.invoke(` are the same call.
+        val sinks = names.joinToString("") {
+            val n = Regex.escape(it)
+            // `(?<!fun )`: the declaration `fun log(msg: String)` is not a call.
+            "|(?<![.\\w])(?<!fun )$n|\\bthis\\.$n|(?<![.\\w])$n\\.invoke"
+        }
+        val start = Regex("""(?:\bLog\.(?:[diwev]|wtf)$sinks)\(""")
         val out = mutableListOf<String>()
-        val start = Regex("""\bLog\.(?:[diwev]|wtf)\(""")
         var m = start.find(content)
         while (m != null) {
             var depth = 0
@@ -267,6 +448,54 @@ class LogRedactionSourceGateTest {
             m = start.find(content, i + 1)
         }
         return out
+    }
+
+    /**
+     * K1-RECOVERY: the loggers a file declares for itself -- a property or parameter of function type
+     * that takes a String and returns Unit, named like a log sink (`log`, `logger`, `debugLog`,
+     * `logSink`, ...) -- plus [KNOWN_LOGGERS], the names this codebase is known to inject. Found from
+     * the declaration, so a new service with its own sink is seen without editing this test.
+     */
+    private fun injectedLoggerNames(content: String): Set<String> {
+        val decl = Regex("""\b([A-Za-z_]\w*)\s*:\s*\(([^()]*)\)\s*->\s*Unit\b""")
+        // `log`, `logger`, `sink`, or camelCase ending in one (`debugLog`, `progressLogger`, `logSink`);
+        // case-sensitive so `onDialog` / `catalog` are not taken for sinks.
+        val loggerName = Regex("""^(log|logger|sink|[a-z]\w*(Log|Logger|Sink))$""")
+        // A local logging function: `private fun log(msg: String)` (HistoryRebuildOnUpgrade).
+        val fn = Regex("""\bfun\s+([A-Za-z_]\w*)\s*\(\s*\w+\s*:\s*String\s*\)""")
+        return (decl.findAll(content)
+            .filter { Regex("""\bString\b""").containsMatchIn(it.groupValues[2]) }
+            .map { it.groupValues[1] } + fn.findAll(content).map { it.groupValues[1] })
+            .filter { loggerName.matches(it) || it in KNOWN_LOGGERS }
+            .toSet()
+    }
+
+    private companion object {
+        /** Sink names this codebase injects today: `log` (ForeignAssetTransferService,
+         *  DigiDollarTransferService, LegacySweepService). A name here is still only a sink in a file
+         *  that declares it with a String-taking function type; add one if a sink is ever named
+         *  outside the pattern above. */
+        val KNOWN_LOGGERS = setOf("log", "logger")
+
+        /** Data classes on the recovery path whose toString() prints an address, an amount or an
+         *  outpoint. Interpolating one whole is the same leak as interpolating the field. */
+        val CARRIER_TYPES = listOf(
+            "UtxoEntry", "Spend", "Plan", "Move", "AssetItem", "Refused", "Contradicted", "Checked",
+            "DerivedAddress", "SweepInputs", "SweepOutcome", "ProfileResult", "Holding", "DigiDollarHolding",
+            "TxOut", "Out", "FeeInput", "Broadcast",
+        )
+
+        /** Names this code gives carriers (and lists of them) where no declared type is in sight:
+         *  lambda and loop variables, partition fields. */
+        val CARRIER_NAMES = setOf(
+            "utxo", "utxos", "coin", "spend", "plan", "move", "moves", "item", "fan", "planned",
+            "outcome", "verdicts", "assetBearing", "sweepable", "unclassified", "heldAssets", "heldUnknown",
+            "heldForAssets", "unproven", "unreadInputs", "unreadPlain", "feePool", "feeInputs", "derivedAddresses",
+            "holdings", "excludeOutpoints", "spentInputs",
+        )
+
+        /** Shared clients brought into the K1-RECOVERY rule (they parse answers that carry chain data). */
+        val SHARED_CLIENTS = setOf("DgbNodeClient.kt")
     }
 
     private fun logLinesOf(path: String): List<String> = collectLogStatements(findSource(path).readText())

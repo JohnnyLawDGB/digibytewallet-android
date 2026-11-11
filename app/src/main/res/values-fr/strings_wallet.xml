@@ -587,6 +587,9 @@
     <string name="send_fail_unknown">La transaction n\'a pas pu être envoyée.</string>
     <string name="send_fail_try_again">Réessayer</string>
     <string name="rf_splitting_for_assets">Préparation du déplacement de %1$d DigiAssets : vos DGB sont répartis pour que chacun puisse payer ses propres frais de transfert. Attente d\'une confirmation, généralement moins d\'une minute.</string>
+    <string name="rf_fanout_short">Vos DigiAssets sont restés dans l\'ancien portefeuille : les déplacer demande %1$s sur celui-ci pour les frais. Vos DGB ont été déplacés. Pour déplacer les actifs, envoyez %1$s à l\'ancien portefeuille en une seule transaction et relancez Récupérer des fonds.</string>
+    <string name="rf_fanout_unread">Vos DigiAssets sont restés dans l\'ancien portefeuille : les déplacer demande %1$s sur celui-ci pour les frais. Vos DGB ont été déplacés, sauf %2$d pièce(s) qui n\'ont pas pu être vérifiées et sont restées dans l\'ancien portefeuille. Pour déplacer les actifs, envoyez %1$s à l\'ancien portefeuille en une seule transaction et relancez Récupérer des fonds.</string>
+    <string name="rf_fanout_failed">Vos DigiAssets sont restés dans l\'ancien portefeuille : l\'étape qui répartit les DGB pour leurs frais de transfert n\'a pas pu aboutir. Vos DGB ont été déplacés. Les actifs sont toujours sur l\'ancienne phrase ; relancez Récupérer des fonds et il indiquera le montant dont l\'ancien portefeuille a besoin.</string>
     <string name="rf_nothing_moved">Rien n’a été déplacé</string>
     <string name="rf_dd_fee_floor">Nécessite %1$s de frais de réseau : ce portefeuille a %2$s.</string>
     <string name="rf_dd_found">%1$s en DigiDollar trouvés</string>

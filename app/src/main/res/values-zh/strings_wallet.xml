@@ -601,6 +601,9 @@
     <string name="send_fail_unknown">交易无法发送。</string>
     <string name="send_fail_try_again">重试</string>
     <string name="rf_splitting_for_assets">正在准备转移 %1$d 项 DigiAssets，正在拆分您的 DGB，使每一项都能支付自己的转账手续费。需等待一次确认，通常不到一分钟。</string>
+    <string name="rf_fanout_short">您的 DigiAssets 仍留在旧钱包中：转移它们需要旧钱包中有 %1$s 用于手续费。您的 DGB 已转移。要转移这些资产，请通过一笔交易向旧钱包发送 %1$s，然后再次运行找回资金。</string>
+    <string name="rf_fanout_unread">您的 DigiAssets 仍留在旧钱包中：转移它们需要旧钱包中有 %1$s 用于手续费。您的 DGB 已转移，但有 %2$d 枚无法核验的币仍留在旧钱包中。要转移这些资产，请通过一笔交易向旧钱包发送 %1$s，然后再次运行找回资金。</string>
+    <string name="rf_fanout_failed">您的 DigiAssets 仍留在旧钱包中：为其转账手续费拆分 DGB 的步骤未能完成。您的 DGB 已转移。这些资产仍在旧助记词上；再次运行找回资金，它会告诉您旧钱包需要多少金额。</string>
     <string name="rf_nothing_moved">没有转移任何资产</string>
     <string name="rf_dd_fee_floor">需要 %1$s 网络手续费：此钱包只有 %2$s。</string>
     <string name="rf_dd_found">找到 %1$s DigiDollar</string>

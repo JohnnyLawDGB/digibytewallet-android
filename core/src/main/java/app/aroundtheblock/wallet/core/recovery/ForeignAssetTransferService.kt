@@ -133,6 +133,10 @@ class ForeignAssetTransferService(
             val shortfallSat: Long,
             val detail: String,
             val unreadInputs: List<String> = emptyList(),
+            /** What the old wallet must hold, in one coin, for a later run to move the assets:
+             *  see ForeignAssetFanOut.Result.Refused.requiredInOneCoinSat. This, not
+             *  [shortfallSat], is what the user is told — the same run sweeps the plain DGB. */
+            val requiredInOneCoinSat: Long = 0L,
         ) : FanOut() {
             enum class Reason {
                 /** Every plain coin's parent was read, and together they are too little. */
@@ -195,8 +199,9 @@ class ForeignAssetTransferService(
             // profile is signed; an input without a readable parent is simply not used.
             val checked = when (val v = parents.check(result)) {
                 is RawTxBinding.Verdict.Contradicted -> {
-                    log('w', "profile=${result.profile.label}: ${v.outpoint}: ${v.detail} — " +
-                        "nothing is signed for this profile")
+                    // K1-RECOVERY: the outpoint and the detail (amounts, txids) stay on the Move row.
+                    log('w', "profile=${result.profile.label}: ${LogTag.outpoint(v.outpoint)}: parent " +
+                        "contradicts the lookup — nothing is signed for this profile")
                     for (utxo in partition.assetBearing) {
                         moves += Move("${utxo.txid}:${utxo.vout}", 0L, null,
                             "not moved — ${v.outpoint}: ${v.detail}")
@@ -246,16 +251,19 @@ class ForeignAssetTransferService(
                 is ForeignAssetFanOut.Result.NotNeeded -> Unit
 
                 is ForeignAssetFanOut.Result.Refused -> {
-                    log('w', "fan-out refused: ${fan.detail}")
+                    // K1-RECOVERY: the detail names exact sats and outpoints, so the log line carries
+                    // only a count; the refusal itself (shortfall, unread inputs) is returned and the
+                    // Recover-funds screen tells the user (RecoverFundsScreen.assetFanOutNotice).
+                    log('w', "fan-out refused: not enough plain DGB to split " +
+                        "(${fan.unreadInputs.size} input(s) unread)")
                     return@withContext Result(
-                        moves, FanOut.Refused(fan.shortfallSat, fan.detail, fan.unreadInputs),
+                        moves, FanOut.Refused(fan.shortfallSat, fan.detail, fan.unreadInputs, fan.requiredInOneCoinSat),
                     )
                 }
 
                 is ForeignAssetFanOut.Result.Ok -> {
                     log('i', "fan-out: splitting ${fan.plan.inputs.size} input(s) into " +
-                        "${fan.plan.outputs.count { it.isFeeOutput }} fee output(s), " +
-                        "fee ${fan.plan.feeSat} sats")
+                        "${fan.plan.outputs.count { it.isFeeOutput }} fee output(s)")
                     val outcome = broadcastFanOut(fan.plan, seedBytes, result.profile, feePerKb, byAddress.keys)
                     // Its outputs are unconfirmed, so nothing can move this round. The caller
                     // waits for confirmation, re-scans, and calls again — at which point there
@@ -283,21 +291,21 @@ class ForeignAssetTransferService(
                 if (ruleState != app.aroundtheblock.wallet.core.asset.rules.TransferRuleState.NONE) {
                     val refusal = if (ruleState == app.aroundtheblock.wallet.core.asset.rules.TransferRuleState.RULE_BOUND)
                         MoveRefusal.RULE_BOUND else MoveRefusal.RULES_UNKNOWN
-                    log('w', "${utxo.txid}:${utxo.vout}: not moved — transfer rules $ruleState")
+                    log('w', "${LogTag.outpoint(RawTxBinding.outpoint(utxo))}: not moved — transfer rules $ruleState")
                     moves += Move("${utxo.txid}:${utxo.vout}", 0L, null, null, refusal = refusal)
                     continue
                 }
 
                 val holding = holdingRefusal(utxo.txid, utxo.vout)
                 if (holding != null) {
-                    log('w', "${utxo.txid}:${utxo.vout}: not moved — holding check $holding")
+                    log('w', "${LogTag.outpoint(RawTxBinding.outpoint(utxo))}: not moved — holding check $holding")
                     moves += Move("${utxo.txid}:${utxo.vout}", 0L, null, null, refusal = holding)
                     continue
                 }
 
                 val provenAsset = checked.proven(utxo)
                 if (provenAsset == null) {
-                    log('w', "${utxo.txid}:${utxo.vout}: not moved — its parent transaction was " +
+                    log('w', "${LogTag.outpoint(RawTxBinding.outpoint(utxo))}: not moved — its parent transaction was " +
                         "not supplied or did not parse")
                     moves += Move(
                         outpoint = "${utxo.txid}:${utxo.vout}",
@@ -344,15 +352,15 @@ class ForeignAssetTransferService(
             if (feeUnverified) {
                 for (item in assets) {
                     val op = "${item.spend.txid}:${item.spend.vout}"
-                    log('w', "$op: not moved — fee coins could not be checked")
+                    log('w', "${LogTag.outpoint(op)}: not moved — fee coins could not be checked")
                     moves += Move(op, 0L, null, null, refusal = MoveRefusal.HOLDING_UNVERIFIED)
                 }
                 continue
             }
 
-            log('i', "profile=${result.profile.label}: fee pool ${feePool.size} outpoint(s) / " +
-                    "${feePool.sumOf { it.amountSat }} sats; units=" +
-                    assets.joinToString { "${LogTag.tx(it.spend.txid)}:${it.spend.vout}=${it.units}" },
+            // K1-RECOVERY: counts only — no pool total, no per-asset units.
+            log('i', "profile=${result.profile.label}: fee pool ${feePool.size} outpoint(s); " +
+                    "${assets.size} asset outpoint(s) to move",
             )
 
             val planned = ForeignAssetTransferBatch.plan(assets, feePool, destAddress, feePerKb)
@@ -360,16 +368,14 @@ class ForeignAssetTransferService(
             for (item in planned) {
                 when (val r = item.result) {
                     is ForeignAssetTransferPlan.Result.Refused -> {
-                        log('w', "${LogTag.outpoint(item.outpoint)}: refused — ${r.reason}: ${r.detail}")
+                        log('w', "${LogTag.outpoint(item.outpoint)}: refused — ${r.reason}")
                         // No plan, so no inputs to protect beyond the asset outpoint itself.
                         moves += Move(item.outpoint, 0L, null, "${r.reason}: ${r.detail}")
                     }
 
                     is ForeignAssetTransferPlan.Result.Ok -> {
-                        log('i', "${LogTag.outpoint(item.outpoint)}: planned ${r.plan.assetUnits} unit(s), " +
-                                "${r.plan.inputs.size} input(s), fee ${r.plan.feeSat} sats, " +
-                                "change ${r.plan.outputs.first().amountSat} sats -> $destAddress",
-                        )
+                        // K1-RECOVERY: no units, fee, change or destination address.
+                        log('i', "${LogTag.outpoint(item.outpoint)}: planned, ${r.plan.inputs.size} input(s)")
                         val signed = sign(r.plan, seedBytes, result.profile, feePerKb)
                         if (signed == null) {
                             log('w', "${LogTag.outpoint(item.outpoint)}: native refused to sign")

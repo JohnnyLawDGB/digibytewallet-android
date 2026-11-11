@@ -57,6 +57,14 @@ object ForeignAssetFanOut {
             val shortfallSat: Long,
             val detail: String,
             val unreadInputs: List<String> = emptyList(),
+            /**
+             * What the old wallet must hold, in ONE coin, for the next run's split to succeed.
+             * Not [shortfallSat]: the same run still sweeps every plain coin to the destination, so
+             * afterwards the old wallet holds nothing and the next split is built from exactly the
+             * coin the user sends. Sized for that shape (one input), which is why it is not simply
+             * the "needed" figure of this refusal — with no plain coin at all that was one input short.
+             */
+            val requiredInOneCoinSat: Long = 0L,
         ) : Result()
     }
 
@@ -98,6 +106,17 @@ object ForeignAssetFanOut {
      *                      never spent here; a refusal names them, so "this wallet has no DGB"
      *                      is never said of coins that exist but could not be checked.
      */
+    /** The split's own fee for its real shape: every input, every fee output, and a change output. */
+    internal fun fanOutFeeSat(inputCount: Int, assetCount: Int, feePerKb: Long): Long {
+        val vsize = 10L + inputCount * 160L + (assetCount + 1) * 34L
+        return maxOf(vsize * feePerKb / 1000L, 1_000L)
+    }
+
+    /** What one coin must hold to fund a split for [assetCount] assets: an output each, plus the
+     *  split's fee when that coin is its only input. See [Result.Refused.requiredInOneCoinSat]. */
+    fun requiredInOneCoinSat(assetCount: Int, feePerKb: Long): Long =
+        perAssetOutputSat(feePerKb) * assetCount + fanOutFeeSat(1, assetCount, feePerKb)
+
     fun plan(
         assetCount: Int,
         plainInputs: List<ForeignAssetTransferPlan.Spend>,
@@ -115,8 +134,7 @@ object ForeignAssetFanOut {
 
         // Size the fan-out's own fee from its real shape: every input, every fee output, and a
         // change output.
-        val vsize = 10L + plainInputs.size * 160L + (assetCount + 1) * 34L
-        val fanOutFee = maxOf(vsize * feePerKb / 1000L, 1_000L)
+        val fanOutFee = fanOutFeeSat(plainInputs.size, assetCount, feePerKb)
 
         val needed = perAsset * assetCount + fanOutFee
         if (available < needed) {
@@ -133,6 +151,7 @@ object ForeignAssetFanOut {
                 shortfallSat = needed - available,
                 detail = detail,
                 unreadInputs = unreadInputs,
+                requiredInOneCoinSat = requiredInOneCoinSat(assetCount, feePerKb),
             )
         }
 

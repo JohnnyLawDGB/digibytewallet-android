@@ -605,10 +605,11 @@ NativeBridge_buildAndSignLegacySweep(
      * listed is refused), and more than dust is left. An under-report smaller than that is a stated
      * residual: only the Kotlin parent binding sees it (sweep_fee_guard.h). */
     uint64_t fee = 0;
-    const SweepFeeVerdict feeVerdict = sweep_fee_check(totalIn, (size_t)inputCount, (int64_t)feePerKb, &fee);
-    if (feeVerdict != SWEEP_FEE_OK) {
-        LOGW("buildAndSignLegacySweep: fee backstop refused (verdict=%d inputs=%d fee=%llu totalIn=%llu)",
-             (int)feeVerdict, (int)inputCount, (unsigned long long)fee, (unsigned long long)totalIn);
+    const SweepFeeVerdict sweepVerdict = sweep_fee_check(totalIn, (size_t)inputCount, (int64_t)feePerKb, &fee);
+    if (sweepVerdict != SWEEP_FEE_OK) {
+        /* K1-RECOVERY: the rule and counts, never the amounts (Android logging ships in release). */
+        LOGW("buildAndSignLegacySweep: fee backstop refused (verdict=%d inputs=%d)",
+             (int)sweepVerdict, (int)inputCount);
         for (jsize i = 0; i < inputCount; i++) BRKeyClean(&keys[i]);
         free(keys);
         BRTransactionFree(tx);
@@ -899,8 +900,7 @@ NativeBridge_buildAndSignForeignAssetTransfer(
 
     if (!ok || totalOut > totalIn) {
         if (totalOut > totalIn) {
-            LOGW("buildAndSignForeignAssetTransfer: outputs %llu exceed inputs %llu",
-                 (unsigned long long)totalOut, (unsigned long long)totalIn);
+            LOGW("buildAndSignForeignAssetTransfer: outputs exceed inputs");
         }
         for (jsize i = 0; i < inputCount; i++) BRKeyClean(&keys[i]);
         free(keys);
@@ -923,18 +923,16 @@ NativeBridge_buildAndSignForeignAssetTransfer(
         case FOREIGN_TX_FEE_OK:
             break;
         case FOREIGN_TX_FEE_TOO_LOW:
-            LOGW("buildAndSignForeignAssetTransfer: implied fee %llu below the %llu this size "
-                 "needs — would not relay",
-                 (unsigned long long)impliedFee, (unsigned long long)expectedFee);
+            LOGW("buildAndSignForeignAssetTransfer: implied fee below what this size needs — "
+                 "would not relay");
             ok = 0;
             break;
         case FOREIGN_TX_FEE_TOO_HIGH:
             /* The caller lost track of value — almost always a missing change output. Burning
              * it is silent and irreversible, so refuse rather than sign. */
-            LOGW("buildAndSignForeignAssetTransfer: implied fee %llu is over %dx the expected "
-                 "%llu — refusing to burn the difference (missing change output?)",
-                 (unsigned long long)impliedFee, FOREIGN_TX_MAX_FEE_FACTOR,
-                 (unsigned long long)expectedFee);
+            LOGW("buildAndSignForeignAssetTransfer: implied fee is over %dx the expected — "
+                 "refusing to burn the difference (missing change output?)",
+                 FOREIGN_TX_MAX_FEE_FACTOR);
             ok = 0;
             break;
         case FOREIGN_TX_FEE_OVERSPEND:
@@ -1051,8 +1049,7 @@ NativeBridge_buildAndSignForeignDigiDollarTransfer(
         return NULL;
     }
     if (!dd_cents_in_range((int64_t)cents)) {
-        LOGW("foreignDD: %lld cents is outside the consensus per-output range",
-             (long long)cents);
+        LOGW("foreignDD: the amount is outside the consensus per-output range");
         return NULL;
     }
 
@@ -1212,13 +1209,11 @@ NativeBridge_buildAndSignForeignDigiDollarTransfer(
     /* The 0.1 DGB DigiDollar fee floor is this wallet's policy, copied from DigiByte Core's own
      * DigiDollar builder (it is not a consensus rule): below it the transfer is refused here. */
     if (ok && totalOut > totalIn) {
-        LOGW("foreignDD: change %llu exceeds fee inputs %llu",
-             (unsigned long long)totalOut, (unsigned long long)totalIn);
+        LOGW("foreignDD: change exceeds fee inputs");
         ok = 0;
     }
     if (ok && (totalIn - totalOut) < DD_MIN_FEE_SATS) {
-        LOGW("foreignDD: implied fee %llu is below the %llu DigiDollar floor",
-             (unsigned long long)(totalIn - totalOut), (unsigned long long)DD_MIN_FEE_SATS);
+        LOGW("foreignDD: implied fee is below the DigiDollar floor");
         ok = 0;
     }
 
