@@ -20,7 +20,7 @@ include(":app", ":core", ":native", ":game")
 //
 // Every library below reaches the build only through Gradle plugins and the
 // tool configurations they create, never the app: the root buildscript
-// classpath (AGP, KGP, KSP, Hilt; versions in gradle/libs.versions.toml), AGP's Unified Test Platform
+// classpath (AGP, KGP, KSP, Hilt, the R8 override; versions in gradle/libs.versions.toml), AGP's Unified Test Platform
 // configurations (`_internal-unified-test-platform-*`), the KSP / Hilt
 // annotation-processor classpaths, and KGP's `kotlinBouncyCastleConfiguration`
 // and `swiftExportClasspathResolvable`. The exposure is the machine that runs

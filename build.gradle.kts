@@ -4,6 +4,18 @@
 // never drift from the Kotlin version (KSP is versioned on its own since 2.3,
 // see gradle/libs.versions.toml). Subprojects apply these by plain
 // id(), inheriting the version resolved here.
+// R8/D8 override: AGP 8.10's bundled R8 cannot read Kotlin 2.4 class metadata.
+// A classpath entry here wins over the R8 inside AGP (Google's documented
+// override). Version and the reason live in gradle/libs.versions.toml.
+buildscript {
+    repositories {
+        google()
+    }
+    dependencies {
+        classpath(libs.android.tools.r8)
+    }
+}
+
 plugins {
     alias(libs.plugins.android.application) apply false
     alias(libs.plugins.android.library) apply false

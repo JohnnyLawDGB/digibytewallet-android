@@ -33,6 +33,23 @@
       "schedule": ["before 6am on monday"]
     },
     {
+      "description": "KSP ceiling: KSP 2.3.12+ refuses AGP < 8.12 (MINIMUM_SUPPORTED_AGP_VERSION) and 2.3.13 has a concurrency regression (google/ksp#3286); we are on AGP 8.10. Lift this together with an AGP bump — see the comments in gradle/libs.versions.toml.",
+      "matchPackageNames": ["/^com\\.google\\.devtools\\.ksp/"],
+      "allowedVersions": "<=2.3.11"
+    },
+    {
+      "description": "Dagger/Hilt ceiling: the Hilt Gradle plugin 2.59+ requires AGP 9 (and Gradle 9.1+). Lift this together with the AGP 9 migration — see the comments in gradle/libs.versions.toml.",
+      "matchPackageNames": ["/^com\\.google\\.dagger/"],
+      "allowedVersions": "<2.59"
+    },
+    {
+      "description": "R8 override (versions.r8): AGP 8.10 bundles an R8 that cannot read Kotlin 2.4 metadata, so the root buildscript puts R8 9.1 ahead of it. Held to the 9.1 line Google lists for Kotlin 2.4; a newer line, or dropping the override, comes with an AGP bump.",
+      "matchPackageNames": ["com.android.tools:r8"],
+      "allowedVersions": "<9.2",
+      "groupName": "R8",
+      "schedule": ["before 6am on monday"]
+    },
+    {
       "description": "Room — runtime, ktx, compiler and testing all resolve from versions.room.",
       "matchPackageNames": ["/^androidx\\.room/"],
       "groupName": "Room",
