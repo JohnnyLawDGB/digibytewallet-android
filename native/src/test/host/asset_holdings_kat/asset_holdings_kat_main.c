@@ -22,7 +22,9 @@
 //    2. BY A MODEL. `m...` below is the Kotlin written out line for line in C: scripts as lower-case
 //       hex text, string-keyed maps where the Kotlin has maps, a row table that deletes and updates by
 //       outpoint the way Room's queries do, and Kotlin's Long arithmetic. model_sweep holds the header
-//       to it over a fixed pseudo-random corpus, prune passes in sequence included.
+//       to it over a fixed pseudo-random corpus, prune passes in sequence included, with rows that go by
+//       other means between them and tables that are sometimes too small for a pass (CAPACITY exactly
+//       when what Kotlin's map holds after the pass does not fit, and nothing written).
 //
 //  One case per process: `asset_holdings_kat <case>` prints PASS:/FAIL: lines and `RESULT <case>
 //  pass|fail`; `list` prints the case names. run.sh builds one binary per ASSET_HOLDINGS_UNFIXED arm and
@@ -583,6 +585,26 @@ static void prune_native_malformed_txid(void)   // malformed_txid_never_queried_
     r[0].txid = NULL;
     a = pass(0, r, &n, gone, NULL);
     ck(a == 0 && TABLE.count == 0, "nor none");
+    tableFresh();
+    memcpy(TXB[1], tx(0, "", 'a'), 64);
+    TXB[1][64] = 'a'; TXB[1][65] = '\0';   // 65
+    r[0] = row(TXB[1], 0, NULL, 0, 0, "La1", 3, 0, NAT, UNC);
+    a = pass(0, r, &n, gone, NULL);
+    b = pass(0, r, &n, gone, NULL);
+    ck(a == 0 && b == 0 && n == 1 && TABLE.count == 0, "nor one of 65, whose first 64 are a txid");
+    // The dead-broadcast prune reads the txid the same way.
+    a = pass(1, r, &n, gone, NULL);
+    b = pass(1, r, &n, gone, NULL);
+    ck(a == 0 && b == 0 && n == 1 && TABLE.count == 0, "the dead prune: never one of 65");
+    r[0].txid = "short";
+    a = pass(1, r, &n, gone, NULL);
+    b = pass(1, r, &n, gone, NULL);
+    ck(a == 0 && b == 0 && n == 1 && TABLE.count == 0, "the dead prune: never a short one");
+    TXB[1][63] = '\0';
+    r[0].txid = TXB[1];
+    a = pass(1, r, &n, gone, NULL);
+    b = pass(1, r, &n, gone, NULL);
+    ck(a == 0 && b == 0 && n == 1 && TABLE.count == 0, "the dead prune: nor one of 63");
 }
 
 static void prune_native_backend_untouched(void)   // queries_only_native_source_backend_rows_untouched
@@ -678,6 +700,24 @@ static void prune_lookup_readings(void)
     a = pass(0, r, &n, lk, NULL);
     b = pass(1, r, &n, lk, NULL);
     ck(a == 0 && b == 0 && TABLE.count == 0, "an answer of no defined kind is present to both");
+    {   // A lookup nobody filled (0) is present to both: it forgets the counts there.
+        BRAssetRow zr[2];
+        BRAssetTxLookup zl[2] = { BR_ASSET_TX_NOT_HELD, BR_ASSET_TX_NOT_HELD };
+        size_t zn = 2, total = 0;
+
+        tableFresh();
+        zr[0] = row(tx(0, "", 'a'), 0, OWN, 3, 0, "La1", 3, 0, NAT, UNC);
+        zr[1] = row(tx(1, "", 'b'), 1, OWN, 3, 0, "La1", 3, 0, NAT, UNC);
+        total += pass(0, zr, &zn, zl, NULL);
+        total += pass(1, zr, &zn, zl, NULL);
+        ck(total == 0 && TABLE.count == 4, "one absent pass of each prune: four counts");
+        memset(zl, 0, sizeof(zl));
+        total += pass(1, zr, &zn, zl, NULL);
+        ck(total == 0 && TABLE.count == 2 && TABLE.entries[0].kind == BR_ASSET_ABSENCE_NATIVE &&
+           TABLE.entries[1].kind == BR_ASSET_ABSENCE_NATIVE, "a dead pass of zeros forgets its counts");
+        total += pass(0, zr, &zn, zl, NULL);
+        ck(total == 0 && zn == 2 && TABLE.count == 0, "a native pass of zeros forgets its own");
+    }
 }
 
 static void prune_shared_table(void)
@@ -706,6 +746,102 @@ static void prune_shared_table(void)
     ck(a == 0 && b == 0 && TABLE.count == 2, "the two prunes count one outpoint apart");
     c = pass(0, r, &n, lk, NULL);
     ck(c == 1 && n == 0 && TABLE.count == 0, "the native pass deletes on its own second count, and forgets the dead one");
+}
+
+// This suite's own: a count left by a row that went by other means (the dead send cleared, the reconcile)
+// never takes the room a native pass needs; the pass drops it, as it drops every count but those of the
+// NATIVE rows it looks at. A table too small for the counts a pass keeps and adds is still CAPACITY.
+static void prune_stale_counts(void)
+{
+    BRAssetRow d[1], r[2];
+    BRAssetAbsence one[1];
+    BRAssetAbsenceTable t;
+    BRAssetTxLookup gone[2] = { BR_ASSET_TX_NOT_HELD, BR_ASSET_TX_NOT_HELD };
+    size_t removed = 9, k;
+    BRAssetHoldingsStatus st;
+
+    memset(one, 0, sizeof(one));
+    t.entries = one; t.count = 0; t.capacity = 1;
+    d[0] = row(tx(0, "", 'd'), 0, OWN, 3, 0, "La1", 3, 0, BAK, UNC);
+    ck(BRAssetPruneDeadBroadcastRows(d, 1, gone, &t, CH, &removed) == BR_ASSET_HOLDINGS_OK && removed == 0 && t.count == 1 &&
+       t.entries[0].kind == BR_ASSET_ABSENCE_DEAD, "a dead pass counts a never-confirmed BACKEND row, filling a table of one");
+    // That row then goes by other means; its count stays.
+    r[0] = row(tx(1, "", 'e'), 0, OWN, 3, 700000, "La1", 3, 0, NAT, VER);
+    st = BRAssetPruneRemovedNativeRows(r, 1, gone, &t, CH, &removed);
+    ck(st == BR_ASSET_HOLDINGS_OK && removed == 0 && t.count == 1 && t.entries[0].kind == BR_ASSET_ABSENCE_NATIVE &&
+       strcmp(t.entries[0].txid, r[0].txid) == 0 && t.entries[0].passes == 1,
+       "a native pass into that table: the stale count makes room and the NATIVE row is counted (%d)", (int)st);
+    st = BRAssetPruneRemovedNativeRows(r, 1, gone, &t, CH, &removed);
+    ck(st == BR_ASSET_HOLDINGS_OK && removed == 1 && CH[0] == BR_ASSET_ROW_DELETE && t.count == 0, "and deleted on the second pass");
+
+    // A stale NATIVE count (its row went by other means) makes room the same way.
+    t.count = 0;
+    ck(BRAssetPruneRemovedNativeRows(r, 1, gone, &t, CH, &removed) == BR_ASSET_HOLDINGS_OK && t.count == 1, "a NATIVE row counted");
+    r[1] = row(tx(2, "", 'f'), 1, OWN, 3, 700000, "La1", 3, 0, NAT, VER);
+    ck(BRAssetPruneRemovedNativeRows(r + 1, 1, gone, &t, CH, &removed) == BR_ASSET_HOLDINGS_OK && removed == 0 && t.count == 1 &&
+       strcmp(t.entries[0].txid, r[1].txid) == 0 && t.entries[0].vout == 1 && t.entries[0].passes == 1,
+       "its row gone, another NATIVE row takes the room");
+
+    // Room is what the table holds once the pass is done. A count that ends this pass (its row deleted)
+    // or is forgotten (its row present) makes room for a new one.
+    t.count = 0;
+    ck(BRAssetPruneRemovedNativeRows(r, 1, gone, &t, CH, &removed) == BR_ASSET_HOLDINGS_OK && t.count == 1, "row 0 counted");
+    ck(BRAssetPruneRemovedNativeRows(r, 2, gone, &t, CH, &removed) == BR_ASSET_HOLDINGS_OK && removed == 1 && CH[0] == BR_ASSET_ROW_DELETE &&
+       CH[1] == BR_ASSET_ROW_KEEP && t.count == 1 && strcmp(t.entries[0].txid, r[1].txid) == 0 && t.entries[0].passes == 1,
+       "row 0 absent again, row 1 new, a table of one: row 0 deleted, row 1 counted");
+    gone[0] = gone[1] = BR_ASSET_TX_HELD;
+    r[0].txid = tx(3, "", 'g');   // a NATIVE row of its own from here
+    ck(BRAssetPruneRemovedNativeRows(r, 2, gone, &t, CH, &removed) == BR_ASSET_HOLDINGS_OK && removed == 0 && t.count == 0,
+       "row 1 present: its count is forgotten");
+    gone[0] = BR_ASSET_TX_NOT_HELD; gone[1] = BR_ASSET_TX_HELD;
+    ck(BRAssetPruneRemovedNativeRows(r, 2, gone, &t, CH, &removed) == BR_ASSET_HOLDINGS_OK && t.count == 1 &&
+       strcmp(t.entries[0].txid, r[0].txid) == 0, "row 0 counted");
+    gone[0] = BR_ASSET_TX_HELD; gone[1] = BR_ASSET_TX_NOT_HELD;
+    ck(BRAssetPruneRemovedNativeRows(r, 2, gone, &t, CH, &removed) == BR_ASSET_HOLDINGS_OK && removed == 0 && t.count == 1 &&
+       strcmp(t.entries[0].txid, r[1].txid) == 0 && t.entries[0].passes == 1, "row 0 present, row 1 new: row 0 forgotten, row 1 counted");
+
+    // Counts the table must still hold, beside the new ones, that it cannot: CAPACITY, nothing written.
+    t.count = 0;
+    gone[0] = gone[1] = BR_ASSET_TX_NOT_HELD;
+    for (k = 0; k < 2; k++) CH[k] = BR_ASSET_ROW_MARK_SPENT;
+    ck(BRAssetPruneRemovedNativeRows(r, 2, gone, &t, CH, &removed) == BR_ASSET_HOLDINGS_CAPACITY && removed == 0 && t.count == 0 &&
+       CH[0] == BR_ASSET_ROW_MARK_SPENT && CH[1] == BR_ASSET_ROW_MARK_SPENT, "two new counts into a table of one: CAPACITY, nothing written");
+    ck(BRAssetPruneRemovedNativeRows(r, 1, gone, &t, CH, &removed) == BR_ASSET_HOLDINGS_OK && t.count == 1, "a NATIVE count");
+    d[0].txid = r[1].txid;
+    ck(BRAssetPruneDeadBroadcastRows(d, 1, gone, &t, CH, &removed) == BR_ASSET_HOLDINGS_CAPACITY && t.count == 1 &&
+       t.entries[0].kind == BR_ASSET_ABSENCE_NATIVE && t.entries[0].passes == 1,
+       "a dead pass keeps every count: the NATIVE one and a new dead one into a table of one is CAPACITY");
+    // A count at 0 (a table the header did not fill) found absent again is kept, at 1.
+    t.entries[0].passes = 0;
+    ck(BRAssetPruneRemovedNativeRows(r, 2, gone, &t, CH, &removed) == BR_ASSET_HOLDINGS_CAPACITY && t.count == 1 && t.entries[0].passes == 0,
+       "a count at 0 counted again and a new one into a table of one: CAPACITY");
+    ck(BRAssetPruneRemovedNativeRows(r, 1, gone, &t, CH, &removed) == BR_ASSET_HOLDINGS_OK && removed == 0 && t.count == 1 &&
+       t.entries[0].passes == 1, "alone, it fits: at 1, nothing deleted");
+    {   // In a table of two: the count at 0 goes to 1, and the row after it is counted too.
+        BRAssetAbsence *two = (BRAssetAbsence *)calloc(2, sizeof(BRAssetAbsence));
+        BRAssetAbsenceTable t2;
+        BRAssetRow dup[3];
+        BRAssetTxLookup lk3[3] = { BR_ASSET_TX_HELD, BR_ASSET_TX_NOT_HELD, BR_ASSET_TX_NOT_HELD };
+
+        if (! two) { ck(0, "calloc"); return; }
+        two[0] = t.entries[0];
+        two[0].passes = 0;
+        t2.entries = two; t2.count = 1; t2.capacity = 2;
+        ck(BRAssetPruneRemovedNativeRows(r, 2, gone, &t2, CH, &removed) == BR_ASSET_HOLDINGS_OK && removed == 0 && t2.count == 2 &&
+           strcmp(two[0].txid, r[0].txid) == 0 && two[0].passes == 1 && strcmp(two[1].txid, r[1].txid) == 0 && two[1].passes == 1,
+           "a count at 0 found absent goes to 1, and a new row after it is counted");
+        // Rows sharing an outpoint (the table's never do) never write past the table: a table of exactly one,
+        // its count forgotten by the first row, found again by the second, and a third row new.
+        free(two);
+        two = (BRAssetAbsence *)malloc(sizeof(BRAssetAbsence));
+        if (! two) { ck(0, "malloc"); return; }
+        dup[0] = r[0]; dup[1] = r[0]; dup[2] = r[1];
+        t2.entries = two; t2.count = 0; t2.capacity = 1;
+        ck(BRAssetPruneRemovedNativeRows(dup, 1, gone, &t2, CH, &removed) == BR_ASSET_HOLDINGS_OK && t2.count == 1, "one count");
+        ck(BRAssetPruneRemovedNativeRows(dup, 3, lk3, &t2, CH, &removed) == BR_ASSET_HOLDINGS_OK && t2.count == 1,
+           "rows that share an outpoint: OK, and the table of one holds one");
+        free(two);
+    }
 }
 
 // ---- reconcile (AssetLocalReconcileTest) and the dead send --------------------------------------
@@ -1366,11 +1502,18 @@ static void capacity(void)
     t.capacity = 1;
     ck(BRAssetPruneDeadBroadcastRows(r, 3, lk, &t, CH, &removed) == BR_ASSET_HOLDINGS_OK && t.count == 1, "one absent into one");
     lk[1] = BR_ASSET_TX_NOT_HELD;
-    ck(BRAssetPruneDeadBroadcastRows(r, 3, lk, &t, CH, &removed) == BR_ASSET_HOLDINGS_CAPACITY && t.count == 1 && t.entries[0].passes == 1,
-       "a second, new, into a full table: CAPACITY, nothing counted");
-    lk[1] = BR_ASSET_TX_HELD;
-    ck(BRAssetPruneDeadBroadcastRows(r, 3, lk, &t, CH, &removed) == BR_ASSET_HOLDINGS_OK && removed == 1 && t.count == 0,
-       "the counted one needs no room: deleted");
+    ck(BRAssetPruneDeadBroadcastRows(r, 3, lk, &t, CH, &removed) == BR_ASSET_HOLDINGS_OK && removed == 1 && CH[0] == BR_ASSET_ROW_DELETE &&
+       t.count == 1 && strcmp(t.entries[0].txid, r[1].txid) == 0 && t.entries[0].passes == 1,
+       "a second, new, into a full table whose one count ends this pass: the first deleted, the second counted");
+    lk[1] = BR_ASSET_TX_HELD; lk[2] = BR_ASSET_TX_NOT_HELD;
+    ck(BRAssetPruneDeadBroadcastRows(r, 1, lk, &t, CH, &removed) == BR_ASSET_HOLDINGS_CAPACITY && removed == 0 && t.count == 1 &&
+       strcmp(t.entries[0].txid, r[1].txid) == 0 && t.entries[0].passes == 1,
+       "a dead pass keeps the count of a row it does not see: with a new one, CAPACITY, nothing counted");
+    ck(BRAssetPruneDeadBroadcastRows(r, 3, lk, &t, CH, &removed) == BR_ASSET_HOLDINGS_CAPACITY && t.count == 1,
+       "row 1 seen present, rows 0 and 2 new: two counts at the end, into a table of one: CAPACITY");
+    t.capacity = 2;
+    ck(BRAssetPruneDeadBroadcastRows(r, 3, lk, &t, CH, &removed) == BR_ASSET_HOLDINGS_OK && removed == 0 && t.count == 2 &&
+       strcmp(t.entries[0].txid, r[1].txid) != 0 && strcmp(t.entries[1].txid, r[1].txid) != 0, "into two: row 1 forgotten, rows 0 and 2 counted");
 }
 
 static void arguments(void)
@@ -1460,6 +1603,24 @@ static void edges(void)
     // Scripts of one byte are told apart by their byte.
     ck(BRAssetHeldForDisplay(A1, 1, one, 1, NAT, 1) && ! BRAssetHeldForDisplay(B1, 1, one, 1, NAT, 1), "one-byte scripts by their byte");
     ck(! BRAssetHeldForDisplay(OWN, 3, zero, 1, NAT, 1), "an owned entry of no bytes owns nothing");
+    {   // A script is owned only whole: neither a prefix of an owned script nor one that extends it.
+        static const uint8_t O4[] = { 1, 2, 3, 4 };
+        BRAssetScript four[1] = { { O4, 4 } };
+
+        ck(! BRAssetHeldForDisplay(OWN, 3, four, 1, NAT, 1) && ! BRAssetHeldForDisplay(O4, 4, OWNED, 1, NAT, 1) &&
+           BRAssetHeldForDisplay(O4, 4, four, 1, NAT, 1), "01 02 03 against an owned 01 02 03 04, and the other way: not held");
+        r[0] = row("pp", 0, OWN, 3, 0, "La1", 5, 0, NAT, VER);
+        ck(BRAssetReconcileRows(r, 1, four, 1, 1, st, CH, &n) == BR_ASSET_HOLDINGS_OK && n == 1 && CH[0] == BR_ASSET_ROW_DELETE,
+           "the reconcile deletes a row whose script is only a prefix of an owned one");
+        o[0].vout = 0; o[0].script = OWN; o[0].scriptLen = 3;
+        ck(BRAssetClearDeadSend(r, 1, "pp", o, 1, four, 1, CH, &n) == BR_ASSET_HOLDINGS_OK && n == 0 && CH[0] == BR_ASSET_ROW_KEEP,
+           "the dead send: an output whose script is a prefix of an owned one deletes nothing");
+        // A script of no bytes at a real pointer, against an owned entry of no bytes: never held.
+        ck(! BRAssetHeldForDisplay(OWN, 0, zero, 1, NAT, 1), "an empty script is not held, even where an owned entry is empty");
+        x = row(tx(0, "", 'a'), 0, OWN, 0, 1, "La1", 5, 0, NAT, VER);
+        ck(! BRAssetRowCounts(&x, zero, 1, 1), "nor does its row count");
+        ck(BRAssetHeldBalances(&x, 1, st, zero, 1, HB, N(HB), &n) == BR_ASSET_HOLDINGS_OK && n == 0, "nor reach a balance");
+    }
 
     // BRAssetRowCounts on its own.
     x = row(tx(0, "", 'a'), 0, OWN, 3, 1, "La1", 5, 0, NAT, VER);
@@ -1616,7 +1777,19 @@ static void zero_structs(void)
     ck(r.source == BAK && r.credit == UNC && ! r.isAsset && ! BRAssetRowCounts(&r, OWNED, 1, 1), "a row nobody filled: no asset row, counts nothing");
     ck(p.action == BR_ASSET_PERSIST_NOTHING && a.verdict == BR_ASSET_ACCEPT_NO_ANSWER, "a write or an acceptance nobody filled does nothing");
     ck((int)BR_ASSET_HOLDINGS_REFUSED == 0 && (int)BR_ASSET_ROW_KEEP == 0 && (int)BR_ASSET_ASK_NO == 0 &&
-       (int)BR_ASSET_TX_LOOKUP_FAILED == 0 && (int)BR_ASSET_ABSENCE_NATIVE == 0, "the zero of each enum");
+       (int)BR_ASSET_TX_HELD == 0 && (int)BR_ASSET_ABSENCE_NATIVE == 0, "the zero of each enum");
+    {   // A lookups array nobody filled reads as present to both prunes: nothing deleted, nothing counted.
+        BRAssetRow zr[2];
+        BRAssetTxLookup zl[2];
+        size_t zn = 2, k, total = 0;
+
+        tableFresh();
+        memset(zl, 0, sizeof(zl));
+        zr[0] = row(tx(0, "", 'a'), 0, OWN, 3, 0, "La1", 3, 0, NAT, UNC);
+        zr[1] = row(tx(1, "", 'b'), 1, OWN, 3, 0, "La1", 3, 0, BAK, UNC);
+        for (k = 0; k < 4; k++) { total += pass(0, zr, &zn, zl, NULL); total += pass(1, zr, &zn, zl, NULL); }
+        ck(total == 0 && zn == 2 && TABLE.count == 0, "lookups nobody filled: four native and four dead passes delete and count nothing");
+    }
     ck(BRAssetIndexerAskDecide(&r, 0, 0, 0) == BR_ASSET_ASK_NO, "a row nobody filled is not asked about");
     ck(BRAssetStackAnswerRead(&s, "", 0, NULL, 0, &n, &lookup) == BR_ASSET_HOLDINGS_OK && lookup == BR_ASSET_STACK_UNAVAILABLE,
        "an answer nobody filled has no vout: no answer");
@@ -2144,9 +2317,10 @@ static void diff(const char *part, int round, const char *got, const char *model
     if (DIFFS++ < 8) printf("  %s round %d: header [%s], model [%s]\n", part, round, got, model);
 }
 
-static const uint8_t SCRIPTS[4][3] = { { 1, 2, 3 }, { 0x51, 0, 0 }, { 9, 9, 9 }, { 0xAB, 0xcd, 0xef } };
-static const size_t SCRIPT_LEN[4] = { 3, 1, 3, 3 };
-static char TXIDS[6][80];
+// 01 02 03 is a prefix of 01 02 03 04: neither owns the other.
+static const uint8_t SCRIPTS[5][4] = { { 1, 2, 3 }, { 0x51 }, { 9, 9, 9 }, { 0xAB, 0xcd, 0xef }, { 1, 2, 3, 4 } };
+static const size_t SCRIPT_LEN[5] = { 3, 1, 3, 3, 4 };
+static char TXIDS[7][80];
 static char IDS[7][80];
 static const int STATES[] = { 0, 1, -1, -2, -99, 5, 2 };
 static const int64_t QTYS[] = { 0, 1, 5, 9, -3, INT64_MAX, INT64_MAX - 1, INT64_MIN, (int64_t)1 << 62, 1000000 };
@@ -2169,18 +2343,19 @@ static void rndRows(int maxRows)
 
     CN = (int)below((uint32_t)maxRows + 1);
     for (i = 0; i < CN; i++) {
-        int s = (int)below(5), id = (int)below(7), cr = (int)below(9), src = (int)below(7);
+        int s = (int)below(7), id = (int)below(7), cr = (int)below(9), src = (int)below(7);
         BRAssetRow *r = &CR[i];
 
         memset(r, 0, sizeof(*r));
         for (tries = 0; tries < 50; tries++) {
-            r->txid = TXIDS[below(6)];
+            r->txid = TXIDS[below(7)];
             r->vout = (int32_t)below(3) - (below(20) == 0 ? 5 : 0);
             for (j = 0; j < i && ! (strcmp(CR[j].txid, r->txid) == 0 && CR[j].vout == r->vout); j++) {}
             if (j == i) break;
         }
         if (tries == 50) { CN = i; break; }
-        if (s < 4) { memcpy(CSCRIPT[i], SCRIPTS[s], SCRIPT_LEN[s]); r->script = CSCRIPT[i]; r->scriptLen = SCRIPT_LEN[s]; }
+        if (s < 5) { memcpy(CSCRIPT[i], SCRIPTS[s], SCRIPT_LEN[s]); r->script = CSCRIPT[i]; r->scriptLen = SCRIPT_LEN[s]; }
+        else if (s == 5) { r->script = CSCRIPT[i]; r->scriptLen = 0; }   // no bytes, at a real pointer
         r->satoshis = 600;
         r->blockHeight = (int64_t[]){ 0, 0, 1, 700000, -1, INT64_MAX }[below(6)];
         r->isAsset = below(6) != 0;
@@ -2206,7 +2381,7 @@ static void rndRows(int maxRows)
     }
 }
 
-static BRAssetScript COWNED[4];
+static BRAssetScript COWNED[6];
 static MSet MOWNED;
 static size_t COWNEDN;
 
@@ -2216,27 +2391,29 @@ static void rndOwned(void)
 
     COWNEDN = 0;
     MOWNED.n = 0;
-    for (i = 0; i < 4; i++) {
+    if (below(8) == 0) return;   // the wallet could not say
+    for (i = 0; i < 5; i++) {
         if (below(2) == 0) continue;
         COWNED[COWNEDN].bytes = SCRIPTS[i];
         COWNED[COWNEDN].len = SCRIPT_LEN[i];
         COWNEDN++;
         { char h[2 * MS + 1]; mHex(SCRIPTS[i], SCRIPT_LEN[i], h); mAddTo(&MOWNED, h); }
     }
-    if (COWNEDN == 0 && below(3) == 0) {   // an owned set holding only the script of no bytes
-        COWNED[0].bytes = NULL; COWNED[0].len = 0; COWNEDN = 1; mAddTo(&MOWNED, "");
+    if ((COWNEDN == 0 && below(3) == 0) || below(6) == 0) {   // the script of no bytes, at no pointer or at a real one
+        COWNED[COWNEDN].bytes = below(2) ? NULL : SCRIPTS[0]; COWNED[COWNEDN].len = 0; COWNEDN++; mAddTo(&MOWNED, "");
     }
 }
 
 enum { R_NULL, R_BALANCES, R_SATURATED, R_EMPTY_ROW, R_HELD, R_PRUNED, R_SET_SPENT, R_CLEARED, R_NATIVE_DELETE, R_DEAD_DELETE,
        R_RETAINED, R_INSERT, R_UPDATE, R_RAISED, R_SETTLED_WRITE, R_FOUND, R_UNAVAILABLE, R_ACCEPT, R_NOT_BELIEVED, R_LATER,
-       R_WIRE_OK, R_WIRE_REFUSED, R_GATE_OPEN, R_TABLE_FULL };
+       R_WIRE_OK, R_WIRE_REFUSED, R_GATE_OPEN, R_TABLE_FULL, R_STALE_FREED,
+       R_PREFIX, R_EMPTY_AT_POINTER, R_LONG_TXID };
 
 static void sweepBalances(void)
 {
     int round, i;
 
-    for (round = 0; round < 6000; round++) {
+    for (round = 0; round < 7000; round++) {
         int states[MR], setSpent[MR], mpruned, prune;
         char got[4096], model[4096];
         size_t count = 0, pruned = 0, at;
@@ -2270,6 +2447,17 @@ static void sweepBalances(void)
             mLower(MRS[i].scriptHex, l);
             mh = mIsHeldForDisplay(l, &ol, MRS[i].source, states[i]);
             if (mh) REACH[R_HELD]++;
+            if (states[i] == BR_ASSET_STATE_HELD && CR[i].scriptLen > 0) {   // a script that is a prefix of an owned one
+                size_t k;
+                for (k = 0; k < COWNEDN; k++) {
+                    if (COWNED[k].len > CR[i].scriptLen && memcmp(COWNED[k].bytes, CR[i].script, CR[i].scriptLen) == 0) REACH[R_PREFIX]++;
+                }
+            }
+            if (states[i] == BR_ASSET_STATE_HELD && CR[i].script && CR[i].scriptLen == 0) {   // no bytes at a pointer, an empty owned entry
+                size_t k;
+                for (k = 0; k < COWNEDN && COWNED[k].len != 0; k++) {}
+                if (k < COWNEDN) REACH[R_EMPTY_AT_POINTER]++;
+            }
             if (BRAssetHeldForDisplay(CR[i].script, CR[i].scriptLen, COWNED, COWNEDN, CR[i].source, states[i]) != mh) {
                 diff("held", round, "", "");
             }
@@ -2296,7 +2484,7 @@ static void sweepClear(void)
 {
     int round, i;
 
-    for (round = 0; round < 3000; round++) {
+    for (round = 0; round < 4500; round++) {
         BRAssetTxOutput outs[6];
         char lines[6][64];
         int no = (int)below(6), m;
@@ -2305,15 +2493,15 @@ static void sweepClear(void)
 
         rndRows(MR);
         rndOwned();
-        txid = TXIDS[below(6)];
+        txid = TXIDS[below(7)];
         for (i = 0; i < no; i++) {
-            int s = (int)below(5);
+            int s = (int)below(7);
             char h[2 * MS + 1];
 
             outs[i].vout = (int32_t)below(4) - (below(10) == 0 ? 5 : 0);
-            outs[i].script = s < 4 ? SCRIPTS[s] : NULL;
-            outs[i].scriptLen = s < 4 ? SCRIPT_LEN[s] : 0;
-            mHex(s < 4 ? SCRIPTS[s] : (const uint8_t *)"", outs[i].scriptLen, h);
+            outs[i].script = s < 5 ? SCRIPTS[s] : s == 5 ? SCRIPTS[0] : NULL;   // 5: no bytes, at a real pointer
+            outs[i].scriptLen = s < 5 ? SCRIPT_LEN[s] : 0;
+            mHex(s < 5 ? SCRIPTS[s] : (const uint8_t *)"", outs[i].scriptLen, h);
             if (below(2)) { size_t k; for (k = 0; h[k]; k++) h[k] = (char)toupper((unsigned char)h[k]); }   // the bridge's case
             snprintf(lines[i], sizeof(lines[i]), "%d|600|%s", outs[i].vout, h);
         }
@@ -2347,12 +2535,32 @@ static void compareTables(int round)
     for (i = 0; i < TABLE.count; i++) if (strcmp(got[i], model[i]) != 0) { diff("prune table", round, got[i], model[i]); return; }
 }
 
+// The model's lookup kinds (0 FAILED, 1 null, 2 empty, 3 outputs) as the header names them.
+static const BRAssetTxLookup LOOKUP_OF[4] = { BR_ASSET_TX_LOOKUP_FAILED, BR_ASSET_TX_NOT_HELD, BR_ASSET_TX_NO_OUTPUTS, BR_ASSET_TX_HELD };
+
+// The counts a pass adds, from the model's map: a row it looks at, found absent, and not yet counted.
+static int mNewCounts(int dead, const MRow *rows, int n, const int *lookupOfRow)
+{
+    int i, added = 0;
+    char key[160];
+
+    for (i = 0; i < n; i++) {
+        if (! rows[i].live || ! rows[i].isAsset || strlen(rows[i].txid) != 64) continue;
+        if (dead && rows[i].height > 0) continue;
+        if (! dead && strcmp(rows[i].source, "NATIVE") != 0) continue;
+        snprintf(key, sizeof(key), dead ? "dead:%s:%d" : "%s:%d", rows[i].txid, rows[i].vout);
+        if ((dead ? mDeadGone(lookupOfRow[i]) : mNativeGone(lookupOfRow[i])) && mMapFind(&MABS, key) < 0) added++;
+    }
+    return added;
+}
+
 static void sweepPrunes(void)
 {
+    static BRAssetAbsence saved[N(AB)];
     int round, i;
 
     for (round = 0; round < 2500; round++) {
-        int passes = 3 + (int)below(6), p, lookupOfTx[6], lookups[MR];
+        int passes = 3 + (int)below(6), p, lookupOfTx[7], lookups[MR];
         BRAssetTxLookup clk[MR];
 
         rndRows(MR);
@@ -2363,22 +2571,45 @@ static void sweepPrunes(void)
             size_t removed = 0;
             BRAssetHoldingsStatus st;
 
-            for (i = 0; i < 6; i++) lookupOfTx[i] = (int)below(4);
+            size_t before = TABLE.count, cap = below(3) ? N(AB) : below(5);
+            int room, added;
+
+            for (i = 0; i < 7; i++) lookupOfTx[i] = (int)below(4);
             for (i = 0; i < CN; i++) {
                 int t;
-                for (t = 0; t < 6 && CR[i].txid != TXIDS[t]; t++) {}
-                lookups[i] = lookupOfTx[t % 6];
-                clk[i] = (BRAssetTxLookup)lookups[i];
+                for (t = 0; t < 7 && CR[i].txid != TXIDS[t]; t++) {}
+                lookups[i] = lookupOfTx[t % 7];
+                clk[i] = LOOKUP_OF[lookups[i]];
+                if (CR[i].isAsset && strlen(CR[i].txid) == 65 && (dead ? mDeadGone(lookups[i]) : mNativeGone(lookups[i]))) REACH[R_LONG_TXID]++;
             }
+            // Sometimes a table with less room than the pass may need: CAPACITY exactly when the counts it keeps
+            // and adds do not fit, with nothing written; then the table grows and the pass runs again.
+            // The room the pass needs is what Kotlin's map holds when the pass is done.
+            TABLE.capacity = cap < before ? before : cap;
+            added = mNewCounts(dead, MRS, CN, lookups);
+            m = dead ? mPruneDeadBroadcast(MRS, CN, lookups) : mPruneRemovedNative(MRS, CN, lookups);
+            room = MABS.n;
+            memcpy(saved, AB, sizeof(AB));
             st = dead ? BRAssetPruneDeadBroadcastRows(CR, (size_t)CN, clk, &TABLE, CH, &removed)
                       : BRAssetPruneRemovedNativeRows(CR, (size_t)CN, clk, &TABLE, CH, &removed);
-            m = dead ? mPruneDeadBroadcast(MRS, CN, lookups) : mPruneRemovedNative(MRS, CN, lookups);
+            if (st == BR_ASSET_HOLDINGS_CAPACITY) {
+                REACH[R_TABLE_FULL]++;
+                if ((size_t)room <= TABLE.capacity) diff("prune room", round, "CAPACITY", "room enough");
+                if (TABLE.count != before || memcmp(saved, AB, sizeof(AB)) != 0) diff("prune room", round, "table written", "");
+                TABLE.capacity = N(AB);
+                st = dead ? BRAssetPruneDeadBroadcastRows(CR, (size_t)CN, clk, &TABLE, CH, &removed)
+                          : BRAssetPruneRemovedNativeRows(CR, (size_t)CN, clk, &TABLE, CH, &removed);
+            }
+            else if (st == BR_ASSET_HOLDINGS_OK && (size_t)room > TABLE.capacity) diff("prune room", round, "OK", "no room");
+            else if (st == BR_ASSET_HOLDINGS_OK && before + (size_t)added > TABLE.capacity) REACH[R_STALE_FREED]++;
             if (st != BR_ASSET_HOLDINGS_OK) { diff("prune", round, "refused", ""); break; }
             if ((int)removed != m) { char g[32], w[32]; snprintf(g, 32, "%zu", removed); snprintf(w, 32, "%d", m); diff("prune count", round, g, w); }
             if (m) REACH[dead ? R_DEAD_DELETE : R_NATIVE_DELETE]++;
             if (MABS.n) REACH[R_RETAINED]++;
             for (i = 0; i < CN; i++) if ((CH[i] == BR_ASSET_ROW_DELETE) != ! MRS[i].live) diff("prune row", round, "", "");
             compareTables(round);
+            // Now and then a row goes by other means (the dead send cleared, the reconcile), its counts left.
+            if (CN > 0 && below(4) == 0) MRS[below((uint32_t)CN)].live = 0;
             // Both drop the rows deleted.
             {
                 int k = 0;
@@ -2613,14 +2844,19 @@ static void model_sweep(void)
         { R_RAISED, 50, "claims raised" }, { R_SETTLED_WRITE, 300, "rows settled on detection" }, { R_FOUND, 1500, "stacks found" },
         { R_UNAVAILABLE, 1500, "replies refused" }, { R_ACCEPT, 500, "answers settled" }, { R_NOT_BELIEVED, 50, "answers not believed" },
         { R_LATER, 300, "asks deferred" }, { R_WIRE_OK, 1000, "stored rows read" }, { R_WIRE_REFUSED, 500, "stored rows refused" },
-        { R_GATE_OPEN, 100, "gates open" },
+        { R_GATE_OPEN, 100, "gates open" }, { R_TABLE_FULL, 300, "prune passes refused for room" },
+        { R_STALE_FREED, 100, "passes that fit only because counts are dropped, forgotten or ended first" },
+        { R_PREFIX, 1000, "held rows whose script is a prefix of an owned one" },
+        { R_EMPTY_AT_POINTER, 300, "held rows of no script bytes at a pointer, beside an empty owned entry" },
+        { R_LONG_TXID, 3000, "absent rows of a 65-character txid" },
     };
     size_t i;
 
     for (i = 0; i < N(TXIDS); i++) {
         static const char fills[] = "abc1e";
         if (i < 5) tx(10 + (int)i, i == 4 ? "AB" : "", fills[i]);
-        strcpy(TXIDS[i], i < 5 ? TXB[10 + i] : "short");
+        strcpy(TXIDS[i], i < 5 ? TXB[10 + i] : i == 5 ? "short" : TXB[10]);
+        if (i == 6) strcat(TXIDS[i], "a");   // 65: a txid and one character more
     }
     strcpy(IDS[0], "La1"); strcpy(IDS[1], "La1"); strcpy(IDS[2], "Ua2"); strcpy(IDS[3], "unresolved:t"); strcpy(IDS[4], "");
     strcpy(IDS[5], "Lb3"); strcpy(IDS[6], "x");
@@ -2688,6 +2924,7 @@ static const Case CASES[] = {
     { "prune_dead_present_kept", prune_dead_present_kept },
     { "prune_lookup_readings", prune_lookup_readings },
     { "prune_shared_table", prune_shared_table },
+    { "prune_stale_counts", prune_stale_counts },
     { "reconcile_prunes_unowned", reconcile_prunes_unowned },
     { "reconcile_unknown_owned", reconcile_unknown_owned },
     { "reconcile_scriptless_kept", reconcile_scriptless_kept },

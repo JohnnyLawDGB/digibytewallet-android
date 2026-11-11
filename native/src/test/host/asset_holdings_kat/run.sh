@@ -99,6 +99,7 @@ CASES=(
     prune_dead_present_kept:-
     prune_lookup_readings:512
     prune_shared_table:512,4096
+    prune_stale_counts:512
     reconcile_prunes_unowned:-
     reconcile_unknown_owned:-
     reconcile_scriptless_kept:8192
