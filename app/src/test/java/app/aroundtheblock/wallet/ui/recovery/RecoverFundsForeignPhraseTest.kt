@@ -13,24 +13,17 @@ import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExecutorCoroutineDispatcher
-import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.test.resetMain
-import kotlinx.coroutines.test.setMain
-import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
-import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 import java.lang.reflect.Modifier
 import java.text.Normalizer
 import java.util.Collections
 import java.util.concurrent.CountDownLatch
-import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 /**
@@ -48,8 +41,8 @@ import java.util.concurrent.TimeUnit
  * the passphrase's bytes, whatever the field is called. The arrays it handed to the seed derivation
  * are checked as well: each must be zeroed once its step is over.
  *
- * Runs the real [RecoverFundsViewModel] with a single-thread stand-in for Main, as
- * [RecoverFundsSeedAuthTest] does. The ViewModel's entry points are called on that thread, as the
+ * Runs the real [RecoverFundsViewModel] with a single-thread stand-in for Main ([MainThreadStandIn]),
+ * as [RecoverFundsSeedAuthTest] does. The ViewModel's entry points are called on that thread, as the
  * screen calls them. The native calls are stood in for through the ViewModel's own seams.
  */
 class RecoverFundsForeignPhraseTest {
@@ -62,24 +55,12 @@ class RecoverFundsForeignPhraseTest {
             Normalizer.normalize(PASSPHRASE, Normalizer.Form.NFKD).toByteArray(Charsets.UTF_8)
     }
 
-    private lateinit var main: ExecutorCoroutineDispatcher
-    private val escaped: MutableList<Throwable> = Collections.synchronizedList(mutableListOf())
-    private var previousHandler: Thread.UncaughtExceptionHandler? = null
-
-    @Before
-    fun setUp() {
-        previousHandler = Thread.getDefaultUncaughtExceptionHandler()
-        Thread.setDefaultUncaughtExceptionHandler { _, t -> escaped += t }
-        main = Executors.newSingleThreadExecutor { r -> Thread(r, "test-main") }.asCoroutineDispatcher()
-        Dispatchers.setMain(main)
-    }
-
-    @After
-    fun tearDown() {
-        Dispatchers.resetMain()
-        main.close()
-        Thread.setDefaultUncaughtExceptionHandler(previousHandler)
-    }
+    /** Main for the test, installed before it and reset only once every ViewModel it ran has
+     *  wound down: a sweep cancelled by `store.clear()` still returns from its IO step afterwards. */
+    @get:Rule
+    val mainStandIn = MainThreadStandIn()
+    private val main get() = mainStandIn.dispatcher
+    private val escaped get() = mainStandIn.escaped
 
     /** Stands in for the native seed derivation. Keeps every array it was handed, a copy of what
      *  each held at the call, and every seed it answered with. */
@@ -122,7 +103,7 @@ class RecoverFundsForeignPhraseTest {
         cents = 100L, holdings = emptyList(), reachable = true, unlocatableCents = 0L,
     )
 
-    private fun viewModel(): RecoverFundsViewModel =
+    private fun viewModel(): RecoverFundsViewModel = mainStandIn.track(
         RecoverFundsViewModel(
             scanService = scan,
             seedProvider = mockk(relaxed = true),
@@ -136,7 +117,8 @@ class RecoverFundsForeignPhraseTest {
             vm.seedFromPhrase = derivations::derive
             // Not a finished scan, so the dollar move answers "nothing to say" without native calls.
             every { scan.state } returns MutableStateFlow<RecoveryScanService.State>(RecoveryScanService.State.Idle)
-        }
+        },
+    )
 
     // ── Driving it as the screen does ────────────────────────────────────────
 
