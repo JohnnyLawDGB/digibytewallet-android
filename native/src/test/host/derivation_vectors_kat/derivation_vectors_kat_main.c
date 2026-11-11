@@ -1,8 +1,9 @@
-// Host KAT: the core derives exactly the addresses in vectors/derivation/abandon-about.txt.
+// Host KAT: the core derives exactly the addresses in a vectors/derivation/*.txt file (argv[1]).
 //
 // The vectors come from vectors/derivation/generate.py, an implementation independent of the
 // core (Python standard library only; it reproduces the published BIP84, BIP86 and BIP44 test
-// vectors). The iOS test target reads the same file. Every address is checked three ways:
+// vectors). No iOS test target exists yet; one must read the same files. Every address is
+// checked three ways:
 //   from the master PUBLIC key, as the wallet derives what it watches (BRBIP32PubKey);
 //   from the PRIVATE key the wallet signs with (BRBIP32PrivKey*), so watched == spendable;
 //   contained in a wallet built by the shared recipe (BRWalletNewDual + BRWalletSetTaprootKey).
