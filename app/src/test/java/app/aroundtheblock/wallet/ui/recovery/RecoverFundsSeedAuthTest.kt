@@ -12,19 +12,12 @@ import app.aroundtheblock.wallet.core.security.KeystoreUserAuthRequiredException
 import io.mockk.coEvery
 import io.mockk.mockk
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExecutorCoroutineDispatcher
-import kotlinx.coroutines.asCoroutineDispatcher
-import kotlinx.coroutines.test.resetMain
-import kotlinx.coroutines.test.setMain
-import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
-import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 import java.util.Collections
-import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.CountDownLatch
 
@@ -40,24 +33,12 @@ import java.util.concurrent.CountDownLatch
  */
 class RecoverFundsSeedAuthTest {
 
-    private val escaped: MutableList<Throwable> = Collections.synchronizedList(mutableListOf())
-    private var previousHandler: Thread.UncaughtExceptionHandler? = null
-    private lateinit var main: ExecutorCoroutineDispatcher
-
-    @Before
-    fun setUp() {
-        previousHandler = Thread.getDefaultUncaughtExceptionHandler()
-        Thread.setDefaultUncaughtExceptionHandler { _, t -> escaped += t }
-        main = Executors.newSingleThreadExecutor { r -> Thread(r, "test-main") }.asCoroutineDispatcher()
-        Dispatchers.setMain(main)
-    }
-
-    @After
-    fun tearDown() {
-        Dispatchers.resetMain()
-        main.close()
-        Thread.setDefaultUncaughtExceptionHandler(previousHandler)
-    }
+    /** Main for the test, reset only once every ViewModel it ran has wound down: a sweep held
+     *  open on its first network step is still suspended when the test ends. */
+    @get:Rule
+    val mainStandIn = MainThreadStandIn()
+    private val main get() = mainStandIn.dispatcher
+    private val escaped get() = mainStandIn.escaped
 
     /** Answers each [SeedProvider.loadSeed] call with the next scripted step, and keeps every
      *  array it handed out so the test can check each one was zeroed. */
@@ -93,7 +74,7 @@ class RecoverFundsSeedAuthTest {
         rawTxs = emptyMap(),
     )
 
-    private fun viewModel(seeds: SeedProvider): RecoverFundsViewModel =
+    private fun viewModel(seeds: SeedProvider): RecoverFundsViewModel = mainStandIn.track(
         RecoverFundsViewModel(
             scanService = scan,
             seedProvider = seeds,
@@ -103,7 +84,8 @@ class RecoverFundsSeedAuthTest {
             assetManager = mockk(relaxed = true),
         ).also { vm ->
             vm.destinationResolver = { DestResolution.Ok("dgb1qtestdestination") }
-        }
+        },
+    )
 
     private fun awaitState(
         vm: RecoverFundsViewModel,
