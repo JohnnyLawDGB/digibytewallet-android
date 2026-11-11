@@ -9,7 +9,9 @@
 #   GREEN  both phases (interleave + stress) ThreadSanitizer clean, the run finishes.
 #   RUNS=N runs each arm N times from one build (default 1); every run must meet its arm's expectation.
 #   Every arm runs under bounded() (lesson: an ASan/TSan report can wedge instead of exiting); a run
-#   stopped at the limit fails with its own message, whether or not it printed a report first.
+#   stopped at the limit -- by bounded() or by the binary's own alarm just inside it -- fails with its own
+#   wedge message, whether or not it printed a report first.
+#   The red arm counts only a race on g_wallet whose racing access is the reader's own frame.
 #   GATES  every NativeBridge_* that names g_wallet takes PEER_GUARD() or WALLET_READ_GUARD(); both frees of
 #          g_wallet sit inside the write side; no WALLET_READ_GUARD reader takes PEER_GUARD.
 set -uo pipefail
@@ -89,6 +91,10 @@ build() {
 export TSAN_OPTIONS="halt_on_error=0 exitcode=66 report_signal_unsafe=0 suppress_equal_addresses=0"
 RUNS="${RUNS:-1}"
 LIMIT_S="${LIMIT_S:-300}"
+# The binary's own in-process alarm fires a margin INSIDE this watchdog, so it always goes first and a
+# raised LIMIT_S raises it too. On firing it prints ALARM_MARK and exits 142; both are reported as a wedge.
+export WALLET_READ_GUARD_ALARM_S=$(( LIMIT_S > 30 ? LIMIT_S - 15 : (LIMIT_S > 1 ? LIMIT_S - 1 : 1) ))
+ALARM_MARK="[watchdog] stopped by the in-process alarm"
 READERS=(getBalance getReceiveAddress getTransactionCount getTransactionDetails)
 
 # The watchdog leaves <outfile>.stopped BEFORE it kills, and that file alone says the run was stopped
@@ -107,12 +113,28 @@ bounded() {   # <outfile> <cmd...>: the command's exit code, or 124 if it was ki
     return $rc
 }
 
-# The reports that fell inside reader <name>'s interleave step: from its marker to the next marker.
+# The races on g_wallet that reader <name> itself made inside its interleave step (from its marker to the
+# next marker). A report counts only if its block says `Location is global 'g_wallet'` AND its first #0
+# frame -- the racing access -- is NativeBridge_<name>: an unrelated race inside the step (a static cache
+# in a helper, say) must not stand in for the one this arm exists to prove.
 step_races() {   # <outfile> <reader>
-    awk -v m="   [step] $2 after a swap" '
-        index($0, "   [step] ") == 1 || index($0, "   [interleave] ") == 1 { on = ($0 == m); next }
-        on && /WARNING: ThreadSanitizer: data race/ { n++ }
+    awk -v m="   [step] $2 after a swap" -v fn="NativeBridge_$2" -v loc="Location is global 'g_wallet'" '
+        index($0, "   [step] ") == 1 || index($0, "   [interleave] ") == 1 { on = ($0 == m); rep = 0; next }
+        on && /WARNING: ThreadSanitizer: data race/ { rep = 1; first = ""; glob = 0; next }
+        rep && first == "" && $1 == "#0" { first = $2 }
+        rep && index($0, loc) { glob = 1 }
+        rep && index($0, "SUMMARY: ThreadSanitizer: data race") == 1 { if (glob && first == fn) n++; rep = 0 }
         END { print n + 0 }' "$1"
+}
+
+# Was the run stopped rather than finished: by the script's watchdog (rc 124) or by the binary's own alarm
+# (its marker, or rc 142 = SIGALRM if the handler never ran)? Sets STOPPED_BY to say which.
+stopped_by() {   # <rc> <outfile>
+    if [ "$1" -eq 124 ]; then STOPPED_BY="stopped by the watchdog at ${LIMIT_S}s"; return 0; fi
+    if [ "$1" -eq 142 ] || grep -qF "$ALARM_MARK" "$2"; then
+        STOPPED_BY="stopped by the in-process alarm at ${WALLET_READ_GUARD_ALARM_S}s, rc=$1"; return 0
+    fi
+    return 1
 }
 
 red_ok=0; green_ok=0
@@ -122,11 +144,11 @@ for ((r = 1; r <= RUNS; r++)); do
     for f in "${READERS[@]}"; do
         out="$BUILD_DIR/red.$r.$f.out"
         bounded "$out" "$BUILD_DIR/red" interleave "$f"; rc=$?
-        if [ "$rc" -eq 124 ]; then
+        if stopped_by "$rc" "$out"; then
             if grep -q "WARNING: ThreadSanitizer" "$out"; then
-                echo "GATE FAILURE: red run $r ($f) printed a report, then wedged (stopped at ${LIMIT_S}s)"
+                echo "GATE FAILURE: red run $r ($f) printed a report, then wedged ($STOPPED_BY)"
             else
-                echo "GATE FAILURE: red run $r ($f) wedged with NO report (stopped at ${LIMIT_S}s)"
+                echo "GATE FAILURE: red run $r ($f) wedged with NO report ($STOPPED_BY)"
             fi
             tail -3 "$out"; missing="$missing $f"; continue
         fi
@@ -148,7 +170,7 @@ for ((r = 1; r <= RUNS; r++)); do
        && grep -q "swaps against" "$out"; then
         green_ok=$((green_ok + 1))
     else
-        [ "$rc" -eq 124 ] && echo "GATE FAILURE: green run $r stopped at ${LIMIT_S}s"
+        stopped_by "$rc" "$out" && echo "GATE FAILURE: green run $r wedged ($STOPPED_BY)"
         echo "GATE FAILURE: green run $r (rc=$rc)"; grep -m3 -E "ThreadSanitizer|FAIL" "$out"; FAIL=1
     fi
 done

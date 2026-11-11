@@ -14,6 +14,10 @@
 //               read of g_wallet is a race TSan sees on every run; guarded, the write side's unlock
 //               happens-before the reader's shared lock and the step is clean. No timing is involved:
 //               the old stress loop alone showed the race on about half the runs.
+//               What it proves: the read of g_wallet has no happens-before edge to the swap's write, which
+//               is what lets a concurrent free be read. The free-while-reading window itself is NOT run:
+//               the reader reads the new, live wallet, no fault occurs, and a red run's rc 66 is the TSan
+//               report alone -- it is not a reproduced use-after-free.
 //               TSan reports a race on a word once and then marks the word as read-only for the rest of
 //               the process, so a red run that proves EVERY reader runs one process per reader
 //               (`interleave <reader>`); the green arm runs all four steps in one process.
@@ -25,6 +29,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
+#include <signal.h>
 #include <sched.h>
 #include <stdatomic.h>
 #include <unistd.h>
@@ -283,6 +288,14 @@ static void run_pair(void *(*fa)(void *), void *(*fb)(void *))
     pthread_join(b, NULL);
 }
 
+static void on_alarm(int sig)
+{
+    static const char mark[] = "\n   [watchdog] stopped by the in-process alarm\n";
+    (void)sig;
+    (void)!write(STDOUT_FILENO, mark, sizeof(mark) - 1);
+    _exit(142);
+}
+
 /* usage: wallet_read_guard_kat all                  both phases, every reader (the default)
  *        wallet_read_guard_kat interleave [reader]  the interleave phase only, for one reader or all */
 int main(int argc, char **argv)
@@ -296,8 +309,13 @@ int main(int argc, char **argv)
     }
     atomic_store_explicit(&g_step, 2 * g_first, memory_order_relaxed);
     setvbuf(stdout, NULL, _IONBF, 0);
-    /* In-process watchdog behind run.sh's: a step that never comes (a thread that died) ends the run. */
-    alarm(240);
+    /* In-process watchdog just inside run.sh's (WALLET_READ_GUARD_ALARM_S, which run.sh derives from its
+     * LIMIT_S): a step that never comes (a thread that died) ends the run with a marker run.sh reports as
+     * a wedge, not as a missing race. */
+    const char *alarmEnv = getenv("WALLET_READ_GUARD_ALARM_S");
+    int alarmS = alarmEnv ? atoi(alarmEnv) : 0;
+    signal(SIGALRM, on_alarm);
+    alarm(alarmS > 0 ? (unsigned)alarmS : 240);
     check(JNI_OnLoad(&g_vmValue, NULL) == JNI_VERSION_1_6, "the bridge boots (JNI_OnLoad)");
     g_phrase = hostArray(kMnemonic, strlen(kMnemonic));
     check(NativeBridge_createWalletFromBytes(env, NULL, g_phrase, NULL) == JNI_TRUE, "a wallet is created");
