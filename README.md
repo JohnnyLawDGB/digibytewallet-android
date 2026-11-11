@@ -118,7 +118,7 @@ digibytewallet-android/
 ├── core/       — Business logic (wallet, assets, IPFS, Digi-ID, security, Hub client)
 ├── native/     — C core + JNI bridge (SPV, crypto, secp256k1)  [C core is a git submodule]
 ├── game/       — DigiRunner mini-game (standalone)
-└── docker/     — Reproducible build environment
+└── docker/     — Docker build environment
 ```
 
 ## Building
@@ -185,7 +185,7 @@ See [VERIFICATION.md § Building from source](VERIFICATION.md#building-from-sour
 - **Responsible disclosure:** [SECURITY.md](SECURITY.md)
 - **Threat model:** [THREAT_MODEL.md](THREAT_MODEL.md)
 - **Crypto inventory:** [CRYPTO_INVENTORY.md](CRYPTO_INVENTORY.md)
-- **Reproducible builds:** [VERIFICATION.md](VERIFICATION.md)
+- **Verifying your install:** [VERIFICATION.md](VERIFICATION.md)
 - **Audit summary:** [security/AUDIT-SUMMARY.md](security/AUDIT-SUMMARY.md)
 
 ### Key security properties

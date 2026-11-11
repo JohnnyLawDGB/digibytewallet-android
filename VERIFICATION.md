@@ -46,6 +46,9 @@ Download `aroundtheblock-wallet-vX.Y.Z.apk` from the
    sha256sum -c --ignore-missing SHA256SUMS
    ```
 
+   On macOS, where `sha256sum` is not installed by default, use `shasum -a 256` in its place
+   (`shasum -a 256 -c --ignore-missing SHA256SUMS`).
+
    `SHA256SUMS` also lists the Play bundle (`app-mainnet-play-release.aab`), which is not offered
    for download; `--ignore-missing` skips it. The line that matters is
    `aroundtheblock-wallet-vX.Y.Z.apk: OK`.
@@ -70,18 +73,24 @@ installed:
 
 ```bash
 adb shell pm path app.aroundtheblock.wallet      # lists base.apk and the split APKs
-adb pull <the base.apk path printed above> base.apk
+adb pull "$(adb shell pm path app.aroundtheblock.wallet | grep base.apk | sed 's/^package://' | tr -d '\r')" base.apk
 apksigner verify --print-certs base.apk
 ```
+
+`pm path` prints each file as `package:/data/app/.../base.apk`. The `sed` strips the
+`package:` prefix, which `adb pull` does not accept; if you copy a path by hand, leave the
+prefix out.
 
 The `certificate SHA-256 digest` must be
 `7e36ddb28561b7856ad0b627bf156539f8b57f97242148d565090cb0aa8edf87`. Every split is signed by the
 same key, and you can pull and check each one the same way. Do not compare `base.apk`, or any
 split, with `SHA256SUMS`: as explained above, those hashes never match on a Play install.
 
-Without a computer, Android enforces the same thing from the other side: it installs an update
-only when it is signed by the same key as the installed app. If Android accepts a verified
-sideload APK as an update over your Play install, both are signed by the same key.
+Background, not a check to run: Android installs an update only when it is signed by the same
+key as the installed app, which is why a Play install and a sideload APK can update each other.
+Do not install the sideload APK over a Play install just to test this. It works, but it moves
+your install to the sideload channel, which turns on the app's own GitHub updater in place of
+Play updates.
 
 ## Building from source
 
@@ -98,8 +107,21 @@ docker run --rm -v "$(pwd)":/build dgb-wallet-build \
   bash -c "./gradlew :app:assembleMainnetSideloadRelease"
 ```
 
-Without the release key this produces an unsigned APK. Its hash can never equal the published
-APK's, because the published file carries a signature; independent builders can compare their
-unsigned builds with each other. We do not currently publish third-party build attestations or
-GPG signatures for releases, so for a published release the checks that apply are the two above:
-the hash (sideload only) and the signing certificate (every install).
+That command does not produce an APK unless you give it a release key. The build refuses to
+sign a release with anything less: with no `keystore.properties` and no `ATB_SIGNING_*`
+variables it stops with `Release signing: no release key configured` before building anything
+(see `app/build.gradle.kts` and [docs/SIGNING.md](docs/SIGNING.md)). To build a release you
+must make your own throwaway key, put it in `keystore.properties` (`storeFile=`,
+`storePassword=`), and run the command again. The APK you get is signed by **your** key, so
+neither its hash nor its certificate will match the published APK.
+
+If you only want an optimised build without making a key, `./gradlew :app:assembleMainnetSideloadMinifiedDebug`
+runs the same R8 configuration and signs with the debug key. It is a different app
+(`app.aroundtheblock.wallet.debug`), installs beside the real one, and is not byte-comparable
+to a release in any way.
+
+Two builders can compare their own release builds with each other only after removing the
+signature from both APKs, and the project does not yet ship a tool for that. We do not publish
+third-party build attestations or GPG signatures for releases. For a published release, the
+checks that apply are the two above: the hash (sideload only) and the signing certificate
+(every install).
