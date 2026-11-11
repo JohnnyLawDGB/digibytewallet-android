@@ -18,6 +18,7 @@
 #include "BRInt.h"
 #include "asset_tx_checks.h"
 #include "one_family_gate.h"
+#include "asset_sign_gate.h"
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -98,6 +99,12 @@ NativeBridge_addressToScriptPubKey(
  *     address is validated and BRAddressScriptPubKey computes the script.
  *     outputScriptsHex[i] is ignored in the address case.
  *
+ * Approval (ASSET-SIGN-GATE):
+ *   approvedToAddress — the recipient the confirmation showed; approvedFeeSats — the fee it showed.
+ *   Before signing and again on the signed transaction, asset_sign_check must hold: every input is a
+ *   wallet or held-asset coin at the amount the wallet holds, every output pays the approved recipient,
+ *   the wallet or a zero-value data output, and the fee is exactly approvedFeeSats.
+ *
  * Returns: signed tx as hex string, or NULL on any failure.
  */
 jstring JNICALL
@@ -109,7 +116,9 @@ NativeBridge_buildAndSignAssetTransferTx(
     jobjectArray inputScriptPubKeysHex,
     jobjectArray outputAddresses,
     jlongArray outputAmounts,
-    jobjectArray outputScriptsHex)
+    jobjectArray outputScriptsHex,
+    jstring approvedToAddress,
+    jlong approvedFeeSats)
 {
     WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
     (void)thiz;
@@ -125,6 +134,22 @@ NativeBridge_buildAndSignAssetTransferTx(
     if (!inputTxidsHex || !inputVouts || !inputAmounts || !inputScriptPubKeysHex ||
         !outputAddresses || !outputAmounts || !outputScriptsHex) {
         LOGW("buildAndSignAssetTransferTx: null required array");
+        return NULL;
+    }
+    if (!approvedToAddress || approvedFeeSats <= 0) {
+        LOGW("buildAndSignAssetTransferTx: no approved recipient or fee (ASSET-SIGN-GATE)");
+        return NULL;
+    }
+    uint8_t recipScript[64];
+    size_t recipScriptLen = 0;
+    {
+        const char *approvedStr = (*env)->GetStringUTFChars(env, approvedToAddress, NULL);
+        if (!approvedStr) return NULL;
+        recipScriptLen = BRAddressScriptPubKey(recipScript, sizeof(recipScript), approvedStr);
+        (*env)->ReleaseStringUTFChars(env, approvedToAddress, approvedStr);
+    }
+    if (recipScriptLen == 0) {
+        LOGW("buildAndSignAssetTransferTx: the approved recipient is not an address (ASSET-SIGN-GATE)");
         return NULL;
     }
 
@@ -245,10 +270,27 @@ NativeBridge_buildAndSignAssetTransferTx(
 
     if (!ok) { BRTransactionFree(tx); return NULL; }
 
+    /* ASSET-SIGN-GATE, before signing: only wallet and held-asset coins, at the amounts the wallet
+     * holds, paying the approved recipient, the wallet and data outputs only, at the approved fee. */
+    AssetSignVerdict gate = asset_sign_check(g_wallet, tx, recipScript, recipScriptLen, (uint64_t)approvedFeeSats);
+    if (gate != ASSET_SIGN_OK) {
+        LOGW("buildAndSignAssetTransferTx: not the approved send (ASSET-SIGN-GATE verdict %d); nothing signed", (int)gate);
+        BRTransactionFree(tx);
+        return NULL;
+    }
+
     /* ── Sign with the wallet's keys ────────────────────────────────── */
     int signed_ok = seed_sign_transaction(g_wallet, tx, 0);
     if (!signed_ok || !BRTransactionIsSigned(tx)) {
         LOGW("buildAndSignAssetTransferTx: signing failed");
+        BRTransactionFree(tx);
+        return NULL;
+    }
+
+    /* ASSET-SIGN-GATE, after signing: the signed transaction is still exactly the approved send. */
+    gate = asset_sign_check(g_wallet, tx, recipScript, recipScriptLen, (uint64_t)approvedFeeSats);
+    if (gate != ASSET_SIGN_OK) {
+        LOGW("buildAndSignAssetTransferTx: the signed transaction is not the approved send (ASSET-SIGN-GATE verdict %d)", (int)gate);
         BRTransactionFree(tx);
         return NULL;
     }

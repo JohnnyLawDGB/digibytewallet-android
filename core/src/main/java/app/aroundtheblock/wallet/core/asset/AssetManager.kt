@@ -3064,6 +3064,9 @@ class AssetManager(
             outputAddresses = outAddresses.toTypedArray(),
             outputAmounts = outAmounts.toLongArray(),
             outputScriptsHex = outScripts.toTypedArray(),
+            // ASSET-SIGN-GATE: native signs only this recipient at exactly this fee.
+            approvedToAddress = toAddress,
+            approvedFeeSats = plan.paidFeeSats,
         ) ?: return TxResult.Error("Native build/sign failed")
 
         val signedBytes = signedHex.hexToByteArray() ?: return TxResult.Error("Bad signed-tx hex")

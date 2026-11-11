@@ -38,6 +38,7 @@
 #include "jni_seed_buffer.h"
 #include "wallet_spend_gate.h"  /* the one wallet question these signers ask */
 #include "foreign_tx_fee_guard.h"
+#include "sweep_fee_guard.h"
 #include "BRDigiDollar.h"
 #include "BRNetwork.h"
 #include "digidollar_transfer_layout.h"
@@ -538,6 +539,9 @@ NativeBridge_buildAndSignLegacySweep(
         (*env)->DeleteLocalRef(env, scriptJ);
 
         if (txidLen != 32 || scriptLen == 0) { ok = 0; break; }
+        /* SWEEP-ABS-CEIL: an amount is positive and the total does not wrap, so the fee bounds below
+         * are taken over the total the caller listed. */
+        if (amtJ[i] <= 0 || (uint64_t)amtJ[i] > UINT64_MAX - totalIn) { ok = 0; break; }
 
         /* txid hex is big-endian display; internal is little-endian. */
         UInt256 txHash;
@@ -591,40 +595,18 @@ NativeBridge_buildAndSignLegacySweep(
         return NULL;
     }
 
-    /* Estimate tx size before fee calc: rough upper bound. P2PKH input is
-     * ~148 bytes, P2WPKH is ~105. Use 160/input as a safe upper bound.
-     * Output is ~34 bytes. Plus fixed 10 bytes of overhead. */
-    size_t estSize = 10 + (size_t)inputCount * 160 + 34;
-    uint64_t fee = ((uint64_t)estSize * (uint64_t)feePerKb) / 1000;
-    if (fee < 1000) fee = 1000; /* DGB min relay */
-
-    /* ── Amount-provenance fee-sanity guard (bug #2, fund-loss). ──
-     * The legacy P2PKH sighash does NOT commit to input amounts, so a stale or
-     * under-reported amounts[] still produces a VALID signature. The tx then
-     * spends the REAL on-chain prevout value and the unreported remainder
-     * (realValue - outAmount) is silently burned to fee by the network. We
-     * cannot verify a FOREIGN prevout on-device without fetching it, but we
-     * CAN refuse the pathological under-report: on a multi-input consolidation
-     * a legitimate total dwarfs the fee, so a computed fee that is >= 5% of the
-     * reported total (fee*20 >= totalIn) means the amounts are almost certainly
-     * stale/under-reported. Refuse rather than sign a lopsided sweep.
-     * Single-input sweeps are exempt — a lone small UTXO can legitimately have
-     * the fee be a meaningful fraction of its value (the dust check below still
-     * protects that case). fee*20 cannot overflow: fee is bounded by
-     * estSize*feePerKb. */
-    if (inputCount > 1 && totalIn <= fee * 20) {
-        LOGW("buildAndSignLegacySweep: fee-sanity guard tripped "
-             "(inputs=%d fee=%llu totalIn=%llu) — refusing under-reported sweep",
-             (int)inputCount, (unsigned long long)fee, (unsigned long long)totalIn);
-        for (jsize i = 0; i < inputCount; i++) BRKeyClean(&keys[i]);
-        free(keys);
-        BRTransactionFree(tx);
-        (*env)->ReleaseStringUTFChars(env, hmacKey, hmac);
-        seed_buffer_release(&seed);
-        return NULL;
-    }
-
-    if (totalIn <= fee + 546 /* dust */) {
+    /* ── The fee backstop (SWEEP-ABS-CEIL; see sweep_fee_guard.h). ──
+     * The legacy P2PKH sighash does NOT commit to input amounts, so a stale or under-reported
+     * amounts[] still produces a VALID signature, and the unreported remainder is paid to the miner
+     * (bug #2). Kotlin binds each parent to its txid and reads the amount from it; this is the
+     * backstop. The fee is the size estimate at feePerKb, and it is bounded for EVERY sweep: the rate
+     * is in range, the fee is under an absolute ceiling (single-input sweeps included), a multi-input
+     * fee is under 5% of the listed total, and more than dust is left. */
+    uint64_t fee = 0;
+    const SweepFeeVerdict feeVerdict = sweep_fee_check(totalIn, (size_t)inputCount, (int64_t)feePerKb, &fee);
+    if (feeVerdict != SWEEP_FEE_OK) {
+        LOGW("buildAndSignLegacySweep: fee backstop refused (verdict=%d inputs=%d fee=%llu totalIn=%llu)",
+             (int)feeVerdict, (int)inputCount, (unsigned long long)fee, (unsigned long long)totalIn);
         for (jsize i = 0; i < inputCount; i++) BRKeyClean(&keys[i]);
         free(keys);
         BRTransactionFree(tx);
