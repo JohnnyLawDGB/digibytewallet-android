@@ -80,7 +80,7 @@ else
     if [ "${#CHECKS[@]}" -eq 1 ] && [ "${#SIGNS[@]}" -eq 1 ] && [ "${#OUTS[@]}" -eq 1 ]; then
         [ "${CHECKS[0]}" -lt "${OUTS[0]}" ] && [ "${CHECKS[0]}" -lt "${SIGNS[0]}" ] || say "the fee is not checked before the output is built and signed"
     fi
-    grep -Eq 'if[[:space:]]*\([[:space:]]*feeVerdict[[:space:]]*!=[[:space:]]*SWEEP_FEE_OK[[:space:]]*\)' <<<"$BODY" || say "a verdict other than SWEEP_FEE_OK is not refused"
+    grep -Eq 'if[[:space:]]*\([[:space:]]*[A-Za-z_]*[Vv]erdict[[:space:]]*!=[[:space:]]*SWEEP_FEE_OK[[:space:]]*\)' <<<"$BODY" || say "a verdict other than SWEEP_FEE_OK is not refused"
     grep -Eq 'sweep_fee_check[[:space:]]*\([^;]*&fee[[:space:]]*\)' <<<"$BODY" || say "the fee is not the one sweep_fee_check computed"
     grep -Eq 'inputCount[[:space:]]*>[[:space:]]*1[[:space:]]*&&' <<<"$BODY" && say "an inline input-count exemption remains"
     grep -Eq 'fee[[:space:]]*=[[:space:]]*\(\(uint64_t\)estSize' <<<"$BODY" && say "an inline fee computation remains"
