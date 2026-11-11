@@ -12,21 +12,17 @@ HoldFast Wallet is a full Kotlin rewrite of the community DigiByte Android walle
 
 | Source | Link |
 |---|---|
-| GitHub Releases (signed APK + SHA-256, every version) | **[github.com/JohnnyLawDGB/digibytewallet-android/releases/latest](https://github.com/JohnnyLawDGB/digibytewallet-android/releases/latest)** |
+| GitHub Releases (signed APK + `SHA256SUMS`, every version) | **[github.com/JohnnyLawDGB/aroundtheblock-wallet-releases/releases/latest](https://github.com/JohnnyLawDGB/aroundtheblock-wallet-releases/releases/latest)** |
 | digiscope.me (latest APK + release notes) | [digiscope.me/downloads](https://digiscope.me/downloads/) · [release notes](https://digiscope.me/wallet/releases/) |
 
-Every release is built and signed in CI — release signing keys are never held locally. Verify
-what you downloaded before installing:
+The app is also on [Google Play](https://play.google.com/store/apps/details?id=app.aroundtheblock.wallet), signed with
+the same key, so a Play install and a release APK can update each other. F-Droid is still on the roadmap (Phase 4).
 
-```bash
-sha256sum aroundtheblock-wallet-v4.1.3.apk
-apksigner verify --print-certs aroundtheblock-wallet-v4.1.3.apk
-```
-
-and compare against the SHA-256 published on the release page; the signer certificate's SHA-256 digest must be
-`7e36ddb28561b7856ad0b627bf156539f8b57f97242148d565090cb0aa8edf87`. The app is also on
-[Google Play](https://play.google.com/store/apps/details?id=app.aroundtheblock.wallet), signed with the same key, so a
-Play install and a release APK can update each other. F-Droid is still on the roadmap (Phase 4).
+**Verify what you installed: [VERIFICATION.md](VERIFICATION.md).** A sideload APK is checked against the release's
+`SHA256SUMS` and its signing certificate. A Play install is checked by its signing certificate only: Play installs split
+APKs built for your phone, whose hashes never match the published APK. The release certificate's SHA-256 is
+`7E:36:DD:B2:85:61:B7:85:6A:D0:B6:27:BF:15:65:39:F8:B5:7F:97:24:21:48:D5:65:09:0C:B0:AA:8E:DF:87`. Releases are built
+and signed on the publisher's machine, never in CI ([RELEASING.md](RELEASING.md)).
 
 ## Design principle: sovereignty first
 
@@ -145,15 +141,8 @@ Install to a connected device:
 adb install -r app/build/outputs/apk/mainnet/debug/app-mainnet-debug.apk
 ```
 
-### Reproducible build (Docker)
-```bash
-docker build -t dgb-wallet-build docker/
-docker run --rm -v "$(pwd)":/build dgb-wallet-build \
-  bash -c "./gradlew :app:assembleMainnetRelease && \
-  sha256sum app/build/outputs/apk/mainnet/release/app-mainnet-release-unsigned.apk"
-```
-
-See [VERIFICATION.md](VERIFICATION.md) for multi-party attestation instructions.
+### Build in Docker
+See [VERIFICATION.md § Building from source](VERIFICATION.md#building-from-source).
 
 ## Testing
 
