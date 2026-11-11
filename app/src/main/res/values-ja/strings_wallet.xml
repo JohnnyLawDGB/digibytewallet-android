@@ -633,10 +633,10 @@
          Machine-assisted. -->
     <string name="reconcile_outputs_found">ブロックチェーン上で見つかったアウトプット</string>
     <string name="reconcile_found_not_compared">ブロックチェーン上で見つかりました（比較なし）</string>
-    <string name="reconcile_spendable">使用可能</string>
-    <string name="reconcile_wallet_spendable">ウォレットの使用可能残高</string>
-    <string name="reconcile_matches_wallet">ウォレットの使用可能残高と一致しています。</string>
-    <string name="reconcile_does_not_match_wallet">ウォレットの使用可能残高と一致しません：下記を参照してください。</string>
+    <string name="reconcile_in_balance">残高に含まれる</string>
+    <string name="reconcile_wallet_balance">ウォレットの残高</string>
+    <string name="reconcile_matches_wallet_balance">ウォレットの残高と一致しています。</string>
+    <string name="reconcile_does_not_match_wallet_balance">ウォレットの残高と一致しません：下記を参照してください。</string>
     <string name="reconcile_held_asset">DigiAsset 用に確保</string>
     <string name="reconcile_held_unknown">確保：アセットの状態は不明</string>
     <string name="reconcile_proven_plain">通常の DGB（再起動後に使用可能）</string>

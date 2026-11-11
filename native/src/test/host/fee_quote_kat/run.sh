@@ -56,12 +56,38 @@ CASES=(
     check_extra_output:fail
     check_change_foreign:fail
     check_self_send_signs:pass
+    check_coin_foreign_unconfirmed:fail
+    check_own_change_signs:pass
+    check_budget_own_change:pass
     dd_transfer_builds:pass
+)
+# SEND-GATE-SET arm: -DSEND_GATE_SET_UNFIXED=1 (and PREPARED_SEND_UNFIXED=0): every check as shipped but
+# the membership set, which is the raw set the balance sums (BRWalletUTXOs) as before that item.
+# <case>:<expectation in that arm>
+SET_CASES=(
+    check_coin_foreign_unconfirmed:fail
+    check_own_change_signs:pass
+    check_coin_spent:pass
+    check_coin_held:pass
+    check_approved_signs:pass
+    check_budget_own_change:pass
+)
+# Enumeration arm: -DSEND_GATE_SET_UNFIXED=2: the selectable set, but listed whole under one walk budget
+# (the first SEND-GATE-SET version) instead of each input asked alone.
+BUDGET_CASES=(
+    check_budget_own_change:fail
+    check_coin_foreign_unconfirmed:pass
+    check_own_change_signs:pass
+    check_approved_signs:pass
 )
 
 # ---- the seam is real ----------------------------------------------------------------------
 if [ ! -f "$HEADER" ]; then
     echo "GATE FAILURE: $HEADER not found."; exit 1
+fi
+if ! grep -Eq '^[[:space:]]*#[[:space:]]*if[[:space:]]+SEND_GATE_SET_UNFIXED' "$HEADER"; then
+    echo "GATE FAILURE: $HEADER does not test the value of SEND_GATE_SET_UNFIXED; the SEND-GATE-SET arm would not differ."
+    exit 1
 fi
 if ! grep -Eq '^[[:space:]]*#[[:space:]]*if[[:space:]]+PREPARED_SEND_UNFIXED' "$HEADER"; then
     echo "GATE FAILURE: $HEADER does not test the value of PREPARED_SEND_UNFIXED; the arms would not differ."
@@ -80,11 +106,11 @@ UNITS=("$CORE_DIR"/BRWallet.c "$CORE_DIR"/BRTransaction.c "$CORE_DIR"/BRDigiDoll
        "$CORE_DIR"/BRBIP32Sequence.c "$CORE_DIR"/BRBIP39Mnemonic.c "$CORE_DIR"/crypto/groestl.c
        "$CORE_DIR"/crypto/skein.c "$CORE_DIR"/crypto/qubit.c "$CORE_DIR"/crypto/odocrypt.c "${SHA3[@]}")
 
-build() {   # <out> <64|32> <unfixed 0|1>
-    local out="$1" bits="$2" unfixed="$3"
+build() {   # <out> <64|32> <unfixed 0|1> [set-unfixed 0|1]
+    local out="$1" bits="$2" unfixed="$3" setunfixed="${4:-0}"
     local m=(); [ "$bits" = "32" ] && m=(-m32)
     clang -w -include stdint.h -g -fsanitize=address -fno-omit-frame-pointer "${m[@]}" \
-        -DPREPARED_SEND_UNFIXED="$unfixed" \
+        -DPREPARED_SEND_UNFIXED="$unfixed" -DSEND_GATE_SET_UNFIXED="$setunfixed" \
         -I "$CORE_DIR" -I "$CORE_DIR/secp256k1/include" -I "$BRIDGE_DIR" \
         "$SCRIPT_DIR/fee_quote_kat_main.c" "${UNITS[@]}" -lm -lpthread -o "$out"
 }
@@ -161,6 +187,29 @@ for bits in 64 32; do
         *)
             echo "  [red$bits $c] GATE FAILURE: unknown expectation '$want'"; FAIL=1 ;;
         esac
+    done
+
+    for setarm in 1 2; do
+        if [ "$setarm" = 1 ]; then arm_cases=("${SET_CASES[@]}"); label="the raw coin set"
+        else arm_cases=("${BUDGET_CASES[@]}"); label="the selectable set enumerated under one walk budget"; fi
+        echo "--- SEND-GATE-SET ARM (-DSEND_GATE_SET_UNFIXED=$setarm): $label; each case meets its expectation ---"
+        if ! build "$BUILD_DIR/set$setarm-$bits" "$bits" 0 "$setarm"; then
+            echo "GATE FAILURE: ${bits}-bit SEND-GATE-SET arm $setarm did not compile."; FAIL=1; continue
+        fi
+        for entry in "${arm_cases[@]}"; do
+            c="${entry%%:*}"; want="${entry##*:}"; out="$BUILD_DIR/set$setarm-$bits.$c.out"
+            bounded "$out" "$BUILD_DIR/set$setarm-$bits" "$c"; rc=$?
+            if [ $rc -eq 124 ] || grep -Eq "$SAN_RE" "$out"; then
+                echo "  [set$setarm/$bits $c] GATE FAILURE: stopped or sanitizer report (rc=$rc)"; show "$out"; FAIL=1; continue
+            fi
+            if [ "$want" = fail ] && [ $rc -ne 0 ] && grep -q "^RESULT $c fail$" "$out"; then
+                echo "  [set$setarm/$bits $c] failed, as it must: $(grep -m1 '^FAIL:' "$out" | cut -c1-150)"
+            elif [ "$want" = pass ] && [ $rc -eq 0 ] && grep -q "^RESULT $c pass$" "$out"; then
+                echo "  [set$setarm/$bits $c] passed (guard)"
+            else
+                echo "  [set$setarm/$bits $c] GATE FAILURE: expected $want (rc=$rc)"; show "$out" 12; FAIL=1
+            fi
+        done
     done
 
     echo "--- SHIPPED ARM (-DPREPARED_SEND_UNFIXED=0): every case passes, no sanitizer report ---"

@@ -207,4 +207,21 @@ class DigiIdRequestTest {
         assertEquals(401, err.code)
         assertEquals("Unauthorized", err.message)
     }
+
+    // MSG-LEN: a Digi-ID URI is length-capped at intake; every intake path parses here.
+    @Test
+    fun `MSG-LEN a URI over the length cap is refused`() {
+        val head = "digiid://site.example/callback?x="
+        val atCap = head + "n".repeat(DigiIdRequest.MAX_URI_LENGTH - head.length)
+        assertEquals(DigiIdRequest.MAX_URI_LENGTH, atCap.length)
+        assertNotNull("a URI at the cap is taken in", DigiIdRequest.parse(atCap))
+        assertNull("a URI one unit over the cap is refused", DigiIdRequest.parse(atCap + "n"))
+        assertNull("a URI over 0xffff is refused", DigiIdRequest.parse(head + "n".repeat(0x10000)))
+    }
+
+    @Test
+    fun `MSG-LEN the cap is below the length where a signed message needs a longer compact size`() {
+        // A UTF-16 unit is at most 3 UTF-8 bytes; the signed message stays under 0xffff bytes.
+        assertTrue(DigiIdRequest.MAX_URI_LENGTH * 3 <= 0xffff)
+    }
 }

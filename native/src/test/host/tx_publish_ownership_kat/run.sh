@@ -261,7 +261,7 @@ check_copy_register() {
 
     # (b) every registration registers COPY. Every mention of the registering function counts as
     # a registration, whatever follows it, so nothing is registered by a spelling this misses.
-    local reg_copy="\\<BRWalletRegisterTransaction(Trusted)?$SP\\([^,()]*,$SP$copy$SP\\)"
+    local reg_copy="\\<BRWalletRegisterTransaction(Trusted|Outcome)?$SP\\([^,()]*,$SP$copy$SP[),]"
     local n_reg n_reg_copy
     n_reg="$(count "BRWalletRegisterTransaction" "$code")"
     n_reg_copy="$(count "$reg_copy" "$code")"
@@ -401,14 +401,23 @@ if [ -n "$HELPER_SEEN" ]; then
                 say "$HELPER_SEEN copies (offset $COPY_AT) before it asks whether the wallet already holds the hash (offset $LOOKUP_AT)"
             fi
             # Exactly one registration, and after it a release of COPY conditional on the wallet
-            # NOT having taken it — the wallet's record for the hash is compared with COPY.
+            # NOT having taken it. Whether it did is the registration's own answer (REGISTER-RESULT):
+            # the one registration is BRWalletRegisterTransactionOutcome(g_wallet, COPY, <check>, &OUT)
+            # and the release is "if (!BRWalletRegisterOutcomeHeld(OUT)) BRTransactionFree(COPY);".
+            # A lookup made after the registration (the earlier shape) is not accepted: it reads the
+            # wallet after its lock was released.
             if [ "$(count "BRWalletRegisterTransaction" "$H")" -ne 1 ]; then
                 say "$HELPER_SEEN must register exactly once"
             fi
-            UNTAKEN="if$SP\\($SP""BRWalletTransactionForHash$SP\\([^;]*\\)$SP!=$SP$COPY$SP\\)$SP""BRTransactionFree$SP\\($SP$COPY$SP\\)$SP;"
+            OUT="$(grep -oE -- "\\<BRWalletRegisterTransactionOutcome$SP\\(${SP}g_wallet$SP,$SP$COPY$SP,[^,;()]*,$SP&$SP$ID$SP\\)" <<<"$H" | head -n 1 | sed -E "s/.*&$SP($ID)$SP\\)$/\\1/")"
+            if [ -z "$OUT" ]; then
+                say "$HELPER_SEEN must register $COPY through BRWalletRegisterTransactionOutcome and keep its outcome"
+                OUT='__no_outcome__'
+            fi
+            UNTAKEN="if$SP\\($SP!$SP""BRWalletRegisterOutcomeHeld$SP\\($SP$OUT$SP\\)$SP\\)$SP""BRTransactionFree$SP\\($SP$COPY$SP\\)$SP;"
             UNTAKEN_AT="$(offsets "$UNTAKEN" "$H" | head -n 1)"
             if [ -z "$UNTAKEN_AT" ]; then
-                say "$HELPER_SEEN must release $COPY when the wallet's record for the hash is not $COPY (the wallet did not take it)"
+                say "$HELPER_SEEN must release $COPY exactly when the registration's outcome ($OUT) says the wallet did not take it"
             elif [ "$UNTAKEN_AT" -le "$CR_LAST_REG" ]; then
                 say "$HELPER_SEEN's untaken-copy release (offset $UNTAKEN_AT) must follow the registration (offset $CR_LAST_REG)"
             fi
