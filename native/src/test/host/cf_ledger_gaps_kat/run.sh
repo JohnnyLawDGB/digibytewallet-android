@@ -11,6 +11,8 @@
 #   -DCF_BAND_KEPT_UNFIXED    a ledger re-Init zeroes a band surfaced earlier in the same locked section
 #   -DCF_PARK_CONTIG_UNFIXED  the never-brick park sets the cursor to the checkpoint even when that is
 #                             above what the ledger requested
+#   -DCF_PARK_LAG_UNFIXED     when the ledger lags below the filter-header chain's start, the park
+#                             still jumps to the checkpoint over the in-chain heights below it
 # RED cases must FAIL in their arm and PASS in green. GUARD cases must PASS in every arm.
 # Every case, every arm: no sanitizer report. A build error is never evidence.
 set -uo pipefail   # not -e: the red arms' nonzero exits must be captured
@@ -28,8 +30,9 @@ declare -A RED=(
     [CF_FLOOR_MEMO_UNFIXED]="floor_memo_relayed_stub_replace floor_memo_install_saved_stub_replace"
     [CF_BAND_KEPT_UNFIXED]="band_survives_cfheaders_floor_snap band_survives_floor_reanchor"
     [CF_PARK_CONTIG_UNFIXED]="park_never_jumps_past_requested"
+    [CF_PARK_LAG_UNFIXED]="park_lagging_stops_at_chain_start"
 )
-ARMS=(CF_FLOOR_MEMO_UNFIXED CF_BAND_KEPT_UNFIXED CF_PARK_CONTIG_UNFIXED)
+ARMS=(CF_FLOOR_MEMO_UNFIXED CF_BAND_KEPT_UNFIXED CF_PARK_CONTIG_UNFIXED CF_PARK_LAG_UNFIXED)
 GUARD_CASES=(band_not_carried_below_or_absent park_still_moves_back)
 
 shopt -s nullglob
@@ -61,6 +64,7 @@ seam() { if ! grep -q "$1" "$CORE_DIR/$2"; then echo "GATE FAILURE: $2 has no $1
 seam CF_FLOOR_MEMO_UNFIXED BRPeerManager.c
 seam CF_BAND_KEPT_UNFIXED BRPeerManager.c
 seam CF_PARK_CONTIG_UNFIXED BRPeerManager.c
+seam CF_PARK_LAG_UNFIXED BRPeerManager.c
 
 FAIL=0
 run_case() { OUT="$("$1" "$2" 2>&1)"; RC=$?; }
@@ -87,8 +91,12 @@ for a in "${ARMS[@]}"; do
     for c in ${RED[$a]}; do
         run_case "$BUILD_DIR/red_$a" "$c"
         if san; then echo "  [$a $c] GATE FAILURE: sanitizer report"; <<<"$OUT" grep -E "$SAN_RE" | head -3; FAIL=1
-        elif [ $RC -ne 0 ] && <<<"$OUT" grep -q "RESULT $c FAIL"; then
-            echo "  [$a $c] failed, as required: $(<<<"$OUT" grep -m1 '  FAIL' | sed 's/^ *FAIL *//')"
+        elif <<<"$OUT" grep -q '^  FAIL setup:'; then
+            # A red arm must fail on the case's invariant, not on its fixture: a broken setup is
+            # never evidence that the seam is load-bearing.
+            echo "  [$a $c] GATE FAILURE: failed in setup, not on its invariant"; <<<"$OUT" grep '^  FAIL setup:' | sed 's/^/      /'; FAIL=1
+        elif [ $RC -ne 0 ] && <<<"$OUT" grep -q "RESULT $c FAIL" && <<<"$OUT" grep -Eq '^  FAIL '; then
+            echo "  [$a $c] failed, as required: $(<<<"$OUT" grep -m1 '^  FAIL ' | sed 's/^ *FAIL *//')"
         else echo "  [$a $c] GATE FAILURE: passed in the earlier shape (rc=$RC) -- the seam is not load-bearing"; FAIL=1; fi
     done
     for c in "${GUARD_CASES[@]}"; do

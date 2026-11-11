@@ -370,6 +370,35 @@ static void case_park_never_jumps_past_requested(void)
     parkFxFree(&f);
 }
 
+// A ledger that lags below the filter-header chain's start (requestedThrough + 1 < chainStart).
+// Below chainStart no cfilter can be verified, so the cursor cannot resume at requestedThrough + 1;
+// but the in-chain heights [chainStart .. cp-1] can be, so the park must stop at chainStart rather
+// than jump to the checkpoint and carry scannedThrough over them unrequested.
+static void case_park_lagging_stops_at_chain_start(void)
+{
+    ParkFx f; parkFxInit(&f, /*belowCp=*/1000, /*aboveCp=*/200, /*evaluated=*/10);
+    BRPeerManager *m = f.m;
+    uint32_t L = f.chainStart - 50;   // the ledger armed 50 below the chain's start
+    BRCFScanLedgerInit(&m->cfLedger, L);
+    BRCFScanLedgerRecordRequested(&m->cfLedger, L, L + 9, UINT128_ZERO, 0, 1);
+    for (uint32_t h = L; h <= L + 9; h++) BRCFScanLedgerMarkEvaluated(&m->cfLedger, h);
+    m->autoFetchCFiltersStart = L; m->autoFetchCFiltersThrough = L + 9;
+    check(m->cfLedger.requestedThrough + 1 < f.chainStart, "setup: the ledger lags below the chain's start");
+    parkMismatch(&f);
+    check(m->cfReanchorCount == CF_CONTINUITY_REANCHOR_MAX && m->compactFilterChain != NULL,
+          "the exhausted-budget path parked (no re-anchor, chain kept)");
+    uint32_t r = resumeAt(m);
+    check(r == f.chainStart, "lagging park: the fetch cursor resumes at the chain's start, not the checkpoint");
+
+    uint32_t stop = r + 9;
+    BRCFScanLedgerRecordRequested(&m->cfLedger, r, stop, UINT128_ZERO, 0, 2);
+    for (uint32_t h = r; h <= stop; h++) BRCFScanLedgerMarkEvaluated(&m->cfLedger, h);
+    check(BRCFScanLedgerScannedThrough(&m->cfLedger) <= stop && stop < f.cpH,
+          "scannedThrough never covers the in-chain heights [chainStart .. cp-1] unrequested");
+    check(BRPeerManagerAbandonedBelow(m) == 0, "a lone disagreer still abandons nothing");
+    parkFxFree(&f);
+}
+
 // GUARD (every arm): a cursor already above the checkpoint still parks back AT the checkpoint.
 static void case_park_still_moves_back(void)
 {
@@ -389,6 +418,7 @@ static const Case CASES[] = {
     { "band_survives_floor_reanchor",          case_band_survives_floor_reanchor },
     { "band_not_carried_below_or_absent",      case_band_not_carried_below_or_absent },
     { "park_never_jumps_past_requested",       case_park_never_jumps_past_requested },
+    { "park_lagging_stops_at_chain_start",     case_park_lagging_stops_at_chain_start },
     { "park_still_moves_back",                 case_park_still_moves_back },
 };
 
