@@ -55,11 +55,11 @@ class StoreDurabilityTest {
     )
 
     private val stores = listOf(
-        Store("saved_filter_headers", { c, b -> FilterHeaderStore.write(c, b, FilterHeaderStore.currentEpoch()) },
+        Store("saved_filter_headers", { c, b -> FilterHeaderStore.write(c, b, FilterHeaderStore.currentEpoch()) == StoreWrite.LANDED },
             FilterHeaderStore::load, FilterHeaderStore::delete, "saved_filter_headers", ::filterChain),
-        Store("saved_blocks", { c, b -> SavedBlockStore.write(c, b, SavedBlockStore.currentEpoch()) },
+        Store("saved_blocks", { c, b -> SavedBlockStore.write(c, b, SavedBlockStore.currentEpoch()) == StoreWrite.LANDED },
             SavedBlockStore::load, SavedBlockStore::delete, "saved_blocks", ::savedBlocks),
-        Store("saved_cf_ledger", { c, b -> CfScanLedgerStore.write(c, b, CfScanLedgerStore.currentEpoch()) },
+        Store("saved_cf_ledger", { c, b -> CfScanLedgerStore.write(c, b, CfScanLedgerStore.currentEpoch()) == StoreWrite.LANDED },
             CfScanLedgerStore::load, CfScanLedgerStore::delete, null, ::ledger),
         Store("saved_transactions", { c, b -> SavedTransactionsStore.write(c, b, SavedTransactionsStore.currentEpoch()) },
             SavedTransactionsStore::load, { c -> SavedTransactionsStore.delete(c) }, null, ::transactions),
@@ -159,6 +159,52 @@ class StoreDurabilityTest {
             assertArrayEquals(s.base, bytes, s.load(c))
             assertArrayEquals("${s.base}: migrated once it can be", bytes, File(dir, "${s.base}.bin").readBytes())
             assertFalse("${s.base}: then the key goes", sync(c).contains(s.legacyKey))
+        }
+    }
+
+    @Test fun `a legacy key a failed migration kept goes once a later write lands`() {
+        for (s in stores.filter { it.legacyKey != null }) {
+            val c = ctx()
+            val bytes = s.blob(3)
+            sync(c).edit().putString(s.legacyKey, hex(bytes)).commit()
+            DurableFile.rename = { _, _ -> false }
+            assertArrayEquals(s.base, bytes, s.load(c))           // the migration write fails: key kept
+            DurableFile.rename = savedRename
+            assertTrue(s.base, sync(c).contains(s.legacyKey))
+            assertEquals(s.base, true, s.write(c, s.blob(4)))    // the coalesced writer / persistBlocks lands
+            assertFalse("${s.base}: a landed write leaves the legacy key pinned", sync(c).contains(s.legacyKey))
+            assertArrayEquals("${s.base}: the load reads the file", s.blob(4), s.load(c))
+        }
+    }
+
+    @Test fun `a readable legacy key beside a file is the newer copy`() {
+        for (s in stores.filter { it.legacyKey != null }) {
+            val c = ctx()
+            assertEquals(s.base, true, s.write(c, s.blob(2)))
+            sync(c).edit().putString(s.legacyKey, hex(s.blob(5))).commit()   // a downgraded build wrote it
+            assertArrayEquals(s.base, s.blob(5), s.load(c))
+            assertArrayEquals("${s.base}: the file is rewritten from it", s.blob(5), File(dir, "${s.base}.bin").readBytes())
+            assertFalse("${s.base}: then it goes", sync(c).contains(s.legacyKey))
+        }
+    }
+
+    @Test fun `a kill between the two removals of a delete leaves no tmp to recover`() {
+        val savedRemove = DurableFile.remove
+        try {
+            for (s in stores) {
+                val c = ctx()
+                assertEquals(s.base, true, s.write(c, s.blob(2)))
+                File(dir, "${s.base}.bin.tmp").writeBytes(s.blob(3))    // a complete tmp: recoverable
+                var removals = 0
+                DurableFile.remove = { f -> if (removals++ == 0) f.delete() else false } // killed after the first
+                s.delete(c)
+                DurableFile.remove = savedRemove
+                assertFalse("${s.base}: the tmp outlived a delete, and the next load would recover it",
+                    File(dir, "${s.base}.bin.tmp").exists())
+                assertFalse("${s.base}: the deleted data came back", s.load(c).contentEquals(s.blob(3)))
+            }
+        } finally {
+            DurableFile.remove = savedRemove
         }
     }
 

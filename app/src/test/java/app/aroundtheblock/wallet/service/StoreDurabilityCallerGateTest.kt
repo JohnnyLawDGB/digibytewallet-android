@@ -31,7 +31,7 @@ class StoreDurabilityCallerGateTest {
     @Test fun `the header and ledger stores are written only through the flush rule`() {
         val flushes = sync.calls("CfStateFlush.flush")
         assertEquals("one copy of the flush: flushCfState", 1, flushes.size)
-        assertTrue("CfStateFlush.flush is called outside flushCfState", flushes.single().range.first in body("private fun flushCfState()"))
+        assertTrue("CfStateFlush.flush is called outside flushCfState", flushes.single().range.first in body("private fun flushCfState("))
         for (store in listOf("FilterHeaderStore.write", "CfScanLedgerStore.write")) {
             val writes = sync.calls(store)
             assertEquals("$store: written once, inside the flush", 1, writes.size)
@@ -43,12 +43,12 @@ class StoreDurabilityCallerGateTest {
     }
 
     @Test fun `both flush sites re-mark dirty when something did not land`() {
-        for (site in listOf("private fun startFilterHeaderWriter()", "private fun flushFilterHeaders()")) {
+        for (site in listOf("private fun startFilterHeaderWriter()", "private fun flushFilterHeaders(")) {
             val range = body(site)
             assertEquals("$site must flush once", 1, sync.calls("flushCfState", range).size)
             val text = KotlinSourceGate.squeeze(sync.code.substring(range))
             assertTrue("$site does not re-mark dirty on a write that did not land: $text",
-                text.contains("val outcome = flushCfState()") && text.contains("if (!outcome.allLanded) filterHeadersDirty = true"))
+                text.contains("val outcome = flushCfState(") && text.contains("if (!outcome.allLanded) filterHeadersDirty = true"))
         }
         assertEquals("flushCfState has a caller besides the two flush sites", 2, sync.calls("flushCfState").size)
     }
@@ -60,13 +60,35 @@ class StoreDurabilityCallerGateTest {
         val tip = sync.written.indexOf("putLong(\"saved_blocks_tip\"", range.first)
         assertTrue("the tip is not recorded in persistBlocks", tip in range)
         val head = KotlinSourceGate.squeeze(sync.code.substring(range.first, write.range.first))
-        assertTrue("persistBlocks ignores whether the block window landed", head.endsWith("if (!"))
+        assertTrue("persistBlocks ignores what the block window's write answered", head.endsWith("when ("))
         val close = sync.code.indexOf(')', write.range.last + 1)
-        val branch = sync.blockAt(sync.code.indexOf('{', close))
-            ?: throw AssertionError("the failed write has no branch")
-        val leaving = KotlinSourceGate.squeeze(sync.code.substring(branch))
-        assertTrue("a window that did not land must leave persistBlocks: $leaving", leaving.contains("return false"))
-        assertTrue("the tip is recorded before the window's write answered", tip > branch.last)
+        val branches = sync.blockAt(sync.code.indexOf('{', close))
+            ?: throw AssertionError("the write's answer has no branches")
+        val text = KotlinSourceGate.squeeze(sync.code.substring(branches))
+        assertTrue("a window that failed must leave persistBlocks as a failure: $text",
+            Regex("""StoreWrite\.FAILED -> \{[^}]*return false \}""").containsMatchIn(text))
+        assertTrue("a stale (obsolete) window must leave persistBlocks, and is not a failure: $text",
+            text.contains("StoreWrite.OBSOLETE, StoreWrite.NONE -> return true"))
+        assertTrue("the tip is recorded before the window's write answered", tip > branches.last)
+    }
+
+    @Test fun `a ledger a delete made stale is not written and its gate is not run`() {
+        val flush = sync.calls("CfStateFlush.flush").single()
+        val ledger = flush.valueRange("ledger") ?: throw AssertionError("the flush is given no ledger")
+        val text = KotlinSourceGate.squeeze(sync.code.substring(ledger))
+        assertTrue("the pending ledger does not say whether a delete made it stale: $text",
+            text.contains("obsolete = { CfScanLedgerStore.currentEpoch() != ep }"))
+    }
+
+    @Test fun `the teardown flush runs off the main thread, bounded, in order`() {
+        val range = body("private fun flushForTeardownBounded()")
+        val text = KotlinSourceGate.squeeze(sync.code.substring(range))
+        assertTrue("the teardown flush must run on its own thread: $text", text.contains("Thread("))
+        assertTrue("onDestroy must wait for it at most the budget: $text", text.contains("worker.join(TEARDOWN_FLUSH_BUDGET_MS)"))
+        assertTrue("order: tx checkpoint -> ledger -> block window -> headers: $text",
+            text.contains("flushFilterHeaders(beforeHeaders = { flushLastBlockWindow("))
+        assertTrue("onDestroy no longer uses the bounded teardown flush",
+            sync.calls("flushForTeardownBounded", body("override fun onDestroy()")).size == 1)
     }
 
     @Test fun `has_synced waits for this flush's ledger write`() {

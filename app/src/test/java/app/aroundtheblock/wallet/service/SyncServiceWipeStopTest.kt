@@ -64,7 +64,13 @@ class SyncServiceWipeStopTest {
         val onDestroy = body("onDestroy")
         val branches = service.branchesOn("!stoodDownForWipe", onDestroy)
         assertTrue("onDestroy has no branch for a service that did not stand down", branches.isNotEmpty())
-        for (write in listOf("persistBlocks", "flushFilterHeaders", "persistPeerPenalties")) {
+        // STORE-DURABILITY: the block window and CF state are flushed through the bounded
+        // off-main-thread teardown flush, which writes the window and the CF state.
+        val teardown = body("flushForTeardownBounded")
+        for (write in listOf("flushLastBlockWindow", "flushFilterHeaders")) {
+            assertTrue("the teardown flush no longer writes through $write", service.calls(write, teardown).isNotEmpty())
+        }
+        for (write in listOf("flushForTeardownBounded", "persistPeerPenalties")) {
             val calls = service.calls(write, onDestroy)
             assertTrue("scanner is blind: onDestroy no longer calls $write", calls.isNotEmpty())
             val outside = calls.filterNot { c -> branches.any { c.range.first in it } }

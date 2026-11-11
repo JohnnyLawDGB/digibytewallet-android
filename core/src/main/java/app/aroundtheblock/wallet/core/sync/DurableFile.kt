@@ -1,5 +1,6 @@
 package app.aroundtheblock.wallet.core.sync
 
+import android.content.SharedPreferences
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.channels.FileChannel
@@ -27,6 +28,9 @@ object DurableFile {
 
     /** Test seam: the rename that publishes the tmp file. */
     @Volatile internal var rename: (File, File) -> Boolean = { from, to -> from.renameTo(to) }
+
+    /** Test seam: remove one file (the delete order is what a kill between two removals leaves). */
+    @Volatile internal var remove: (File) -> Boolean = { it.delete() }
 
     /** Test seam: make a rename into [dir] durable. */
     @Volatile internal var syncDir: (File?) -> Unit = { syncDirectory(it) }
@@ -68,8 +72,8 @@ object DurableFile {
      * tmp beside a missing live file, which the next load would recover as the deleted data.
      */
     fun delete(live: File, tmp: File) {
-        runCatching { tmp.delete() }
-        runCatching { live.delete() }
+        runCatching { remove(tmp) }
+        runCatching { remove(live) }
     }
 
     /** fsync a directory. Best-effort: a platform that cannot open a directory for sync is left as before. */
@@ -77,4 +81,52 @@ object DurableFile {
         if (dir == null) return
         runCatching { FileChannel.open(dir.toPath(), StandardOpenOption.READ).use { it.force(true) } }
     }
+
+    /**
+     * The one rule for a store's legacy SharedPreferences hex copy (the pre-file format, pinned in
+     * SharedPreferencesImpl's process-lifetime map, so it must not outlive its migration):
+     *  - a readable key is the NEWER copy, even beside a file: only an older build writes it, after a
+     *    downgrade. [load] rewrites the file from it and removes it once that write landed; a write
+     *    that failed keeps it, as the last good copy;
+     *  - an unusable key (empty, over [maxHex], not hex) is dropped, unless the store says otherwise;
+     *  - every write of the store that lands removes a key still present ([afterLanded]), so a key a
+     *    failed migration kept cannot stay pinned once the file is written some other way.
+     */
+    class LegacyKey(private val prefs: () -> SharedPreferences, private val key: String, private val maxHex: Int?) {
+        sealed class Read {
+            object Absent : Read()
+            object Unusable : Read()
+            class Usable(val bytes: ByteArray) : Read()
+        }
+
+        fun read(): Read {
+            val hex = runCatching { prefs().getString(key, null) }.getOrNull() ?: return Read.Absent
+            if (hex.isEmpty() || (maxHex != null && hex.length > maxHex)) return Read.Unusable
+            return FilterHeaderStore.decodeHexOrNull(hex)?.let { Read.Usable(it) } ?: Read.Unusable
+        }
+
+        fun remove() {
+            runCatching { prefs().edit().remove(key).apply() }
+        }
+
+        /** After a write of the store landed: the file is the newest copy now. */
+        fun afterLanded() {
+            if (runCatching { prefs().contains(key) }.getOrDefault(false)) remove()
+        }
+    }
+}
+
+/** What a store write did. Only [FAILED] means the latest state is not on disk and must be retried. */
+enum class StoreWrite {
+    /** The file now holds exactly these bytes. */
+    LANDED,
+    /** Not written: the write or its rename failed. The previous file is kept as it was. */
+    FAILED,
+    /** Not written, on purpose: a delete (reset, wipe) ran since the snapshot, so these bytes are stale. */
+    OBSOLETE,
+    /** Nothing was pending. */
+    NONE;
+
+    val failed: Boolean get() = this == FAILED
+
 }

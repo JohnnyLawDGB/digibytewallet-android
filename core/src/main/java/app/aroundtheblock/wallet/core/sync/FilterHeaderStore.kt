@@ -59,42 +59,43 @@ object FilterHeaderStore {
      * Persist the chain as raw bytes, durably ([DurableFile]: tmp, fsync, rename, directory fsync) — UNLESS a
      * [delete] has run since `snapshotEpoch` was taken, in which case the write is
      * dropped so a stale pre-reset chain can't be resurrected after the file was
-     * already deleted. Serialized with [delete] on [ioLock]. Returns true only when
-     * the file now holds [bytes]; on false the previous file is kept as it was (STORE-DURABILITY).
+     * already deleted. Serialized with [delete] on [ioLock]. Returns [StoreWrite.LANDED]
+     * when the file now holds [bytes], [StoreWrite.OBSOLETE] for a dropped stale snapshot (not a
+     * failure), and [StoreWrite.FAILED] with the previous file kept as it was (STORE-DURABILITY).
      */
-    fun write(ctx: Context, bytes: ByteArray, snapshotEpoch: Long): Boolean = synchronized(ioLock) {
-        if (epoch != snapshotEpoch) return false // a delete() invalidated this snapshot
-        writeLocked(ctx, bytes)
+    fun write(ctx: Context, bytes: ByteArray, snapshotEpoch: Long): StoreWrite = synchronized(ioLock) {
+        if (epoch != snapshotEpoch) return StoreWrite.OBSOLETE // a delete() invalidated this snapshot
+        if (writeLocked(ctx, bytes)) StoreWrite.LANDED else StoreWrite.FAILED
     }
 
+    private fun legacy(ctx: Context) = DurableFile.LegacyKey({ legacyPrefs(ctx) }, LEGACY_KEY, MAX_LEGACY_MIGRATE_HEX)
+
     /** STORE-DURABILITY ([DurableFile]): true only when the file now holds [bytes]; a failed write
-     *  leaves the previous file as it was. */
-    private fun writeLocked(ctx: Context, bytes: ByteArray): Boolean = DurableFile.write(file(ctx), tmpFile(ctx), bytes)
+     *  leaves the previous file as it was. A write that lands also removes a legacy key still there. */
+    private fun writeLocked(ctx: Context, bytes: ByteArray): Boolean =
+        DurableFile.write(file(ctx), tmpFile(ctx), bytes).also { landed -> if (landed) legacy(ctx).afterLanded() }
 
     /**
-     * Load the chain for restore: prefer the file; then a complete tmp file (a write
-     * that synced but was killed before its rename, recovered into place); otherwise a
-     * one-time migration from the legacy prefs hex (capped). The leaky legacy key is
-     * dropped when it is unusable (empty, oversized, not hex) or once the file holding it
-     * landed; a migration write that fails keeps it, as the last good copy
-     * (STORE-DURABILITY). Returns null if none / dropped.
+     * Load the chain for restore, by the one legacy-key rule ([DurableFile.LegacyKey]): a
+     * readable legacy hex key (capped) is the newer copy, rewritten to the file and removed
+     * once that write landed (a failed write keeps it, as the last good copy); an unusable
+     * one is dropped. Then the file; then a complete tmp file (a write that synced but was
+     * killed before its rename, recovered into place). Returns null if none / dropped.
      */
     fun load(ctx: Context): ByteArray? = synchronized(ioLock) {
         val f = file(ctx)
+        // The legacy key first ([DurableFile.LegacyKey]): a readable one is the newer copy.
+        when (val key = legacy(ctx).read()) {
+            is DurableFile.LegacyKey.Read.Usable -> {
+                writeLocked(ctx, key.bytes) // removes the key only if the file landed
+                return key.bytes
+            }
+            DurableFile.LegacyKey.Read.Unusable -> legacy(ctx).remove()
+            DurableFile.LegacyKey.Read.Absent -> Unit
+        }
         if (f.exists()) return runCatching { f.readBytes() }.getOrNull()
         // STORE-DURABILITY: a write that synced its tmp but was killed before the rename.
-        DurableFile.recoverTmp(f, tmpFile(ctx), ::isComplete)?.let { recovered ->
-            runCatching { legacyPrefs(ctx).edit().remove(LEGACY_KEY).apply() } // older than the file
-            return recovered
-        }
-        val legacyHex = runCatching { legacyPrefs(ctx).getString(LEGACY_KEY, null) }.getOrNull()
-        val bytes = legacyHex?.takeIf { it.isNotEmpty() && it.length <= MAX_LEGACY_MIGRATE_HEX }?.let { decodeHexOrNull(it) }
-        // Drop the leaky legacy key (frees the pinned in-memory hex floor) when it is unusable or once
-        // the file holding it landed. A migration write that failed keeps it: it is the last good copy.
-        if (bytes == null || writeLocked(ctx, bytes)) {
-            runCatching { legacyPrefs(ctx).edit().remove(LEGACY_KEY).apply() }
-        }
-        bytes
+        DurableFile.recoverTmp(f, tmpFile(ctx), ::isComplete)
     }
 
     /** Delete the persisted chain (file, tmp, and legacy prefs key). Used on re-anchor /
@@ -157,9 +158,9 @@ object FilterHeaderStore {
         return b.size.toLong() == CHAIN_HEADER_LEN + 32L * b.u32(42)
     }
 
-    private const val CHAIN_MAGIC = 0x46434243L // "BCFC", BRCompactFilterChain.c
-    private const val CHAIN_VERSION = 1
-    private const val CHAIN_HEADER_LEN = 46L
+    internal const val CHAIN_MAGIC = 0x46434243L // "BCFC", BRCompactFilterChain.c
+    internal const val CHAIN_VERSION = 1
+    internal const val CHAIN_HEADER_LEN = 46L
 
     private fun ByteArray.u32(at: Long): Long = (this[at.toInt()].toLong() and 0xffL) or
         ((this[at.toInt() + 1].toLong() and 0xffL) shl 8) or

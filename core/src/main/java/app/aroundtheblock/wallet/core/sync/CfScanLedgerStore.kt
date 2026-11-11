@@ -42,12 +42,13 @@ object CfScanLedgerStore {
      * Persist the ledger as raw bytes, durably ([DurableFile]: tmp, fsync, rename, directory fsync) — UNLESS a
      * [delete] has run since `snapshotEpoch` was taken, in which case the write is
      * dropped so a stale pre-reset ledger can't be resurrected after the file was
-     * already deleted. Serialized with [delete] on [ioLock]. Returns true only when
-     * the file now holds [bytes]; on false the previous file is kept as it was (STORE-DURABILITY).
+     * already deleted. Serialized with [delete] on [ioLock]. Returns [StoreWrite.LANDED]
+     * when the file now holds [bytes], [StoreWrite.OBSOLETE] for a dropped stale snapshot (not a
+     * failure), and [StoreWrite.FAILED] with the previous file kept as it was (STORE-DURABILITY).
      */
-    fun write(ctx: Context, bytes: ByteArray, snapshotEpoch: Long): Boolean = synchronized(ioLock) {
-        if (epoch != snapshotEpoch) return false // a delete() invalidated this snapshot
-        DurableFile.write(file(ctx), tmpFile(ctx), bytes)
+    fun write(ctx: Context, bytes: ByteArray, snapshotEpoch: Long): StoreWrite = synchronized(ioLock) {
+        if (epoch != snapshotEpoch) return StoreWrite.OBSOLETE // a delete() invalidated this snapshot
+        if (DurableFile.write(file(ctx), tmpFile(ctx), bytes)) StoreWrite.LANDED else StoreWrite.FAILED
     }
 
     /**
@@ -97,7 +98,7 @@ object CfScanLedgerStore {
         val len = b.size.toLong()
         if (len < 24L || b.u32(0) != LEDGER_MAGIC) return false
         val version = b.u32(4)
-        if (version !in 1L..3L) return false
+        if (version !in 1L..LEDGER_VERSION_MAX) return false
         val header = if (version >= 2L) 28L else 24L
         if (len < header) return false
         val outEntry = if (version >= 3L) 6L else 5L
@@ -107,7 +108,11 @@ object CfScanLedgerStore {
         return parkedAt + 4L + b.u32(parkedAt) * parkedEntry == len
     }
 
-    private const val LEDGER_MAGIC = 0x43464C31L // "CFL1", BRCFScanLedger.c
+    internal const val LEDGER_MAGIC = 0x43464C31L // "CFL1", BRCFScanLedger.c
+
+    /** The newest ledger version BRCFScanLedgerParse reads (BR_CF_RESTORE_LEDGER_VERSION_MAX); pinned to the C
+     *  header by StoreBlobCompletenessTest, so a version bump fails a test instead of silently ending tmp recovery. */
+    internal const val LEDGER_VERSION_MAX = 3L
 
     private fun ByteArray.u32(at: Long): Long = (this[at.toInt()].toLong() and 0xffL) or
         ((this[at.toInt() + 1].toLong() and 0xffL) shl 8) or
