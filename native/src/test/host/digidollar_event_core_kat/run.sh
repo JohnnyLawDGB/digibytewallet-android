@@ -82,6 +82,10 @@ WALLET_CASES=(
     wallet_self_transfer:fail
     wallet_plain_dgb:pass
     wallet_no_answer:pass
+    wallet_redeemed:fail
+    wallet_redeemed_second_output:fail
+    wallet_received_others_output:pass
+    wallet_received_missing_output:pass
 )
 
 # ---- the seam is real ----------------------------------------------------------------------

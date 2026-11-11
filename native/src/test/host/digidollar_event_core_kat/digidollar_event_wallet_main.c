@@ -18,10 +18,32 @@
 //   wallet_no_answer       a hash the wallet does not hold, a NULL wallet and a NULL out answer 0 and leave
 //                          out untouched; a NULL wallet or tx is NONE.
 //
+// The four below pin what the wallet answers for an input: whether it spends one of the wallet's outputs,
+// and the cents that output held. A redemption is the one row that shows those cents (burned = spent less
+// change), so the amount is read through one; a transfer that pays the wallet is RECEIVED only while none
+// of its inputs is taken for the wallet's, so the ownership is read through one.
+//
+//   wallet_redeemed        a redemption that spends the $100.00 coin and brings $40.00 back is REDEEMED
+//                          $60.00 with $40.00 change: the cents are the spent output's, and the DGB coin
+//                          beside it adds none.
+//   wallet_redeemed_second_output
+//                          the same for a coin held at output 1 ($75.00), beside another key's $25.00 at
+//                          output 0 of the same transaction: REDEEMED $65.00 with $10.00 change. The cents
+//                          are those of the output the input names.
+//   wallet_received_others_output
+//                          a transfer that spends that other key's output 0 and pays the wallet $25.00 is
+//                          RECEIVED $25.00: an output of a transaction the wallet holds is the wallet's
+//                          only when its address is.
+//   wallet_received_missing_output
+//                          a transfer whose inputs name outputs 2, 7 and 0xffffffff of a held transaction
+//                          that has outputs 0 and 1, and that pays the wallet $40.00, is RECEIVED $40.00:
+//                          an output the transaction does not have is not read and is nobody's.
+//
 // RED (comparison arm, -DDIGIDOLLAR_EVENT_UNFIXED=1): the rule before read the direction from the DGB
-// movement, which the wallet's answers do not carry: the sent transfer reads "received $60.00" and the
-// transfer to self "received $100.00". wallet_sent and wallet_self_transfer must fail in that arm; the
-// other three are guards and hold in both.
+// movement, which the wallet's answers do not carry: the sent transfer reads "received $60.00", the
+// transfer to self "received $100.00" and the two redemptions "received $40.00" and "received $10.00".
+// wallet_sent, wallet_self_transfer, wallet_redeemed and wallet_redeemed_second_output must fail in that
+// arm; the other five are guards and hold in both.
 //
 // One case per process (argv[1]); "list" names them. Each case prints RESULT <case> pass|fail.
 #include <stdio.h>
@@ -221,6 +243,149 @@ static void wallet_no_answer(void)
     BRWalletFree(w);
 }
 
+// The DigiDollar token script of `key`: OP_1 <32-byte key>.
+static void ddScript(uint8_t spk[34], const uint8_t key[32])
+{
+    spk[0] = 0x51; spk[1] = 0x20;
+    memcpy(spk + 2, key, 32);
+}
+
+// A confirmed transfer the wallet did not pay for, registered with it: output 0 pays another key $25.00,
+// output 1 the wallet's key `own` $75.00, output 2 is the amount list. 1 with *hash set once the wallet
+// holds it.
+static int holdSplit(BRWallet *w, const uint8_t own[32], UInt256 *hash)
+{
+    uint8_t spk[34];
+    BRTransaction *tx = BRTransactionNew();
+    UInt256 ph;
+    memset(ph.u8, 0x22, sizeof(ph.u8));
+    tx->version = 0x02000770;
+    BRTransactionAddInput(tx, ph, 0, 0, NULL, 0, kPlaceholder, 0, kPlaceholder, 0, 0xffffffff);
+    ddScript(spk, kRecip);
+    BRTransactionAddOutput(tx, 0, spk, sizeof(spk));
+    ddScript(spk, own);
+    BRTransactionAddOutput(tx, 0, spk, sizeof(spk));
+    // "DD" type 2 [c4 09 = 0x09c4 = 2500 c, 4c 1d = 0x1d4c = 7500 c]
+    const uint8_t orr[12] = { 0x6a, 0x02, 0x44, 0x44, 0x01, 0x02, 0x02, 0xc4, 0x09, 0x02, 0x4c, 0x1d };
+    BRTransactionAddOutput(tx, 0, orr, sizeof(orr));
+    tx->blockHeight = 23700001;
+    finalizeTxHash(tx);
+    *hash = tx->txHash;
+    if (BRWalletRegisterTransaction(w, tx)) return 1;   // the wallet's now
+    BRTransactionFree(tx);
+    return 0;
+}
+
+// A redemption, not registered: it spends a collateral vault the wallet does not hold, the DigiDollar coin
+// `coin`:`n` and the DGB coin `dgb`:0; the collateral's DGB comes back at output 0, DigiDollar change to
+// the wallet's key `own` at output 1, and output 2 is `orr`, the "DD" type 3 list with that change.
+static BRTransaction *redemption(BRWallet *w, UInt256 coin, uint32_t n, UInt256 dgb, const uint8_t own[32],
+                                 const uint8_t *orr, size_t orrLen)
+{
+    uint8_t spk[34], dspk[64];
+    BRAddress da = BRWalletReceiveAddress(w, 1);
+    size_t dspkLen = BRAddressScriptPubKey(dspk, sizeof(dspk), da.s);
+    BRTransaction *tx = BRTransactionNew();
+    UInt256 vault;
+    memset(vault.u8, 0xD0, sizeof(vault.u8));
+    tx->version = 0x03000770;
+    BRTransactionAddInput(tx, vault, 0, 0, NULL, 0, NULL, 0, NULL, 0, 0xffffffff);
+    BRTransactionAddInput(tx, coin, n, 0, NULL, 0, NULL, 0, NULL, 0, 0xffffffff);
+    BRTransactionAddInput(tx, dgb, 0, 0, NULL, 0, NULL, 0, NULL, 0, 0xffffffff);
+    BRTransactionAddOutput(tx, 6010000000ULL, dspk, dspkLen);
+    ddScript(spk, own);
+    BRTransactionAddOutput(tx, 0, spk, sizeof(spk));
+    BRTransactionAddOutput(tx, 0, orr, orrLen);
+    return tx;
+}
+
+static void wallet_redeemed(void)
+{
+    UInt256 ddHash, dgbHash;
+    uint8_t own[32];
+    BRWallet *w = ddWallet(50000000, &ddHash, &dgbHash);
+    ck(ownKey(w, own), "setup: the wallet's own DigiDollar key");
+    const uint8_t orr[9] = { 0x6a, 0x02, 0x44, 0x44, 0x01, 0x03, 0x02, 0xa0, 0x0f };   // type 3 [a0 0f = 0x0fa0 = 4000 c]
+    BRTransaction *tx = redemption(w, ddHash, 0, dgbHash, own, orr, sizeof(orr));
+    ck(BRDigiDollarOutputAmount(tx, 1) == 4000, "setup: the redemption's change decodes, $40.00 at output 1");
+    // Spent: output 0 of the transaction that paid the wallet, 10000 c (its list is [10 27 = 0x2710]); the
+    // vault and the DGB coin hold none. Paid back: 4000 c. Burned: 10000 - 4000 = 6000 c.
+    expect(BRWalletDigiDollarEvent(w, tx), 5, 6000, 4000, "a redemption of $60.00 of the wallet's $100.00 coin");
+    BRTransactionFree(tx);
+    BRWalletFree(w);
+}
+
+static void wallet_redeemed_second_output(void)
+{
+    UInt256 ddHash, dgbHash, splitHash;
+    uint8_t own[32];
+    BRWallet *w = ddWallet(50000000, &ddHash, &dgbHash);
+    ck(ownKey(w, own), "setup: the wallet's own DigiDollar key");
+    int held = holdSplit(w, own, &splitHash);
+    ck(held, "setup: the wallet holds a transfer that paid another key $25.00 at output 0 and it $75.00 at output 1");
+    if (!held) { BRWalletFree(w); return; }
+    const uint8_t orr[9] = { 0x6a, 0x02, 0x44, 0x44, 0x01, 0x03, 0x02, 0xe8, 0x03 };   // type 3 [e8 03 = 0x03e8 = 1000 c]
+    BRTransaction *tx = redemption(w, splitHash, 1, dgbHash, own, orr, sizeof(orr));
+    ck(BRDigiDollarOutputAmount(tx, 1) == 1000, "setup: the redemption's change decodes, $10.00 at output 1");
+    // Spent: output 1 of the held transfer, the second amount of its list, 7500 c (output 0, the first,
+    // 2500 c, is another key's and is not spent). Paid back: 1000 c. Burned: 7500 - 1000 = 6500 c.
+    expect(BRWalletDigiDollarEvent(w, tx), 5, 6500, 1000, "a redemption of $65.00 of the wallet's $75.00 coin at output 1");
+    BRTransactionFree(tx);
+    BRWalletFree(w);
+}
+
+static void wallet_received_others_output(void)
+{
+    UInt256 ddHash, dgbHash, splitHash;
+    uint8_t own[32], spk[34];
+    BRWallet *w = ddWallet(50000000, &ddHash, &dgbHash);
+    ck(ownKey(w, own), "setup: the wallet's own DigiDollar key");
+    int held = holdSplit(w, own, &splitHash);
+    ck(held, "setup: the wallet holds a transfer that paid another key $25.00 at output 0 and it $75.00 at output 1");
+    if (!held) { BRWalletFree(w); return; }
+    // The other key spends its $25.00 (output 0 of the held transfer) and pays the wallet all of it. The
+    // wallet holds the transaction the input names, but not that output: it paid for nothing here, and
+    // its one DigiDollar output is 2500 c.
+    BRTransaction *tx = BRTransactionNew();
+    tx->version = 0x02000770;
+    BRTransactionAddInput(tx, splitHash, 0, 0, NULL, 0, NULL, 0, NULL, 0, 0xffffffff);
+    ddScript(spk, own);
+    BRTransactionAddOutput(tx, 0, spk, sizeof(spk));
+    const uint8_t orr[9] = { 0x6a, 0x02, 0x44, 0x44, 0x01, 0x02, 0x02, 0xc4, 0x09 };   // type 2 [c4 09 = 0x09c4 = 2500 c]
+    BRTransactionAddOutput(tx, 0, orr, sizeof(orr));
+    expect(BRWalletDigiDollarEvent(w, tx), 3, 2500, 0,
+           "a payment of $25.00 that spends another key's output of a held transaction");
+    BRTransactionFree(tx);
+    BRWalletFree(w);
+}
+
+static void wallet_received_missing_output(void)
+{
+    UInt256 ddHash, dgbHash;
+    uint8_t own[32], spk[34];
+    BRWallet *w = ddWallet(50000000, &ddHash, &dgbHash);
+    ck(ownKey(w, own), "setup: the wallet's own DigiDollar key");
+    BRTransaction *held = BRWalletCopyTransactionForHash(w, ddHash);
+    ck(held != NULL && held->outCount == 2, "setup: the transaction that paid the wallet $100.00 has outputs 0 and 1");
+    if (held) BRTransactionFree(held);
+    // Three inputs name that transaction, at the output just past its last, at 7 and at 0xffffffff. It has
+    // none of them, so no input spends the wallet's: it paid for nothing here, and its one DigiDollar
+    // output is 4000 c.
+    BRTransaction *tx = BRTransactionNew();
+    tx->version = 0x02000770;
+    BRTransactionAddInput(tx, ddHash, 2, 0, NULL, 0, NULL, 0, NULL, 0, 0xffffffff);
+    BRTransactionAddInput(tx, ddHash, 7, 0, NULL, 0, NULL, 0, NULL, 0, 0xffffffff);
+    BRTransactionAddInput(tx, ddHash, 0xffffffffu, 0, NULL, 0, NULL, 0, NULL, 0, 0xffffffff);
+    ddScript(spk, own);
+    BRTransactionAddOutput(tx, 0, spk, sizeof(spk));
+    const uint8_t orr[9] = { 0x6a, 0x02, 0x44, 0x44, 0x01, 0x02, 0x02, 0xa0, 0x0f };   // type 2 [a0 0f = 0x0fa0 = 4000 c]
+    BRTransactionAddOutput(tx, 0, orr, sizeof(orr));
+    expect(BRWalletDigiDollarEvent(w, tx), 3, 4000, 0,
+           "a payment of $40.00 whose inputs name outputs a held transaction does not have");
+    BRTransactionFree(tx);
+    BRWalletFree(w);
+}
+
 typedef struct { const char *name; void (*run)(void); } Case;
 static const Case kCases[] = {
     { "wallet_received", wallet_received },
@@ -228,6 +393,10 @@ static const Case kCases[] = {
     { "wallet_self_transfer", wallet_self_transfer },
     { "wallet_plain_dgb", wallet_plain_dgb },
     { "wallet_no_answer", wallet_no_answer },
+    { "wallet_redeemed", wallet_redeemed },
+    { "wallet_redeemed_second_output", wallet_redeemed_second_output },
+    { "wallet_received_others_output", wallet_received_others_output },
+    { "wallet_received_missing_output", wallet_received_missing_output },
 };
 
 int main(int argc, char **argv)
