@@ -13,8 +13,10 @@
 #            BR_SPEND_GUARD_UNFIXED=1                 the guard allows everything
 #            BR_SIGNED_SPEND_GATE_UNFIXED=1           the gate lets everything through
 #            BR_SIGNED_SPEND_GATE_RED_NO_RECHECK      no second spent-set check after the claim
-#   RED    BR_COIN_RESERVATION_RED_NO_LOCK (ThreadSanitizer): the table's mutex is not taken; TSan must report a data race
-#          in BRCoinReservation.c. (The scenarios' answers are not required to differ: a race need not show in one run.)
+#   RED    BR_COIN_RESERVATION_RED_NO_LOCK (ThreadSanitizer): the table's mutex is not taken; TSan must report a data race.
+#          The macro reaches the core's units only and the same units with the lock are the TSan green arm, which must
+#          be clean, so the race is the core's. (The scenarios' answers are not required to differ: a race need not show
+#          in one run.)
 #   GATES  the two headers compile clean under -Wall -Wextra -Wpedantic -Werror, each included twice, and
 #          BRCoinReservation.c under the same flags; the bridge's constants equal the core's (_Static_assert in _main.c).
 set -uo pipefail   # NOT -e: a comparison arm's non-zero exit is captured
@@ -85,7 +87,9 @@ build() {
 SAN_RE='ERROR: AddressSanitizer|ERROR: LeakSanitizer|runtime error:|WARNING: ThreadSanitizer'
 export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1"
 export UBSAN_OPTIONS="halt_on_error=1 print_stacktrace=1"
-export TSAN_OPTIONS="halt_on_error=0 exitcode=66"
+# symbolize=0: a report is judged by its warning line, never by a file name in its summary, so no arm waits on a
+# symbolizer (macOS's atos can hang until the time limit).
+export TSAN_OPTIONS="halt_on_error=0 exitcode=66 symbolize=0"
 FAIL=0
 
 run_arm() {   # $1 bin -> sets OUT, RC
@@ -151,11 +155,10 @@ if [ "$HAVE_TSAN" -eq 1 ]; then
     build "$BUILD_DIR/red_NO_LOCK" TSAN -DBR_COIN_RESERVATION_RED_NO_LOCK || { echo "GATE FAILURE: the NO_LOCK arm did not build"; FAIL=1; }
     if [ -x "$BUILD_DIR/red_NO_LOCK" ]; then
         run_arm "$BUILD_DIR/red_NO_LOCK"
-        if <<<"$OUT" grep -Eq "^SUMMARY: ThreadSanitizer: data race (.*/)?BRCoinReservation\.c:" \
-           && ! <<<"$OUT" grep -Eq "^SUMMARY: ThreadSanitizer: data race (.*/)?coin_reservation\.c:"; then
-            echo "  [red BR_COIN_RESERVATION_RED_NO_LOCK] ThreadSanitizer reports a data race in BRCoinReservation.c, none in the bridge's"
+        if <<<"$OUT" grep -q "WARNING: ThreadSanitizer: data race"; then
+            echo "  [red BR_COIN_RESERVATION_RED_NO_LOCK] ThreadSanitizer reports a data race with the core's lock not taken"
         else
-            echo "GATE FAILURE: the NO_LOCK arm (rc=$RC): no ThreadSanitizer race reported in BRCoinReservation.c"
+            echo "GATE FAILURE: the NO_LOCK arm (rc=$RC): ThreadSanitizer reported no data race"
             <<<"$OUT" grep -E "ThreadSanitizer|SCENARIO-FAIL" | head -6; FAIL=1
         fi
     fi
