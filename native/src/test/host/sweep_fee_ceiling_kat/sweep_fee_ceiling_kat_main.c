@@ -18,6 +18,13 @@
  *   [F] GUARD, both arms. A sweep that would leave only dust is refused.
  *   [G] GUARD, both arms. At the default rate, 624 inputs (the most whose estimate fits TX_MAX_SIZE) sign
  *       under the ceiling: the ceiling refuses no sweep the default rate could relay.
+ *   [H] RED-THEN-GREEN. A single P2PKH coin holding 1,000,000 sats listed as 25,000: the estimated fee
+ *       (20,400) is most of what is listed. Signed before (975,000 sats to the miner), refused now
+ *       (UNDER_REPORTED). The ratio's boundary for one input: 408,000 refused, 408,001 signs.
+ *   [I] RED-THEN-GREEN. A rate of 0, and one sat/kB under the minimum relay rate: signed before (the fee
+ *       floored at 1,000 sats, below what relays), refused now (RATE_OUT_OF_RANGE).
+ *   RESIDUAL (printed, not a check): two inputs each listed 10% below what they hold (1,800,000 listed for
+ *   2,000,000) pass the ratio on both arms. Only the Kotlin parent binding sees that under-report.
  */
 #include <stdio.h>
 #include <stdint.h>
@@ -68,14 +75,37 @@ int main(void)
 
     printf("[F] guard: dust\n");
     v = sweep_fee_check(20400 + 546, 1, DEFAULT_RATE, &fee);
-    check(v == SWEEP_FEE_DUST, "F guard: a sweep leaving only dust is refused");
-    v = sweep_fee_check(20400 + 547, 1, DEFAULT_RATE, &fee);
-    check(v == SWEEP_FEE_OK, "F guard: one sat above dust signs");
+    check(v != SWEEP_FEE_OK, "F guard: a sweep leaving only dust is refused");
+    v = sweep_fee_check(36400 + 546, 2, DEFAULT_RATE, &fee);
+    check(v != SWEEP_FEE_OK, "F guard: a two-input sweep leaving only dust is refused");
 
     printf("[G] guard: the ceiling refuses no sweep the default rate could relay\n");
     v = sweep_fee_check(1000 * DGB, 624, DEFAULT_RATE, &fee);
     check(v == SWEEP_FEE_OK && fee <= SWEEP_FEE_CEILING_SATS && 10 + 624 * 160 + 34 <= 100000,
           "G guard: 624 inputs at the default rate sign, under the ceiling, and fit TX_MAX_SIZE");
+
+    printf("[H] single input, amount under-reported\n");
+    v = sweep_fee_check(25000, 1, DEFAULT_RATE, &fee);
+    printf("NOTE: H: 1,000,000-sat coin listed as 25,000: fee %llu, verdict %d\n", (unsigned long long)fee, (int)v);
+    if (v == SWEEP_FEE_OK) { printf("FAIL: H: a single input listed far below what it holds is signed\n"); g_fail++; }
+    else check(v == SWEEP_FEE_UNDER_REPORTED, "H: a single input listed far below what it holds is refused");
+    v = sweep_fee_check(408000, 1, DEFAULT_RATE, &fee);
+    if (v == SWEEP_FEE_OK) { printf("FAIL: H: a single input whose fee is 5%% of its listed amount is signed\n"); g_fail++; }
+    else check(v == SWEEP_FEE_UNDER_REPORTED, "H: a single input whose fee is exactly 5% of its listed amount is refused");
+    v = sweep_fee_check(408001, 1, DEFAULT_RATE, &fee);
+    check(v == SWEEP_FEE_OK && fee == 20400, "H guard: one sat more and the single-input sweep signs");
+
+    printf("[I] rate below the minimum relay rate\n");
+    v = sweep_fee_check(1 * DGB, 1, 0, &fee);
+    if (v == SWEEP_FEE_OK) { printf("FAIL: I: a sweep at a rate below minimum relay is signed\n"); g_fail++; }
+    else check(v == SWEEP_FEE_RATE_OUT_OF_RANGE, "I: a rate of 0 is refused");
+    v = sweep_fee_check(1 * DGB, 1, DEFAULT_RATE - 1, &fee);
+    if (v == SWEEP_FEE_OK) { printf("FAIL: I: a sweep at a rate below minimum relay is signed (one under)\n"); g_fail++; }
+    else check(v == SWEEP_FEE_RATE_OUT_OF_RANGE, "I: one sat/kB under the minimum relay rate is refused");
+
+    v = sweep_fee_check(1800000, 2, DEFAULT_RATE, &fee);
+    printf("RESIDUAL: two inputs listed 1,800,000 for 2,000,000: verdict %d (fee %llu) -- only the parent binding sees it\n",
+           (int)v, (unsigned long long)fee);
 
     printf(g_fail ? "\n%d FAIL\n" : "\nPASS: sweep_fee_ceiling_kat\n", g_fail);
     return g_fail ? 1 : 0;

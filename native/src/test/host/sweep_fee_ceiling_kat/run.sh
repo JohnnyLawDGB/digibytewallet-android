@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # sweep_fee_ceiling_kat -- SWEEP-ABS-CEIL: the legacy sweep's native backstop bounds the fee for single-input
 # sweeps too (an absolute ceiling, not an exemption). See the _main.c for the cases.
-#   RED    -DSWEEP_ABS_CEIL_UNFIXED=1: the guard before this item. Cases A-C must FAIL on their named checks;
-#          every guard (D-G) must still pass.
+#   RED    -DSWEEP_ABS_CEIL_UNFIXED=1: the guard before this item. Cases A-C, H and I must FAIL on their
+#          named checks; every guard (D-G, H's boundary guard) must still pass.
 #   GREEN  every check passes; no sanitizer report. 64- and 32-bit.
 # Then a SOURCE GATE over the real jni_derive.c: buildAndSignLegacySweep takes its fee from sweep_fee_check,
 # refuses on any verdict but OK before it signs, and keeps no inline single-input exemption.
@@ -32,6 +32,10 @@ RED_MUST_FAIL=(
     "^FAIL: A: a single-input sweep paying"
     "^FAIL: B: a single-input sweep above the rate ceiling is signed"
     "^FAIL: C: a sweep paying more than the absolute ceiling is signed"
+    "^FAIL: H: a single input listed far below what it holds is signed"
+    "^FAIL: H: a single input whose fee is 5% of its listed amount is signed"
+    "^FAIL: I: a sweep at a rate below minimum relay is signed$"
+    "^FAIL: I: a sweep at a rate below minimum relay is signed (one under)"
 )
 for bits in 64 32; do
     build "$BUILD_DIR/red$bits" 1 "$bits" || { echo "GATE FAILURE: red$bits did not build (not evidence)"; FAIL=1; continue; }
@@ -40,7 +44,7 @@ for bits in 64 32; do
     [ "$RC" -ne 0 ] && [ "$RC" -ne 124 ] || ok=0
     <<<"$OUT" grep -qE "$SAN_RE" && ok=0
     for want in "${RED_MUST_FAIL[@]}"; do <<<"$OUT" grep -q "$want" || { echo "  [red$bits] did not fail: $want"; ok=0; }; done
-    EXTRA="$(<<<"$OUT" grep "^FAIL" | grep -vE "^FAIL: (A|B|C): ")"
+    EXTRA="$(<<<"$OUT" grep "^FAIL" | grep -vE "^FAIL: (A|B|C|H|I): ")"
     [ -z "$EXTRA" ] || { echo "  [red$bits] an unexpected check failed: $EXTRA"; ok=0; }
     if [ "$ok" -eq 1 ]; then echo "  [red$bits] ${#RED_MUST_FAIL[@]} named checks failed, as required; guards held"
     else echo "GATE FAILURE: red$bits (rc=$RC)"; <<<"$OUT" grep -E "FAIL|ERROR|runtime" | head; FAIL=1; fi
@@ -83,5 +87,5 @@ else
 fi
 if [ "$gate_fail" -eq 0 ]; then echo "  gate: buildAndSignLegacySweep takes its fee from sweep_fee_check and refuses before building and signing"
 else echo "SOURCE GATE FAILED"; FAIL=1; fi
-[ "$FAIL" -eq 0 ] && { echo "PASS: sweep_fee_ceiling_kat (A-C red-then-green; D-G guards; 64/32-bit, ASan+UBSan; source gate)"; exit 0; }
+[ "$FAIL" -eq 0 ] && { echo "PASS: sweep_fee_ceiling_kat (A-C, H, I red-then-green; D-G guards; 64/32-bit, ASan+UBSan; source gate)"; exit 0; }
 echo "FAIL: sweep_fee_ceiling_kat"; exit 1

@@ -599,9 +599,11 @@ NativeBridge_buildAndSignLegacySweep(
      * The legacy P2PKH sighash does NOT commit to input amounts, so a stale or under-reported
      * amounts[] still produces a VALID signature, and the unreported remainder is paid to the miner
      * (bug #2). Kotlin binds each parent to its txid and reads the amount from it; this is the
-     * backstop. The fee is the size estimate at feePerKb, and it is bounded for EVERY sweep: the rate
-     * is in range, the fee is under an absolute ceiling (single-input sweeps included), a multi-input
-     * fee is under 5% of the listed total, and more than dust is left. */
+     * backstop, and the same bounds apply to EVERY sweep, single-input sweeps included: the rate is
+     * within [minimum relay, 10x default], the fee is under an absolute ceiling, the fee is under 5% of
+     * the listed total (an under-report big enough to make the estimated fee a large share of what is
+     * listed is refused), and more than dust is left. An under-report smaller than that is a stated
+     * residual: only the Kotlin parent binding sees it (sweep_fee_guard.h). */
     uint64_t fee = 0;
     const SweepFeeVerdict feeVerdict = sweep_fee_check(totalIn, (size_t)inputCount, (int64_t)feePerKb, &fee);
     if (feeVerdict != SWEEP_FEE_OK) {
