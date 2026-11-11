@@ -12,8 +12,9 @@ import java.io.File
  * A source scan, not a KAT: the bridge files include <jni.h> and <android/log.h> and do not build on
  * the host. Each `LOGx(` / `__android_log_print(` / `_peer_log(` call is collected to its balancing
  * paren, and fails if it
- *  - formats a 64-bit integer (`%llu`, `%lld`, `%lu`, `PRIu64`): every amount in this code is a
- *    uint64_t / jlong, while counts and indices are cast to int, so the specifier is the amount; or
+ *  - formats a 64-bit or size_t integer (`%llu`, `%12llu`, `%08llx`, `%zu`, `PRIu64`) or a floating
+ *    point value (`%f`): every amount in this code is a uint64_t / jlong (or a double in DGB), while
+ *    counts and indices are cast to int, so the specifier is the amount; or
  *  - passes an argument named like an amount, address, outpoint, txid or script, unless it goes
  *    through the keyed tag (`BRLogTxTagHex` / `BR_LOG_TX`).
  */
@@ -42,6 +43,16 @@ class NativeRecoveryLogGateTest {
             """LOGW("to %s", destAddress);""",
             """LOGW("spending %s:%d", txidHex, (int)vout);""",
             """_peer_log("script %s", scriptHex);""",
+            // Width / flags before the length, size_t, floating point.
+            """LOGW("in=%12llu", (unsigned long long)x);""",
+            """LOGW("h=%08llx", (unsigned long long)x);""",
+            """LOGW("n=%zu", n);""",
+            """LOGW("dgb=%.8f", d);""",
+            // Names the first list lacked.
+            """LOGW("x=%d", (int)amountSat);""", """LOGW("x=%d", (int)value);""", """LOGW("x=%d", (int)total);""",
+            """LOGW("x=%d", (int)balance);""", """LOGW("x=%d", (int)units);""", """LOGW("x=%d", (int)needed);""",
+            // A message containing "(...)" is still a call.
+            """LOGW("refusing (...) at %llu", (unsigned long long)x);""",
         ).forEach { c -> assertTrue("not flagged: $c", nativeLogCalls(c).single().let(::nativeLeaks).isNotEmpty()) }
         listOf(
             """LOGW("rejecting a seed of %d bytes (expected 1..%u)", (int)seedLen, SEED_BUFFER_MAX);""",
@@ -50,8 +61,11 @@ class NativeRecoveryLogGateTest {
             """LOGW("implied fee is over %dx the expected", FOREIGN_TX_MAX_FEE_FACTOR);""",
             """LOGI("sent " BR_LOG_TX, BRLogTxTagHex(txid));""",
         ).forEach { c -> assertTrue("wrongly flagged: $c", nativeLogCalls(c).single().let(::nativeLeaks).isEmpty()) }
-        // The collector does not mistake the macro definitions for calls.
+        // The collector does not mistake the macro definitions for calls, and does not drop a call
+        // whose message contains "(...)".
         assertTrue(nativeLogCalls("#define LOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)").isEmpty())
+        assertTrue(nativeLogCalls("  #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)").isEmpty())
+        assertTrue(nativeLogCalls("x();\n    LOGW(\"skipped (...) here\");").size == 1)
     }
 
     private fun nativeLogCalls(content: String): List<String> {
@@ -67,8 +81,11 @@ class NativeRecoveryLogGateTest {
                 i++
             }
             val call = content.substring(m.range.first, minOf(i + 1, content.length)).replace(Regex("""\s+"""), " ")
-            // `#define LOGW(...) __android_log_print(..., __VA_ARGS__)`: the macro, not a call.
-            if (!call.contains("__VA_ARGS__") && !call.startsWith("LOGW(...)") && !call.contains("(...)")) out.add(call)
+            // `#define LOGW(...) __android_log_print(..., __VA_ARGS__)` is the macro, not a call: skip
+            // what sits on a #define line. (Filtering on "(...)" in the text dropped real calls whose
+            // message happened to contain it.)
+            val lineStart = content.lastIndexOf('\n', m.range.first) + 1
+            if (!content.substring(lineStart, m.range.first).trimStart().startsWith("#define")) out.add(call)
             m = start.find(content, i + 1)
         }
         return out
@@ -76,12 +93,15 @@ class NativeRecoveryLogGateTest {
 
     private fun nativeLeaks(call: String): List<String> {
         val out = mutableListOf<String>()
-        Regex("""%(?:ll|l|j|q)[diux]|PRI[diux]64""").findAll(call).forEach { out.add(it.value) }
+        // Any flags, width and precision before the length (`%12llu`, `%08llx`); size_t (`%zu`) and
+        // floating point (`%f`, `%.8f`) as well -- a DGB figure printed as a double is still an amount.
+        Regex("""%[-+ #0]*\d*(?:\.\d+)?(?:(?:ll|l|j|q|z|t)[diouxX]|[fFeEgGaA])|PRI[diouxX]64""")
+            .findAll(call).forEach { out.add(it.value) }
         // Arguments after the format string (string literals removed, so a word in the message is not an argument).
         val args = call.replace(Regex(""""(?:[^"\\]|\\.)*""""), "\"\"")
         val tagged = Regex("""BRLogTxTagHex\([^()]*\)|BR_LOG_TX""")
         val name = Regex(
-            """(?i)\b\w*(amount|fee|totalIn|totalOut|cents|change|txid|txHash|address|addr|outpoint|vout|script|hex)\w*\b"""
+            """(?i)\b\w*(amount|fee|total|cents|change|sat|value|balance|units|need|txid|txHash|address|addr|outpoint|vout|script|hex)\w*\b"""
         )
         name.findAll(tagged.replace(args, "")).map { it.value }
             .filterNot { it in CONSTANTS }
