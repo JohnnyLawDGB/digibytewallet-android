@@ -10,6 +10,7 @@ import kotlinx.coroutines.job
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withTimeout
 import org.junit.rules.ExternalResource
 import java.util.Collections
@@ -52,6 +53,9 @@ class MainThreadStandIn : ExternalResource() {
     fun <VM : ViewModel> track(vm: VM): VM = vm.also { scopes += it.viewModelScope.coroutineContext.job }
 
     override fun after() {
+        // What escaped while the test ran is the test's to assert. What escapes while the scopes are
+        // wound down is checked here, so a crash after the test's last line is not swallowed.
+        val escapedBeforeDrain = synchronized(escaped) { escaped.size }
         try {
             val jobs = synchronized(scopes) { scopes.toList() }
             jobs.forEach { it.cancel() }
@@ -60,6 +64,11 @@ class MainThreadStandIn : ExternalResource() {
             Dispatchers.resetMain()
             dispatcher.close()
             Thread.setDefaultUncaughtExceptionHandler(previousHandler)
+        }
+        val duringDrain = synchronized(escaped) { escaped.drop(escapedBeforeDrain) }
+            .filterNot { it is CancellationException }
+        if (duringDrain.isNotEmpty()) {
+            throw AssertionError("uncaught after the test ended: ${duringDrain.first()}", duringDrain.first())
         }
     }
 
