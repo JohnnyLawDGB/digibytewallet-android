@@ -117,6 +117,18 @@ static const char *nameOf(const char *id)
     return id;
 }
 
+// Ids are compared by their bytes, never by where they are kept: every id a vector names goes into a
+// buffer of its own (idCopy), so one asset reaches the headers at as many addresses as it has entries.
+#define ID_BUFFER 80
+
+static const char *idOf(const char *name, size_t len);
+
+static const char *idCopy(char *buf, const char *name, size_t len)
+{
+    snprintf(buf, ID_BUFFER, "%s", idOf(name, len));
+    return buf;
+}
+
 static const char *idOf(const char *name, size_t len)
 {
     size_t i;
@@ -865,6 +877,7 @@ static void script(const char *hex)
 }
 
 static BRAssetUnits U[M_STACKS][M_ENTRIES];
+static char UID[M_STACKS][M_ENTRIES][ID_BUFFER];   // the ids of U, one buffer each
 static BRAssetInputStack IN[M_STACKS];
 static MStack MIN[M_STACKS];
 static size_t INN;
@@ -906,7 +919,7 @@ static void parseStacks(const char *spec)
                 while (*p && *p != ':') p++;
                 if (s->unitCount >= M_ENTRIES || ! *p) { ck(0, "a broken stack \"%s\"", spec); return; }
                 u = &U[INN - 1][s->unitCount++];
-                u->assetId = idOf(name, (size_t)(p - name));
+                u->assetId = idCopy(UID[INN - 1][s->unitCount - 1], name, (size_t)(p - name));
                 p++;
                 u->count = num(&p);
                 u->ruleFree = 1;
@@ -1075,7 +1088,7 @@ static void receive(const char *spec, int32_t outputCount)
             if (! *p) { ck(0, "a broken input \"%s\"", spec); return; }
             f.hasRow = 1;
             f.credit = BR_ASSET_CREDIT_VERIFIED;
-            f.assetId = idOf(name, (size_t)(p - name));
+            f.assetId = idCopy(UID[INN][M_ENTRIES - 1], name, (size_t)(p - name));
             p++;
             f.quantity = num(&p);
         }
@@ -1689,6 +1702,14 @@ static void allocate_rules(void)
 
 static void allocate_draws(void)
 {
+    // One asset in two inputs, its id kept in two buffers: the same asset, by its bytes.
+    hdr(DA_TRANSFER, 3, "0:3 0:4");
+    alloc("X:3/X:4", 3, "allocated kept: 0:X:7");
+    credit(0, 3, "holds X:7 label=X");
+    hdr(DA_TRANSFER, 3, "0:6");
+    alloc("X:3/X:4", 3, "allocated kept: 0:X:6 2:X:1");
+    credit(0, 3, "holds X:6 label=X");
+    indexer(BR_ASSET_STACK_FOUND, "X:3,X:4", "holds X:7 label=X");
     hdr(DA_TRANSFER, 3, "0:5");
     alloc("X:3,X:4", 3, "allocated kept: 0:X:5 2:X:2");      // aggregatable: on to the next entry
     alloc("X:3/X:4", 3, "allocated kept: 0:X:5 2:X:2");      // and to the next stack
@@ -1761,6 +1782,11 @@ static void allocate_burns_and_legacy(void)
 
 static void allocate_overflow(void)
 {
+    // A range at the last int32 indexes: outputIndex + 1 is taken in int64.
+    hdr(DA_TRANSFER, 3, "2147483647:1:r");
+    alloc("X:5", 2, "allocated voided: 1:X:5");
+    hdr(DA_TRANSFER, 3, "2147483646:1:r");
+    alloc("X:5", 2, "allocated voided: 1:X:5");
     hdr(DA_TRANSFER, 3, "0:HALF1 0:HALF1");
     alloc("X:MAX,X:MAX", 3, "indeterminate: overflow");     // the delivered sum
     hdr(DA_TRANSFER, 3, "");
@@ -1900,6 +1926,12 @@ static void bound_rules(void)
     maxd(0, 9, "0");
     hdr(DA_ISSUANCE, 3, "0:3 0:3:p");
     maxd(0, 9, "unbounded");
+    hdr(DA_TRANSFER, 3, "2147483647:1:r");   // outputIndex + 1 taken in int64
+    maxd(0, 2, "1");
+    maxd(1, 2, "unbounded");
+    hdr(DA_TRANSFER, 3, "2147483646:1:r");
+    maxd(0, 2, "1");
+    maxd(1, 2, "unbounded");
 }
 
 static void resolve_rules(void)
@@ -2391,7 +2423,8 @@ static void allocator_reference_model(void)
 
 // ---- model_sweep: the headers against the model over a fixed corpus -----------------------------
 
-static const char *const POOL[] = { X, X, X, Y, Y, A, HY, DI, PT, "Ua1", "Uh7", "Ud9", "La", "Lx1" };
+static char X2[] = X, X3[] = X, Y2[] = Y;   // the repeated ids, each kept apart
+static const char *const POOL[] = { X, X2, X3, Y, Y2, A, HY, DI, PT, "Ua1", "Uh7", "Ud9", "La", "Lx1" };
 static int FREE[N(POOL)];
 static int DIFFS;
 
