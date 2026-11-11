@@ -81,6 +81,11 @@ fun PinSetupScreen(
     val pinMismatchMsg = stringResource(R.string.pin_err_mismatch)
     val pinSaveFailedMsg = stringResource(R.string.pin_err_save)
     val walletFailedMsg = stringResource(R.string.pin_err_wallet)
+    val ksbPromptTitle = stringResource(R.string.app_name_display)
+    val ksbPromptSubtitle = stringResource(R.string.ksb_prompt_subtitle)
+    // KS-BIND: the one-time no-screen-lock notice, and what to do once it is dismissed.
+    var showNoScreenLockNotice by remember { mutableStateOf(false) }
+    var afterNotice by remember { mutableStateOf<(() -> Unit)?>(null) }
     var currentInput by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var biometricAvailable by remember { mutableStateOf(false) }
@@ -133,13 +138,26 @@ fun PinSetupScreen(
                                                                     }
                                                                 }
                                                                 isPinSaving = false
-                                                                if (biometricAvailable && activity != null) {
-                                                                    step = PinStep.BIOMETRIC
-                                                                } else {
-                                                                    val dest = if (pendingLegacyRecovery) "recover_funds" else "wallet"
-                                                                    navController.navigate(dest) {
-                                                                        popUpTo(navController.graph.startDestinationId) { inclusive = true }
+                                                                val proceed: () -> Unit = {
+                                                                    if (biometricAvailable && activity != null) {
+                                                                        step = PinStep.BIOMETRIC
+                                                                    } else {
+                                                                        val dest = if (pendingLegacyRecovery) "recover_funds" else "wallet"
+                                                                        navController.navigate(dest) {
+                                                                            popUpTo(navController.graph.startDestinationId) { inclusive = true }
+                                                                        }
                                                                     }
+                                                                }
+                                                                // KS-BIND: a device with no secure lock screen is told so, once,
+                                                                // here at setup; Security settings keeps the status line.
+                                                                val status = withContext(Dispatchers.IO) {
+                                                                    runCatching { walletManager.seedKeyStatus() }.getOrNull()
+                                                                }
+                                                                if (status == app.aroundtheblock.wallet.core.security.SeedKeyStatus.NO_LOCK_SCREEN) {
+                                                                    afterNotice = proceed
+                                                                    showNoScreenLockNotice = true
+                                                                } else {
+                                                                    proceed()
                                                                 }
                                                             }
                                                         } else {
@@ -156,7 +174,18 @@ fun PinSetupScreen(
                                                     // decided by what is loaded in memory — after a wipe
                                                     // in this process that can be the wiped wallet.
                                                     if (walletManager.pinSetupCreatesWallet()) {
-                                                        viewModel.createWallet(afterWalletReady)
+                                                        // KS-BIND: the record is written right after this, so this is
+                                                        // where the seed key must be usable. Usually the device unlock
+                                                        // still covers it and nothing shows; otherwise ONE device-
+                                                        // credential prompt, then the create (whatever its outcome).
+                                                        // No wallet is open yet, so the prompt's onStop locks nothing.
+                                                        scope.launch {
+                                                            prepareSeedKeyBeforeRecordWrite(
+                                                                walletManager, biometricAuth, activity,
+                                                                ksbPromptTitle, ksbPromptSubtitle,
+                                                            )
+                                                            viewModel.createWallet(afterWalletReady)
+                                                        }
                                                     } else {
                                                         afterWalletReady(walletManager.isWalletReady())
                                                     }
@@ -219,6 +248,15 @@ fun PinSetupScreen(
                     }
                 )
             }
+        }
+
+        if (showNoScreenLockNotice) {
+            NoScreenLockNotice(onDismiss = {
+                showNoScreenLockNotice = false
+                val next = afterNotice
+                afterNotice = null
+                next?.invoke()
+            })
         }
     }
 }

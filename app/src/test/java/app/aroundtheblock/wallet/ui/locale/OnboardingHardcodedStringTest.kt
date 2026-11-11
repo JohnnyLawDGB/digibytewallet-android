@@ -46,6 +46,8 @@ class OnboardingHardcodedStringTest {
         "ui/onboarding/SeedDisplayScreen.kt",
         "ui/onboarding/SeedVerifyScreen.kt",
         "ui/onboarding/PinSetupScreen.kt",
+        // KS-BIND: the no-screen-lock notice shown at setup.
+        "ui/onboarding/SeedKeyBindingStep.kt",
         "ui/onboarding/UnlockScreen.kt",
         // Not an onboarding screen, but its two dialogs fire immediately after onboarding and
         // before the user has seen anything else — the battery one explains how to stop the

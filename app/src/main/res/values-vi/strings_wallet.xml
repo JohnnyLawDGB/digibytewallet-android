@@ -717,4 +717,14 @@
     <string name="reconcile_unprovable_confirm">Chạm lần nữa để xác nhận — xóa bộ nhớ đệm và khởi động lại</string>
     <string name="rf_capped_body">Quá trình quét đã dừng ở giới hạn trên %1$s khi đường dẫn đó vẫn đang được dùng, nên có thể còn nhiều tiền hơn số hiển thị. Phần không hiển thị vẫn an toàn trên chuỗi.</string>
     <string name="reconcile_stuck_stale_cleared">, trong đó %1$d giao dịch chưa từng được chuyển tiếp (sau một ngày mạng không có chúng, cũng không có giao dịch nào tiêu số coin của chúng). Nếu một khoản thanh toán trong số đó đã đến người nhận, nó vẫn có thể được xác nhận: hãy hỏi người nhận trước khi trả lại</string>
+    <!-- KS-BIND: seed key bound to the device lock -->
+    <string name="ksb_prompt_subtitle">Xác nhận khóa màn hình một lần để khóa ví có thể được gắn với nó</string>
+    <string name="ksb_notice_title">Điện thoại này không có khóa màn hình</string>
+    <string name="ksb_notice_body">Ví của bạn được mã hóa trên điện thoại này, nhưng khóa của ví không thể gắn với khóa màn hình vì điện thoại này không có. Khi đó chỉ còn mã PIN của ví ngăn giữa ứng dụng và tiền của bạn. Hãy đặt mã PIN, hình mở khóa hoặc mật khẩu trong cài đặt Android: ví sẽ gắn khóa với nó vào lần tới bạn mở khóa ứng dụng. Cài đặt bảo mật cho biết khóa đã được gắn hay chưa.</string>
+    <string name="ksb_notice_ok">Tôi đã hiểu</string>
+    <string name="sec_seed_key">Khóa ví</string>
+    <string name="sec_seed_key_bound">Đã gắn với khóa màn hình của điện thoại này</string>
+    <string name="sec_seed_key_pending">Chưa gắn: sẽ được gắn với khóa màn hình vào lần tới bạn mở khóa ví</string>
+    <string name="sec_seed_key_no_lock">Chưa gắn: điện thoại này không có khóa màn hình. Hãy đặt trong cài đặt Android.</string>
+    <string name="sec_seed_key_lock_removed">Khóa màn hình đã bị gỡ: ví này sẽ cần cụm từ khôi phục vào lần mở khóa tới</string>
 </resources>

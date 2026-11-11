@@ -729,4 +729,14 @@
     <string name="reconcile_unprovable_confirm">Toca de nuevo para confirmar: borra la caché y reinicia</string>
     <string name="rf_capped_body">El escaneo llegó a su límite en %1$s mientras esa ruta seguía en uso, así que puede haber más fondos allí de los que se muestran. Lo que no se muestra sigue a salvo en la cadena.</string>
     <string name="reconcile_stuck_stale_cleared">, %1$d de ellas nunca se retransmitieron (tras un día la red no tenía ni ellas ni nada que gastara sus monedas). Si alguno de esos pagos llegó a su destinatario, todavía puede confirmarse: consúltalo con él antes de volver a pagar</string>
+    <!-- KS-BIND: seed key bound to the device lock -->
+    <string name="ksb_prompt_subtitle">Confirma tu bloqueo de pantalla una vez para que la clave de la billetera pueda vincularse a él</string>
+    <string name="ksb_notice_title">Este teléfono no tiene bloqueo de pantalla</string>
+    <string name="ksb_notice_body">Tu billetera está cifrada en este teléfono, pero su clave no puede vincularse a un bloqueo de pantalla porque este teléfono no tiene ninguno. Así, solo el PIN de la billetera queda entre la app y tus fondos. Configura un PIN, patrón o contraseña en los ajustes de Android: la billetera vinculará su clave la próxima vez que desbloquees la app. Los ajustes de seguridad muestran si la clave está vinculada.</string>
+    <string name="ksb_notice_ok">Entendido</string>
+    <string name="sec_seed_key">Clave de la billetera</string>
+    <string name="sec_seed_key_bound">Vinculada al bloqueo de pantalla de este teléfono</string>
+    <string name="sec_seed_key_pending">Aún no vinculada: se vinculará a tu bloqueo de pantalla la próxima vez que desbloquees la billetera</string>
+    <string name="sec_seed_key_no_lock">No vinculada: este teléfono no tiene bloqueo de pantalla. Configura uno en los ajustes de Android.</string>
+    <string name="sec_seed_key_lock_removed">Se quitó el bloqueo de pantalla: esta billetera necesitará su frase de recuperación en el próximo desbloqueo</string>
 </resources>

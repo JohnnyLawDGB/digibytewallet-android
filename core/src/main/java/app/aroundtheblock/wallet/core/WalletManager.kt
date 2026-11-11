@@ -16,6 +16,11 @@ import app.aroundtheblock.wallet.core.security.EncryptedData
 import app.aroundtheblock.wallet.core.security.KeyStoreManager
 import app.aroundtheblock.wallet.core.security.KeystoreKeyInvalidatedException
 import app.aroundtheblock.wallet.core.security.KeystoreUserAuthRequiredException
+import app.aroundtheblock.wallet.core.security.AuthBoundProbe
+import app.aroundtheblock.wallet.core.security.SeedKeyReadiness
+import app.aroundtheblock.wallet.core.security.SeedKeyStatus
+import app.aroundtheblock.wallet.core.security.seedKeyReadinessFor
+import app.aroundtheblock.wallet.core.security.seedKeyStatusFor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -1003,6 +1008,59 @@ class WalletManager @Suppress("LongParameterList") constructor(
      * bound door — keygen refused, a lapsed auth window, a vendor quirk — falls back to the legacy one.
      */
     private class SealedRecord(val authBound: Boolean, val seed: EncryptedData, val passphrase: EncryptedData?)
+
+    /**
+     * KS-BIND. Asked by the step that is about to write a NEW wallet record (PIN setup for a create,
+     * the restore's start for a restore): can the record be sealed under the auth-bound key right
+     * now, and if not, would one device-credential prompt make it possible?
+     *
+     * Invariant: on a device with a secure lock screen the new record is wrapped under the
+     * auth-bound key from creation. The bound key opens for SEED_KEY_AUTH_WINDOW_SECS after any
+     * device authentication, so this probes it with a throwaway encryption: an open window answers
+     * READY and the record write that follows lands bound with no prompt; a lapsed one answers
+     * NEEDS_DEVICE_CREDENTIAL and the caller prompts once, then writes.
+     *
+     * Writes nothing to the wallet record and reads no secret: a stored record (any existing
+     * wallet) is left exactly as it was. Creates the auth-bound key if it is absent, as the seal
+     * itself would. Never throws: anything unexpected is UNAVAILABLE, and the seal then falls back
+     * to the legacy key as it always has (onboarding is never blocked on binding).
+     */
+    fun prepareSeedKeyForNewRecord(): SeedKeyReadiness {
+        val secure = try { keyStoreManager.isDeviceSecure() } catch (e: Exception) { false }
+        if (!secure) {
+            android.util.Log.i("WalletManager", "KS-BIND: no secure lock screen; the new record uses the legacy key")
+            return SeedKeyReadiness.NO_LOCK_SCREEN
+        }
+        val probe = probeAuthBoundKey()
+        val readiness = seedKeyReadinessFor(deviceSecure = true, probe = probe)
+        android.util.Log.i("WalletManager", "KS-BIND: auth-bound key probe=$probe readiness=$readiness")
+        return readiness
+    }
+
+    private fun probeAuthBoundKey(): AuthBoundProbe = try {
+        if (!keyStoreManager.createAuthBoundKey()) {
+            AuthBoundProbe.UNAVAILABLE
+        } else {
+            keyStoreManager.encryptAuthBound(ByteArray(16))
+            AuthBoundProbe.READY
+        }
+    } catch (e: KeystoreUserAuthRequiredException) {
+        AuthBoundProbe.AUTH_REQUIRED
+    } catch (e: KeystoreKeyInvalidatedException) {
+        AuthBoundProbe.INVALIDATED
+    } catch (e: Exception) {
+        AuthBoundProbe.UNAVAILABLE
+    }
+
+    /**
+     * KS-BIND. Whether the stored seed is wrapped under the key bound to the device lock, for the
+     * Security-settings status line and the no-lock-screen notice. Reads no secret.
+     */
+    fun seedKeyStatus(): SeedKeyStatus = seedKeyStatusFor(
+        hasWallet = hasSavedWallet(),
+        recordBound = seedIsAuthBound(),
+        deviceSecure = try { keyStoreManager.isDeviceSecure() } catch (e: Exception) { false },
+    )
 
     private fun sealRecord(mnemonicBytes: ByteArray, passphrase: ByteArray?): SealedRecord {
         if (keyStoreManager.createAuthBoundKey()) {

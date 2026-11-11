@@ -717,4 +717,14 @@
     <string name="reconcile_unprovable_confirm">再次点按以确认——将清除缓存并重启</string>
     <string name="rf_capped_body">扫描在 %1$s 上达到上限时，该路径仍在使用中，因此那里的资金可能比显示的更多。未显示的部分仍安全地留在区块链上。</string>
     <string name="reconcile_stuck_stale_cleared">，其中 %1$d 笔从未被转发（一天后网络中既没有它们，也没有花费其币的交易）。如果其中某笔付款其实已到达收款方，它仍可能被确认：再次付款前请先与对方核实</string>
+    <!-- KS-BIND: seed key bound to the device lock -->
+    <string name="ksb_prompt_subtitle">请确认一次屏幕锁定，以便将钱包密钥与其绑定</string>
+    <string name="ksb_notice_title">此手机未设置屏幕锁定</string>
+    <string name="ksb_notice_body">您的钱包在此手机上已加密，但由于此手机未设置屏幕锁定，其密钥无法与屏幕锁定绑定。此时，应用与您的资金之间只有钱包 PIN 码。请在 Android 设置中设置 PIN 码、图案或密码：下次解锁应用时，钱包会将密钥与其绑定。安全设置会显示密钥是否已绑定。</string>
+    <string name="ksb_notice_ok">我知道了</string>
+    <string name="sec_seed_key">钱包密钥</string>
+    <string name="sec_seed_key_bound">已与此手机的屏幕锁定绑定</string>
+    <string name="sec_seed_key_pending">尚未绑定：下次解锁钱包时将与您的屏幕锁定绑定</string>
+    <string name="sec_seed_key_no_lock">未绑定：此手机未设置屏幕锁定。请在 Android 设置中设置。</string>
+    <string name="sec_seed_key_lock_removed">屏幕锁定已被移除：下次解锁时此钱包将需要其恢复短语</string>
 </resources>

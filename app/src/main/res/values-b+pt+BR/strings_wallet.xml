@@ -727,4 +727,14 @@
     <string name="reconcile_unprovable_confirm">Toque de novo para confirmar — limpa o cache e reinicia</string>
     <string name="rf_capped_body">A varredura chegou ao limite em %1$s enquanto esse caminho ainda estava em uso, então pode haver mais fundos lá do que o mostrado. O que não aparece continua seguro na cadeia.</string>
     <string name="reconcile_stuck_stale_cleared">, %1$d delas nunca foram retransmitidas (após um dia a rede não tinha nem elas nem nada gastando suas moedas). Se algum desses pagamentos chegou ao destinatário, ele ainda pode ser confirmado: confirme com ele antes de pagar de novo</string>
+    <!-- KS-BIND: seed key bound to the device lock -->
+    <string name="ksb_prompt_subtitle">Confirme o bloqueio de tela uma vez para que a chave da carteira possa ser vinculada a ele</string>
+    <string name="ksb_notice_title">Este celular não tem bloqueio de tela</string>
+    <string name="ksb_notice_body">Sua carteira está criptografada neste celular, mas a chave dela não pode ser vinculada a um bloqueio de tela, porque este celular não tem nenhum. Assim, só o PIN da carteira fica entre o app e seus fundos. Defina um PIN, padrão ou senha nas configurações do Android: a carteira vincula a chave a ele na próxima vez que você desbloquear o app. As configurações de segurança mostram se a chave está vinculada.</string>
+    <string name="ksb_notice_ok">Entendi</string>
+    <string name="sec_seed_key">Chave da carteira</string>
+    <string name="sec_seed_key_bound">Vinculada ao bloqueio de tela deste celular</string>
+    <string name="sec_seed_key_pending">Ainda não vinculada: será vinculada ao seu bloqueio de tela na próxima vez que você desbloquear a carteira</string>
+    <string name="sec_seed_key_no_lock">Não vinculada: este celular não tem bloqueio de tela. Defina um nas configurações do Android.</string>
+    <string name="sec_seed_key_lock_removed">O bloqueio de tela foi removido: esta carteira vai precisar da frase de recuperação no próximo desbloqueio</string>
 </resources>

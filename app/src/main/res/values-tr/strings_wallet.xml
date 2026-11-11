@@ -722,4 +722,14 @@
     <string name="reconcile_unprovable_confirm">Onaylamak için tekrar dokunun — önbelleği temizler ve yeniden başlatır</string>
     <string name="rf_capped_body">Tarama, %1$s yolunda bu yol hâlâ kullanılırken sınırına ulaştı; orada gösterilenden fazla bakiye olabilir. Gösterilmeyenler zincirde güvende kalır.</string>
     <string name="reconcile_stuck_stale_cleared">, bunlardan %1$d tanesi hiç iletilmedi (bir gün sonra ağda ne bunlar ne de coin\'lerini harcayan bir işlem vardı). Bu ödemelerden biri alıcısına ulaştıysa yine de onaylanabilir: yeniden ödemeden önce alıcıya danışın</string>
+    <!-- KS-BIND: seed key bound to the device lock -->
+    <string name="ksb_prompt_subtitle">Cüzdan anahtarının ekran kilidine bağlanabilmesi için ekran kilidinizi bir kez onaylayın</string>
+    <string name="ksb_notice_title">Bu telefonda ekran kilidi yok</string>
+    <string name="ksb_notice_body">Cüzdanınız bu telefonda şifreli, ancak bu telefonda ekran kilidi olmadığı için anahtarı bir ekran kilidine bağlanamıyor. Bu durumda uygulama ile fonlarınız arasında yalnızca cüzdan PIN’i durur. Android ayarlarında bir PIN, desen veya şifre belirleyin: cüzdan, uygulamanın kilidini bir sonraki açışınızda anahtarı ona bağlar. Anahtarın bağlı olup olmadığını güvenlik ayarları gösterir.</string>
+    <string name="ksb_notice_ok">Anladım</string>
+    <string name="sec_seed_key">Cüzdan anahtarı</string>
+    <string name="sec_seed_key_bound">Bu telefonun ekran kilidine bağlı</string>
+    <string name="sec_seed_key_pending">Henüz bağlı değil: cüzdanın kilidini bir sonraki açışınızda ekran kilidinize bağlanacak</string>
+    <string name="sec_seed_key_no_lock">Bağlı değil: bu telefonda ekran kilidi yok. Android ayarlarından bir tane belirleyin.</string>
+    <string name="sec_seed_key_lock_removed">Ekran kilidi kaldırıldı: bu cüzdanın bir sonraki kilit açmada kurtarma ifadesine ihtiyacı olacak</string>
 </resources>

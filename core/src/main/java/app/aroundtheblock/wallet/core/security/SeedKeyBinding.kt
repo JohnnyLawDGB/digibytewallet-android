@@ -45,3 +45,83 @@ class KeystoreUserAuthRequiredException(cause: Throwable) :
  *  generic unlock failure. */
 class KeystoreKeyInvalidatedException(cause: Throwable) :
     Exception("Keystore key permanently invalidated (device lock removed)", cause)
+
+// ── KS-BIND: a new record is sealed under the auth-bound key FROM CREATION ─────────
+//
+// Invariant: when the device has a secure lock screen at wallet creation or restore, the seed is
+// wrapped under the auth-bound key when the record is first written — not only after a later
+// unlock migrates it. The bound key is usable for [SEED_KEY_AUTH_WINDOW_SECS] after ANY device
+// authentication (the keyguard unlock that opened the phone counts, so does a device-credential
+// prompt), so a create or restore that reaches its record write inside that window needs no prompt
+// at all. One that does not — the user spent longer than the window writing the phrase down — gets
+// ONE device-credential prompt at the step that writes the record (PIN setup for a create, the
+// restore's start for a restore), and the record write follows inside the fresh window. Nothing
+// here may block onboarding: every other outcome keeps the legacy fallback, and the existing
+// unlock-time migration still moves such a wallet later.
+
+/** What a probe of the auth-bound key answered, just before a new record is sealed. */
+enum class AuthBoundProbe {
+    /** The bound key exists and encrypted: the auth window is open. */
+    READY,
+
+    /** The bound key exists but the auth window has lapsed ([KeystoreUserAuthRequiredException]). */
+    AUTH_REQUIRED,
+
+    /** The bound key exists but was permanently invalidated ([KeystoreKeyInvalidatedException]). */
+    INVALIDATED,
+
+    /** No bound key could be made or used (no lock screen, keygen refused, vendor quirk). */
+    UNAVAILABLE,
+}
+
+/** What the step that writes a new record must do before the write. */
+enum class SeedKeyReadiness {
+    /** Seal now: the record will be written under the auth-bound key. */
+    READY,
+
+    /** Show ONE device-credential prompt, then seal (whatever the prompt's outcome). */
+    NEEDS_DEVICE_CREDENTIAL,
+
+    /** The device has no secure lock screen: seal under the legacy key and tell the user so. */
+    NO_LOCK_SCREEN,
+
+    /** Binding is possible in principle but this device refused it: legacy key, no prompt — a
+     *  prompt would not help, and onboarding must not be blocked on it. */
+    UNAVAILABLE,
+}
+
+/** Pure: the readiness of a new record's seal, from whether the device is secure and the probe. */
+fun seedKeyReadinessFor(deviceSecure: Boolean, probe: AuthBoundProbe): SeedKeyReadiness = when {
+    !deviceSecure -> SeedKeyReadiness.NO_LOCK_SCREEN
+    probe == AuthBoundProbe.READY -> SeedKeyReadiness.READY
+    probe == AuthBoundProbe.AUTH_REQUIRED -> SeedKeyReadiness.NEEDS_DEVICE_CREDENTIAL
+    else -> SeedKeyReadiness.UNAVAILABLE
+}
+
+/** Whether the stored seed key is bound to the device lock, for the Security-settings status line. */
+enum class SeedKeyStatus {
+    /** No wallet record is stored. */
+    NO_WALLET,
+
+    /** The seed is wrapped under the auth-bound key. */
+    BOUND,
+
+    /** The seed is on the legacy key on a device that has a lock screen: the next unlock moves it. */
+    PENDING,
+
+    /** The seed is on the legacy key because the device has no secure lock screen. */
+    NO_LOCK_SCREEN,
+
+    /** The seed is wrapped under the auth-bound key but the device lock is gone: the key is
+     *  invalidated and the wallet needs its recovery phrase at the next unlock. */
+    LOCK_REMOVED,
+}
+
+/** Pure: the status line, from what is stored and whether the device is secure now. */
+fun seedKeyStatusFor(hasWallet: Boolean, recordBound: Boolean, deviceSecure: Boolean): SeedKeyStatus = when {
+    !hasWallet -> SeedKeyStatus.NO_WALLET
+    recordBound && deviceSecure -> SeedKeyStatus.BOUND
+    recordBound -> SeedKeyStatus.LOCK_REMOVED
+    deviceSecure -> SeedKeyStatus.PENDING
+    else -> SeedKeyStatus.NO_LOCK_SCREEN
+}
