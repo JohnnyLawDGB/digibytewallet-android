@@ -1,14 +1,20 @@
 #!/usr/bin/env bash
-# Host KAT runner: PEER-PENALTY-SHOTGUN -- the fallback dial honours the peer penalty set exactly
-# like the filter-first dial, and never starves the pinned own-node or the fixed peer (see the
-# _main.c header for the cases).
+# Host KAT runner: PEER-PENALTY-SHOTGUN -- the fallback dial honours the peer penalty set (non-filter
+# peers: every window; filter peers: every ban that outlasts the redial cooldown), a lapsed window
+# never excludes, and the canon filter peers, the pinned own-node and the fixed peer are never
+# starved (see the _main.c header for the cases).
 #
-# ARMS. Shipped: no -D. Comparisons: -DPEER_PENALTY_SHOTGUN_UNFIXED (the shotgun never reads the
-# penalty set) and -DPEER_PENALTY_SHOTGUN_NO_FIXED_EXEMPT (the fixed peer is not exempt). 64-bit
-# and 32-bit builds; every run under a time limit and with LeakSanitizer on.
-#
-# EXPECTED. Shipped: every case passes. UNFIXED: penalized, crowd and pinned fail (a penalized
-# peer is dialed); fixed passes. NO_FIXED_EXEMPT: fixed fails (the fixed peer is not dialed).
+# ARMS (each built 64- and 32-bit, every run under a time limit and with LeakSanitizer on). Every
+# arm runs every case; the cases an arm must FAIL are listed, every other case must PASS:
+#   green        shipped (no -D)                                   fails none
+#   red          -DPEER_PENALTY_SHOTGUN_UNFIXED (no penalty check)  fails penalized crowd expired pinned
+#   honour       -DPEER_PENALTY_SHOTGUN_HONOUR_COOLDOWN             fails canon
+#                (filter peers' redial cooldowns honoured: the shape that starved the canon)
+#   stale        -DPEER_PENALTY_SHOTGUN_STALE_CLOCK (time 0)        fails canon expired
+#   nofix        -DPEER_PENALTY_SHOTGUN_NO_FIXED_EXEMPT             fails fixed
+#   noslot       -DPEER_PENALTY_SHOTGUN_NO_RESERVED_SLOT            fails none (the shotgun's own
+#                pinned exemption dials the own-node)
+#   noslotnopin  NO_RESERVED_SLOT + NO_PINNED_EXEMPT                fails pinned exclusive
 # Exit code 0 = every expectation held.
 set -uo pipefail
 
@@ -19,7 +25,8 @@ BUILD_DIR="$(mktemp -d)"
 trap 'rm -rf "$BUILD_DIR"' EXIT
 LIMIT_S=60
 
-for seam in PEER_PENALTY_SHOTGUN_UNFIXED PEER_PENALTY_SHOTGUN_NO_FIXED_EXEMPT; do
+for seam in PEER_PENALTY_SHOTGUN_UNFIXED PEER_PENALTY_SHOTGUN_NO_FIXED_EXEMPT PEER_PENALTY_SHOTGUN_HONOUR_COOLDOWN \
+            PEER_PENALTY_SHOTGUN_STALE_CLOCK PEER_PENALTY_SHOTGUN_NO_RESERVED_SLOT PEER_PENALTY_SHOTGUN_NO_PINNED_EXEMPT; do
     if ! grep -q "$seam" "$CORE_DIR/BRPeerManager.c"; then
         echo "GATE FAILURE: the $seam comparison seam is not in BRPeerManager.c"; exit 1
     fi
@@ -107,18 +114,44 @@ expect() {
     grep -E "^\[|dials|dialed|ERROR: |SUMMARY: |FAIL " "$out" | sed -n "1,5s/^/       | /p"
 }
 
+CASES="penalized crowd canon expired pinned exclusive fixed"
+ARMS="green red honour stale nofix noslot noslotnopin"
+arm_flags() {
+    case "$1" in
+        green) ;;
+        red) echo -DPEER_PENALTY_SHOTGUN_UNFIXED ;;
+        honour) echo -DPEER_PENALTY_SHOTGUN_HONOUR_COOLDOWN ;;
+        stale) echo -DPEER_PENALTY_SHOTGUN_STALE_CLOCK ;;
+        nofix) echo -DPEER_PENALTY_SHOTGUN_NO_FIXED_EXEMPT ;;
+        noslot) echo -DPEER_PENALTY_SHOTGUN_NO_RESERVED_SLOT ;;
+        noslotnopin) echo -DPEER_PENALTY_SHOTGUN_NO_RESERVED_SLOT -DPEER_PENALTY_SHOTGUN_NO_PINNED_EXEMPT ;;
+    esac
+}
+arm_fails() {
+    case "$1" in
+        red) echo "penalized crowd expired pinned" ;;
+        honour) echo "canon" ;;
+        stale) echo "canon expired" ;;
+        nofix) echo "fixed" ;;
+        noslotnopin) echo "pinned exclusive" ;;
+        *) echo "" ;;
+    esac
+}
+
 for bits in 64 32; do
     echo "=== $bits-bit ==="
-    build "$BUILD_DIR/red$bits" "$bits" -DPEER_PENALTY_SHOTGUN_UNFIXED || { echo "FAIL: build error (UNFIXED, $bits)"; exit 1; }
-    build "$BUILD_DIR/nofix$bits" "$bits" -DPEER_PENALTY_SHOTGUN_NO_FIXED_EXEMPT || { echo "FAIL: build error (NO_FIXED_EXEMPT, $bits)"; exit 1; }
-    build "$BUILD_DIR/green$bits" "$bits" || { echo "FAIL: build error (shipped, $bits)"; exit 1; }
-    echo "--- comparison arm (-DPEER_PENALTY_SHOTGUN_UNFIXED) ---"
-    for c in penalized crowd pinned; do expect "red$bits" "$BUILD_DIR/red$bits" "$c" fail; done
-    expect "red$bits" "$BUILD_DIR/red$bits" fixed pass
-    echo "--- comparison arm (-DPEER_PENALTY_SHOTGUN_NO_FIXED_EXEMPT) ---"
-    expect "nofix$bits" "$BUILD_DIR/nofix$bits" fixed fail
-    echo "--- shipped arm ---"
-    for c in penalized crowd pinned fixed; do expect "green$bits" "$BUILD_DIR/green$bits" "$c" pass; done
+    for arm in $ARMS; do
+        # shellcheck disable=SC2046
+        build "$BUILD_DIR/$arm$bits" "$bits" $(arm_flags "$arm") || { echo "FAIL: build error ($arm, $bits)"; exit 1; }
+    done
+    for arm in $ARMS; do
+        flags="$(arm_flags "$arm")"; echo "--- arm $arm: ${flags:-shipped, no -D} ---"
+        fails=" $(arm_fails "$arm") "
+        for c in $CASES; do
+            if [[ "$fails" == *" $c "* ]]; then want=fail; else want=pass; fi
+            expect "$arm$bits" "$BUILD_DIR/$arm$bits" "$c" "$want"
+        done
+    done
 done
 
 if [ "$FAILS" -eq 0 ]; then echo "peer_penalty_shotgun_kat: ALL PASS"; exit 0; fi
