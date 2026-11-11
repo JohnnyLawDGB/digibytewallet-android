@@ -9,6 +9,16 @@
 //   [D] guard: one send aged by a device sleep, then a retry -> SERVING until the retry stalls too
 //   [E] guard: stalled, then answered                       -> SERVING again
 //   [F] guard: exclusive pin -- the lone node is kept, nothing else is dialled, the pin is unchanged
+//   [G] guard: request AND retry lost across a device sleep, then the wake retry -> SERVING (the
+//       newest send is what the timeout is measured against, not the second one)
+//   [H] guard: requests lost on a socket that closed, then a reconnect           -> SERVING (the
+//       clocks restart on connect/disconnect)
+//   [I] guard: answers the wallet cannot use because of its own state (a misaligned cfheaders
+//       batch after its chain moved, a cfilter for a block a reorg replaced) stop the clock -> SERVING
+//   [J] scope pin: a caught-up wallet asks nothing, so a node that stops relaying blocks starts no
+//       clock; the tip-stall watchdog's rebuild is what darkens it -- a rebuilt manager reads the
+//       still-connected node CONNECTED_NOT_SERVING / DARK until it answers again
+//   G, H and I failed on the first revision of this fix; the red arm below is the pre-fix rule.
 // Harness: cf_empty_batch_kat's (BRPeer.c and BRPeerManager.c #included). Time is advanced by
 // ageing the served clocks, the only state the decision reads time from.
 #include <assert.h>
@@ -134,6 +144,8 @@ static void mxInit(Mx *x, uint32_t chainTip, uint32_t top)
 }
 static void mxFree(Mx *x)
 {
+    // H's reconnect queues mempool callbacks the harness never runs.
+    for (size_t i = 0; i < array_count(x->m->connectedPeers); i++) BRPeerCancelPendingCallbacks(x->m->connectedPeers[i]);
     BRPeerManagerFree(x->m);
     BRWalletFree(x->w);
     free(x->blk);
@@ -174,7 +186,7 @@ static void age(Mx *x, int64_t secs)
 {
     for (int i = 0; i < 16; i++) for (int k = 0; k < 2; k++) {
         BRCFServedClock *c = &x->m->cfServedClock[i][k];
-        if (c->sends) { c->firstSend -= secs; c->retrySend -= secs; }
+        if (c->sends) { c->firstSend -= secs; c->lastSend -= secs; }
     }
 }
 static int status(Mx *x) { return BRPeerManagerCompactFilterPeerStatus(x->m, x->p->address, x->p->port); }
@@ -270,6 +282,71 @@ int main(void)
         check(BRPeerConnectStatus(x.p) == BRPeerStatusConnected, "and it is not dropped");
         check(x.m->pinnedPort == x.p->port && UInt128Eq(x.m->pinnedAddr, x.p->address) && x.m->pinnedExclusive == 1,
               "the exclusive pin is unchanged (the user chooses \"Use public peers\")");
+        mxFree(&x);
+    }
+
+    printf("[G] request and retry lost across a device sleep, then the wake retry\n");
+    {
+        Mx x; mxInit(&x, tip, tip + 100);
+        answerCFHeaders(&x, tip + 1, tip + 50);
+        askCFHeaders(&x); askCFHeaders(&x);                    // request + retry, both lost as the device slept
+        age(&x, 3600);
+        askCFHeaders(&x);                                       // wake: the driver asks again, 0 s ago
+        check(servingNow(&x), "the wake retry is inside its timeout: still serving");
+        answerCFHeaders(&x, tip + 51, tip + 100);
+        check(servingNow(&x) && x.m->cfServedClock[0][CF_SERVED_HDR].sends == 0, "answered: serving, clock stopped");
+        mxFree(&x);
+    }
+
+    printf("[H] requests lost on a closed socket, then a reconnect\n");
+    {
+        Mx x; mxInit(&x, tip, tip + 100);
+        answerCFHeaders(&x, tip + 1, tip + 50);
+        askCFHeaders(&x); askCFHeaders(&x);
+        age(&x, 3600);
+        x.p->services |= BRMainNetParams.services | SERVICES_NODE_NETWORK;
+        ((BRPeerContext *)x.p)->lastblock = x.top;              // a synced node
+        _peerConnected(&x.inf);                                 // the socket closed; the node is back
+        drainPeers();
+        check(x.m->cfServedClock[0][CF_SERVED_HDR].sends == 0 && x.m->cfServedClock[0][CF_SERVED_FLT].sends == 0,
+              "a (re)connect restarts both clocks");
+        check(servingNow(&x), "the reconnected node that served reads serving");
+        mxFree(&x);
+    }
+
+    printf("[I] answers the wallet cannot use because of its own state\n");
+    {
+        Mx x; mxInit(&x, tip, tip + 100);
+        answerCFHeaders(&x, tip + 1, tip + 50);                 // chain next = tip + 51
+        askCFHeaders(&x); askCFHeaders(&x);
+        age(&x, CF_SERVED_STALE_SECS + 30);
+        check(x.m->cfServedClock[0][CF_SERVED_HDR].sends == 2, "the cfheaders clock is running before the answer");
+        answerCFHeaders(&x, tip + 60, tip + 70);                // misaligned with our chain: not usable, but an answer
+        check(x.m->cfServedClock[0][CF_SERVED_HDR].sends == 0, "a cfheaders answer we cannot use stops its clock");
+        check(servingNow(&x), "and the node reads serving");
+        askCFilters(&x, tip + 2, tip + 50); askCFilters(&x, tip + 2, tip + 50);
+        age(&x, CF_SERVED_STALE_SECS + 30);
+        check(x.m->cfServedClock[0][CF_SERVED_FLT].sends >= 2, "the cfilter clock is running before the answer");
+        {   // a filter for a block a reorg replaced at tip + 10 (asked for before the reorg): stale, not wrong
+            BRMerkleBlock *alt = mkBlock(tip + 10, blockHashAt(tip + 9));
+            memset(alt->blockHash.u8, 0xA7, 32);
+            BRSetAdd(x.m->blocks, alt);
+            uint8_t e[33]; encodedAt(tip + 11, e);
+            _peerRelayedCFilter(&x.inf, FILTER_TYPE_BASIC, alt->blockHash, e, sizeof(e));
+            drainPeers();
+        }
+        check(x.m->cfServedClock[0][CF_SERVED_FLT].sends == 0, "a stale cfilter answer (our reorg) stops its clock");
+        check(servingNow(&x), "and the node reads serving");
+        mxFree(&x);
+    }
+
+    printf("[J] scope: a rebuilt manager reads the still-connected node dark until it answers\n");
+    {
+        Mx x; mxInit(&x, tip, tip + 100);                       // the rebuild: a fresh manager, the node connected
+        check(status(&x) == BR_CF_PEER_CONNECTED_NOT_SERVING && dark(&x),
+              "no answer since the rebuild: connected-not-serving, DARK");
+        answerCFHeaders(&x, tip + 1, tip + 50);
+        check(servingNow(&x), "its first answer reads serving");
         mxFree(&x);
     }
 

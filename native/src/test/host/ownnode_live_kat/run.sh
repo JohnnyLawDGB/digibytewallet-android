@@ -42,5 +42,5 @@ OUT="$(timeout -k 5 120 "$BUILD_DIR/green" 2>&1)"; RC=$?
 if [ "$RC" -eq 0 ] && ! <<<"$OUT" grep -qE "ERROR: (AddressSanitizer|LeakSanitizer)" && <<<"$OUT" grep -q "^PASS: ownnode_live_kat"; then
     echo "  [green] all cases pass"
 else echo "GATE FAILURE: the green arm (rc=$RC)"; <<<"$OUT" grep -E "FAIL|ERROR" | head -6; FAIL=1; fi
-[ "$FAIL" -eq 0 ] && { echo "PASS: ownnode_live_kat (A, B red-then-green; C-F guards; ASan)"; exit 0; }
+[ "$FAIL" -eq 0 ] && { echo "PASS: ownnode_live_kat (A, B red-then-green; C-J guards; ASan)"; exit 0; }
 echo "FAIL: ownnode_live_kat"; exit 1

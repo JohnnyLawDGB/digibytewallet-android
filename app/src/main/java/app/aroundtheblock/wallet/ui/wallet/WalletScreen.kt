@@ -225,8 +225,9 @@ fun WalletScreen(
         }
 
         // Own-node dark banner (own-node-pairing track): the paired node is
-        // unreachable or connected but not serving compact filters (a node
-        // missing peerblockfilters=1). "Use public peers" only makes sense in
+        // unreachable or connected but not serving compact filters now (a node
+        // missing peerblockfilters=1, or one whose filter request stalled).
+        // "Use public peers" only makes sense in
         // exclusive mode — in additive mode the wallet already has public
         // peers alongside the own node, so the escape hatch would be a no-op.
         if (ownNodeHealth == OwnNodeHealth.DARK) {
@@ -1123,8 +1124,9 @@ private fun TorFailureBanner(onRetry: () -> Unit) {
 
 /**
  * Own-node-pairing track: shown when the paired node is DARK — either
- * unreachable, or connected but not answering cfheaders (a node missing
- * peerblockfilters=1). "Use public peers" is the session escape hatch
+ * unreachable, or connected but not serving compact filters now (a node missing
+ * peerblockfilters=1, or one whose cfheaders/cfilters request stalled).
+ * "Use public peers" is the session escape hatch
  * (additive, non-exclusive re-pin — see SyncService.ACTION_OWN_NODE_ADDITIVE_SESSION);
  * it's hidden in additive mode since the wallet already has public peers
  * there and the action would be a no-op.
