@@ -241,6 +241,30 @@ ln -sf ../../scripts/check-worktree-target.sh .git/hooks/pre-commit   # once per
   pinned suite), so it rides the weekly schedule, not every push.
 - **Prefer `git add <explicit paths>` over `git add -A`** when a worktree is in play.
 
+### CI (`.github/workflows/ci.yml`)
+
+A push or pull-request run is four kinds of job. **`build` is the one to wait on.**
+
+- `app`: the Gradle side (guard scripts, unit tests, debug APKs; the `debug-apk` artifact).
+- `kat-plan`: lists the host KAT suites and splits them into `KAT_SHARDS` (8) lists.
+- `kat-shard N`: one job per list, in parallel. Each suite still runs through
+  `scripts/run-host-kats.sh <name>`, one at a time, with the 32-bit toolchain and LeakSanitizer.
+- `build`: the gate. Fails unless all of the above succeeded and the suites that passed are
+  exactly the planned list (`.github/kat-shards/check.sh`).
+
+What to know when touching it:
+
+- **A new suite needs no list edit.** `plan.py` takes every `*_kat` directory; one with no line
+  in `.github/kat-shards/timings.txt` is planned at 60 seconds and runs all the same. The plan
+  is compared with `scripts/run-host-kats.sh --list`, so the planner and the runner cannot
+  disagree about what a suite is without failing `kat-plan`.
+- **Timings only balance the shards.** To refresh them, replace the lines of `timings.txt` with
+  the `kat-timings` artifact of a green run's `build` job. Its summary lists the slowest suites.
+- **The scripts in `.github/kat-shards/` are copies of the core repo's**, which runs these
+  suites against a core change. `plan.py` says how the two are kept in step.
+- **Before a release the gate is still the whole sweep in one go** (`RELEASING.md` §4), and the
+  Monday scheduled run does the same, followed by `check-kat-level-pins.sh`.
+
 ### Submodule (digibytewallet-core)
 The C core is a git submodule. Use explicit GIT_DIR for submodule commits:
 ```bash
