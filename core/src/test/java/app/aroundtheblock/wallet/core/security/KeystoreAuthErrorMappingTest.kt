@@ -63,4 +63,36 @@ class KeystoreAuthErrorMappingTest {
         a.initCause(b)
         assertNull(keystoreAuthFailureOf(a))
     }
+
+    // KS-BIND: the one rule shared by the status line and the unlock path (boundKeyStateOnFailure).
+
+    @Test fun `KS-BIND alias missing reads ABSENT whatever the error says`() {
+        // API 31+: getKey answers null for the deleted alias; the cipher's error names nothing.
+        val nullKey = java.security.InvalidKeyException("No installed provider supports this key: (null)")
+        assertEquals(BoundKeyState.ABSENT, boundKeyStateOnFailure(nullKey, aliasExists = false))
+        assertEquals(BoundKeyState.ABSENT, boundKeyStateOnFailure(NullPointerException(), aliasExists = false))
+        assertEquals(true, BoundKeyState.ABSENT.neverOpens)
+    }
+
+    @Test fun `KS-BIND KeyPermanentlyInvalidatedException reads INVALIDATED, raw or wrapped`() {
+        assertEquals(BoundKeyState.INVALIDATED, boundKeyStateOnFailure(invalidated, aliasExists = true))
+        assertEquals(BoundKeyState.INVALIDATED, boundKeyStateOnFailure(wrapped(invalidated), aliasExists = null))
+        assertEquals(true, BoundKeyState.INVALIDATED.neverOpens)
+    }
+
+    @Test fun `KS-BIND InvalidKeyException with the alias present is UNKNOWN - retryable, not lock removed`() {
+        // A permanently invalidated key raises the KeyPermanentlyInvalidatedException subclass; a plain
+        // InvalidKeyException on a key that is still there is no evidence of loss.
+        val r = boundKeyStateOnFailure(java.security.InvalidKeyException("vendor"), aliasExists = true)
+        assertEquals(BoundKeyState.UNKNOWN, r)
+        assertEquals(false, r.neverOpens)
+    }
+
+    @Test fun `KS-BIND a transient error is UNKNOWN and a lapsed window USABLE - both retryable`() {
+        assertEquals(BoundKeyState.UNKNOWN, boundKeyStateOnFailure(java.security.ProviderException("busy"), aliasExists = null))
+        assertEquals(BoundKeyState.UNKNOWN, boundKeyStateOnFailure(java.security.ProviderException("busy"), aliasExists = true))
+        assertEquals(BoundKeyState.USABLE, boundKeyStateOnFailure(wrapped(notAuthed), aliasExists = true))
+        assertEquals(false, BoundKeyState.UNKNOWN.neverOpens)
+        assertEquals(false, BoundKeyState.USABLE.neverOpens)
+    }
 }

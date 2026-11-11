@@ -22,6 +22,8 @@ import app.aroundtheblock.wallet.core.security.SeedKeyReadiness
 import app.aroundtheblock.wallet.core.security.SeedKeyStatus
 import app.aroundtheblock.wallet.core.security.seedKeyReadinessFor
 import app.aroundtheblock.wallet.core.security.seedKeyStatusFor
+import app.aroundtheblock.wallet.core.security.boundKeyStateOnFailure
+import app.aroundtheblock.wallet.core.security.neverOpens
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -1091,12 +1093,22 @@ class WalletManager @Suppress("LongParameterList") constructor(
         return try {
             keyStoreManager.encryptAuthBound(ByteArray(16))
             BoundKeyState.USABLE
-        } catch (e: KeystoreUserAuthRequiredException) {
-            BoundKeyState.USABLE
-        } catch (e: KeystoreKeyInvalidatedException) {
-            BoundKeyState.INVALIDATED
         } catch (e: Exception) {
-            BoundKeyState.UNKNOWN
+            boundKeyStateOnFailure(e, keyStoreManager.authBoundKeyExists())
+        }
+    }
+
+    /**
+     * KS-BIND. A read under the auth-bound key failed with [e], which is not one of the typed auth
+     * exceptions. When the key is gone or permanently invalidated by the same rule the status line
+     * uses ([boundKeyStateOnFailure]), throw [KeystoreKeyInvalidatedException] so the unlock path says
+     * "lock removed: restore from your recovery phrase" rather than a generic failure. Otherwise
+     * return, and the caller keeps its retryable outcome. Nothing is deleted either way.
+     */
+    private fun throwIfBoundKeyLost(e: Exception) {
+        if (boundKeyStateOnFailure(e, keyStoreManager.authBoundKeyExists()).neverOpens) {
+            android.util.Log.w("WalletManager", "KS-BIND: auth-bound key gone or invalidated (${e::class.java.simpleName}); record kept")
+            throw KeystoreKeyInvalidatedException(e)
         }
     }
 
@@ -1360,6 +1372,7 @@ class WalletManager @Suppress("LongParameterList") constructor(
         } catch (e: KeystoreKeyInvalidatedException) {
             throw e
         } catch (e: Exception) {
+            if (envelope.authBound) throwIfBoundKeyLost(e)
             return StoredPassphrase.Unknown("envelope did not read (${e::class.java.simpleName})")
         }
         if (bytes.isEmpty()) return StoredPassphrase.None
@@ -1393,6 +1406,7 @@ class WalletManager @Suppress("LongParameterList") constructor(
             } catch (e: KeystoreKeyInvalidatedException) {
                 throw e
             } catch (e: Exception) {
+                throwIfBoundKeyLost(e)
                 null
             }
         }

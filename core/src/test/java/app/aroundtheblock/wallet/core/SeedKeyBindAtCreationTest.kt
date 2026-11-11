@@ -298,4 +298,70 @@ class SeedKeyBindAtCreationTest {
     @Test fun `KS-BIND no wallet stored - status is NO_WALLET`() {
         assertEquals(SeedKeyStatus.NO_WALLET, Harness().walletManager.seedKeyStatus())
     }
+
+    // ── KS-BIND: the unlock path after the device lock was removed ───────────────────────────────
+    //
+    // Invariant: a record wrapped under the auth-bound key whose key is gone or permanently
+    // invalidated, by any route, makes the unlock path throw KeystoreKeyInvalidatedException (the UI's
+    // "lock removed: restore from your recovery phrase"), never the generic failure, never a loop, and
+    // never a deleted record. A key that exists but cannot be used just now stays retryable.
+
+    /** A bound wallet, then the real Keystore's behaviour on decrypt: getKey answers null for a deleted
+     *  alias, and Cipher.init(null) throws InvalidKeyException — not the fake's own absent-key error. */
+    private fun boundWalletThen(decrypt: (Harness) -> Throwable?): Harness {
+        val h = Harness(windowOpen = true)
+        h.prepareAsTheStepDoes(h.walletManager)
+        assertTrue(h.walletManager.createWallet(phrase))
+        assertTrue("precondition: a bound record", h.recordIsBound())
+        every { h.ksm.decryptAuthBound(any()) } answers {
+            decrypt(h)?.let { throw it }
+            h.vault.decrypt(BOUND_ALIAS, firstArg())
+        }
+        return h
+    }
+
+    private fun Harness.unlockOutcome(): Any = try {
+        walletManager.restoreFromDisk()
+    } catch (e: Exception) {
+        e
+    }
+
+    private fun Harness.assertRecordIntact() {
+        assertTrue("the record was deleted", recordIsBound())
+        assertFalse("a key was deleted", vault.events.any { it.startsWith("delete:") })
+    }
+
+    @Test fun `KS-BIND unlock with the bound alias deleted (API 31+) says lock removed`() {
+        val h = boundWalletThen { if (BOUND_ALIAS !in it.vault.keys) java.security.InvalidKeyException("No installed provider supports this key: (null)") else null }
+        h.vault.keys.remove(BOUND_ALIAS)
+        repeat(2) {
+            val r = h.unlockOutcome()
+            assertTrue("a deleted bound key gave $r, not the lock-removed outcome", r is KeystoreKeyInvalidatedException)
+        }
+        h.assertRecordIntact()
+    }
+
+    @Test fun `KS-BIND unlock with the bound key permanently invalidated (raw) says lock removed`() {
+        val h = boundWalletThen { mockk<android.security.keystore.KeyPermanentlyInvalidatedException>(relaxed = true) }
+        val r = h.unlockOutcome()
+        assertTrue("a raw KeyPermanentlyInvalidatedException gave $r", r is KeystoreKeyInvalidatedException)
+        h.assertRecordIntact()
+    }
+
+    @Test fun `KS-BIND unlock with an InvalidKeyException on a present key stays retryable`() {
+        // The alias is still there, so this is not evidence the key is gone: a permanently invalidated
+        // key raises KeyPermanentlyInvalidatedException (a subclass, mapped above), and a plain
+        // InvalidKeyException on a present key may be a vendor hiccup. Sending the user to their
+        // recovery phrase on a key that may open next time is the worse error.
+        val h = boundWalletThen { java.security.InvalidKeyException("vendor") }
+        assertEquals(false, h.unlockOutcome())
+        h.assertRecordIntact()
+    }
+
+    @Test fun `KS-BIND unlock with a transient Keystore error stays retryable`() {
+        val h = boundWalletThen { KeystoreHiccup() }
+        every { h.ksm.authBoundKeyExists() } returns null   // the Keystore cannot be asked either
+        assertEquals(false, h.unlockOutcome())
+        h.assertRecordIntact()
+    }
 }

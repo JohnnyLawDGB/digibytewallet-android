@@ -117,6 +117,34 @@ enum class BoundKeyState {
     UNKNOWN,
 }
 
+/** KS-BIND: the key is gone or permanently invalidated: a record wrapped under it never opens again. */
+val BoundKeyState.neverOpens: Boolean
+    get() = this == BoundKeyState.ABSENT || this == BoundKeyState.INVALIDATED
+
+/**
+ * KS-BIND. The ONE rule for what a failed use of the auth-bound key says about the key, shared by the
+ * Security-settings status line and the unlock path, so the two cannot disagree. [aliasExists] is
+ * the Keystore's answer to containsAlias, asked after the failure (null: it could not be asked).
+ *
+ * - The alias is missing: [BoundKeyState.ABSENT]. API 31+ deletes the key when the device lock is
+ *   removed, getKey then answers null and the cipher throws InvalidKeyException (or an NPE) — an
+ *   error that names nothing, so the alias check, not the error, is the evidence.
+ * - "Permanently invalidated" anywhere in the cause chain: [BoundKeyState.INVALIDATED].
+ * - "User not authenticated": [BoundKeyState.USABLE] (the window lapsed; the key still opens).
+ * - Anything else on a key that is still there, a plain InvalidKeyException included, is
+ *   [BoundKeyState.UNKNOWN]: not evidence of loss, so it stays retryable. A permanently invalidated
+ *   key raises KeyPermanentlyInvalidatedException, the subclass mapped above; sending the user to
+ *   their recovery phrase over a key that may open next time is the worse error.
+ */
+fun boundKeyStateOnFailure(failure: Throwable, aliasExists: Boolean?): BoundKeyState = when {
+    aliasExists == false -> BoundKeyState.ABSENT
+    else -> when (keystoreAuthFailureOf(failure)) {
+        KeystoreAuthFailure.INVALIDATED -> BoundKeyState.INVALIDATED
+        KeystoreAuthFailure.AUTH_REQUIRED -> BoundKeyState.USABLE
+        null -> BoundKeyState.UNKNOWN
+    }
+}
+
 /** Whether the stored seed key is bound to the device lock, for the Security-settings status line. */
 enum class SeedKeyStatus {
     /** No wallet record is stored. */
@@ -163,7 +191,7 @@ fun seedKeyStatusFor(
     !hasWallet -> SeedKeyStatus.NO_WALLET
     recordBound -> when {
         !deviceSecure -> SeedKeyStatus.LOCK_REMOVED
-        boundKey == BoundKeyState.ABSENT || boundKey == BoundKeyState.INVALIDATED -> SeedKeyStatus.LOCK_REMOVED
+        boundKey.neverOpens -> SeedKeyStatus.LOCK_REMOVED
         boundKey == BoundKeyState.USABLE -> SeedKeyStatus.BOUND
         else -> SeedKeyStatus.UNCHECKED
     }
