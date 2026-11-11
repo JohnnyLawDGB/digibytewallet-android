@@ -216,9 +216,12 @@ jobs:
       matrix:
         shard: ${{ fromJSON(needs.kat-plan.outputs.shards) }}
     steps:
+      # Full history, as the core's shards have: two suites compare with an earlier commit and
+      # skip that part when the commit is not in the checkout.
       - uses: actions/checkout@v7
         with:
           submodules: recursive
+          fetch-depth: 0
 
       # Outside the checkout, like the results below: the suites that scan the tree should find
       # in it only what the repository has.
@@ -314,8 +317,11 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/kat-results"
+          # The check's own status decides this step. The summary is written whether it passed
+          # or not, and nothing in the summary can change the result.
+          status=0
           bash .github/kat-shards/check.sh "$RUNNER_TEMP/kat-plan" "$RUNNER_TEMP/kat-results" \
-            "$KAT_SHARDS" "$KAT_FLOOR" 2>&1 | tee "$RUNNER_TEMP/coverage.txt"
+            "$KAT_SHARDS" "$KAT_FLOOR" 2>&1 | tee "$RUNNER_TEMP/coverage.txt" || status=$?
           {
             echo '```'
             cat "$RUNNER_TEMP/coverage.txt"
@@ -323,10 +329,12 @@ jobs:
             echo '<details><summary>Slowest suites</summary>'
             echo
             echo '```'
-            grep -v '^#' "$RUNNER_TEMP/kat-results/timings.txt" | sort -rn | head -25
+            # sed, not head: head leaves early, and sort then fails the pipe under pipefail.
+            grep -v '^#' "$RUNNER_TEMP/kat-results/timings.txt" | sort -rn | sed -n '1,25p'
             echo '```'
             echo '</details>'
-          } >> "$GITHUB_STEP_SUMMARY"
+          } >> "$GITHUB_STEP_SUMMARY" || true
+          exit "$status"
 
       # What .github/kat-shards/timings.txt is refreshed from.
       - name: Upload the timings

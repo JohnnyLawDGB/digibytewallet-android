@@ -72,11 +72,7 @@ each with a concrete failure scenario.
 ## What CI must cover
 
 - **Android:** `ci.yml` (Gradle build and unit tests, the native host KATs, the guardrail
-  scripts), CodeQL, gitleaks. In `ci.yml` the job to wait on is **`build`**: it is the gate,
-  green only if the Gradle job (`app`) and every host-KAT shard (`kat-shard N`) passed and the
-  suites that passed are exactly the suites in the checkout. The host KATs run as eight parallel
-  shards, each planned at about 22 minutes, where one job took two to three hours; the Monday
-  scheduled run is still the whole sweep in one job. How the shards work: `CLAUDE.md`, "CI".
+  scripts), CodeQL, gitleaks.
 - **Core:** a workflow on Linux that builds the core and runs every host KAT that exercises it,
   including the 32-bit, sanitizer and leak arms the Mac cannot run (owed: the first track of the
   iOS port plan's §19, which lands with the iOS repo's next push).
