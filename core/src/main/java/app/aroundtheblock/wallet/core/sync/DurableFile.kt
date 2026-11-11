@@ -106,7 +106,7 @@ object DurableFile {
         }
 
         fun remove() {
-            runCatching { prefs().edit().remove(key).apply() }
+            runCatching { prefs().edit().remove(key).commit() } // commit: a key outliving a newer file would win the next load
         }
 
         /** After a write of the store landed: the file is the newest copy now. */

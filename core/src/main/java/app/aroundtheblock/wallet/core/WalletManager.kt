@@ -1465,6 +1465,12 @@ class WalletManager @Suppress("LongParameterList") constructor(
         // TX-CKPT-CAP: the transaction checkpoint moved out of dgb_sync_data too; a new wallet must
         // not restore the previous wallet's history from it.
         SavedTransactionsStore.delete(context)
+        // STORE-DURABILITY review: the scan ledger records which heights were evaluated for ONE wallet,
+        // so after a seed change it is the wrong wallet's record; the header chain goes with it. Deleted
+        // here, through delete() (epoch bump, tmp first), rather than left to the next start's restore
+        // preflight to find (HEADER_WINDOW_MISSING) once the block window above is gone.
+        app.aroundtheblock.wallet.core.sync.FilterHeaderStore.delete(context)
+        app.aroundtheblock.wallet.core.sync.CfScanLedgerStore.delete(context)
         // A new wallet (create, recover, seed change): every record cached from here on is
         // written by this build, so the one-time rebuild after an update has nothing to do. The
         // floor a previous wallet's rebuild recorded does not belong to this one.
