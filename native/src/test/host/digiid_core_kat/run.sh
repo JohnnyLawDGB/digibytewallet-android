@@ -14,11 +14,16 @@
 #               message over 0xffff bytes gets the standard compact size; 64 the message is hashed once;
 #               128 the key is not marked compressed; 256 address format 2 answers P2PKH; 512 the caller's
 #               key is left unwiped after signing; 1024 a lone surrogate is written as three bytes; 2048
-#               modified UTF-8; 4096 the shared identity is m/0'/1/0; 8192 unpadded base64. Each arm fails
-#               exactly the cases CASES lists for its bit and passes every other.
+#               modified UTF-8; 4096 the shared identity is m/0'/1/0; 8192 unpadded base64; 16384 the URI's
+#               surrogate pairs as two three-byte halves (the JNI specification's form, which ART does not
+#               write); 32768 the URI written by the message's rules (U+0000 one byte, a lone surrogate '?');
+#               65536 BRDigiIdAddressWithKey leaves the caller's key unwiped. Each arm fails exactly the cases
+#               CASES lists for its bit and passes every other.
 #   shipped     -DDIGIID_UNFIXED=0: every case passes, exit 0.
 #   bridge      the shipped header against the bridge's own jni_wallet_sign.c / jni_wallet.c / slip13.c,
-#               over identity_sign_bytes_kat's host_jni stand-ins: every answer and refusal the same.
+#               over identity_sign_bytes_kat's host_jni stand-ins: every answer and refusal the same. Its
+#               host env's GetStringUTFChars writes what ART's does (a surrogate pair as four bytes), and the
+#               header gets the URI through BRDigiIdUriBytesFromUtf16.
 # All under ASan + UBSan, 64-bit; the shipped arm and the bridge comparison again 32-bit where a 32-bit link
 # works (said so, and skipped, where it does not: no 32-bit link on an arm64 Mac). The arms run with
 # detect_leaks=0; then every case runs once more on the shipped arm under LeakSanitizer where the platform
@@ -65,11 +70,14 @@ CASES=(
     message_prefix:32
     message_digest:64
     utf8_bytes:1024,2048
+    uri_bytes:16384,32768
+    uri_identity:2,4,64,8192,16384,32768
     sign_shared_login:64,256,4096,8192
     sign_site_request:2,4,8,64,2048,4096,8192
     request_golden_inputs:2,4
     address_rules:1,2,4,8,16,4096
     sign_with_key_wipes:128,512
+    address_with_key_wipes:128,65536
     long_messages:2,4,32,64,4096,8192
     edges:1,2,4,8,16,64,256,4096,8192
     buffer_edges:512
@@ -77,10 +85,11 @@ CASES=(
     sweep_keys:1,2,4,8,4096
     sweep_sign:1,2,4,8,16,64,256,4096,8192
     sweep_utf8:1024,2048
+    sweep_uri_bytes:16384,32768
 )
 ARMS=(1:index-big-endian 2:words-big-endian 4:soft-path 8:negative-index 16:shared-any-index 32:compact-size
       64:single-sha 128:uncompressed 256:segwit-ignored 512:key-kept 1024:lone-surrogate-kept 2048:modified-utf8
-      4096:shared-path 8192:base64-unpadded)
+      4096:shared-path 8192:base64-unpadded 16384:uri-spec-pairs 32768:uri-as-message 65536:address-key-kept)
 
 # ---- the seam is real ----------------------------------------------------------------------
 if [ ! -f "$HEADER" ]; then
@@ -88,7 +97,7 @@ if [ ! -f "$HEADER" ]; then
 fi
 HDR="$(cat "$HEADER")"
 for fn in BRDigiIdSlip13Indexes BRDigiIdSiteKey BRDigiIdSharedKey BRDigiIdMessagePrefix BRDigiIdMessageDigest BRDigiIdUtf8FromUtf16 \
-          BRDigiIdSignWithKey BRDigiIdSignShared BRDigiIdSignSite BRDigiIdAddress; do
+          BRDigiIdUriBytesFromUtf16 BRDigiIdAddressWithKey BRDigiIdSignWithKey BRDigiIdSignShared BRDigiIdSignSite BRDigiIdAddress; do
     if ! grep -Eq "static inline [a-zA-Z0-9_ ]+ \*?$fn\(" <<<"$HDR"; then
         echo "GATE FAILURE: $HEADER does not define $fn."; exit 1
     fi
@@ -204,24 +213,33 @@ if [ "$(uname -s)" = Darwin ] && command -v swiftc >/dev/null 2>&1; then
     printf '#include "BRDigiId.h"\n' > "$BUILD_DIR/bridging.h"
     cat > "$BUILD_DIR/use.swift" <<'EOF'
 let seed = [UInt8](repeating: 1, count: 64)
-var work = [UInt8](repeating: 0, count: BRDigiIdSignSiteWorkSize(28, 4))
+// The URI's bytes as Android hashes them: from its UTF-16 units (THE URI in BRDigiId.h), not uri.utf8,
+// which differs for U+0000.
+let uri = "https://example.com/\u{1F600}"
+let uriUnits: [UInt16] = Array(uri.utf16)
+var uriRaw = [UInt8](repeating: 0, count: 3 * uriUnits.count)
+var uriLength = 0
+let uriStatus: BRDigiIdStatus = BRDigiIdUriBytesFromUtf16(&uriRaw, uriRaw.count, &uriLength, uriUnits, uriUnits.count)
+let uriBytes: [CChar] = uriRaw[0..<uriLength].map { CChar(bitPattern: $0) }
+let units: [UInt16] = Array("gm \u{1F600}".utf16)
+var message = [UInt8](repeating: 0, count: 3 * units.count)
+var length = 0
+let utf8: BRDigiIdStatus = BRDigiIdUtf8FromUtf16(&message, message.count, &length, units, units.count)
+var work = [UInt8](repeating: 0, count: BRDigiIdSignSiteWorkSize(uriLength, length))
 var out = [CChar](repeating: 0, count: Int(BR_DIGIID_ANSWER_CAPACITY))
 var addr = [CChar](repeating: 0, count: Int(BR_DIGIID_ADDRESS_CAPACITY))
-let message: [UInt8] = Array("ping".utf8)
-let uri = "https://example.com/callback"
 let workCount = work.count
-let signed: BRDigiIdStatus = BRDigiIdSignSite(&out, out.count, seed, seed.count, message, message.count, uri, uri.utf8.count, 0,
+let signed: BRDigiIdStatus = BRDigiIdSignSite(&out, out.count, seed, seed.count, message, length, uriBytes, uriLength, 0,
                                               &work, workCount)
-let shared: BRDigiIdStatus = BRDigiIdSignShared(&out, out.count, seed, seed.count, message, message.count, 2, &work, workCount)
+let shared: BRDigiIdStatus = BRDigiIdSignShared(&out, out.count, seed, seed.count, message, length, 2, &work, workCount)
 let address: BRDigiIdStatus = BRDigiIdAddress(&addr, addr.count, seed, seed.count, 0, nil, 0, 0, &work, workCount)
 var idx = [UInt32](repeating: 0, count: 4)
-let indexes: BRDigiIdStatus = BRDigiIdSlip13Indexes(&idx, uri, uri.utf8.count, 0, &work, workCount)
-let units: [UInt16] = Array("gm \u{1F600}".utf16)
-var bytes = [UInt8](repeating: 0, count: 3 * units.count)
-var length = 0
-let utf8: BRDigiIdStatus = BRDigiIdUtf8FromUtf16(&bytes, bytes.count, &length, units, units.count)
-print(signed == BR_DIGIID_OK, shared == BR_DIGIID_OK, address == BR_DIGIID_OK, indexes == BR_DIGIID_OK, utf8 == BR_DIGIID_OK,
-      DIGIID_UNFIXED, BR_DIGIID_MESSAGE_HEADER_LENGTH)
+let indexes: BRDigiIdStatus = BRDigiIdSlip13Indexes(&idx, uriBytes, uriLength, 0, &work, workCount)
+var key = BRKey()
+let siteKey: BRDigiIdStatus = BRDigiIdSiteKey(&key, seed, seed.count, uriBytes, uriLength, 0, &work, workCount)
+let keyAddress: BRDigiIdStatus = BRDigiIdAddressWithKey(&addr, addr.count, &key)
+print(uriStatus == BR_DIGIID_OK, signed == BR_DIGIID_OK, shared == BR_DIGIID_OK, address == BR_DIGIID_OK, indexes == BR_DIGIID_OK,
+      utf8 == BR_DIGIID_OK, siteKey == BR_DIGIID_OK, keyAddress == BR_DIGIID_OK, DIGIID_UNFIXED, BR_DIGIID_MESSAGE_HEADER_LENGTH)
 EOF
     # The headers alone, without the core's module.modulemap (Swift would read it as the BRCore module, and it
     # names headers this core no longer has): the way an app's bridging header sees them.
@@ -309,6 +327,15 @@ run_shipped() {   # <binary> <label>
     done
 }
 run_shipped "$BUILD_DIR/green" 64-bit
+# Once more without the sanitizers: ASan's stack layout can leave a buffer a function forgot to clear
+# zero by luck (the NO_ADDRESS checks dirty the stack first, and only an unsanitized build sees it).
+if "$CC" -w -std=c99 -include stdint.h -g -O0 -DDIGIID_UNFIXED=0 -I "$CORE_DIR" -I "$CORE_DIR/secp256k1/include" -I "$BRIDGE_DIR" \
+       "$SCRIPT_DIR/digiid_core_kat_main.c" "$BUILD_DIR/tu2.c" "$BRIDGE_DIR/slip13.c" "$BUILD_DIR"/core_plain/*.o -lm -lpthread \
+       -o "$BUILD_DIR/green_plain"; then
+    run_shipped "$BUILD_DIR/green_plain" "64-bit unsanitized"
+else
+    echo "GATE FAILURE: the unsanitized shipped arm did not compile (a build error is not evidence)."; FAIL=1
+fi
 
 # ---- the bridge it moved from --------------------------------------------------------------
 BRIDGE_CORE=(BRWallet.c BRTransaction.c BRMerkleBlock.c BRWalletFilterElements.c BRDigiDollar.c BRDigiAsset.c BRSet.c)
@@ -380,6 +407,6 @@ if ! grep -q "detect_leaks is not supported" <<<"$leak_probe"; then
 fi
 echo "leak check: $leak_note"
 
-[ $FAIL -eq 0 ] && echo "PASS: digiid_core_kat (${#CASES[@]} cases: ${#ARMS[@]} comparison arms each failing exactly its cases, shipped arm clean under ASan + UBSan; the bridge's own answers matched; 32-bit $bits_note; leak check $leak_note; portability)"
+[ $FAIL -eq 0 ] && echo "PASS: digiid_core_kat (${#CASES[@]} cases: ${#ARMS[@]} comparison arms each failing exactly its cases, shipped arm clean under ASan + UBSan and unsanitized; the bridge's own answers matched; 32-bit $bits_note; leak check $leak_note; portability)"
 [ $FAIL -ne 0 ] && echo "FAIL: digiid_core_kat"
 exit $FAIL

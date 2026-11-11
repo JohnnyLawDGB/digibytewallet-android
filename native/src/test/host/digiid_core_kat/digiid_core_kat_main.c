@@ -19,7 +19,9 @@
 //    2. BY THE BRIDGE'S OWN slip13.c, compiled into this binary: the path indexes are held to it.
 //    3. BY A MODEL. `b_...` below is the bridge's C written out line for line without JNI (a jstring
 //       becomes its bytes or its UTF-16 units, NULL a Java null). The sweep_* cases hold the header to
-//       it over fixed pseudo-random inputs.
+//       it over fixed pseudo-random inputs. The URI's bytes are what ART's GetStringUTFChars writes:
+//       art8_utf below is ART's own encoder (Android 8.0 to 12) line for line, and
+//       digiid_core_bridge_main.c's host env writes them with the newer ART's.
 //
 //  IdentityKeyPolicyTest's assertions are not here: IdentityKeyPolicy (which identity a site gets) stays
 //  in Kotlin; only the C moved.
@@ -82,6 +84,17 @@ static const char *REQUEST_SITE_ANSWER =
     "DPeEMYki92jeUSDgjkrfrTMVpvGWCHYd68|H04hUIUu+y0CNyLxVH35AVWVzTxQgDJxiRyH7JP9RUHnEZfnLkA70TurMuFs1A1YTbYfC5y0WF6fROn2Z7SA1dI=";
 static const char *REQUEST_SHARED_ANSWER =
     "DGAf4MmtdP6D6QY1KREaznT3DZwxeAkWyn|H8xIXGJ7lXa6l/eDeVwtkusc6h0Aa8CN7s9FQoEDUBzrTGwOe+xF2oes1/uS/qf2La+8L1tjP4R3fqeHQyc84fk=";
+// A callback URL with an emoji in its path, as Android hashes it (ART writes the pair as its four-byte
+// character), and two that only GetStringUTFChars's U+0000 and lone-surrogate rules reach: the bridge's
+// addresses, at index 0, and the request signed with the first.
+static const char *EMOJI_URI_ADDRESS = "DJ7bsa92E89mALV8yB9x7d6K1icB8Q9KHP";
+static const char *NUL_URI_ADDRESS = "DC4WY65HLkjENNHiQLFq4vU2vDrb7L41d4";
+static const char *LONE_URI_ADDRESS = "DP7tdtpUk51YSBP5iWCWMXznSTSoKpHuva";
+static const char *EMOJI_URI_REQUEST_ANSWER =
+    "DJ7bsa92E89mALV8yB9x7d6K1icB8Q9KHP|H8PhhdIpZA4vNCMkr9DLjH5GyhqKOPPQoeE8e9DpJSXqbScat2Iwc3k2Utr6q1ZCc3ZRl1nk0vMMor4bQGx0D/s=";
+// The same emoji URL in the JNI specification's modified UTF-8 (the pair as two three-byte halves), which
+// ART does not write: an independent model's address for it (not the bridge's, which never sees it).
+static const char *EMOJI_URI_SPEC_ADDRESS = "DJEY3MhnjYjB7RxKHfxfZeZiyDu6ziGV6F";
 static const char *EMOJI_SITE_ANSWER =
     "DFfdC1dpu7GjqwbHBGwMbuHzwtfBE2r5Wx|IEjMM6/dfsv1K8w5HKPNCFHV/bjkzpPkLyi9KRdyyqm5a70pMTDcL5Bc+HjtmX+FblU+9Up/NIXxIVDNNLfAbDE=";
 
@@ -129,6 +142,19 @@ static UInt256 ownSecret(const uint8_t *seed, size_t seedLen, const uint32_t *pa
 }
 
 static int sameSecret(const BRKey *key, UInt256 s) { return memcmp(&key->secret, &s, 32) == 0; }
+
+// Fills the stack below the caller with 0x5a, so that a callee's buffer it forgets to clear is not
+// zero by luck (Apple clang has no MemorySanitizer to say so).
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline))
+#endif
+static void dirtyStack(void)
+{
+    volatile uint8_t junk[16384];
+    size_t i;
+
+    for (i = 0; i < sizeof(junk); i++) junk[i] = 0x5a;
+}
 
 static int allZero(const void *p, size_t n)
 {
@@ -233,6 +259,44 @@ static uint8_t *b_message_utf8(const uint16_t *units, size_t n, size_t *outLen)
 }
 
 // sign_with_key: the answer into result[256] and 1, or 0 (NULL). Cleans the key in every path.
+// ART's ConvertUtf16ToModifiedUtf8 as Android 8.0 to 12 have it (runtime/utf.cc on 8.x, then
+// libdexfile/dex/utf.cc), which their GetStringUTFChars calls, line for line but for its all-ASCII fast
+// path (a copy of the same bytes). Writes into utf8_out (room for 3 * char_count); returns the bytes.
+static size_t art8_utf(uint8_t *utf8_out, const uint16_t *utf16_in, size_t char_count)
+{
+    uint8_t *start = utf8_out;
+
+    while (char_count--) {
+        const uint16_t ch = *utf16_in++;
+        if (ch > 0 && ch <= 0x7f) {
+            *utf8_out++ = (uint8_t)ch;
+        } else {
+            if ((ch >= 0xd800 && ch <= 0xdbff) && (char_count > 0)) {
+                const uint16_t ch2 = *utf16_in;
+                if (ch2 >= 0xdc00 && ch2 <= 0xdfff) {
+                    utf16_in++;
+                    char_count--;
+                    const uint32_t code_point = ((uint32_t)ch << 10) + ch2 - 0x035fdc00;
+                    *utf8_out++ = (uint8_t)((code_point >> 18) | 0xf0);
+                    *utf8_out++ = (uint8_t)(((code_point >> 12) & 0x3f) | 0x80);
+                    *utf8_out++ = (uint8_t)(((code_point >> 6) & 0x3f) | 0x80);
+                    *utf8_out++ = (uint8_t)((code_point & 0x3f) | 0x80);
+                    continue;
+                }
+            }
+            if (ch > 0x07ff) {
+                *utf8_out++ = (uint8_t)((ch >> 12) | 0xe0);
+                *utf8_out++ = (uint8_t)(((ch >> 6) & 0x3f) | 0x80);
+                *utf8_out++ = (uint8_t)((ch & 0x3f) | 0x80);
+            } else {
+                *utf8_out++ = (uint8_t)((ch >> 6) | 0xc0);
+                *utf8_out++ = (uint8_t)((ch & 0x3f) | 0x80);
+            }
+        }
+    }
+    return (size_t)(utf8_out - start);
+}
+
 static int b_sign_with_key(char result[256], BRKey *key, const uint8_t *msgChars, size_t msgLen, int32_t addressFormat)
 {
     key->compressed = 1;
@@ -692,9 +756,101 @@ static void utf8_bytes(void)
     ck(BRDigiIdUtf8FromUtf16(out, sizeof(emojiUtf8) - 1, &len, emoji, N(emoji)) == BR_DIGIID_CAPACITY && len == sizeof(emojiUtf8) &&
        out[0] == 0x5a, "a byte too few is CAPACITY: the length needed, nothing written");
     ck(BRDigiIdUtf8FromUtf16(NULL, 0, &len, emoji, N(emoji)) == BR_DIGIID_CAPACITY && len == 9, "no out asks the length");
+    ck(BRDigiIdUtf8FromUtf16(NULL, 64, &len, emoji, N(emoji)) == BR_DIGIID_CAPACITY && len == 9, "no out is CAPACITY whatever outCap says");
     ck(BRDigiIdUtf8FromUtf16(out, sizeof(emojiUtf8), &len, emoji, N(emoji)) == BR_DIGIID_OK && len == 9, "exactly the length suffices");
     ck(BRDigiIdUtf8FromUtf16(out, sizeof(out), &len, NULL, 0) == BR_DIGIID_REFUSED && len == 0, "no units (a null message) is refused");
     ck(BRDigiIdUtf8FromUtf16(out, sizeof(out), NULL, emoji, N(emoji)) == BR_DIGIID_REFUSED, "no outLen is refused");
+}
+
+// The URI's bytes: what ART's GetStringUTFChars writes, written out here by hand.
+static void uri_bytes(void)
+{
+    static const uint16_t emoji[] = { 'h', 't', 't', 'p', 's', ':', '/', '/', 'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm', '/',
+                                      0xD83D, 0xDE00 };
+    static const uint8_t emojiBytes[] = { 'h', 't', 't', 'p', 's', ':', '/', '/', 'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm', '/',
+                                          0xF0, 0x9F, 0x98, 0x80 };
+    static const uint16_t nul[] = { 'a', 0x0000, 'b' };
+    static const uint8_t nulBytes[] = { 'a', 0xC0, 0x80, 'b' };
+    static const uint16_t lone[] = { 'a', 0xD800, 'b', 0xDC00 };
+    static const uint8_t loneBytes[] = { 'a', 0xED, 0xA0, 0x80, 'b', 0xED, 0xB0, 0x80 };
+    static const uint16_t highAtEnd[] = { 'x', 0xD83D };
+    static const uint8_t highAtEndBytes[] = { 'x', 0xED, 0xA0, 0xBD };
+    static const uint16_t highHighLow[] = { 0xD800, 0xD83D, 0xDE00 };
+    static const uint8_t highHighLowBytes[] = { 0xED, 0xA0, 0x80, 0xF0, 0x9F, 0x98, 0x80 };
+    static const uint16_t lowHigh[] = { 0xDC00, 0xD800 };
+    static const uint8_t lowHighBytes[] = { 0xED, 0xB0, 0x80, 0xED, 0xA0, 0x80 };
+    static const uint16_t edges[] = { 0x01, 0x7F, 0x80, 0x7FF, 0x800, 0xD7FF, 0xDBFF, 0xDFFF, 0xE000, 0xFFFF, 0xD800, 0xDC00 };
+    static const uint8_t edgesBytes[] = { 0x01, 0x7F, 0xC2, 0x80, 0xDF, 0xBF, 0xE0, 0xA0, 0x80, 0xED, 0x9F, 0xBF, 0xF4, 0x8F, 0xBF, 0xBF,
+                                          0xEE, 0x80, 0x80, 0xEF, 0xBF, 0xBF, 0xF0, 0x90, 0x80, 0x80 };
+    static const struct { const char *name; const uint16_t *u; size_t n; const uint8_t *b; size_t bn; } V[] = {
+        { "an emoji in the path (a surrogate pair) as its four bytes, as ART writes it", emoji, N(emoji), emojiBytes, sizeof(emojiBytes) },
+        { "U+0000 as C0 80", nul, N(nul), nulBytes, sizeof(nulBytes) },
+        { "a surrogate without its partner as its own three bytes", lone, N(lone), loneBytes, sizeof(loneBytes) },
+        { "a high surrogate at the end as its three bytes", highAtEnd, N(highAtEnd), highAtEndBytes, sizeof(highAtEndBytes) },
+        { "a high surrogate, then a pair", highHighLow, N(highHighLow), highHighLowBytes, sizeof(highHighLowBytes) },
+        { "a low surrogate, then a high one: two lone ones", lowHigh, N(lowHigh), lowHighBytes, sizeof(lowHighBytes) },
+        { "the encoding's boundaries (U+10FFFF and U+10000 as pairs)", edges, N(edges), edgesBytes, sizeof(edgesBytes) },
+    };
+    uint16_t ascii[64];
+    uint8_t out[64], art[192];
+    size_t i, len, alen;
+
+    for (i = 0; i < N(V); i++) {
+        ck(BRDigiIdUriBytesFromUtf16(out, sizeof(out), &len, V[i].u, V[i].n) == BR_DIGIID_OK && len == V[i].bn && memcmp(out, V[i].b, len) == 0,
+           "%s", V[i].name);
+        alen = art8_utf(art, V[i].u, V[i].n);
+        ck(alen == len && memcmp(art, out, len) == 0, "and ART's own encoder writes the same");
+        ck(memchr(out, 0, len) == NULL && len <= 3 * V[i].n, "no 00 byte, at most three bytes a unit");
+    }
+    for (i = 0; i < strlen(REQUEST_CALLBACK); i++) ascii[i] = (uint16_t)REQUEST_CALLBACK[i];
+    ck(BRDigiIdUriBytesFromUtf16(out, sizeof(out), &len, ascii, strlen(REQUEST_CALLBACK)) == BR_DIGIID_OK && len == strlen(REQUEST_CALLBACK) &&
+       memcmp(out, REQUEST_CALLBACK, len) == 0, "an ASCII callback URL is its own bytes");
+    ck(BRDigiIdUriBytesFromUtf16(out, sizeof(out), &len, emoji, 0) == BR_DIGIID_OK && len == 0, "no units, no bytes");
+
+    memset(out, 0x5a, sizeof(out));
+    ck(BRDigiIdUriBytesFromUtf16(out, sizeof(emojiBytes) - 1, &len, emoji, N(emoji)) == BR_DIGIID_CAPACITY && len == sizeof(emojiBytes) &&
+       out[0] == 0x5a, "a byte too few is CAPACITY: the length needed, nothing written");
+    ck(BRDigiIdUriBytesFromUtf16(NULL, 0, &len, nul, N(nul)) == BR_DIGIID_CAPACITY && len == 4, "no out asks the length");
+    ck(BRDigiIdUriBytesFromUtf16(NULL, 64, &len, nul, N(nul)) == BR_DIGIID_CAPACITY && len == 4, "no out is CAPACITY whatever outCap says");
+    ck(BRDigiIdUriBytesFromUtf16(out, sizeof(emojiBytes), &len, emoji, N(emoji)) == BR_DIGIID_OK && len == sizeof(emojiBytes),
+       "exactly the length suffices");
+    ck(BRDigiIdUriBytesFromUtf16(out, sizeof(out), &len, NULL, 0) == BR_DIGIID_REFUSED && len == 0, "no units (a null URI) is refused");
+    ck(BRDigiIdUriBytesFromUtf16(out, sizeof(out), NULL, emoji, N(emoji)) == BR_DIGIID_REFUSED, "no outLen is refused");
+}
+
+// A site whose callback URL is not ASCII gets the identity it gets on Android: the bridge's addresses.
+static void uri_identity(void)
+{
+    static const uint16_t emoji[] = { 'h', 't', 't', 'p', 's', ':', '/', '/', 'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm', '/',
+                                      0xD83D, 0xDE00 };
+    static const uint16_t nul[] = { 'h', 't', 't', 'p', 's', ':', '/', '/', 'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm', '/',
+                                    'a', 0x0000, 'b' };
+    static const uint16_t lone[] = { 'h', 't', 't', 'p', 's', ':', '/', '/', 'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm', '/',
+                                     'a', 0xD800, 'b' };
+    static const uint8_t emojiSpec[] = { 'h', 't', 't', 'p', 's', ':', '/', '/', 'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm', '/',
+                                         0xED, 0xA0, 0xBD, 0xED, 0xB8, 0x80 };
+    static const struct { const char *name; const uint16_t *u; size_t n; const char **address; } V[] = {
+        { "https://example.com/<U+1F600>", emoji, N(emoji), &EMOJI_URI_ADDRESS },
+        { "https://example.com/a<U+0000>b", nul, N(nul), &NUL_URI_ADDRESS },
+        { "https://example.com/a<U+D800>b", lone, N(lone), &LONE_URI_ADDRESS },
+    };
+    uint8_t seed[64], uri[96];
+    char addr[BR_DIGIID_ADDRESS_CAPACITY], answer[BR_DIGIID_ANSWER_CAPACITY];
+    size_t i, len;
+
+    seedOf(seed, ABANDON);
+    for (i = 0; i < N(V); i++) {
+        ck(BRDigiIdUriBytesFromUtf16(uri, sizeof(uri), &len, V[i].u, V[i].n) == BR_DIGIID_OK &&
+           BRDigiIdAddress(addr, sizeof(addr), seed, 64, 1, (const char *)uri, len, 0, WORK, sizeof(WORK)) == BR_DIGIID_OK &&
+           strcmp(addr, *V[i].address) == 0, "%s: the bridge's address (%s)", V[i].name, addr);
+    }
+    BRDigiIdUriBytesFromUtf16(uri, sizeof(uri), &len, emoji, N(emoji));
+    ck(BRDigiIdSignSite(answer, sizeof(answer), seed, 64, (const uint8_t *)REQUEST, strlen(REQUEST), (const char *)uri, len, 0, WORK,
+                        sizeof(WORK)) == BR_DIGIID_OK && strcmp(answer, EMOJI_URI_REQUEST_ANSWER) == 0,
+       "the request signed with the emoji URL's identity: the bridge's answer");
+    ck(BRDigiIdAddress(addr, sizeof(addr), seed, 64, 1, (const char *)emojiSpec, sizeof(emojiSpec), 0, WORK, sizeof(WORK)) == BR_DIGIID_OK &&
+       strcmp(addr, EMOJI_URI_SPEC_ADDRESS) == 0 && strcmp(addr, EMOJI_URI_ADDRESS) != 0,
+       "the JNI specification's bytes for it would be another identity (%s), as an independent model says", addr);
 }
 
 // ---- signing -------------------------------------------------------------------------------------
@@ -868,6 +1024,7 @@ static void sign_with_key_wipes(void)
     }
     memset(&key, 0, sizeof(key));
     key.compressed = 1;
+    dirtyStack();
     ck(BRDigiIdSignWithKey(out, sizeof(out), &key, (const uint8_t *)LOGIN, 3, 0, WORK, sizeof(WORK)) == BR_DIGIID_NO_ADDRESS && out[0] == '\0',
        "a key with no secret gives no address: NO_ADDRESS");
     {
@@ -876,6 +1033,50 @@ static void sign_with_key_wipes(void)
         ck(b_sign_with_key(b, &key, (const uint8_t *)LOGIN, 3, 0) == 0, "and the bridge refuses it too");
     }
     ck(BRDigiIdSignWithKey(out, sizeof(out), NULL, (const uint8_t *)LOGIN, 3, 0, WORK, sizeof(WORK)) == BR_DIGIID_REFUSED, "no key: refused");
+}
+
+// BRDigiIdAddressWithKey (identityAddress's last step) wipes the caller's key on every path.
+static void address_with_key_wipes(void)
+{
+    uint8_t seed[64];
+    char out[BR_DIGIID_ADDRESS_CAPACITY], shared[BR_DIGIID_ADDRESS_CAPACITY], site[BR_DIGIID_ADDRESS_CAPACITY];
+    BRKey key;
+
+    seedOf(seed, ABANDON);
+    hAddress(shared, seed, NULL, 0);
+    hAddress(site, seed, REQUEST_CALLBACK, 0);
+    BRDigiIdSharedKey(&key, seed, 64);
+    ck(BRDigiIdAddressWithKey(out, sizeof(out), &key) == BR_DIGIID_OK && strcmp(out, shared) == 0, "the shared key's address is BRDigiIdAddress's");
+    ck(allZero(&key, sizeof(key)), "and the key is wiped after");
+    BRDigiIdSiteKey(&key, seed, 64, REQUEST_CALLBACK, strlen(REQUEST_CALLBACK), 0, WORK, sizeof(WORK));
+    ck(BRDigiIdAddressWithKey(out, sizeof(out), &key) == BR_DIGIID_OK && strcmp(out, site) == 0 && allZero(&key, sizeof(key)),
+       "the per-site key's likewise, the key wiped");
+
+    BRDigiIdSharedKey(&key, seed, 64);
+    ck(BRDigiIdAddressWithKey(NULL, 0, &key) == BR_DIGIID_REFUSED && allZero(&key, sizeof(key)), "no out: refused, the key wiped");
+    BRDigiIdSharedKey(&key, seed, 64);
+    ck(BRDigiIdAddressWithKey(out, strlen(shared), &key) == BR_DIGIID_CAPACITY && out[0] == '\0' && allZero(&key, sizeof(key)),
+       "a byte too small an out: CAPACITY, out empty, the key wiped");
+    BRDigiIdSharedKey(&key, seed, 64);
+    ck(BRDigiIdAddressWithKey(out, strlen(shared) + 1, &key) == BR_DIGIID_OK && strcmp(out, shared) == 0 && allZero(&key, sizeof(key)),
+       "exactly the address and its NUL suffices");
+    {
+        BRKey k2;
+        UInt256 secret;
+
+        BRDigiIdSharedKey(&k2, seed, 64);
+        secret = k2.secret;
+        BRKeyClean(&k2);
+        BRKeySetSecret(&key, &secret, 0);   // the caller's key marked uncompressed
+        ck(BRDigiIdAddressWithKey(out, sizeof(out), &key) == BR_DIGIID_OK && strcmp(out, shared) == 0 && allZero(&key, sizeof(key)),
+           "a key marked uncompressed gives the compressed key's address, and is wiped");
+        mem_clean(&secret, sizeof(secret));
+    }
+    memset(&key, 0, sizeof(key));
+    dirtyStack();
+    ck(BRDigiIdAddressWithKey(out, sizeof(out), &key) == BR_DIGIID_NO_ADDRESS && out[0] == '\0' && allZero(&key, sizeof(key)),
+       "a key with no secret gives no address: NO_ADDRESS, the key wiped");
+    ck(BRDigiIdAddressWithKey(out, sizeof(out), NULL) == BR_DIGIID_REFUSED, "no key: refused");
 }
 
 // Messages around 0xffff bytes and above: the bridge's prefix, held to the model.
@@ -1163,6 +1364,38 @@ static void sweep_utf8(void)
     ck(pairs > 10000 && lone > 10000, "the stream holds surrogate pairs (%ld) and lone surrogates (%ld)", pairs, lone);
 }
 
+// BRDigiIdUriBytesFromUtf16 against ART's own encoder over arbitrary UTF-16.
+static void sweep_uri_bytes(void)
+{
+    uint16_t u[300];
+    uint8_t out[900], art[900];
+    long differ = 0, n, pairs = 0, nuls = 0;
+
+    for (n = 0; n < 20000; n++) {
+        size_t count = (size_t)below(N(u) + 1), i, len, alen;
+
+        for (i = 0; i < count; i++) {
+            switch (below(8)) {
+                case 0: u[i] = 0; nuls++; break;
+                case 1: u[i] = (uint16_t)(0xD800 + below(0x400)); break;
+                case 2: u[i] = (uint16_t)(0xDC00 + below(0x400)); break;
+                case 3: u[i] = (uint16_t)(0x80 + below(0x780)); break;
+                case 4: u[i] = (uint16_t)rnd(); break;
+                case 5: if (i + 1 < count) { u[i++] = (uint16_t)(0xD800 + below(0x400)); u[i] = (uint16_t)(0xDC00 + below(0x400)); pairs++; break; }
+                /* fall through */
+                default: u[i] = (uint16_t)below(0x80); break;
+            }
+        }
+        if (BRDigiIdUriBytesFromUtf16(out, sizeof(out), &len, u, count) != BR_DIGIID_OK) { differ++; continue; }
+        alen = art8_utf(art, u, count);
+        if (alen != len || memcmp(art, out, len) != 0 || memchr(out, 0, len) != NULL) {
+            if (differ++ < 4) ck(0, "%zu units: the bytes are not ART's", count);
+        }
+    }
+    ck(differ == 0, "20000 strings of UTF-16 units: the URI bytes are ART's GetStringUTFChars's (%ld differ)", differ);
+    ck(pairs > 10000 && nuls > 10000, "the stream holds surrogate pairs (%ld) and U+0000 (%ld)", pairs, nuls);
+}
+
 // ---- main ----------------------------------------------------------------------------------------
 
 typedef struct { const char *name; void (*run)(void); } Case;
@@ -1172,10 +1405,12 @@ static const Case CASES[] = {
     { "slip13_index_values", slip13_index_values }, { "slip13_edges", slip13_edges },
     { "site_key_derivation", site_key_derivation }, { "shared_key_derivation", shared_key_derivation },
     { "message_prefix", message_prefix }, { "message_digest", message_digest }, { "utf8_bytes", utf8_bytes },
+    { "uri_bytes", uri_bytes }, { "uri_identity", uri_identity },
     { "sign_shared_login", sign_shared_login }, { "sign_site_request", sign_site_request },
     { "request_golden_inputs", request_golden_inputs }, { "address_rules", address_rules },
-    { "sign_with_key_wipes", sign_with_key_wipes }, { "long_messages", long_messages }, { "edges", edges }, { "buffer_edges", buffer_edges },
+    { "sign_with_key_wipes", sign_with_key_wipes }, { "address_with_key_wipes", address_with_key_wipes }, { "long_messages", long_messages }, { "edges", edges }, { "buffer_edges", buffer_edges },
     { "sweep_indexes", sweep_indexes }, { "sweep_keys", sweep_keys }, { "sweep_sign", sweep_sign }, { "sweep_utf8", sweep_utf8 },
+    { "sweep_uri_bytes", sweep_uri_bytes },
 };
 
 int main(int argc, char **argv)

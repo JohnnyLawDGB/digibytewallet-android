@@ -8,9 +8,11 @@
  * (or NULL) is held byte for byte to what the header answers (or refuses) for the same seed -- the
  * phrase's BRBIP39DeriveKey, as the bridge derives it -- the same message bytes and the same URI bytes.
  *
- * The host env's strings are UTF-16, as a JVM's are; its GetStringUTFChars writes modified UTF-8 as the
- * JNI specification defines it (each unit on its own, U+0000 as C0 80). The header is handed those same
- * bytes for the URI, and BRDigiIdUtf8FromUtf16's bytes for the message.
+ * The host env's strings are UTF-16, as a JVM's are; its GetStringUTFChars writes what ART's does (art_utf
+ * below, transcribed from ART's runtime/jni/jni_internal.cc and libdexfile/dex/utf-inl.h: a surrogate pair
+ * as its four-byte character, against the JNI specification, U+0000 as C0 80 and a lone surrogate as its
+ * own three bytes). The header is handed BRDigiIdUriBytesFromUtf16's bytes for the URI, and
+ * BRDigiIdUtf8FromUtf16's for the message, so the sweep holds both encoders to what the bridge hashes.
  *
  *   digiid_core_bridge sweep    four phrases, a fixed pseudo-random stream of messages, URIs, indexes
  *                               and address formats, and long messages around 0xffff bytes.
@@ -110,18 +112,33 @@ static const jchar *h_GetStringChars(JNIEnv *e, jstring s, jboolean *isCopy)
 }
 static void h_ReleaseStringChars(JNIEnv *e, jstring s, const jchar *chars) { (void)e; (void)s; free((void *)chars); }
 
-/* Modified UTF-8 of units[0, n) into out (room for 3n + 1): its length, without the NUL it also writes. */
-static size_t modified_utf8(const jchar *units, size_t n, unsigned char *out)
+/* What ART's GetStringUTFChars writes for units[0, n) into out (room for 3n + 1): its length, without the
+ * NUL it also writes. ART's ConvertUtf16ToUtf8<kUtfUseShortZero = false, kUtfUse4ByteSequence = true,
+ * kUtfReplaceBadSurrogates = false> (libdexfile/dex/utf-inl.h; the flags in runtime/jni/jni_internal.cc),
+ * line for line. digiid_core_kat_main.c holds the header to the older form of the same rule. */
+static size_t art_utf(const jchar *utf16, size_t char_count, unsigned char *out)
 {
     size_t k = 0;
-    for (size_t i = 0; i < n; i++) {
-        uint32_t c = units[i];
-        if (c != 0 && c < 0x80) out[k++] = (unsigned char)c;
-        else if (c < 0x800) { out[k++] = (unsigned char)(0xC0 | (c >> 6)); out[k++] = (unsigned char)(0x80 | (c & 0x3F)); }
-        else {
-            out[k++] = (unsigned char)(0xE0 | (c >> 12));
-            out[k++] = (unsigned char)(0x80 | ((c >> 6) & 0x3F));
-            out[k++] = (unsigned char)(0x80 | (c & 0x3F));
+    for (size_t i = 0; i < char_count; ++i) {
+        int has_trail = i + 1 != char_count && (utf16[i + 1] & 0xfc00u) == 0xdc00u;
+        uint16_t ch = utf16[i];
+        if (ch < 0x80u && ch != 0u) {
+            out[k++] = (unsigned char)ch;                                   /* One byte. */
+        } else if (ch < 0x800u) {
+            out[k++] = (unsigned char)((ch >> 6) | 0xc0);                   /* Two bytes. */
+            out[k++] = (unsigned char)((ch & 0x3f) | 0x80);
+        } else if ((ch & 0xfc00u) == 0xd800u && has_trail) {
+            const uint32_t offset = (0xd800u << 10) + 0xdc00u - 0x10000u;   /* A valid surrogate pair: four bytes. */
+            uint32_t code_point = ((uint32_t)ch << 10) + (uint32_t)utf16[i + 1] - offset;
+            ++i;
+            out[k++] = (unsigned char)((code_point >> 18) | 0xf0);
+            out[k++] = (unsigned char)(((code_point >> 12) & 0x3f) | 0x80);
+            out[k++] = (unsigned char)(((code_point >> 6) & 0x3f) | 0x80);
+            out[k++] = (unsigned char)((code_point & 0x3f) | 0x80);
+        } else {
+            out[k++] = (unsigned char)((ch >> 12) | 0xe0);                  /* Three bytes. */
+            out[k++] = (unsigned char)(((ch >> 6) & 0x3f) | 0x80);
+            out[k++] = (unsigned char)((ch & 0x3f) | 0x80);
         }
     }
     out[k] = 0;
@@ -132,7 +149,7 @@ static const char *h_GetStringUTFChars(JNIEnv *e, jstring s, jboolean *isCopy)
     HostString *h = s;
     unsigned char *out = malloc((size_t)h->len * 3 + 1);
     (void)e;
-    modified_utf8(h->units, (size_t)h->len, out);
+    art_utf(h->units, (size_t)h->len, out);
     if (isCopy) *isCopy = JNI_TRUE;
     return (const char *)out;
 }
@@ -211,13 +228,25 @@ static const char *header_shared(const jchar *units, size_t n, int32_t format, c
     return r;
 }
 
+/* The header's bytes for a URI: BRDigiIdUriBytesFromUtf16's, into ub (room for 3 * un + 1). */
+static size_t header_uri(const jchar *uri, size_t un, unsigned char *ub)
+{
+    size_t ulen = 0;
+    static const jchar none[1] = { 0 };
+    if (BRDigiIdUriBytesFromUtf16(ub, 3 * un + 1, &ulen, uri ? uri : none, uri ? un : 0) != BR_DIGIID_OK) {
+        check(0, "BRDigiIdUriBytesFromUtf16 refused a %zu-unit URI", un);
+        ulen = 0;
+    }
+    return ulen;
+}
+
 static const char *header_site(const jchar *units, size_t n, const jchar *uri, size_t un, int32_t index, char *out)
 {
     size_t len = 0, ulen;
     uint8_t *bytes = malloc(3 * n + 1);
     unsigned char *ub = malloc(3 * un + 1);
     const char *r = NULL;
-    ulen = modified_utf8(uri, un, ub);
+    ulen = header_uri(uri, un, ub);
     if (BRDigiIdUtf8FromUtf16(bytes, 3 * n + 1, &len, units, n) == BR_DIGIID_OK) {
         need_work(BRDigiIdSignSiteWorkSize(ulen, len));
         if (BRDigiIdSignSite(out, BR_DIGIID_ANSWER_CAPACITY, g_seed, sizeof(g_seed), bytes, len, (const char *)ub, ulen, index,
@@ -231,7 +260,7 @@ static const char *header_site(const jchar *units, size_t n, const jchar *uri, s
 static const char *header_address(const jchar *uri, size_t un, int hasUri, int32_t index, char *out)
 {
     unsigned char *ub = malloc(3 * un + 1);
-    size_t ulen = modified_utf8(uri ? uri : (const jchar *)"", hasUri ? un : 0, ub);
+    size_t ulen = header_uri(uri, hasUri ? un : 0, ub);
     const char *r = NULL;
     need_work(BRDigiIdIndexesWorkSize(ulen));
     if (BRDigiIdAddress(out, BR_DIGIID_ADDRESS_CAPACITY, g_seed, sizeof(g_seed), hasUri, (const char *)ub, ulen, index, g_work,
@@ -282,7 +311,13 @@ static size_t rnd_uri(jchar *out, size_t cap)
     size_t n = strlen(b), i, extra;
     for (i = 0; i < n; i++) out[i] = (jchar)(unsigned char)b[i];
     extra = (size_t)below(cap - n);
-    for (i = 0; i < extra; i++) out[n + i] = below(8) == 0 ? rnd_unit() : (jchar)(0x21 + below(0x5e));
+    for (i = 0; i < extra; i++) {
+        if (below(16) == 0 && i + 1 < extra) {   /* a whole surrogate pair: an emoji in the path */
+            out[n + i++] = (jchar)(0xD800 + below(0x400));
+            out[n + i] = (jchar)(0xDC00 + below(0x400));
+        }
+        else out[n + i] = below(8) == 0 ? rnd_unit() : (jchar)(0x21 + below(0x5e));
+    }
     return n + extra;
 }
 
@@ -375,6 +410,32 @@ static void sweep(void)
 
     check(differ == 0, "%ld answers compared over four phrases: %ld agree, %ld differ", agree + differ, agree, differ);
     check(answered > 800 && refused > 150, "the stream reaches both answers and refusals: %ld answered, %ld refused", answered, refused);
+
+    /* The URI bytes alone: what the bridge's GetStringUTFChars hands seed_derive_identity_key, against
+     * BRDigiIdUriBytesFromUtf16, over the URIs above and strings of arbitrary units. */
+    {
+        long same_bytes = 0, diff_bytes = 0, pairs = 0, nuls = 0, lone = 0;
+        unsigned char *ub = malloc(3 * 200 + 1);
+        for (int it = 0; it < 20000; it++) {
+            size_t un = (it & 1) ? rnd_uri(uri, sizeof(uri) / sizeof(*uri)) : rnd_message(uri, sizeof(uri) / sizeof(*uri)), i;
+            HostString *hs = hostString(uri, un);
+            const char *art = h_GetStringUTFChars(env, hs, NULL);
+            size_t alen = strlen(art), hlen = header_uri(uri, un, ub);
+            for (i = 0; i < un; i++) {
+                if (uri[i] == 0) nuls++;
+                else if (uri[i] >= 0xD800 && uri[i] <= 0xDBFF && i + 1 < un && uri[i + 1] >= 0xDC00 && uri[i + 1] <= 0xDFFF) { pairs++; i++; }
+                else if (uri[i] >= 0xD800 && uri[i] <= 0xDFFF) lone++;
+            }
+            if (alen == hlen && memcmp(art, ub, hlen) == 0) same_bytes++;
+            else if (diff_bytes++ < 4) check(0, "a %zu-unit URI: GetStringUTFChars gives %zu bytes, BRDigiIdUriBytesFromUtf16 %zu", un, alen, hlen);
+            h_ReleaseStringUTFChars(env, hs, art);
+            release_all();
+        }
+        free(ub);
+        check(diff_bytes == 0, "20000 URIs of UTF-16 units: BRDigiIdUriBytesFromUtf16's bytes are GetStringUTFChars's (%ld differ)", diff_bytes);
+        check(pairs > 10000 && nuls > 5000 && lone > 5000, "the URIs hold surrogate pairs (%ld), U+0000 (%ld) and lone surrogates (%ld)",
+              pairs, nuls, lone);
+    }
 }
 
 /* The bridge's answers for the hand cases' inputs, printed as the literals the hand cases hold. */
@@ -402,6 +463,16 @@ static void print(void)
     printf("ADDRESS example.com/callback index 2147483647 %s\n",
            answerText(NativeBridge_identityAddress(env, NULL, jascii(golden[0]), INT32_MAX)));
     printf("ADDRESS empty uri %s\n", answerText(NativeBridge_identityAddress(env, NULL, jascii(""), 0)));
+    {
+        static const jchar emojiUri[] = { 'h','t','t','p','s',':','/','/','e','x','a','m','p','l','e','.','c','o','m','/', 0xD83D, 0xDE00 };
+        static const jchar nulUri[] = { 'h','t','t','p','s',':','/','/','e','x','a','m','p','l','e','.','c','o','m','/', 'a', 0x0000, 'b' };
+        static const jchar loneUri[] = { 'h','t','t','p','s',':','/','/','e','x','a','m','p','l','e','.','c','o','m','/', 'a', 0xD800, 'b' };
+        printf("ADDRESS https://example.com/<U+1F600> %s\n", answerText(NativeBridge_identityAddress(env, NULL, hostString(emojiUri, 22), 0)));
+        printf("ADDRESS https://example.com/a<U+0000>b %s\n", answerText(NativeBridge_identityAddress(env, NULL, hostString(nulUri, 23), 0)));
+        printf("ADDRESS https://example.com/a<U+D800>b %s\n", answerText(NativeBridge_identityAddress(env, NULL, hostString(loneUri, 23), 0)));
+        printf("SIGN site emoji uri %s\n", answerText(NativeBridge_signIdentityMessage(env, NULL, jascii(request), hostString(emojiUri, 22), 0)));
+        release_all();
+    }
     printf("SIGN shared login format 0 %s\n", answerText(NativeBridge_signMessage(env, NULL, jascii(login), 0)));
     printf("SIGN shared login format 2 %s\n", answerText(NativeBridge_signMessage(env, NULL, jascii(login), 2)));
     printf("SIGN shared empty format 0 %s\n", answerText(NativeBridge_signMessage(env, NULL, jascii(""), 0)));
