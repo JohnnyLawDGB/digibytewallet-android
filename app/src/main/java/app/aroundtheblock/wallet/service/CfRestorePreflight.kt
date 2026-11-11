@@ -1,5 +1,6 @@
 package app.aroundtheblock.wallet.service
 
+import app.aroundtheblock.wallet.core.WalletTxPersister
 import app.aroundtheblock.wallet.core.sync.SavedTransactionsCheckpoint
 
 internal enum class CfRestoreResetReason {
@@ -45,6 +46,14 @@ internal fun cfRestoreResetReason(
     val lowestNeeded = maxOf(state.scannedThrough + 1L, state.abandonedBelow)
     return if (lowestNeeded < blockFloor) CfRestoreResetReason.HEADER_WINDOW_MISSING else null
 }
+
+/**
+ * The transaction-checkpoint gate SyncService puts in front of every scan-ledger write and of
+ * `has_synced`: open only when the wallet's set is on disk ([WalletTxPersister.Result.WRITTEN]) or
+ * there is none to save ([WalletTxPersister.Result.EMPTY]). TX-CKPT-CAP: a set the writer refuses
+ * (above the shared limit) keeps it shut, so the frontier never moves past unsaved history.
+ */
+internal fun checkpointGateOpen(result: WalletTxPersister.Result): Boolean = result.landed
 
 /**
  * Whether it is safe to commit `has_synced = true` right now.

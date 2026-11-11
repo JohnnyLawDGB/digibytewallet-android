@@ -23,7 +23,9 @@ CC="${CC:-clang}"
 export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 symbolize=0"
 SAN_RE='ERROR: AddressSanitizer|ERROR: LeakSanitizer|runtime error:'
 RED_CASES=(over_old_cap_round_trips writer_never_emits_refused)
-GUARD_CASES=(at_limit_round_trips hostile_count_refused)
+GUARD_CASES=(at_limit_round_trips hostile_count_refused old_blob_over_limit_refused real_writer_vector_current)
+# The writer's blob for a fixed 3-record wallet; SavedTransactionsCheckpointTest (core, JVM) reads it.
+export TX_CKPT_VECTOR="$SCRIPT_DIR/real_writer_3.hex"
 
 # Seam self-check: a -D that names nothing builds the shipped code, and the RED arm proves nothing.
 for f in "$CORE_DIR/BRSavedTransactions.h" "$CORE_DIR/BRWallet.c"; do

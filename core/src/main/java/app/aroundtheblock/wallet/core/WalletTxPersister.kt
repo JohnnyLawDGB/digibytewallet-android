@@ -2,40 +2,85 @@ package app.aroundtheblock.wallet.core
 
 import android.content.Context
 import app.aroundtheblock.wallet.core.bridge.NativeBridge
+import app.aroundtheblock.wallet.core.sync.SavedTransactionsCheckpoint
+import app.aroundtheblock.wallet.core.sync.SavedTransactionsStore
 
 /**
- * Snapshots the C wallet's transaction set to SharedPreferences so a
- * just-broadcast tx survives an app force-stop or crash before
- * SyncService's next sync-complete save fires. Without this, a user
- * who sends and immediately closes the app loses the tx from
- * persistent state (in-memory only); after restart the C wallet
- * rebuilds from the stale snapshot and the tx vanishes from the UI.
+ * The one writer of the wallet's transaction checkpoint ([SavedTransactionsStore]): every path that
+ * saves the C wallet's transaction set — a broadcast, the sync service's checkpoint gate, the
+ * background catch-up — goes through [persistCheckpoint], so the epoch snapshot, the atomic file
+ * write and the over-limit breadcrumb are one copy.
  *
- * Companion to the C-side change in `jni_transaction.c`'s
- * publishTransaction, which calls BRWalletRegisterTransaction
- * synchronously so getSerializedTransactions includes the new tx by
- * the time persist() runs here.
+ * The post-broadcast path ([persist]) still matters on its own: without a synchronous write a user
+ * who sends and force-stops at once loses the tx from persistent state, and after restart the C
+ * wallet rebuilds from the stale snapshot and the tx vanishes from the UI (publishTransaction in
+ * `jni_transaction.c` registers the tx synchronously, so the set read here includes it).
  */
-class WalletTxPersister(private val context: Context) {
+class WalletTxPersister(
+    private val context: Context,
+    private val source: Source = Source.Native,
+    private val nowMs: () -> Long = System::currentTimeMillis,
+) {
+
+    /** The native set. An interface so the host JVM tests can stand in for the JNI library. */
+    interface Source {
+        fun transactionCount(): Long
+        /** The checkpoint blob, or null: no transactions, a failed allocation, or above the limit. */
+        fun serialized(): ByteArray?
+
+        object Native : Source {
+            override fun transactionCount(): Long = NativeBridge.getTransactionCount().toLong()
+            override fun serialized(): ByteArray? = NativeBridge.getSerializedTransactions()
+        }
+    }
+
+    enum class Result(val landed: Boolean) {
+        /** The checkpoint file now holds the wallet's set. */
+        WRITTEN(true),
+        /** The wallet holds no transactions: nothing to write, and nothing is lost. */
+        EMPTY(true),
+        /** TX-CKPT-CAP: more records than the shared limit; the writer emits nothing. The previous
+         *  checkpoint stays, and the caller must not advance the scan ledger or `has_synced`. */
+        REFUSED_OVER_LIMIT(false),
+        /** The serializer or the file write failed, or a reset ran in between. */
+        FAILED(false),
+        /** [persistCheckpoint]'s abort check said stop (a wipe stood the caller down). */
+        ABORTED(false),
+    }
 
     /**
-     * Serialize the wallet's tx set and write it through to disk
-     * synchronously. Uses commit() (not apply()) because the
-     * intended caller is the post-broadcast path — a user who
-     * force-stops the app moments later would otherwise lose the
-     * tx from the async flush.
+     * Serialize the wallet's set and write it through to disk, synchronously. [shouldAbort] is asked
+     * after the native read and before the write, so a wipe in between leaves the wiped store as it is.
      */
-    fun persist(): Boolean {
-        val txData = NativeBridge.getSerializedTransactions() ?: return false
-        val hex = txData.joinToString("") { "%02x".format(it) }
-        return context.getSharedPreferences(PREFS_NAME + networkSuffix(context), Context.MODE_PRIVATE)
-            .edit()
-            .putString(KEY_SAVED_TRANSACTIONS, hex)
-            .commit()
+    fun persistCheckpoint(shouldAbort: () -> Boolean = { false }): Result {
+        val epoch = SavedTransactionsStore.currentEpoch()
+        val count = runCatching { source.transactionCount() }.getOrDefault(-1L)
+        if (count == 0L) return Result.EMPTY
+        val data = runCatching { source.serialized() }.getOrNull()
+        if (data == null) {
+            if (count > SavedTransactionsCheckpoint.MAX_RECORDS) {
+                val first = runCatching {
+                    SavedTransactionsCheckpoint.noteWriterRefused(diagPrefs(), count, nowMs())
+                }.getOrDefault(false)
+                if (first) runCatching {
+                    android.util.Log.w(
+                        "WalletTxPersister",
+                        "TX-CKPT-CAP: $count transactions is above the checkpoint limit " +
+                            "${SavedTransactionsCheckpoint.MAX_RECORDS}; the last checkpoint stays and each launch rescans",
+                    )
+                }
+                return Result.REFUSED_OVER_LIMIT
+            }
+            return Result.FAILED
+        }
+        if (shouldAbort()) return Result.ABORTED
+        if (!SavedTransactionsStore.write(context, data, epoch)) return Result.FAILED
+        runCatching { SavedTransactionsCheckpoint.noteWriterAccepted(diagPrefs()) }
+        return Result.WRITTEN
     }
 
-    companion object {
-        private const val PREFS_NAME = "dgb_sync_data"
-        private const val KEY_SAVED_TRANSACTIONS = "saved_transactions"
-    }
+    /** [persistCheckpoint] for the post-broadcast callers: true when a checkpoint file was written. */
+    fun persist(): Boolean = persistCheckpoint() == Result.WRITTEN
+
+    private fun diagPrefs() = context.getSharedPreferences("dgb_diag", Context.MODE_PRIVATE)
 }

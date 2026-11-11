@@ -135,17 +135,24 @@ class SyncServiceWipeStopTest {
                 code.substring(lastRead, firstWrite).contains("stoodDownForWipe"),
             )
         }
-        // The wallet's transaction set, wherever the service writes it.
+        // The wallet's transaction set, wherever the service writes it: through the one writer
+        // (WalletTxPersister, TX-CKPT-CAP), which asks the abort check after its native read and
+        // before its file write; every service call must hand it the stood-down flag.
         val written = service.written
-        val sites = Regex("""putString\(\s*"saved_transactions"""").findAll(written).map { it.range.first }.toList()
+        val sites = Regex("""WalletTxPersister\([^)]*\)\.persistCheckpoint""").findAll(written).map { it.range.first }.toList()
         assertTrue("scanner is blind: found ${sites.size} writes of the transaction set", sites.size >= 3)
         for (site in sites) {
-            val read = written.lastIndexOf("getSerializedTransactions()", site)
-            assertTrue("scanner is blind: no native read before the write at $site", read >= 0)
+            val call = service.code.substring(site, minOf(service.code.length, site + 120))
             assertTrue(
                 "the transaction set is written without asking whether the service stood down (at $site)",
-                service.code.substring(read, site).contains("stoodDownForWipe"),
+                Regex("""persistCheckpoint\s*\{\s*stoodDownForWipe\s*}""").containsMatchIn(call),
             )
         }
+        val persister = java.io.File(java.io.File("..").canonicalFile, "core/src/main/java/app/aroundtheblock/wallet/core/WalletTxPersister.kt").readText()
+        val fn = persister.substring(persister.indexOf("fun persistCheckpoint("))
+        val read = fn.indexOf("source.serialized()")
+        val abort = fn.indexOf("if (shouldAbort()) return Result.ABORTED")
+        val write = fn.indexOf("SavedTransactionsStore.write(")
+        assertTrue("the writer must ask the abort check after its native read and before its write", read in 0 until abort && abort < write)
     }
 }

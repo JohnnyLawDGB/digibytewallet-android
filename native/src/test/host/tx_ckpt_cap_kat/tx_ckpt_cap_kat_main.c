@@ -29,6 +29,16 @@
 //   at_limit_round_trips       GUARD. MAX records round-trip completely through both readers.
 //   hostile_count_refused      GUARD. A 4-byte blob declaring MAX+1 or 0xFFFFFFFF records is
 //                              refused by both readers: 0 loaded, no array, nothing read past it.
+//   old_blob_over_limit_refused GUARD. A full blob of MAX+1 real records, as a writer with no limit
+//                              wrote it before 2026-11, is refused whole by both readers (0 loaded,
+//                              no array): the app's short-restore record then rebuilds from the
+//                              birth floor (the over-limit upgrade path).
+//   real_writer_vector_current GUARD. The writer's blob for a fixed 3-record wallet, which both
+//                              readers load in full, is byte-identical to real_writer_3.hex beside
+//                              this file. The Kotlin test SavedTransactionsCheckpointTest feeds that
+//                              file to the restore's short-load check, which must say "not short":
+//                              the app reads the count the real writer wrote. TX_CKPT_REGEN=1
+//                              rewrites the file instead.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -208,6 +218,64 @@ int main(void)
             free(b);
         }
         result("hostile_count_refused", ok);
+    }
+
+    printf("-- old_blob_over_limit_refused: MAX+1 records, written the old way --\n");
+    {
+        size_t n = BR_SAVED_TRANSACTIONS_MAX_COUNT + 1, len = 4, pos;
+        BRTransaction **txs = chain(n), **core = (BRTransaction **)1, **bridge = (BRTransaction **)1;
+        uint8_t *blob;
+        for (size_t i = 0; i < n; i++) len += 12 + BRTransactionSerialize(txs[i], NULL, 0);
+        blob = malloc(len);
+        UInt32SetLE(blob, (uint32_t)n); pos = 4;
+        for (size_t i = 0; i < n; i++) {   // the writer's layout, with no limit
+            size_t l = BRTransactionSerialize(txs[i], NULL, 0);
+            UInt32SetLE(&blob[pos], (uint32_t)l); UInt32SetLE(&blob[pos + 4], txs[i]->blockHeight);
+            UInt32SetLE(&blob[pos + 8], txs[i]->timestamp); pos += 12;
+            BRTransactionSerialize(txs[i], &blob[pos], l); pos += l;
+        }
+        free_txs(txs, n);
+        size_t nc = BRSavedTransactionsDeserialize(blob, len, &core);
+        size_t nb = deserialize_saved_transactions_guarded(blob, len, &bridge);
+        printf("   declared %zu in %zu bytes: core loaded %zu, bridge loaded %zu\n", n, len, nc, nb);
+        result("old_blob_over_limit_refused", nc == 0 && nb == 0 && core == NULL && bridge == NULL);
+        free_txs(core, nc); free_txs(bridge, nb);
+        free(blob);
+    }
+
+    printf("-- real_writer_vector_current: the writer's blob for a fixed 3-record wallet --\n");
+    {
+        const char *path = getenv("TX_CKPT_VECTOR");
+        int regen = getenv("TX_CKPT_REGEN") != NULL, ok = 0;
+        BRWallet *w = wallet_of(3);
+        size_t len, nc = 0;
+        uint8_t *blob = write_checkpoint(w, &len);
+        BRTransaction **core = NULL;
+        BRWalletFree(w);
+        if (blob) nc = BRSavedTransactionsDeserialize(blob, len, &core);
+        free_txs(core, nc);
+        if (blob && nc == 3 && UInt32GetLE(blob) == 3 && path) {
+            char *hex = malloc(2 * len + 2);
+            for (size_t i = 0; i < len; i++) sprintf(&hex[2 * i], "%02x", blob[i]);
+            hex[2 * len] = '\n'; hex[2 * len + 1] = '\0';
+            if (regen) {
+                FILE *f = fopen(path, "w");
+                ok = f && fputs(hex, f) >= 0;
+                if (f) fclose(f);
+                printf("   wrote %s (%zu bytes of blob)\n", path, len);
+            } else {
+                FILE *f = fopen(path, "r");
+                char *have = calloc(1, 2 * len + 16);
+                size_t got = f ? fread(have, 1, 2 * len + 8, f) : 0;
+                if (f) fclose(f);
+                ok = got == 2 * len + 1 && memcmp(have, hex, 2 * len + 1) == 0;
+                if (! ok) printf("   %s is not the writer's blob (got %zu chars); regenerate with TX_CKPT_REGEN=1\n", path, got);
+                free(have);
+            }
+            free(hex);
+        }
+        free(blob);
+        result("real_writer_vector_current", ok);
     }
 
     if (! g_failed) printf("ALL PASS\n");

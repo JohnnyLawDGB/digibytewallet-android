@@ -13,6 +13,7 @@ import app.aroundtheblock.wallet.core.UtxoManager
 import app.aroundtheblock.wallet.core.OutgoingTxStore
 import app.aroundtheblock.wallet.core.WalletManager
 import app.aroundtheblock.wallet.core.WalletState
+import app.aroundtheblock.wallet.core.WalletTxPersister
 import app.aroundtheblock.wallet.core.asset.AssetManager
 import app.aroundtheblock.wallet.core.reconcile.ChainReconciliationService
 import app.aroundtheblock.wallet.core.reconcile.DgbNodeClient
@@ -27,6 +28,7 @@ import app.aroundtheblock.wallet.core.sync.FilterHeaderStore
 import app.aroundtheblock.wallet.core.sync.HistoryRebuildOnUpgrade
 import app.aroundtheblock.wallet.core.sync.SavedBlockStore
 import app.aroundtheblock.wallet.core.sync.SavedTransactionsCheckpoint
+import app.aroundtheblock.wallet.core.sync.SavedTransactionsStore
 import app.aroundtheblock.wallet.core.sync.KeepaliveAction
 import app.aroundtheblock.wallet.core.sync.keepaliveAction
 import app.aroundtheblock.wallet.core.db.dao.PeerDao
@@ -1460,12 +1462,7 @@ class SyncService : Service() {
                             "continuing to sync past stale peers")
                         // Persist transactions
                         serviceScope.launch(Dispatchers.IO) {
-                            val txData = NativeBridge.getSerializedTransactions()
-                            if (txData != null && !stoodDownForWipe) {
-                                val hex = bytesToHex(txData)
-                                getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
-                                    .edit().putString("saved_transactions", hex).apply()
-                            }
+                            WalletTxPersister(this@SyncService).persistCheckpoint { stoodDownForWipe }
                         }
                     }
                 }
@@ -2243,7 +2240,7 @@ class SyncService : Service() {
         // one-time legacy-hex migration and drops the malformed/oversized case.
         var blockBytes = SavedBlockStore.load(this@SyncService)
         val hasTransactionCheckpoint =
-            prefs.getBoolean("transactions_checkpointed", false) || prefs.contains("saved_transactions")
+            prefs.getBoolean("transactions_checkpointed", false) || SavedTransactionsStore.exists(this@SyncService)
         // TX-CKPT-CAP: a restore that loaded fewer checkpointed transactions than the checkpoint
         // declares (recorded by WalletManager.restoreFromDisk before the wallet was built) rebuilds
         // from the birth floor rather than resuming near the tip without that history.
@@ -3819,12 +3816,7 @@ class SyncService : Service() {
         }
         // Persist the wallet tx set so any drops survive a restart.
         if (dropped) {
-            runCatching {
-                NativeBridge.getSerializedTransactions()?.takeUnless { stoodDownForWipe }?.let { data ->
-                    getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
-                        .edit().putString("saved_transactions", bytesToHex(data)).apply()
-                }
-            }
+            runCatching { WalletTxPersister(this@SyncService).persistCheckpoint { stoodDownForWipe } }
         }
     }
 
@@ -3937,20 +3929,19 @@ class SyncService : Service() {
         }
     }
 
+    /**
+     * The checkpoint gate: the scan ledger and `has_synced` are written only when this returns true.
+     * The transaction set goes to its file store (WalletTxPersister → SavedTransactionsStore); a set
+     * the writer refuses (TX-CKPT-CAP, above the shared limit) or a write that did not land returns
+     * false, so the frontier never moves past history that was not saved.
+     */
     private fun persistWalletTransactionsCheckpoint(): Boolean = runCatching {
-        val prefs = getSharedPreferences("dgb_sync_data" + networkSuffix(this), MODE_PRIVATE)
-        val transactionCount = NativeBridge.getTransactionCount()
-        val txData = if (transactionCount > 0) {
-            NativeBridge.getSerializedTransactions() ?: return@runCatching false
-        } else {
-            null
-        }
-        // After the native reads and before the write: a wipe that stood the service down in
-        // between leaves the wiped stores as it erased them.
-        if (stoodDownForWipe) return@runCatching false
-        val editor = prefs.edit().putBoolean("transactions_checkpointed", true)
-        if (txData != null) editor.putString("saved_transactions", bytesToHex(txData))
-        editor.commit()
+        // A wipe that stands the service down between the native read and the write leaves the wiped
+        // stores as it erased them (asked again inside, after the read).
+        val result = WalletTxPersister(this).persistCheckpoint { stoodDownForWipe }
+        if (!checkpointGateOpen(result) || stoodDownForWipe) return@runCatching false
+        getSharedPreferences("dgb_sync_data" + networkSuffix(this), MODE_PRIVATE)
+            .edit().putBoolean("transactions_checkpointed", true).commit()
     }.getOrDefault(false)
 
     private fun persistSyncCompletionState(): Boolean {

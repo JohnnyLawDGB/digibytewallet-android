@@ -8,33 +8,34 @@ import org.junit.Test
 import java.io.File
 
 /**
- * TX-CKPT-CAP, the restore side: a restore that loads fewer checkpointed transactions than the
- * checkpoint declares is recorded, so the sync start rebuilds from the birth floor (the SyncService
- * side is CfRestorePreflightTest / TransactionCheckpointPreflightGateTest); a complete restore is
- * not, so it resumes near the tip. The native writer/reader limit is held by the host KAT
- * tx_ckpt_cap_kat; the Kotlin mirror of it is held to the header here.
+ * TX-CKPT-CAP, the restore side: a restore whose reader loads fewer checkpointed transactions than
+ * the checkpoint declares is recorded, so the sync start rebuilds from the birth floor (the
+ * SyncService side is the app's TransactionCheckpointPreflightTest); a complete restore is not, so
+ * it resumes near the tip. The native writer/reader limit is held by the host KAT tx_ckpt_cap_kat;
+ * the Kotlin mirror of it is held to the header here.
  */
 class SavedTransactionsCheckpointTest {
 
-    /** The checkpoint hex of a blob declaring [count] records (framing only). */
-    private fun hexDeclaring(count: Long, tail: String = "") =
-        "%02x%02x%02x%02x".format(count and 0xff, (count shr 8) and 0xff, (count shr 16) and 0xff, (count shr 24) and 0xff) + tail
+    /** A blob declaring [count] records (framing only). */
+    private fun declaring(count: Long, tail: Int = 0) = ByteArray(4 + tail).also {
+        for (i in 0 until 4) it[i] = ((count shr (8 * i)) and 0xff).toByte()
+    }
+
+    private val repo = File("..").canonicalFile
 
     @Test fun `declared count is the leading little-endian u32`() {
-        assertEquals(10_001L, SavedTransactionsCheckpoint.declaredCount(hexDeclaring(10_001, "deadbeef")))
-        assertEquals(1L, SavedTransactionsCheckpoint.declaredCount("01000000"))
-        assertEquals(0xFFFFFFFFL, SavedTransactionsCheckpoint.declaredCount("ffffffff"))
-        assertEquals(0xFFFFFFFFL, SavedTransactionsCheckpoint.declaredCount("FFFFFFFF"))
+        assertEquals(10_001L, SavedTransactionsCheckpoint.declaredCount(declaring(10_001, tail = 8)))
+        assertEquals(1L, SavedTransactionsCheckpoint.declaredCount(declaring(1)))
+        assertEquals(0xFFFFFFFFL, SavedTransactionsCheckpoint.declaredCount(declaring(0xFFFFFFFFL)))
     }
 
-    @Test fun `no checkpoint declares nothing, an unreadable one is unreadable`() {
+    @Test fun `no checkpoint declares nothing, a too-short one is unreadable`() {
         assertNull(SavedTransactionsCheckpoint.declaredCount(null))
-        assertEquals(SavedTransactionsCheckpoint.UNREADABLE, SavedTransactionsCheckpoint.declaredCount(""))
-        assertEquals(SavedTransactionsCheckpoint.UNREADABLE, SavedTransactionsCheckpoint.declaredCount("0100"))
-        assertEquals(SavedTransactionsCheckpoint.UNREADABLE, SavedTransactionsCheckpoint.declaredCount("01zz0000"))
+        assertEquals(SavedTransactionsCheckpoint.UNREADABLE, SavedTransactionsCheckpoint.declaredCount(ByteArray(0)))
+        assertEquals(SavedTransactionsCheckpoint.UNREADABLE, SavedTransactionsCheckpoint.declaredCount(ByteArray(3)))
     }
 
-    @Test fun `short is fewer loaded than declared, or an unreadable checkpoint`() {
+    @Test fun `short is fewer loaded by the reader than declared, or an unreadable checkpoint`() {
         assertTrue(SavedTransactionsCheckpoint.isShort(10_001, 0))          // the reader refused the whole blob
         assertTrue(SavedTransactionsCheckpoint.isShort(10_001, 10_000))     // one record lost
         assertTrue(SavedTransactionsCheckpoint.isShort(SavedTransactionsCheckpoint.UNREADABLE, 0))
@@ -45,12 +46,12 @@ class SavedTransactionsCheckpointTest {
 
     @Test fun `a short restore is recorded, a complete one is not`() {
         val prefs = FakeSharedPreferences()
-        assertFalse(SavedTransactionsCheckpoint.recordRestore(prefs, hexDeclaring(10_001), 10_001))
+        assertFalse(SavedTransactionsCheckpoint.recordRestore(prefs, declaring(10_001), 10_001))
         assertFalse(prefs.contains(SavedTransactionsCheckpoint.KEY_SHORT_RESTORE))
         assertFalse(SavedTransactionsCheckpoint.recordRestore(prefs, null, 0))
         assertFalse(prefs.contains(SavedTransactionsCheckpoint.KEY_SHORT_RESTORE))
 
-        assertTrue(SavedTransactionsCheckpoint.recordRestore(prefs, hexDeclaring(10_001), 0))
+        assertTrue(SavedTransactionsCheckpoint.recordRestore(prefs, declaring(10_001), 0))
         assertEquals(10_001L, prefs.getLong(SavedTransactionsCheckpoint.KEY_SHORT_RESTORE, 0L))
     }
 
@@ -58,14 +59,54 @@ class SavedTransactionsCheckpointTest {
         // A checkpoint rewritten from the short wallet (a send's persist) declares the short count, so
         // the next restore is "complete"; the record taken earlier must still stand.
         val prefs = FakeSharedPreferences()
-        assertTrue(SavedTransactionsCheckpoint.recordRestore(prefs, "zz", 0))
+        assertTrue(SavedTransactionsCheckpoint.recordRestore(prefs, ByteArray(0), 0))
         assertEquals(SavedTransactionsCheckpoint.UNREADABLE, prefs.getLong(SavedTransactionsCheckpoint.KEY_SHORT_RESTORE, 0L))
-        assertFalse(SavedTransactionsCheckpoint.recordRestore(prefs, hexDeclaring(3), 3))
+        assertFalse(SavedTransactionsCheckpoint.recordRestore(prefs, declaring(3), 3))
         assertTrue(prefs.contains(SavedTransactionsCheckpoint.KEY_SHORT_RESTORE))
     }
 
+    // (a) The false-positive guard. real_writer_3.hex is BRWalletSerializeTransactions' own blob for a
+    // fixed 3-record wallet; tx_ckpt_cap_kat holds it current and shows the C readers load all 3.
+    // Fed to the restore's check with that reader count, it must not be short: a normal restore
+    // resumes near the tip.
+    @Test fun `the real writer's blob with the real reader's count is not short`() {
+        val vector = File(repo, "native/src/test/host/tx_ckpt_cap_kat/real_writer_3.hex")
+        assertTrue("$vector not found", vector.isFile)
+        val blob = FilterHeaderStore.decodeHexOrNull(vector.readText().trim())
+        assertTrue("the vector is not a 3-record blob", blob != null && blob.size > 4 + 3 * 12)
+        assertEquals(3L, SavedTransactionsCheckpoint.declaredCount(blob))
+        val prefs = FakeSharedPreferences()
+        assertFalse(SavedTransactionsCheckpoint.recordRestore(prefs, blob, readerLoadedCount = 3))
+        assertFalse(prefs.contains(SavedTransactionsCheckpoint.KEY_SHORT_RESTORE))
+        // ...and the same blob with a reader that dropped one record is.
+        assertTrue(SavedTransactionsCheckpoint.recordRestore(prefs, blob, readerLoadedCount = 2))
+    }
+
+    // (c) The over-limit upgrade path: a checkpoint an earlier build wrote with more records than the
+    // limit (that writer had none) is refused whole by the reader (tx_ckpt_cap_kat
+    // old_blob_over_limit_refused), so the restore loads 0 and must record a short restore.
+    @Test fun `an earlier build's checkpoint above the limit is recorded short`() {
+        val prefs = FakeSharedPreferences()
+        val old = declaring(SavedTransactionsCheckpoint.MAX_RECORDS + 1, tail = 64)
+        assertTrue(SavedTransactionsCheckpoint.recordRestore(prefs, old, readerLoadedCount = 0))
+        assertEquals(SavedTransactionsCheckpoint.MAX_RECORDS + 1, prefs.getLong(SavedTransactionsCheckpoint.KEY_SHORT_RESTORE, 0L))
+    }
+
+    @Test fun `the writer refusal breadcrumb is written once per state change`() {
+        val diag = FakeSharedPreferences()
+        assertTrue(SavedTransactionsCheckpoint.noteWriterRefused(diag, 100_001, nowMs = 1_000))
+        assertFalse(SavedTransactionsCheckpoint.noteWriterRefused(diag, 100_005, nowMs = 2_000))   // same state
+        assertEquals(100_001L, diag.getLong(SavedTransactionsCheckpoint.KEY_DIAG_REFUSED_COUNT, 0))
+        assertEquals(1_000L, diag.getLong(SavedTransactionsCheckpoint.KEY_DIAG_REFUSED_AT_MS, 0))
+        SavedTransactionsCheckpoint.noteWriterAccepted(diag)
+        assertFalse(diag.getBoolean(SavedTransactionsCheckpoint.KEY_DIAG_REFUSED, true))
+        assertEquals("the last refusal stays on record", 100_001L, diag.getLong(SavedTransactionsCheckpoint.KEY_DIAG_REFUSED_COUNT, 0))
+        assertTrue(SavedTransactionsCheckpoint.noteWriterRefused(diag, 100_009, nowMs = 3_000))   // a new refusal
+        assertEquals(3_000L, diag.getLong(SavedTransactionsCheckpoint.KEY_DIAG_REFUSED_AT_MS, 0))
+    }
+
     @Test fun `the Kotlin limit is the core's shipped limit`() {
-        val header = File(File("..").canonicalFile, "native/src/main/jni/digibytewallet-core/BRSavedTransactions.h")
+        val header = File(repo, "native/src/main/jni/digibytewallet-core/BRSavedTransactions.h")
         assertTrue("$header not found: is the core submodule checked out?", header.isFile)
         val src = header.readText()
         // The shipped value is the #else arm of the TX_CKPT_CAP_UNFIXED seam.
@@ -79,10 +120,12 @@ class SavedTransactionsCheckpointTest {
 
     @Test fun `the restore records its load before the wallet is built from it`() {
         val wm = File("src/main/java/app/aroundtheblock/wallet/core/WalletManager.kt").readText()
-        val record = wm.indexOf("SavedTransactionsCheckpoint.recordRestore(syncPrefs, savedTxHex, loaded.toLong())")
-        val load = wm.indexOf("loaded = NativeBridge.loadSerializedTransactions(txBytes)")
+        val read = wm.indexOf("SavedTransactionsStore.load(context)")
+        val load = wm.indexOf("loaded = NativeBridge.loadSerializedTransactions(savedTx)")
+        val record = wm.indexOf("SavedTransactionsCheckpoint.recordRestore(syncPrefs, savedTx, loaded.toLong())")
         val build = wm.indexOf("NativeBridge.restoreWalletFromBytes(seedBytes, restoreTime, storedPass)")
+        assertTrue("the restore no longer reads the file store", read > 0)
         assertTrue("the restore no longer records a short load", record > 0)
-        assertTrue("the record must follow the load and precede the build", load in 1 until record && record < build)
+        assertTrue("read, load, record, build: in that order", read < load && load < record && record < build)
     }
 }

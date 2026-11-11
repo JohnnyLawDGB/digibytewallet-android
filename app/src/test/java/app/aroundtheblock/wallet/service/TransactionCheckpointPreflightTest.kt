@@ -1,5 +1,6 @@
 package app.aroundtheblock.wallet.service
 
+import app.aroundtheblock.wallet.core.WalletTxPersister
 import app.aroundtheblock.wallet.core.sync.SavedTransactionsCheckpoint
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -39,8 +40,8 @@ class TransactionCheckpointPreflightTest {
 
     @Test fun `a checkpoint past the old reader limit that loaded nothing is short`() {
         // 10,001 declared, 0 loaded: the shape a wallet past 10,000 transactions restored as before.
-        val hex = "11270000" + "00".repeat(16)
-        val declared = SavedTransactionsCheckpoint.declaredCount(hex)
+        val blob = byteArrayOf(0x11, 0x27, 0, 0) + ByteArray(16)
+        val declared = SavedTransactionsCheckpoint.declaredCount(blob)
         assertEquals(10_001L, declared)
         assertTrue(SavedTransactionsCheckpoint.isShort(declared, 0))
         assertEquals(
@@ -73,6 +74,36 @@ class TransactionCheckpointPreflightTest {
         val commit = block.substring(block.indexOf("prefs.edit()"), block.indexOf(".commit()") + 1)
         assertTrue("the record must be cleared in the frontier's commit",
             commit.contains(".remove(SavedTransactionsCheckpoint.KEY_SHORT_RESTORE)") && commit.contains(".remove(\"has_synced\")"))
+    }
+
+    // (b) the above-limit caller: when the writer refuses (getSerializedTransactions returns null for a
+    // wallet above the limit), the gate is shut, and SyncService writes neither the scan ledger nor
+    // has_synced behind it.
+    @Test fun `a refused checkpoint shuts the gate in front of the ledger and has_synced`() {
+        assertEquals(false, checkpointGateOpen(WalletTxPersister.Result.REFUSED_OVER_LIMIT))
+        assertEquals(false, checkpointGateOpen(WalletTxPersister.Result.FAILED))
+        assertEquals(false, checkpointGateOpen(WalletTxPersister.Result.ABORTED))
+        assertEquals(true, checkpointGateOpen(WalletTxPersister.Result.WRITTEN))
+        assertEquals(true, checkpointGateOpen(WalletTxPersister.Result.EMPTY))
+
+        val src = File("src/main/java/app/aroundtheblock/wallet/service/SyncService.kt").readText()
+        val gate = src.substring(src.indexOf("private fun persistWalletTransactionsCheckpoint()"))
+            .let { it.substring(0, it.indexOf("}.getOrDefault(false)")) }
+        assertTrue("the gate no longer goes through the one writer",
+            gate.contains("WalletTxPersister(this).persistCheckpoint { stoodDownForWipe }"))
+        assertTrue("the gate no longer stops on a refused checkpoint",
+            gate.contains("if (!checkpointGateOpen(result) || stoodDownForWipe) return@runCatching false"))
+        assertTrue("the marker must follow the gate", gate.indexOf("checkpointGateOpen") < gate.indexOf("transactions_checkpointed"))
+        // Every ledger write sits behind the gate, and has_synced's writer refuses without it.
+        val ledgerWrites = Regex("""CfScanLedgerStore\.write\(""").findAll(src).map { it.range.first }.toList()
+        assertTrue("no ledger writes found: re-anchor the gate", ledgerWrites.isNotEmpty())
+        for (at in ledgerWrites) {
+            val before = src.substring(maxOf(0, at - 300), at)
+            assertTrue("a scan-ledger write is not behind the checkpoint gate", before.contains("if (persistWalletTransactionsCheckpoint())"))
+        }
+        val completion = src.substring(src.indexOf("private fun persistSyncCompletionState(): Boolean {"))
+        assertTrue("has_synced no longer waits for the checkpoint",
+            completion.trimStart().lines()[1].trim() == "if (!persistWalletTransactionsCheckpoint()) return false")
     }
 
     private fun ledger(scannedThrough: Int, requestedThrough: Int, start: Int): ByteArray = ByteArray(32).also {
