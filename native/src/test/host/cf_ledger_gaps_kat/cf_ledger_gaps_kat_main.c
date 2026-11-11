@@ -14,6 +14,8 @@
 //       recorded. Sites: the cfheaders floor snap and the CF chain floor re-anchor (and the
 //       corroborated rebuild, which uses the same helper). A re-Init BELOW the band makes those
 //       heights requestable again, which is the rescan, so there the band is not carried (guard).
+//       A re-Init strictly inside a band keeps the part below the new start (abandonedBelow ==
+//       start). The corroborated-rebuild cases are in cf_ledger_gaps_rebuild_main.c.
 //
 //   (c) PARK CONTIGUOUS.  scannedThrough never advances over a height that was never requested and
 //       evaluated. The never-brick checkpoint park set the fetch cursor to the checkpoint with no
@@ -267,6 +269,20 @@ static void case_band_survives_floor_reanchor(void)
     bandFxFree(&f);
 }
 
+// A re-Init strictly INSIDE the band (scannedThrough + 1 < start < band), as the corroborated rebuild
+// or an arming call can land: the part of the band below the new start stays recorded.
+static void case_band_inside_reinit_keeps_lower_part(void)
+{
+    BandFx f; bandFxInit(&f, /*withChain=*/0);
+    uint32_t inside = BAND_START + 500;
+    _BRPeerManagerReinitCFLedgerLocked(f.m, inside);
+    uint32_t below = f.m->cfLedger.abandonedBelow;
+    MGR_UNLOCK(f.m);
+    check(below == inside,
+          "re-Init inside a band: the part of the band below the new start stays recorded (abandonedBelow == start)");
+    bandFxFree(&f);
+}
+
 // GUARD (every arm): a re-Init BELOW the band makes it requestable again, which is the rescan, so
 // the band is not carried. Also proves the carry rule does not invent a band on a clean ledger.
 static void case_band_not_carried_below_or_absent(void)
@@ -416,6 +432,7 @@ static const Case CASES[] = {
     { "floor_memo_install_saved_stub_replace", case_floor_memo_install_saved_stub_replace },
     { "band_survives_cfheaders_floor_snap",    case_band_survives_cfheaders_floor_snap },
     { "band_survives_floor_reanchor",          case_band_survives_floor_reanchor },
+    { "band_inside_reinit_keeps_lower_part",   case_band_inside_reinit_keeps_lower_part },
     { "band_not_carried_below_or_absent",      case_band_not_carried_below_or_absent },
     { "park_never_jumps_past_requested",       case_park_never_jumps_past_requested },
     { "park_lagging_stops_at_chain_start",     case_park_lagging_stops_at_chain_start },
