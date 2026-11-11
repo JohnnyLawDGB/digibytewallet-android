@@ -737,9 +737,9 @@
     <string name="send_fail_unknown">The transaction could not be sent.</string>
     <string name="send_fail_try_again">Try again</string>
     <string name="rf_splitting_for_assets">Preparing to move %1$d DigiAssets: splitting your DGB so each one can pay its own transfer fee. This waits for one confirmation, usually under a minute.</string>
-    <!-- K1-RECOVERY: the DGB split for the assets' fees was refused or failed; no asset moved. %1$s / %2$s are DGB amounts ("0.5 DGB"). -->
-    <string name="rf_fanout_short">Your DigiAssets were not moved: giving each one its own transfer fee needs %1$s more than the old wallet holds. They are still on the old phrase. Add DGB to it and run Recover funds again.</string>
-    <string name="rf_fanout_unread">Your DigiAssets were not moved: %1$d of the old wallet\'s DGB coins could not be checked, so the DGB that could be proven is %2$s short of giving each asset its own transfer fee. They are still on the old phrase. Try again later.</string>
+    <!-- K1-RECOVERY: the DGB split for the assets' fees was refused or failed; no asset moved, but the plain DGB was still swept. %1$s is the FULL amount (with " DGB") the old wallet must then hold, not the shortfall; %2$d is a coin count. -->
+    <string name="rf_fanout_short">Your DigiAssets stayed in the old wallet: moving them needs %1$s there for fees. Your DGB was moved. To move the assets, send %1$s to the old wallet and run Recover funds again.</string>
+    <string name="rf_fanout_unread">Your DigiAssets stayed in the old wallet: moving them needs %1$s there for fees. Your DGB was moved, except %2$d coin(s) that could not be checked, which stayed in the old wallet. To move the assets, send %1$s to the old wallet and run Recover funds again.</string>
     <string name="rf_fanout_failed">Your DigiAssets were not moved: the step that splits DGB for their transfer fees could not be completed. They are still on the old phrase. Try again later.</string>
     <string name="rf_nothing_moved">Nothing was moved</string>
     <string name="rf_dd_fee_floor">Needs %1$s for the network fee: this wallet has %2$s.</string>

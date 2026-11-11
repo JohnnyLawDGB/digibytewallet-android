@@ -587,8 +587,8 @@
     <string name="send_fail_unknown">La transaction n\'a pas pu être envoyée.</string>
     <string name="send_fail_try_again">Réessayer</string>
     <string name="rf_splitting_for_assets">Préparation du déplacement de %1$d DigiAssets : vos DGB sont répartis pour que chacun puisse payer ses propres frais de transfert. Attente d\'une confirmation, généralement moins d\'une minute.</string>
-    <string name="rf_fanout_short">Vos DigiAssets n\'ont pas été déplacés : donner à chacun ses propres frais de transfert demande %1$s de plus que ce que contient l\'ancien portefeuille. Ils sont toujours sur l\'ancienne phrase. Ajoutez-y des DGB et relancez Récupérer des fonds.</string>
-    <string name="rf_fanout_unread">Vos DigiAssets n\'ont pas été déplacés : %1$d pièces DGB de l\'ancien portefeuille n\'ont pas pu être vérifiées, il manque donc %2$s aux DGB vérifiés pour donner à chaque actif ses propres frais de transfert. Ils sont toujours sur l\'ancienne phrase. Réessayez plus tard.</string>
+    <string name="rf_fanout_short">Vos DigiAssets sont restés dans l\'ancien portefeuille : les déplacer demande %1$s sur celui-ci pour les frais. Vos DGB ont été déplacés. Pour déplacer les actifs, envoyez %1$s à l\'ancien portefeuille et relancez Récupérer des fonds.</string>
+    <string name="rf_fanout_unread">Vos DigiAssets sont restés dans l\'ancien portefeuille : les déplacer demande %1$s sur celui-ci pour les frais. Vos DGB ont été déplacés, sauf %2$d pièce(s) qui n\'ont pas pu être vérifiées et sont restées dans l\'ancien portefeuille. Pour déplacer les actifs, envoyez %1$s à l\'ancien portefeuille et relancez Récupérer des fonds.</string>
     <string name="rf_fanout_failed">Vos DigiAssets n\'ont pas été déplacés : l\'étape qui répartit les DGB pour leurs frais de transfert n\'a pas pu aboutir. Ils sont toujours sur l\'ancienne phrase. Réessayez plus tard.</string>
     <string name="rf_nothing_moved">Rien n’a été déplacé</string>
     <string name="rf_dd_fee_floor">Nécessite %1$s de frais de réseau : ce portefeuille a %2$s.</string>

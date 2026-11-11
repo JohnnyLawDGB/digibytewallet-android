@@ -61,7 +61,7 @@ class RecoverFundsSeedAuthWiringTest {
         val body = screen.calls("CredentialBody").single { it.range.first in branch!!.range }
         assertEquals(listOf("onAskAgain = { vm.askDeviceCredentialAgain() }"), body.arguments)
 
-        val composable = screen.range("private fun CredentialBody(", "private fun formatSatToDgb(")
+        val composable = screen.range("private fun CredentialBody(", "internal fun formatSatToDgb(")
         assertNotNull("CredentialBody is no longer where this gate looks", composable)
         val button = screen.calls("Button", within = composable!!).single()
         assertEquals("onAskAgain", button.named["onClick"])

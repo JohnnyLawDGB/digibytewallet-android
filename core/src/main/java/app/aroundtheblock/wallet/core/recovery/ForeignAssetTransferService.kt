@@ -133,6 +133,10 @@ class ForeignAssetTransferService(
             val shortfallSat: Long,
             val detail: String,
             val unreadInputs: List<String> = emptyList(),
+            /** What the old wallet must hold, in one coin, for a later run to move the assets:
+             *  see ForeignAssetFanOut.Result.Refused.requiredInOneCoinSat. This, not
+             *  [shortfallSat], is what the user is told — the same run sweeps the plain DGB. */
+            val requiredInOneCoinSat: Long = 0L,
         ) : FanOut() {
             enum class Reason {
                 /** Every plain coin's parent was read, and together they are too little. */
@@ -253,7 +257,7 @@ class ForeignAssetTransferService(
                     log('w', "fan-out refused: not enough plain DGB to split " +
                         "(${fan.unreadInputs.size} input(s) unread)")
                     return@withContext Result(
-                        moves, FanOut.Refused(fan.shortfallSat, fan.detail, fan.unreadInputs),
+                        moves, FanOut.Refused(fan.shortfallSat, fan.detail, fan.unreadInputs, fan.requiredInOneCoinSat),
                     )
                 }
 

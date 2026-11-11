@@ -601,8 +601,8 @@
     <string name="send_fail_unknown">Transaksi tidak dapat dikirim.</string>
     <string name="send_fail_try_again">Coba lagi</string>
     <string name="rf_splitting_for_assets">Menyiapkan pemindahan %1$d DigiAssets: DGB Anda dibagi agar masing-masing dapat membayar biaya transfernya sendiri. Menunggu satu konfirmasi, biasanya kurang dari satu menit.</string>
-    <string name="rf_fanout_short">DigiAssets Anda tidak dipindahkan: memberi masing-masing biaya transfernya sendiri memerlukan %1$s lebih banyak daripada isi dompet lama. Aset masih ada di frasa lama. Tambahkan DGB ke sana lalu jalankan Pulihkan dana lagi.</string>
-    <string name="rf_fanout_unread">DigiAssets Anda tidak dipindahkan: %1$d koin DGB dari dompet lama tidak dapat diperiksa, sehingga DGB yang terbukti kurang %2$s untuk memberi setiap aset biaya transfernya sendiri. Aset masih ada di frasa lama. Coba lagi nanti.</string>
+    <string name="rf_fanout_short">DigiAssets Anda tetap di dompet lama: memindahkannya memerlukan %1$s di sana untuk biaya. DGB Anda sudah dipindahkan. Untuk memindahkan aset, kirim %1$s ke dompet lama lalu jalankan Pulihkan dana lagi.</string>
+    <string name="rf_fanout_unread">DigiAssets Anda tetap di dompet lama: memindahkannya memerlukan %1$s di sana untuk biaya. DGB Anda sudah dipindahkan, kecuali %2$d koin yang tidak dapat diperiksa dan tetap di dompet lama. Untuk memindahkan aset, kirim %1$s ke dompet lama lalu jalankan Pulihkan dana lagi.</string>
     <string name="rf_fanout_failed">DigiAssets Anda tidak dipindahkan: langkah yang membagi DGB untuk biaya transfernya tidak dapat diselesaikan. Aset masih ada di frasa lama. Coba lagi nanti.</string>
     <string name="rf_nothing_moved">Tidak ada yang dipindahkan</string>
     <string name="rf_dd_fee_floor">Perlu %1$s untuk biaya jaringan: dompet ini punya %2$s.</string>
