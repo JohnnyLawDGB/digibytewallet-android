@@ -197,7 +197,7 @@ class DgbNodeClient(
                 parseTxNetworkStatus(resp.code, body)
             }
         } catch (t: Throwable) {
-            android.util.Log.w("DgbNodeClient", "GET ${redactUrl(url)} threw ${t::class.java.simpleName}: ${t.message}")
+            android.util.Log.w("DgbNodeClient", "GET ${redactUrl(url)} threw ${t::class.java.simpleName} (request or response parse failed)")
             TxNetworkStatus.UNAVAILABLE
         }
     }
@@ -215,7 +215,7 @@ class DgbNodeClient(
                 parseSpendingAnswer(resp.code, BoundedBody.text(resp.body, EXPLORER_BODY_BYTES))
             }
         } catch (t: Throwable) {
-            android.util.Log.w("DgbNodeClient", "GET ${redactUrl(url)} threw ${t::class.java.simpleName}: ${t.message}")
+            android.util.Log.w("DgbNodeClient", "GET ${redactUrl(url)} threw ${t::class.java.simpleName} (request or response parse failed)")
             null
         }
     }
@@ -373,7 +373,7 @@ class DgbNodeClient(
                 JSONObject(body)
             }
         } catch (t: Throwable) {
-            android.util.Log.w("DgbNodeClient", "GET ${redactUrl(url)} threw ${t::class.java.simpleName}: ${t.message}")
+            android.util.Log.w("DgbNodeClient", "GET ${redactUrl(url)} threw ${t::class.java.simpleName} (request or response parse failed)")
             null
         }
     }
@@ -399,7 +399,7 @@ class DgbNodeClient(
                 JSONObject(body)
             }
         } catch (t: Throwable) {
-            android.util.Log.w("DgbNodeClient", "POST ${redactUrl(url)} threw ${t::class.java.simpleName}: ${t.message}")
+            android.util.Log.w("DgbNodeClient", "POST ${redactUrl(url)} threw ${t::class.java.simpleName} (request or response parse failed)")
             null
         }
     }
@@ -419,7 +419,7 @@ class DgbNodeClient(
                 if (!resp.isSuccessful) {
                     android.util.Log.w(
                         "DgbNodeClient",
-                        "reconcile ${redactUrl(url)} returned HTTP ${resp.code} ${resp.message}"
+                        "reconcile ${redactUrl(url)} returned HTTP ${resp.code}"
                     )
                     return null
                 }
@@ -431,10 +431,11 @@ class DgbNodeClient(
                 parseReconcileResponse(body)
             }
         } catch (t: Throwable) {
+            // K1-RECOVERY: the class and a fixed reason only. An org.json message quotes the offending
+            // value (an address, an amount) and so would its stack trace; neither is logged.
             android.util.Log.w(
                 "DgbNodeClient",
-                "reconcile ${redactUrl(url)} threw ${t::class.java.simpleName}: ${t.message}",
-                t
+                "reconcile ${redactUrl(url)} threw ${t::class.java.simpleName} (request or response parse failed)",
             )
             null
         }
