@@ -3,8 +3,8 @@
 # header, the transfer instructions, the exact re-read, the metadata CID, and the bit reader under them).
 # Moved from Kotlin core/.../asset/DigiAssetDecoder.kt, BitReader.kt and AssetPayloadCheck.kt; their tests
 # (DigiAssetDecoderTest, the fixed cases of DigiAssetDecoderFuzzTest, BitReaderTest,
-# AssetArithmeticNeverWrapsTest, AssetAllocatorTest's re-read cases) run here value for value, with the
-# scripts of the asset_*_kat suites beside this one. See asset_decode_kat_main.c.
+# AssetArithmeticNeverWrapsTest, AssetTransferAllocatorTest's re-read cases) run here value for value,
+# with the scripts of the asset_*_kat suites beside this one. See asset_decode_kat_main.c.
 #
 #   comparison  one arm per defect, -DASSET_DECODE_UNFIXED=<bit> (BRAssetDecode.h): 1 an amount past
 #               INT64_MAX is read, wrapped; 2 a tagged carrier that cannot be classified is not an asset;
@@ -86,8 +86,14 @@ CASES=(
     kat_unclassifiable:2,4,8
     issuance_flags:2
     issuance_lenient_stream:32
-    list_capacity:2
+    list_capacity:2,8
     carrier_offsets:2
+    carrier_direct_75:-
+    carrier_push_one_past:2
+    opcode_issuance_range:2
+    reread_sha1_skip:-
+    reread_header_not_asset:2
+    test_scripts_decoded:512
     arguments:-
     model_sweep:1,2,4,8,16,32,64,128,256,512
 )
@@ -126,8 +132,9 @@ if [ ! -f "$VEC_DIR/generate.c" ] || [ ! -f "$VEC_DIR/vectors.txt" ]; then
     echo "VECTORS GATE FAILED: $VEC_DIR/generate.c or vectors.txt is missing"; FAIL=1
 elif ! "$CC" -w -std=c99 -include stdint.h -I "$CORE_DIR" "$VEC_DIR/generate.c" -o "$BUILD_DIR/gen"; then
     echo "VECTORS GATE FAILED: generate.c did not compile (a build error is not evidence)"; FAIL=1
+elif ! "$BUILD_DIR/gen" > "$BUILD_DIR/vectors.txt"; then
+    echo "VECTORS GATE FAILED: generate.c did not write its vectors (it exits 1 when one does not fit its buffer)"; FAIL=1
 else
-    "$BUILD_DIR/gen" > "$BUILD_DIR/vectors.txt"
     if ! cmp -s "$BUILD_DIR/vectors.txt" "$VEC_DIR/vectors.txt"; then
         echo "VECTORS GATE FAILED: vectors.txt is not what generate.c writes from this header; regenerate it"
         diff "$VEC_DIR/vectors.txt" "$BUILD_DIR/vectors.txt" > "$BUILD_DIR/vec.diff"

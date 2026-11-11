@@ -968,6 +968,7 @@ static void exact_refuses_trailing(void)
 static void exact_truncated_transfer(void)
 {
     wantUncl("6a05 44410315 00", "a transfer instruction with no amount");
+    wantExact(0);   // AssetTransferAllocatorTest: and the re-read, asked with the header the decoder gave, is false
 }
 
 // AssetHoldCoversCreditedOutputsTest: every output an instruction can name, range or not, in each
@@ -1279,7 +1280,7 @@ static void list_capacity(void)
 {
     static BRAssetTransferInstruction l[BR_ASSET_MAX_INSTRUCTIONS + 1];
     BRAssetHeader h;
-    char hex[2 * 257 + 1];
+    char hex[2 * 258 + 1];
     size_t i, n;
     int all = 1;
 
@@ -1307,6 +1308,32 @@ static void list_capacity(void)
     SL = hx("6a06 44410305 0a 10", S, sizeof(S));
     ck(BRAssetDecodeInstructions(S, SL, &h, NULL, 0) == BR_ASSET_SCRIPT_ASSET && h.instructionCount == 0 && h.totalQuantity == 10,
        "a script with no instruction needs no buffer");
+
+    // 255 bytes, the most OP_PUSHDATA1 holds: one amount of two bytes (100), then 124 of one byte.
+    n = (size_t)sprintf(hex, "6a4cff44410315002012");
+    for (i = 0; i < 124; i++) n += (size_t)sprintf(hex + n, "0001");
+    wantAsset(hex, "255 bytes behind OP_PUSHDATA1", 3, 0x15, DA_TRANSFER, BR_ASSET_MAX_INSTRUCTIONS);
+    wantInst(0, 0, 0, 0, 0, 0, 100);
+    wantInst(1, 0, 0, 0, 0, 0, 1);
+    wantInst(124, 0, 0, 0, 0, 0, 1);
+    wantExact(1);
+
+    // The same 255 bytes as 125 instructions of two bytes and the first byte of one more: a transfer
+    // whose last instruction is cut is not a shorter list.
+    n = (size_t)sprintf(hex, "6a4cff44410315");
+    for (i = 0; i < 125; i++) n += (size_t)sprintf(hex + n, "0001");
+    sprintf(hex + n, "00");
+    wantUncl(hex, "125 instructions and the first byte of another");
+
+    // An issuance has its amount before the list and its last byte after it: 124 fit in 254 bytes.
+    n = (size_t)sprintf(hex, "6a4cfe444103050a");
+    for (i = 0; i < 124; i++) n += (size_t)sprintf(hex + n, "0001");
+    sprintf(hex + n, "10");
+    wantAsset(hex, "an issuance of 10 with 124 instructions", 3, 5, DA_ISSUANCE, 124);
+    wantIssue(10, 0, 1, BR_ASSET_AGGREGATABLE);
+    wantInst(0, 0, 0, 0, 0, 0, 1);
+    wantInst(123, 0, 0, 0, 0, 0, 1);
+    wantExact(1);
 }
 
 static void carrier_offsets(void)
@@ -1336,6 +1363,139 @@ static void carrier_offsets(void)
     wantNot("6a014441", "a push of one byte, though the tag bytes follow");
     wantNot("6b0644410215000a", "not OP_RETURN");
     wantNot("6a4d0600444202150005", "OP_PUSHDATA2 with another tag");
+}
+
+// The longest direct push is 75 bytes (0x4b); the next value, 0x4c, is OP_PUSHDATA1.
+static void carrier_direct_75(void)
+{
+    char hex[2 * 78 + 1];
+    size_t i, n, off = 99, len = 99;
+    int all = 1;
+
+    // 100 to output 0 in three bytes, so that 34 instructions of two bytes fill the 75
+    n = (size_t)sprintf(hex, "6a4b44410315002012");
+    for (i = 0; i < 34; i++) n += (size_t)sprintf(hex + n, "0001");
+    wantAsset(hex, "75 bytes behind a direct push", 3, 0x15, DA_TRANSFER, 35);
+    wantInst(0, 0, 0, 0, 0, 0, 100);
+    for (i = 1; i < 35; i++) if (L[i].outputIndex != 0 || L[i].amount != 1 || L[i].skip || L[i].range || L[i].percent || L[i].isBurn) all = 0;
+    ck(all, "  then 34 times 1 to output 0");
+    wantExact(1);
+    ck(BRAssetDecodeCarrier(S, SL, &off, &len) == BR_ASSET_SCRIPT_ASSET && off == 2 && len == 75, "  the payload is 75 bytes from 2");
+
+    n = (size_t)sprintf(hex, "6a4c4b44410315002012");
+    for (i = 0; i < 34; i++) n += (size_t)sprintf(hex + n, "0001");
+    wantAsset(hex, "the same 75 bytes behind OP_PUSHDATA1", 3, 0x15, DA_TRANSFER, 35);
+    wantExact(1);
+}
+
+// `hex` is a whole transfer of 5 to output 0. Then the script is taken one byte shorter: its push says
+// one byte more than it has. That byte still stands in the buffer after the script's end, where a
+// reader that took it would find the whole transfer again.
+static void pushOnePast(const char *hex, const char *what)
+{
+    BRAssetHeader h;
+    BRAssetTransferInstruction l[1];
+    const char *diff;
+    size_t off = 99, len = 99;
+
+    wantAsset(hex, what, 3, 0x15, DA_TRANSFER, 1);
+    wantInst(0, 0, 0, 0, 0, 0, 5);
+    wantExact(1);
+    h = H; l[0] = L[0];
+
+    SL -= 1;
+    diff = decodeBoth();
+    if (diff) ck(0, "%s, one byte short: the header and the Kotlin model differ in %s", what, diff);
+    ck(K == BR_ASSET_SCRIPT_UNCLASSIFIABLE && H.operation == DA_UNDEFINED && H.instructionCount == 0,
+       "  one byte short: unclassifiable, no instruction (kind %d)", (int)K);
+    ck(BRAssetDecodeCarrier(S, SL, &off, &len) == BR_ASSET_SCRIPT_UNCLASSIFIABLE && off == 0 && len == 0, "  and no payload");
+    ck(BRAssetPayloadReadsExactly(S, SL, &h, l, 1) == 0 && mExact(S, SL, &h, l, 1) == 0,
+       "  and the re-read with the whole script's header and list: 0");
+}
+
+static void carrier_push_one_past(void)
+{
+    pushOnePast("6a06 44410315 0005", "5 to output 0 behind a direct push");
+    pushOnePast("6a4c06 44410315 0005", "5 to output 0 behind OP_PUSHDATA1");
+}
+
+// Opcodes 1 to 5 are issuances. 0 and 6, the values either side, are no operation.
+static void opcode_issuance_range(void)
+{
+    wantAsset("6a26 44410301 1111111111111111111111111111111111111111111111111111111111111111 05 10",
+              "opcode 1, the first issuance", 3, 1, DA_ISSUANCE, 0);
+    wantIssue(5, 0, 1, BR_ASSET_AGGREGATABLE);
+    wantAsset("6a06 44410305 05 10", "opcode 5, the last", 3, 5, DA_ISSUANCE, 0);
+    wantIssue(5, 0, 1, BR_ASSET_AGGREGATABLE);
+    wantUncl("6a06 44410300 05 10", "opcode 0 before the same amount and flags");
+    wantUncl("6a06 44410306 05 10", "opcode 6 before the same amount and flags");
+    wantUncl("6a1a 44410200 0102030405060708090a0b0c0d0e0f1011121314 05 10", "version 2 opcode 0, with 20 bytes to step over");
+}
+
+// Before version 3 an opcode under 3 is followed by 20 bytes, and the re-read steps over them as the
+// decoder does. No header the decoder returns as an asset takes the re-read that far (opcodes 1 and
+// 2 are issuances, and an issuance before version 3 is answered 0 first), so the header and the list
+// are built by hand: version 2, opcode 2, read as a transfer of 5 to output 0.
+static void reread_sha1_skip(void)
+{
+    BRAssetHeader h;
+    BRAssetTransferInstruction l[1];
+
+    memset(&h, 0, sizeof(h));
+    memset(l, 0, sizeof(l));
+    h.kind = BR_ASSET_SCRIPT_ASSET; h.version = 2; h.opcode = 2; h.operation = DA_TRANSFER; h.instructionCount = 1;
+    l[0].outputIndex = 0; l[0].amount = 5;
+
+    SL = hx("6a1a 44410202 0102030405060708090a0b0c0d0e0f1011121314 00 05", S, sizeof(S));
+    ck(BRAssetPayloadReadsExactly(S, SL, &h, l, 1) == 1 && mExact(S, SL, &h, l, 1) == 1,
+       "20 bytes, then 5 to output 0: the 20 are stepped over and the instruction is the list's");
+    SL = hx("6a19 44410202 0102030405060708090a0b0c0d0e0f10111213 00 05", S, sizeof(S));
+    ck(BRAssetPayloadReadsExactly(S, SL, &h, l, 1) == 0 && mExact(S, SL, &h, l, 1) == 0,
+       "19 bytes: the 20 take the instruction's first byte, and the 05 left is no instruction");
+    SL = hx("6a06 44410202 00 05", S, sizeof(S));
+    ck(BRAssetPayloadReadsExactly(S, SL, &h, l, 1) == 0 && mExact(S, SL, &h, l, 1) == 0, "no 20 bytes to step over: 0");
+    h.version = 3;
+    SL = hx("6a06 44410302 00 05", S, sizeof(S));
+    ck(BRAssetPayloadReadsExactly(S, SL, &h, l, 1) == 1 && mExact(S, SL, &h, l, 1) == 1, "version 3 has no 20 bytes: the instruction follows the opcode");
+}
+
+// The re-read is defined only for a header of kind BR_ASSET_SCRIPT_ASSET decoded from the same script.
+// For the zeroed header of a script that is not classified it still returns a value, and this one is
+// pinned so that the C and the Kotlin stay equal: version 0 and opcode 0 are the script's, the 20
+// bytes after them are stepped over, and nothing is left for an empty list to differ from.
+static void reread_header_not_asset(void)
+{
+    BRAssetHeader h;
+
+    memset(&h, 0, sizeof(h));
+    SL = hx("6a18 44410000 1122334455667788990011223344556677889900", S, sizeof(S));
+    ck(BRAssetPayloadReadsExactly(S, SL, &h, NULL, 0) == 1 && mExact(S, SL, &h, NULL, 0) == 1,
+       "version 0, opcode 0 and 20 bytes, asked with a zeroed header and no list: 1");
+
+    wantUncl("6a18 44410000 1122334455667788990011223344556677889900", "the same script decoded: version 0");
+    wantExact(1);   // the decoder's header for it is that zeroed header
+}
+
+// Scripts the Kotlin tests hand to code above the decoder (UnbackedAssetCreditTest,
+// AssetArithmeticNeverWrapsTest, AssetHoldCoversCreditedOutputsTest): what each decodes to, by hand.
+static void test_scripts_decoded(void)
+{
+    wantAsset("6a0a 44410305 2016 01 2016 10", "an issuance of 1000000, all of it to output 1", 3, 5, DA_ISSUANCE, 1);
+    wantIssue(1000000, 0, 1, BR_ASSET_AGGREGATABLE);
+    wantInst(0, 0, 0, 0, 0, 1, 1000000);
+    wantExact(1);
+    wantAsset("6a07 44410305 2016 10", "an issuance of 1000000 with no instruction", 3, 5, DA_ISSUANCE, 0);
+    wantIssue(1000000, 0, 1, BR_ASSET_AGGREGATABLE);
+    wantExact(1);
+    wantAsset("6a0d 44410315 5fff ffffffffffffff", "a range transfer of 2^54 - 1 to output 8191", 3, 0x15, DA_TRANSFER, 1);
+    wantInst(0, 0, 1, 0, 0, 8191, 18014398509481983LL);
+    wantExact(1);
+    wantAsset("6a09 44410315 00 698967f0", "9999999 to output 0", 3, 0x15, DA_TRANSFER, 1);
+    wantInst(0, 0, 0, 0, 0, 0, 9999999);
+    wantExact(1);
+    wantAsset("6a07 44410205 2640 00", "a version 2 issuance of 100, unlocked", 2, 5, DA_ISSUANCE, 0);
+    wantIssue(100, 0, 0, BR_ASSET_AGGREGATABLE);
+    wantExact(0);
 }
 
 static void arguments(void)
@@ -1386,6 +1546,8 @@ static uint32_t rnd(void)   // xorshift64: the same stream on every machine
 }
 
 static uint32_t below(uint32_t n) { return rnd() % n; }
+
+#define LONG_SCRIPTS 1500                       // part E's scripts
 
 static BRAssetHeader PH;                        // the script before this one, as the header decoded it
 static BRAssetTransferInstruction PL[CAP];
@@ -1464,6 +1626,61 @@ static size_t rndPayload(uint8_t *p)
     return n;
 }
 
+// A payload of `target` bytes (or one fewer) that its list fills: a transfer, a burn or an issuance.
+// `plain` makes every instruction the shortest there is, two bytes, for the longest list. One draw a
+// statement, so the stream is the same from every compiler.
+static size_t rndLongPayload(uint8_t *p, size_t target, int plain)
+{
+    static const uint8_t ops[] = { 2, 3, 5, 5, 0x15, 0x15, 0x15, 0x15, 0x25, 0x25 };
+    size_t n = 0, i, end;
+    uint8_t version = 3, opcode;
+    int issuance;
+
+    if (below(4) == 0) version = (uint8_t)(1 + below(2));
+    opcode = ops[below((uint32_t)N(ops))];
+    issuance = (opcode <= 5);
+
+    p[n++] = 0x44; p[n++] = 0x41; p[n++] = version; p[n++] = opcode;
+    if (version < 3 && opcode < 3) for (i = 0; i < 20; i++) p[n++] = (uint8_t)rnd();
+    if (opcode == 1 || opcode == 3 || opcode == 4) for (i = 0; i < 32; i++) p[n++] = (uint8_t)rnd();
+    if (issuance) p[n++] = (uint8_t)below(32);   // an amount of one byte
+    end = target - (issuance ? 1 : 0);           // where the list ends
+
+    while (! plain && n + 12 <= end) {           // an instruction of any form: nine bytes at the most
+        uint32_t range = (below(4) == 0), percent = (below(6) == 0), skip = (below(5) == 0);
+        uint32_t out = below(range ? 8192 : 32);
+
+        if (range) { p[n++] = (uint8_t)((skip << 7) | 0x40 | (percent << 5) | (out >> 8)); p[n++] = (uint8_t)out; }
+        else p[n++] = (uint8_t)((skip << 7) | (percent << 5) | out);
+        if (percent) p[n++] = (uint8_t)rnd();
+        else n += rndFixed(p + n);
+    }
+
+    if ((end - n) % 2 == 1 && end - n >= 3) {    // an odd number of bytes left: one amount of two bytes
+        p[n++] = (uint8_t)below(32);
+        p[n++] = (uint8_t)(0x20 | below(32));
+        p[n++] = (uint8_t)rnd();
+    }
+
+    while (n + 2 <= end) {                       // then instructions of two bytes to the end
+        uint32_t percent = (below(8) == 0), skip = (below(8) == 0);
+        uint32_t out = below(32);
+
+        p[n++] = (uint8_t)((skip << 7) | (percent << 5) | out);
+        if (percent) p[n++] = (uint8_t)rnd();
+        else p[n++] = (uint8_t)below(32);
+    }
+
+    if (issuance) {
+        uint32_t flags = rnd();
+        uint32_t policy = below(3);
+
+        p[n++] = (uint8_t)((flags & ~0x0cu) | (policy << 2));
+    }
+
+    return n;
+}
+
 // The payload behind a push of the given kind (0 direct, 1 OP_PUSHDATA1, 2 OP_PUSHDATA2, 3 OP_PUSHDATA4)
 // that declares `said` bytes, into S.
 static void frame(const uint8_t *p, size_t len, int kind, size_t said)
@@ -1484,7 +1701,7 @@ static void model_sweep(void)
     static const uint8_t versions[] = { 0, 1, 1, 2, 2, 3, 3, 3 };
     static const uint8_t opcodes[] = { 1, 2, 3, 4, 5, 0x15, 0x15, 0x25, 0, 6, 0x16 };
     uint8_t p[300];
-    unsigned long i, before, fixedRead = 0, fixedRefused = 0, fixedDiffs = 0;
+    unsigned long i, before, fixedRead = 0, fixedRefused = 0, fixedDiffs = 0, longLists = 0, fullLists = 0, fullExact = 0;
     size_t n, k;
 
     memset(&PH, 0, sizeof(PH));
@@ -1541,7 +1758,39 @@ static void model_sweep(void)
     }
     ck(DIFFS == before, "C: 60000 encoded issuances, transfers and burns, whole and damaged");
 
-    ck(SWEPT == 140000 && REACHED[BR_ASSET_SCRIPT_NOT_ASSET] > 1000 && REACHED[BR_ASSET_SCRIPT_UNCLASSIFIABLE] > 1000 &&
+    // E: payloads of 250 to 255 bytes that their lists fill, whole and damaged as in C, behind OP_PUSHDATA1
+    // (now and then OP_PUSHDATA2 or 4, or a push that says one byte more than there is); and past 255
+    // bytes behind OP_PUSHDATA2 or behind an OP_PUSHDATA1 that says 255
+    RNG = 0x10D6115Bu; before = DIFFS;
+    for (i = 0; i < LONG_SCRIPTS; i++) {
+        uint32_t how = below(8);
+        size_t target = 250 + below(6), said;
+        int plain = (int)below(2), kind = 1;
+
+        n = rndLongPayload(p, target, plain);
+        if (how == 4) n -= 1 + below(3);
+        else if (how == 5) for (k = 1 + below(3); k > 0; k--) p[n++] = (uint8_t)rnd();
+        else if (how == 6) { uint8_t value = (uint8_t)rnd(); uint32_t at = below((uint32_t)n); p[at] = value; }
+        else if (how == 7) { uint32_t bit = below(8); uint32_t at = below((uint32_t)(n - 4)); p[4 + at] ^= (uint8_t)(1u << bit); }
+        said = n;
+        if (n > 255) { kind = 1 + (int)below(2); if (kind == 1) said = 255; }
+        else if (below(40) == 0) kind = 2 + (int)below(2);
+        else if (n < 255 && below(20) == 0) said = n + 1;
+        frame(p, n, kind, said);
+        if (below(20) == 0) S[SL++] = (uint8_t)rnd();
+        sweepOne("E (long lists)");
+
+        if (K == BR_ASSET_SCRIPT_ASSET && H.instructionCount >= 100) longLists++;
+        if (K == BR_ASSET_SCRIPT_ASSET && H.instructionCount == BR_ASSET_MAX_INSTRUCTIONS) {
+            fullLists++;
+            if (BRAssetPayloadReadsExactly(S, SL, &H, L, (size_t)H.instructionCount)) fullExact++;
+        }
+    }
+    ck(DIFFS == before && longLists > 250 && fullLists > 50 && fullExact > 25,
+       "E: %d payloads of about 255 bytes: %lu decoded with 100 instructions or more, %lu of them with all %d (%lu read exactly)",
+       LONG_SCRIPTS, longLists, fullLists, BR_ASSET_MAX_INSTRUCTIONS, fullExact);
+
+    ck(SWEPT == 140000 + LONG_SCRIPTS && REACHED[BR_ASSET_SCRIPT_NOT_ASSET] > 1000 && REACHED[BR_ASSET_SCRIPT_UNCLASSIFIABLE] > 1000 &&
        REACHED[BR_ASSET_SCRIPT_ASSET] > 1000 && EXACT[0] > 1000 && EXACT[1] > 1000,
        "the corpus reaches every answer: %lu not an asset, %lu unclassifiable, %lu decoded (%lu of them read exactly, %lu not)",
        REACHED[BR_ASSET_SCRIPT_NOT_ASSET], REACHED[BR_ASSET_SCRIPT_UNCLASSIFIABLE], REACHED[BR_ASSET_SCRIPT_ASSET], EXACT[1], EXACT[0]);
@@ -1600,7 +1849,11 @@ static const Case CASES[] = {
     { "exact_header_mismatch", exact_header_mismatch },
     { "kat_burn_marker", kat_burn_marker }, { "kat_classified", kat_classified }, { "kat_unclassifiable", kat_unclassifiable },
     { "issuance_flags", issuance_flags }, { "issuance_lenient_stream", issuance_lenient_stream },
-    { "list_capacity", list_capacity }, { "carrier_offsets", carrier_offsets }, { "arguments", arguments },
+    { "list_capacity", list_capacity }, { "carrier_offsets", carrier_offsets },
+    { "carrier_direct_75", carrier_direct_75 }, { "carrier_push_one_past", carrier_push_one_past },
+    { "opcode_issuance_range", opcode_issuance_range }, { "reread_sha1_skip", reread_sha1_skip },
+    { "reread_header_not_asset", reread_header_not_asset }, { "test_scripts_decoded", test_scripts_decoded },
+    { "arguments", arguments },
     { "model_sweep", model_sweep },
 };
 
