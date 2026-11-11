@@ -1,5 +1,6 @@
 package app.aroundtheblock.wallet.ui.wallet
 
+import app.aroundtheblock.wallet.core.LogSafe
 import app.aroundtheblock.wallet.core.LogTag
 
 import androidx.lifecycle.ViewModel
@@ -315,7 +316,7 @@ class SendViewModel @Inject constructor(
                         SendState.NotYetRelayed(result.txid)
                     }
                     is TxResult.Error -> {
-                        android.util.Log.w(TAG, "send refused: ${result.message}")
+                        android.util.Log.w(TAG, "send refused: ${LogSafe.text(result.message)}")
                         SendState.Error(result.message)
                     }
                     is TxResult.Refused -> {
@@ -423,7 +424,7 @@ class SendViewModel @Inject constructor(
             val prepared = when (val result = transactionBuilder.prepareDigiDollar(typed.address, typed.cents)) {
                 is DigiDollarPrepareResult.Ready -> result.send
                 is DigiDollarPrepareResult.Error -> {
-                    android.util.Log.w(TAG, "DigiDollar review built nothing: ${result.message}")
+                    android.util.Log.w(TAG, "DigiDollar review built nothing: ${LogSafe.text(result.message)}")
                     onNotBuilt()
                     return null
                 }

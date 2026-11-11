@@ -1,6 +1,7 @@
 package app.aroundtheblock.wallet.core.digiscope
 
 import android.content.Context
+import app.aroundtheblock.wallet.core.LogSafe
 import app.aroundtheblock.wallet.core.hub.ChatMessage
 import app.aroundtheblock.wallet.core.hub.DigiRunnerStats
 import app.aroundtheblock.wallet.core.hub.LeaderboardEntry
@@ -154,7 +155,7 @@ class DigiScopeClient(
             android.util.Log.i("DigiScope", "quickLogin: token=${if (token != null) "received" else "null"}")
             token != null
         } catch (e: Exception) {
-            android.util.Log.e("DigiScope", "quickLogin: exception: ${e.message}", e)
+            android.util.Log.e("DigiScope", "quickLogin: exception: ${LogSafe.text(e.message)}", e)
             false
         }
     }
@@ -397,11 +398,11 @@ class DigiScopeClient(
                     .build()
                 client.newCall(request).execute().use { response ->
                     val respBody = BoundedBody.text(response.body, SMALL_BODY_BYTES)
-                    android.util.Log.d("DigiScope", "submitScore: ${response.code} — $respBody")
+                    android.util.Log.d("DigiScope", "submitScore: ${response.code} — ${LogSafe.text(respBody)}")
                     response.isSuccessful
                 }
             } catch (e: Exception) {
-                android.util.Log.e("DigiScope", "submitScore exception: ${e.message}")
+                android.util.Log.e("DigiScope", "submitScore exception: ${LogSafe.text(e.message)}")
                 false
             }
         }

@@ -318,6 +318,115 @@ class LogRedactionSourceGateTest {
         return out
     }
 
+    /**
+     * ASSET-LOG-CRLF: no log line in core/ or app/ interpolates an untrusted remote string without
+     * neutralising its control characters and bounding its length, which `LogSafe.text` does.
+     * Logcat starts a new line at every line break in a message, so a raw value prints text that reads
+     * as lines of its own. Untrusted here: a value read from a remote JSON document or HTTP body (and
+     * anything derived from one in the same function), a String a WebSocket callback is handed, an
+     * issuer-metadata field by name, a parameter [REMOTE_TEXT_PARAMS] lists, and an exception's message
+     * (org.json and OkHttp quote what they failed on). A length, a count or a null check of one is fine.
+     */
+    @Test
+    fun `ASSET-LOG-CRLF no log line interpolates an untrusted remote string unescaped`() {
+        val violations = mutableListOf<String>()
+        listOf("core/src/main/java", "app/src/main/java").forEach { root ->
+            findSourceRoot(root).walkTopDown().filter { it.extension == "kt" }.forEach { file ->
+                remoteTextLogs(file.readText(), REMOTE_TEXT_PARAMS[file.name].orEmpty())
+                    .forEach { violations.add("${file.name}: $it") }
+            }
+        }
+        assertTrue("log statements carrying an untrusted remote string unescaped (use LogSafe.text):\n" +
+            violations.joinToString("\n"), violations.isEmpty())
+    }
+
+    /** The remote-text rule must flag each source it names and pass the forms it allows. */
+    @Test
+    fun `ASSET-LOG-CRLF rule flags each remote source and passes LogSafe, lengths and codes`() {
+        val d = '$'
+        // The shipped line (AssetImageResolver): a listed remote parameter, trimmed, then logged.
+        val resolver = "fun resolve(raw: String?): Any? {\n val trimmed = raw.trim()\n" +
+            " android.util.Log.w(\"AssetImageResolver\", \"Unrecognised imageUrl format: ${d}trimmed\")\n}"
+        assertTrue("the shipped resolver line is not caught", remoteTextLogs(resolver, setOf("raw")).isNotEmpty())
+        // A server body (DigiScopeClient.submitScore) and remote JSON fields (SyncService seeder).
+        assertTrue(remoteTextLogs("fun f() {\n val respBody = BoundedBody.text(response.body, 4096)\n" +
+            " Log.d(T, \"submitScore: ${d}{response.code} - ${d}respBody\")\n}").isNotEmpty())
+        assertTrue(remoteTextLogs("fun f() {\n val capability = root.optString(\"capability\", \"unknown\")\n" +
+            " Log.i(T, \"capability=${d}capability\")\n}").isNotEmpty())
+        assertTrue(remoteTextLogs("fun f() {\n val v = o.getString(\"name\")\n Log.i(T, \"n=${d}{v.trim()}\")\n}").isNotEmpty())
+        // A WebSocket close reason, an exception's message, a metadata field, a concatenated value.
+        assertTrue(remoteTextLogs("override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {\n" +
+            " Log.w(T, \"closed: ${d}code ${d}reason\")\n}").isNotEmpty())
+        assertTrue(remoteTextLogs("fun f() { Log.w(T, \"failed: ${d}{e.message}\") }").isNotEmpty())
+        assertTrue(remoteTextLogs("fun f() { Log.w(T, \"failed: ${d}{t.localizedMessage}\") }").isNotEmpty())
+        assertTrue(remoteTextLogs("fun f() { Log.w(T, \"img ${d}{meta.imageUrl}\") }").isNotEmpty())
+        assertTrue(remoteTextLogs("fun f() {\n val body = r.body?.string()\n Log.w(T, \"got \" + body)\n}").isNotEmpty())
+        // Allowed: through LogSafe, a length, a code, a null check, a class name.
+        assertTrue(remoteTextLogs(resolver.replace("${d}trimmed\"", "${d}{LogSafe.text(trimmed)}\""), setOf("raw")).isEmpty())
+        assertTrue(remoteTextLogs("fun f() {\n val responseBody = BoundedBody.text(r.body, 4096)\n" +
+            " Log.i(T, \"HTTP ${d}{r.code} bodyLength=${d}{responseBody?.length ?: -1}\")\n}").isEmpty())
+        assertTrue(remoteTextLogs("fun f() { Log.w(T, \"failed: ${d}{LogSafe.text(e.message)}\") }").isEmpty())
+        assertTrue(remoteTextLogs("fun f() { Log.w(T, \"failed: ${d}{e.javaClass.simpleName}\") }").isEmpty())
+        assertTrue(remoteTextLogs("fun f() {\n val tok = o.optString(\"token\")\n Log.i(T, \"t=${d}{tok != null}\")\n}").isEmpty())
+        assertTrue(remoteTextLogs("fun f() {\n val body = r.body?.string()\n Log.w(T, \"got \" + LogSafe.text(body))\n}").isEmpty())
+        // SharedPreferences.getString(key, default) and resources are local, not remote JSON.
+        assertTrue(remoteTextLogs("fun f() {\n val h = prefs.getString(\"k\", null)\n Log.i(T, \"h=${d}h\")\n}").isEmpty())
+    }
+
+    /** Per function, like [txRowLogs]: a name is remote text only in the function that read it. */
+    private fun remoteTextLogs(content: String, remoteParams: Set<String> = emptySet()): List<String> {
+        val sinks = injectedLoggerNames(content)
+        return Regex("""(?=\n[ \t]*(?:(?:private|internal|public|override|suspend|inline|protected)\s+)*fun\s)""")
+            .split(content).flatMap { remoteTextLogsIn(it, sinks, remoteParams) }
+    }
+
+    private fun remoteTextLogsIn(content: String, sinks: Set<String>, remoteParams: Set<String>): List<String> {
+        val tainted = mutableSetOf<String>()
+        // Parameters: those listed for the file, and every String a WebSocket callback is handed.
+        val params = Regex("""\bfun\s+[\w.<>]+\s*\(([^)]*)\)""").find(content)?.groupValues?.get(1).orEmpty()
+        tainted += Regex("""\b(\w+)\s*:""").findAll(params).map { it.groupValues[1] }.filter { it in remoteParams }
+        if (Regex("""\bWebSocket\b""").containsMatchIn(params)) {
+            tainted += Regex("""\b(\w+)\s*:\s*String\b""").findAll(params).map { it.groupValues[1] }
+        }
+        val assign = Regex("""\b(?:val|var)\s+(\w+)\s*(?::[^=\n]+)?=([^\n]*)""")
+        var grew = true
+        while (grew) {
+            grew = false
+            assign.findAll(content).forEach { m ->
+                val name = m.groupValues[1]; val rhs = m.groupValues[2]
+                val head = Regex("""^\s*([A-Za-z_]\w*)""").find(rhs)?.groupValues?.get(1)
+                if (name !in tainted && (REMOTE_TEXT_SOURCE.containsMatchIn(rhs) || head in tainted)) {
+                    tainted.add(name); grew = true
+                }
+            }
+        }
+        // A length, a count, a null or emptiness check, a class name: not the text.
+        val shape = Regex("""\.(length|size|count|isEmpty|isNotEmpty|isBlank|isNotBlank|isNullOrEmpty|isNullOrBlank|javaClass|hashCode)\b|::class|[!=]=\s*null|\bLogTag\.""")
+        val exceptionText = Regex("""\.(message|localizedMessage)\b""")
+        val fieldText = Regex("""\.(${REMOTE_FIELD_NAMES.joinToString("|")})\b""")
+        val out = mutableListOf<String>()
+        collectLogStatements(content, sinks).forEach { stmt ->
+            val bad = mutableListOf<String>()
+            Regex("""\$(?!\{)([A-Za-z_]\w*)""").findAll(stmt).map { it.groupValues[1] }
+                .filter { it in tainted || it in REMOTE_FIELD_NAMES }.forEach { bad.add("\$$it") }
+            Regex("""\$\{([^{}]*)\}""").findAll(stmt).map { it.groupValues[1].trim() }
+                .filter { !it.startsWith("LogSafe.") && !shape.containsMatchIn(it) }
+                .filter { expr ->
+                    val head = Regex("""^([A-Za-z_]\w*)""").find(expr)?.groupValues?.get(1)
+                    head in tainted || head in REMOTE_FIELD_NAMES ||
+                        exceptionText.containsMatchIn(expr) || fieldText.containsMatchIn(expr)
+                }
+                .forEach { bad.add("\${$it}") }
+            // Concatenation: a remote value passed outside any string literal and outside LogSafe.text(...).
+            val outside = stmt.replace(Regex(""""(?:[^"\\]|\\.)*""""), "\"\"")
+                .replace(Regex("""LogSafe\.text\([^()]*(?:\([^()]*\)[^()]*)*\)"""), "")
+            Regex("""(?<![.\w$])([A-Za-z_]\w*)\b(?!\s*\()""").findAll(outside).map { it.groupValues[1] }
+                .filter { it in tainted }.forEach { bad.add("arg $it") }
+            if (bad.isNotEmpty()) out.add("$bad in $stmt")
+        }
+        return out
+    }
+
     /** The gate above must see what it is meant to see. */
     @Test
     fun `the txid gate collects a multi-line log call and Log_wtf`() {
@@ -492,6 +601,24 @@ class LogRedactionSourceGateTest {
             "outcome", "verdicts", "assetBearing", "sweepable", "unclassified", "heldAssets", "heldUnknown",
             "heldForAssets", "unproven", "unreadInputs", "unreadPlain", "feePool", "feeInputs", "derivedAddresses",
             "holdings", "excludeOutpoints", "spentInputs",
+        )
+
+        /** ASSET-LOG-CRLF: reads of remote text -- a JSON field (`optString(`, `getString("key")`; a
+         *  SharedPreferences `getString(key, default)` takes two arguments and is not one), an HTTP body. */
+        val REMOTE_TEXT_SOURCE = Regex(
+            """\boptString\(|\bgetString\("[^"]*"\)|\bBoundedBody\.text\(|\.string\(\)|\bpeekBody\(|\breadUtf8\("""
+        )
+
+        /** ASSET-LOG-CRLF: issuer-metadata fields, remote by nature wherever they are read from. */
+        val REMOTE_FIELD_NAMES = setOf(
+            "imageUrl", "image", "description", "issuer", "issuerName", "symbol", "ticker",
+            "metadataJson", "rulesJson", "assetName",
+        )
+
+        /** ASSET-LOG-CRLF: parameters that carry remote text into a file, by file. `raw` is the issuer's
+         *  image value (AssetImageResolver.resolve). */
+        val REMOTE_TEXT_PARAMS = mapOf(
+            "AssetImageResolver.kt" to setOf("raw"),
         )
 
         /** Shared clients brought into the K1-RECOVERY rule (they parse answers that carry chain data). */
