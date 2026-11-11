@@ -280,7 +280,7 @@ if [ "$(uname -s)" = Darwin ] && command -v swiftc >/dev/null 2>&1; then
     printf '#include "BRAssetProvenance.h"\n#include "BRAssetRuleGate.h"\n' > "$BUILD_DIR/bridging.h"
     cat > "$BUILD_DIR/use.swift" <<'EOF'
 var walk = BRAssetWalk()
-var slots = [BRAssetTxidSlot](repeating: BRAssetTxidSlot(), count: 51)
+var slots = [BRAssetTxidSlot](repeating: BRAssetTxidSlot(), count: BRAssetWalkSlots(BR_ASSET_WALK_DEFAULT_MAX_HOPS))
 var need: BRAssetWalkNeed = BRAssetWalkBegin(&walk, "t0", 1, BR_ASSET_WALK_DEFAULT_MAX_HOPS, &slots, slots.count)
 var feed = BRAssetWalkFeed()
 need = BRAssetWalkStep(&walk, &feed)

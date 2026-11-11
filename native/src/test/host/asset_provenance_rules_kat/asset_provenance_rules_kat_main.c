@@ -25,6 +25,19 @@
 //       the bytes the walk is given in production: bytes that are exactly one transaction (the wallet's
 //       own serialization, or an endpoint's answer whose id BRRawTxId confirms).
 //
+//  LEFT TO THE PLATFORM. Three Kotlin assertions test what the platform does around the headers, not what
+//  the headers answer, so no case here carries them; the iOS executor's own tests must:
+//    - AssetProvenanceTxidBindingTest, a_wrong_answer_counts_as_a_failure_of_that_endpoint:
+//      `first.asked.size == 2`. An endpoint that answers with the wrong transaction counts as failing, and
+//      past the failure threshold it is not asked again for the cool-down period (binding_wrong_answer_refused
+//      holds only the refusal and the second endpoint's four answers).
+//    - AssetSendRuleGateTest, a rule-bound asset is refused before any UTXO is read:
+//      `coVerify(exactly = 0) { utxoDao.getAssetUtxosByIdNow }`. The send asks the gate before it reads a
+//      UTXO (send_rule_bound holds only the refusal).
+//    - AssetSendRuleGateTest, transferRuleState reads the two stores and nothing else:
+//      `coVerify(exactly = 0) { refreshRules }`. Asking for the state makes no network call
+//      (send_two_stores holds only the two verdicts).
+//
 //  One case per process: `asset_provenance_rules_kat <case>` prints PASS:/FAIL: lines and
 //  `RESULT <case> pass|fail`; `list` prints the case names. run.sh builds one binary per comparison arm and
 //  holds each arm to failing exactly its cases.
@@ -124,6 +137,24 @@ static BRAssetResolvedFacts mkFacts(const char *id, int64_t supply, int32_t div,
     f.hasIssuanceLocked = hasLock;
     f.issuanceLocked = hasLock ? lock : 0;
     return f;
+}
+
+// Asset ids that agree on a long prefix. Real ids are BR_ASSET_ID_LENGTH (38) characters and all begin La,
+// Lh or Ld, so every comparison of two ids must read them to the end: ID_Q1 and ID_Q2 differ only in their
+// last character, ID_Q37 is a proper prefix of both, and "LaA" is a proper prefix of "LaAB".
+#define ID_Q37 "LaQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ"
+#define ID_Q1 ID_Q37 "1"
+#define ID_Q2 ID_Q37 "2"
+
+// { the id the facts name, an id asked about that is not it }
+static const char *const ID_PAIRS[][2] = {
+    { ID_Q1, ID_Q2 }, { ID_Q2, ID_Q1 }, { ID_Q37, ID_Q1 }, { ID_Q1, ID_Q37 }, { "LaA", "LaAB" }, { "LaAB", "LaA" },
+};
+
+static int idFixturesHold(void)
+{
+    return strlen(ID_Q1) == BR_ASSET_ID_LENGTH && strlen(ID_Q2) == BR_ASSET_ID_LENGTH && strlen(ID_Q37) == BR_ASSET_ID_LENGTH - 1 &&
+           strncmp(ID_Q1, ID_Q2, BR_ASSET_ID_LENGTH - 1) == 0 && strcmp(ID_Q1, ID_Q2) != 0;
 }
 
 // ---- the fake store (the Kotlin tests' FakeStore, InMemoryProvenanceStore, RecordingStore) ----
@@ -733,6 +764,43 @@ static void walker_issuance_rows(void)
        "and answers the row that does");
     ck(! BRAssetIssuanceFactsMatch(&RULED, "LaOther"), "a row naming another asset does not answer");
     ck(! BRAssetIssuanceFactsMatch(NULL, FACTS.assetId) && ! BRAssetIssuanceFactsMatch(&RULED, NULL), "NULL arguments do not match");
+
+    // ids that share a prefix: the whole id decides
+    ck(idFixturesHold(), "the id fixtures are full-length ids that share all but their last character");
+    {
+        static Store s2;
+        size_t i;
+
+        for (i = 0; i < N(ID_PAIRS); i++) {
+            BRAssetResolvedFacts held = mkFacts(ID_PAIRS[i][0], 1, 0, NULL, 1, 1, 1, 1);
+
+            ck(BRAssetIssuanceFactsMatch(&held, ID_PAIRS[i][0]) && ! BRAssetIssuanceFactsMatch(&held, ID_PAIRS[i][1]),
+               "a row naming %s answers for it and not for %s", ID_PAIRS[i][0], ID_PAIRS[i][1]);
+            memset(&s2, 0, sizeof(s2));
+            stSet(&s2, "tx0", &held);
+            ck(stIssuanceFactsFor(&s2, ID_PAIRS[i][1], 1) == NULL && stIssuanceFactsFor(&s2, ID_PAIRS[i][1], 0) == NULL &&
+               stIssuanceFactsFor(&s2, ID_PAIRS[i][0], 1) == &s2.rows[0].f, "and the store answers %s with nothing", ID_PAIRS[i][1]);
+        }
+    }
+
+    // a row whose id does not end in its buffer is never read past it: the whole row, and the id asked
+    // about, are 'L' bytes (so the opcode is nonzero), and the row is exactly its own size on the heap,
+    // where ASan sees a read past it
+    {
+        BRAssetResolvedFacts *open = malloc(sizeof(*open));
+        char *asked = malloc(201);
+
+        if (! open || ! asked) ck(0, "allocation");
+        else {
+            memset(open, 'L', sizeof(*open));
+            memset(asked, 'L', 200);
+            asked[200] = '\0';
+            ck(open->hasIssuanceOpcode != 0 && ! BRAssetIssuanceFactsMatch(open, asked),
+               "facts whose id does not end in its buffer match nothing, and are not read past");
+        }
+        free(open);
+        free(asked);
+    }
 }
 
 // ---- real transactions: a builder ------------------------------------------------------------
@@ -1687,6 +1755,22 @@ static void capacity(void)
     ck(BRAssetWalkBegin(&w, "s", 1, 10, slots, BR_ASSET_WALK_SLOTS(10) - 1) == BR_ASSET_WALK_REFUSED &&
        w.why == BR_ASSET_WALK_WHY_CAPACITY && ! w.hasAnswer && w.pathCount == 0 && w.frontier == BR_ASSET_FRONTIER_KEEP,
        "one slot fewer is refused, with nothing to write");
+
+    // BRAssetWalkSlots, the function Swift can import, is the macro's count for every budget
+    {
+        static const int32_t budgets[] = { INT32_MIN, -50, -1, 0, 1, 2, 10, BR_ASSET_WALK_DEFAULT_MAX_HOPS, INT32_MAX - 1, INT32_MAX };
+        size_t k;
+        int same = 1;
+
+        for (k = 0; k < N(budgets); k++) same &= BRAssetWalkSlots(budgets[k]) == BR_ASSET_WALK_SLOTS(budgets[k]);
+        ck(same, "BRAssetWalkSlots is BR_ASSET_WALK_SLOTS for every budget");
+        ck(BRAssetWalkSlots(BR_ASSET_WALK_DEFAULT_MAX_HOPS) == 51 && BRAssetWalkSlots(10) == 11 && BRAssetWalkSlots(0) == 1 &&
+           BRAssetWalkSlots(-1) == 1 && BRAssetWalkSlots(INT32_MIN) == 1 && BRAssetWalkSlots(INT32_MAX) == (size_t)INT32_MAX + 1,
+           "51 for the default budget, one per hop and one for the start, and 1 for a budget of 0 or less");
+        ck(BRAssetWalkBegin(&w, "s", 1, 10, slots, BRAssetWalkSlots(10)) == BR_ASSET_WALK_NEEDS_FRONTIER &&
+           BRAssetWalkBegin(&w, "s", 1, 10, slots, BRAssetWalkSlots(10) - 1) == BR_ASSET_WALK_REFUSED &&
+           w.why == BR_ASSET_WALK_WHY_CAPACITY, "and is the count Begin holds the caller to");
+    }
 }
 
 static void zero_structs(void)
@@ -1830,6 +1914,33 @@ static void named_rules(void)
     ck(! namedBoth(&n, "LaA", "s", &out, "no parents"), "no other inputs: none");
     n.resolveAns[0] = NULL;
     ck(! namedBoth(&n, "LaB", "s", &out, "nothing"), "nothing answers: none");
+
+    // ids that share a prefix: at each stage (the store's facts, the start's walk, another input's walk) an
+    // answer for an id that agrees with the one asked on all but its end is another asset's
+    {
+        static const char *const p1[] = { "p1" };
+        size_t i;
+
+        for (i = 0; i < N(ID_PAIRS); i++) {
+            const char *heldId = ID_PAIRS[i][0], *asked = ID_PAIRS[i][1];
+            BRAssetResolvedFacts held = mkFacts(heldId, 7, 0, NULL, 1, 1, 1, 1);
+
+            memset(&n, 0, sizeof(n));
+            n.knownFacts = &held;
+            ck(! namedBoth(&n, asked, "s", &out, "prefix known"), "the store's facts for %s do not answer %s", heldId, asked);
+            ck(namedBoth(&n, heldId, "s", &out, "prefix known self") && factsEq(&out, &held), "and do answer %s", heldId);
+
+            memset(&n, 0, sizeof(n));
+            n.resolveTx[0] = "s"; n.resolveAns[0] = &held; n.nResolve = 1;
+            ck(! namedBoth(&n, asked, "s", &out, "prefix start"), "the start's walk to %s does not answer %s", heldId, asked);
+
+            memset(&n, 0, sizeof(n));
+            n.resolveTx[0] = "p1"; n.resolveAns[0] = &held; n.nResolve = 1;
+            n.parents = p1; n.nParents = 1;
+            ck(! namedBoth(&n, asked, "s", &out, "prefix parent"), "another input's walk to %s does not answer %s", heldId, asked);
+            ck(namedBoth(&n, heldId, "s", &out, "prefix parent self") && factsEq(&out, &held), "and does answer %s", heldId);
+        }
+    }
 }
 
 static void named_through_walk(void)
@@ -2019,6 +2130,17 @@ static void gate_for_asset(void)
     ck(BRAssetRuleStateForAsset(NULL, "LaA", 1, 1, 1, 1, 0, 0) == BR_SWEEP_RULE_UNKNOWN, "no asset asked: UNKNOWN");
     ck(BRAssetRuleStateForAsset("LaA", "LaA", 1, 4, 1, 1, 0, 0) == BR_SWEEP_RULE_BOUND, "and BOUND for the asked asset when it is");
     ck(BRAssetRuleStateForAsset("LaA", "Laa", 1, 1, 1, 1, 0, 0) == BR_SWEEP_RULE_UNKNOWN, "ids compare byte for byte");
+    {
+        size_t i;
+
+        for (i = 0; i < N(ID_PAIRS); i++) {
+            const char *named = ID_PAIRS[i][0], *asked = ID_PAIRS[i][1];
+            ck(BRAssetRuleStateForAsset(asked, named, 1, 1, 1, 1, 0, 0) == BR_SWEEP_RULE_UNKNOWN &&
+               BRAssetRuleStateForAsset(asked, named, 1, 4, 1, 1, 0, 0) == BR_SWEEP_RULE_UNKNOWN &&
+               BRAssetRuleStateForAsset(named, named, 1, 1, 1, 1, 0, 0) == BR_SWEEP_RULE_NONE,
+               "facts naming %s give %s no verdict, to the last character", named, asked);
+        }
+    }
 }
 
 // ---- the send gate (AssetSendRuleGateTest) -----------------------------------------------------
@@ -2123,7 +2245,7 @@ static const char *POOL[] = { "t0", "t1", "t2", "t3", "t4", "t5", "t6", "t7", "t
 
 static BRAssetResolvedFacts randFacts(void)
 {
-    static const char *ids[] = { "LaA", "LaB", "LhC", "" };
+    static const char *ids[] = { "LaA", "LaB", "LhC", "", ID_Q1, ID_Q2, ID_Q37, "LaAB" };
     int32_t ops[] = { 1, 2, 3, 4, 5, 0x15, 0, -1, INT32_MAX };
     int hasOp = (int)below(3) != 0;
 
@@ -2232,21 +2354,21 @@ static void sweep_hop(void)
 
 static void sweep_named(void)
 {
-    static const char *ids[] = { "LaA", "LaB", "LaC" };
+    static const char *ids[] = { "LaA", "LaB", "LaC", ID_Q1, ID_Q2, ID_Q37, "LaAB" };
     static const char *txs[] = { "s", "p1", "p2", "p3", "p4" };
-    BRAssetResolvedFacts facts[3], out;
+    BRAssetResolvedFacts facts[N(ids)], out;
     int i, bad = 0, answered = 0;
 
-    for (i = 0; i < 3; i++) facts[i] = mkFacts(ids[i], i, 0, NULL, 1, 1, 1, 1);
+    for (i = 0; i < (int)N(ids); i++) facts[i] = mkFacts(ids[i], i, 0, NULL, 1, 1, 1, 1);
     for (i = 0; i < 20000 && bad < 3; i++) {
         Named n;
         const char *parents[6];
         size_t k;
-        const char *asset = ids[below(3)], *start = txs[below(N(txs))];
+        const char *asset = ids[below(N(ids))], *start = txs[below(N(txs))];
 
         memset(&n, 0, sizeof(n));
-        n.knownFacts = below(3) ? NULL : &facts[below(3)];
-        for (k = 0; k < N(txs); k++) { n.resolveTx[k] = txs[k]; n.resolveAns[k] = below(3) ? &facts[below(3)] : NULL; }
+        n.knownFacts = below(3) ? NULL : &facts[below(N(ids))];
+        for (k = 0; k < N(txs); k++) { n.resolveTx[k] = txs[k]; n.resolveAns[k] = below(3) ? &facts[below(N(ids))] : NULL; }
         n.nResolve = N(txs);
         n.nParents = below(7);
         for (k = 0; k < n.nParents; k++) parents[k] = txs[below(N(txs))];
@@ -2272,7 +2394,7 @@ static void sweep_gate(void)
 {
     int32_t ops[] = { INT32_MIN, -1, 0, 1, 2, 3, 4, 5, 6, 0x15, 0x25, 255, INT32_MAX };
     int vals[] = { 0, 1, 2, -1, INT_MAX };
-    static const char *ids[] = { "LaA", "LaB", "" };
+    static const char *ids[] = { "LaA", "LaB", "", ID_Q1, ID_Q2, ID_Q37, "LaAB" };
     size_t o, i;
     int hasOp, hasL, hasA, l, a, n = 0, bad = 0;
 
