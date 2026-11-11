@@ -11,6 +11,6 @@ jobs:
   pins:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Pinned certificates are served
         run: bash scripts/check-pins-live.sh
