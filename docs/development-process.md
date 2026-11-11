@@ -19,9 +19,12 @@ hold:
    verdict are posted on the PR as a comment.
 3. **A push-down proves its gate.** A change to a core rule ships with its host KAT: green on
    the fix, and every red arm fails exactly its cases.
-4. **Order holds across repos:** core PR → Android PR that pins core `develop` → iOS pin. A pin
-   is moved only to a commit reachable from core `develop` (`check-submodule-pin.sh`,
-   `Scripts/check-core-pin.sh`).
+4. **Order holds across repos:** core PR first, then the two pins. Once a core commit's
+   `develop` CI run is green (core CI runs Android's host KATs on Linux for every core PR),
+   the Android pin PR and the iOS pin move may go in either order, and the Android pin PR is
+   opened the same day. A pin is moved only to a commit reachable from core `develop`
+   (`check-submodule-pin.sh`, `Scripts/check-core-pin.sh`). *Changed 2026-11-10: iOS used to
+   wait for the Android pin PR to merge.*
 5. **Merge commit or fast-forward, never a squash**, so pins stay reachable.
 6. **Generated files are regenerated, never merged.** `jni_registry_gen.h` can merge with no
    conflict and still be stale (two PRs that each add natives). Before merging a PR that touches
@@ -35,6 +38,10 @@ hold:
 ### Still Mark's, always
 
 - Releases, tags, version bumps meant for a release, Play Store, App Store, TestFlight.
+  One standing exception (Mark, 2026-11-10): when a stage of the iOS roadmap has passed its
+  exit check on the test phone, the lead uploads one TestFlight build for **internal testers
+  only** and tells Mark afterwards. External testers and App Store submission need him each
+  time.
 - Force-pushes to `develop`, `master` or any branch someone else works on.
 - Security decisions: anything that changes how seeds, keys or PINs are stored, unlocked or
   wiped, or what the spend gate covers (the owner checklist's questions). A PR that does this
@@ -44,6 +51,47 @@ hold:
 
 Mark sees merged work as a batch: the progress page and a short digest of what merged, what
 review found, and what waits for him.
+
+## Where a rule is written
+
+- **Funds in the core** (Mark, 2026-11-10). Anything that signs, spends, selects coins, builds
+  a transaction, or decides what the wallet holds or what a balance is, lives in
+  `digibytewallet-core` with a host KAT. Neither app carries its own copy.
+- **Display on the platform.** Code that only reads and shows (asset names and images,
+  metadata parsing, list order, labels) may be written per platform. The second platform
+  carries the first one's test cases value for value. Display code never feeds a spend, a
+  balance or the set of held outputs, and every amount on a screen comes from the core. The
+  conditions in full: the iOS repo's `docs/cross-platform-contract.md` §3.
+
+## Two sessions, one Android repo
+
+Since 2026-11-10 two lead sessions work in this repo.
+
+- **The Android session** owns the app and the bridge (`app/`, `core/`, `native/src/main`):
+  adopting new core headers, and fixing what the core reviews found on Android.
+- **The iOS and core session** changes only the host KATs (`native/src/test/host`), their
+  shard lists, and the core pin.
+- Either session may open a pin PR. A pin conflict resolves to core `develop` (rule 8).
+- `jni_registry_gen.h`: one PR at a time across both sessions (rule 6). The session that is
+  second regenerates.
+- Work passes between the sessions as a hand-off file in a repo, never as a chat summary.
+
+## Keeping plans current
+
+Each app has **one** current plan: `ROADMAP.md` here, `docs/roadmap.md` in the iOS repo.
+
+- **Status moves with the code.** A PR that finishes, starts or changes a planned item edits
+  the plan in the same PR, and "done" names the test or device check that shows it. The
+  reviewer checks this.
+- **Answered questions leave the open list.** The owner checklist holds open items only; an
+  answer is recorded with its date in the decisions log, in the PR that acts on it.
+- **True-up weekly, and within two days of a release tag:** compare the other platform's
+  changes, core `develop` against each pin, and the open items; update the plan and its date.
+  The iOS repo's CI fails on a plan more than 14 days old.
+- **An overrun stops for a re-plan.** A stage that passes its target date by more than half
+  its planned length goes back to Mark with what slipped, why, and a new date or a cut.
+- **Scope and target change only by Mark's word,** recorded the same day. A new Android
+  release becomes the iOS target at a true-up, never mid-stage.
 
 ## Subagents: who does what
 
@@ -76,4 +124,5 @@ each with a concrete failure scenario.
 - **Core:** a workflow on Linux that builds the core and runs every host KAT that exercises it,
   including the 32-bit, sanitizer and leak arms the Mac cannot run (owed: the first track of the
   iOS port plan's §19, which lands with the iOS repo's next push).
-- **iOS:** the simulator suite, the pin check, and the string-catalog checks.
+- **iOS:** the simulator suite, the pin check, the string-catalog checks, and the roadmap
+  freshness check (`Scripts/check-roadmap.sh`).
