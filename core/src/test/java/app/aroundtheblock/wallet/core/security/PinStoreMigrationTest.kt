@@ -47,9 +47,11 @@ class PinStoreMigrationTest {
 
     private class SoftwareCipher(var key: SecretKey = newKey()) : PinStoreCipher {
         var sealFails = false
+        var sealFailsTimes = 0
         var openTampers = false
         override fun seal(plain: ByteArray): ByteArray {
             if (sealFails) throw GeneralSecurityException("stand-in: the key could not be used")
+            if (sealFailsTimes > 0) { sealFailsTimes--; throw GeneralSecurityException("stand-in: a passing Keystore fault") }
             return KeystorePinStoreCipher.sealWith(key, plain)
         }
         override fun open(sealed: ByteArray): ByteArray {
@@ -69,6 +71,7 @@ class PinStoreMigrationTest {
         var deleteLands = true
         var deletes = 0
         var opens = 0
+        var onDelete: () -> Unit = {}
 
         override fun exists() = present
         override fun open(): LegacyPinStore.Opened {
@@ -77,6 +80,7 @@ class PinStoreMigrationTest {
             return View()
         }
         override fun delete(): Boolean {
+            onDelete()
             deletes++
             if (deleteLands) { present = false; map.clear() }
             return deleteLands
@@ -276,6 +280,66 @@ class PinStoreMigrationTest {
         assertFalse("its delete was tried again", legacy.present)
         assertTrue(mgr.verifyPin("999999") is PinVerifyResult.Wrong)
         assertTrue("the new store's count stands", mgr.verifyPin(pin) is PinVerifyResult.LockedOut)
+    }
+
+    // ── durability: the rename is on disk before the old store goes ───────────
+
+    /** Records each directory sync, with whether the PIN file was in place at that moment. */
+    private class RecordingSync(val events: MutableList<String>, val target: File) : DirSync {
+        override fun sync(dir: File) {
+            events += "sync ${dir.name} inPlace=${target.exists()}"
+        }
+    }
+
+    @Test fun `PIN-STORE the migration syncs the directory after the rename and before the old store is deleted`() {
+        val events = mutableListOf<String>()
+        val legacy = legacyWithPin().apply { onDelete = { events += "delete old" } }
+        val store = PinManager.openStore { PinStoreMigration.open(target, SoftwareCipher(), legacy, RecordingSync(events, target)) }
+        assertTrue(store is FilePinStore)
+        val delete = events.indexOf("delete old")
+        assertTrue("the old store was deleted: $events", delete >= 0)
+        assertTrue(
+            "a sync of ${target.parentFile!!.name} with the file in place comes before the delete: $events",
+            events.subList(0, delete).contains("sync ${target.parentFile!!.name} inPlace=true")
+        )
+    }
+
+    @Test fun `PIN-STORE a stale old store beside the new file is deleted only after a directory sync`() {
+        val cipher = SoftwareCipher()
+        manager(open(cipher, legacyWithPin().apply { deleteLands = false })).verifyPin("000002")
+        val events = mutableListOf<String>()
+        val legacy = legacyWithPin().apply { onDelete = { events += "delete old" } }
+        PinStoreMigration.open(target, cipher, legacy, RecordingSync(events, target))
+        val delete = events.indexOf("delete old")
+        assertTrue("the stale old store was deleted: $events", delete >= 0)
+        assertTrue("a sync comes before the delete: $events", events.subList(0, delete).any { it.startsWith("sync ") })
+    }
+
+    @Test fun `PIN-STORE every write syncs the directory once the rename has landed`() {
+        val events = mutableListOf<String>()
+        val none = FakeLegacy().apply { present = false }
+        val mgr = manager(PinStoreMigration.open(target, SoftwareCipher(), none, RecordingSync(events, target)))
+        mgr.setPin(pin)
+        assertTrue("the write synced its directory after the rename: $events", events.contains("sync ${target.parentFile!!.name} inPlace=true"))
+    }
+
+    @Test fun `PIN-STORE a staging write stopped before its rename leaves nothing behind at the next launch`() {
+        // The next launch need not migrate again (the store may already be in place), so the open
+        // itself removes it, not the next staging write.
+        val (cipher, none) = inPlace()
+        val stray = File(target.parentFile, target.name + ".migrating.tmp").apply { writeBytes(byteArrayOf(1, 2, 3)) }
+        assertTrue(open(cipher, none) is FilePinStore)
+        assertFalse("the stopped staging write is cleaned up", stray.exists())
+    }
+
+    @Test fun `PIN-STORE a write that fails once is tried again and lands`() {
+        val cipher = SoftwareCipher()
+        val none = FakeLegacy().apply { present = false }
+        val mgr = manager(open(cipher, none))
+        mgr.setPin(pin)
+        cipher.sealFailsTimes = 1
+        assertTrue(mgr.verifyPin("000000") is PinVerifyResult.Wrong)
+        assertEquals("the failure counted on disk, not only in memory", 1, FilePinStore.read(target, cipher)["pin_fail_count"])
     }
 
     // ── a corrupt new store is unavailable, not "no PIN" ──────────────────────

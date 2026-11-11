@@ -74,7 +74,8 @@ dependencies {
     implementation(libs.kmp.tor.runtime)
     implementation(libs.kmp.tor.resource.noexec)
 
-    // EncryptedSharedPreferences for PIN storage
+    // security-crypto: HubTokenStore (dgb_hub_session) + the one-time legacy PIN-store reader
+    // (PIN-STORE); remove when both are gone.
     implementation(libs.androidx.security.crypto)
 
     // BiometricPrompt
