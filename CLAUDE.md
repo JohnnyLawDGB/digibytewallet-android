@@ -255,7 +255,7 @@ All JNI functions follow: `Java_io_digibyte_core_bridge_NativeBridge_<methodName
 - `dgb_bloom_peers` — cached bloom peer list from seeder API
 - `dgb_dandelion` — `enabled` flag for Dandelion++ stem submission (default off / opt-in)
 - `dgb_dandelion_peers` — cached Dandelion-capable peer list from seeder
-- `dgb_pin_store` — EncryptedSharedPreferences for PIN hash
+- `dgb_pin_store` — the OLD EncryptedSharedPreferences PIN store (androidx.security-crypto alpha); since PIN-STORE it is read once, migrated into `noBackupFilesDir/dgb_pin_store.bin` (AES-256-GCM under Keystore alias `dgb_pin_store_key`, `PinStoreMigration` in `core/security/FilePinStore.kt`) and deleted. The Hub JWT (`dgb_hub_session`, `HubTokenStore`) still uses EncryptedSharedPreferences
 
 ### Versioning Policy
 - `3.X.Y` — current line (at v3.10.29). `Y` = patch (every publish bumps at least the patch); `X` = minor (feature batches, e.g. 3.5→3.6→3.7).
