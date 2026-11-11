@@ -23,7 +23,7 @@
       "schedule": ["before 6am on monday"]
     },
     {
-      "description": "Kotlin + KSP — versions.ksp is Kotlin-derived (<kotlin>-<ksp>) and the Compose compiler plugin ships in the Kotlin release, so all three move together. Patterns deliberately require ':' or '.' after 'kotlin' so org.jetbrains.kotlinx (coroutines) does NOT fall in here.",
+      "description": "Kotlin + KSP — the Compose compiler plugin ships in the Kotlin release; KSP is no longer Kotlin-derived (since 2.3.0) but must be re-checked on every Kotlin bump, and KSP sets the AGP floor (see the comments in gradle/libs.versions.toml), so they land as one PR. Patterns deliberately require ':' or '.' after 'kotlin' so org.jetbrains.kotlinx (coroutines) does NOT fall in here.",
       "matchPackageNames": [
         "/^org\\.jetbrains\\.kotlin:/",
         "/^org\\.jetbrains\\.kotlin\\./",

@@ -14,7 +14,9 @@ import java.math.BigDecimal
  *    what a comma means;
  *  - no more decimals may be TYPED than the asset has: "1.234" is not a quantity of an asset with
  *    two decimals, and "1.0" is not a quantity of an asset with none;
- *  - only digits and one decimal point: no sign, no exponent, no "NaN";
+ *  - only ASCII digits and one decimal point: no sign, no exponent, no "NaN", no other script's
+ *    digits (checked here, not left to toBigDecimalOrNull, which accepts any Char.isDigit() digit
+ *    since Kotlin 2.4 — KOTLIN-2.4);
  *  - zero is not a quantity, so there is no "0 units" for a caller to forget to refuse;
  *  - the length is bounded before anything is built from the text.
  */
@@ -33,7 +35,7 @@ object AssetQuantity {
         if (divisibility !in 0..MAX_DIVISIBILITY) return null
         val text = DgbAmount.normalizeSeparators(input.trim()) ?: return null
         if (text.isEmpty() || text.length > MAX_TEXT_LENGTH) return null
-        if (!text.all { it.isDigit() || it == '.' }) return null
+        if (!text.all { it in '0'..'9' || it == '.' }) return null
         val value = text.toBigDecimalOrNull() ?: return null
         // With only digits and a point in the text, the scale IS the number of typed decimals.
         if (value.scale() > divisibility) return null

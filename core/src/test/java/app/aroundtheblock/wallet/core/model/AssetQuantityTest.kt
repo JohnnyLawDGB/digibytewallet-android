@@ -171,4 +171,18 @@ class AssetQuantityTest {
             }
         }
     }
+
+    /**
+     * KOTLIN-2.4: a quantity is ASCII digits and one point. Kotlin 2.4's String.toBigDecimalOrNull
+     * started accepting any Char.isDigit() digit (Arabic-Indic, Devanagari, fullwidth...), which
+     * Kotlin 2.2 refused; the parser must keep refusing them on its own rather than inherit the
+     * standard library's rule, so a toolchain bump cannot change what an asset send accepts.
+     */
+    @Test fun `a quantity in non-ASCII digits is refused`() {
+        for (text in listOf("\u0661", "\u0661\u0665", "1\u0665", "\u06f1.5", "\u0967\u0966", "\uff11", "\uff11.\uff15")) {
+            for (divisibility in 0..8) {
+                assertNull("\"$text\" at $divisibility", AssetQuantity.parse(text, divisibility))
+            }
+        }
+    }
 }
