@@ -125,12 +125,12 @@ class SavedTransactionsStoreTest {
         val c = ctx()
         val old = framed(2)
         assertTrue(SavedTransactionsStore.write(c, old, SavedTransactionsStore.currentEpoch()))
-        val saved = SavedTransactionsStore.rename
+        val saved = DurableFile.rename
         try {
-            SavedTransactionsStore.rename = { _, _ -> false }
+            DurableFile.rename = { _, _ -> false }
             assertFalse(SavedTransactionsStore.write(c, framed(3), SavedTransactionsStore.currentEpoch()))
         } finally {
-            SavedTransactionsStore.rename = saved
+            DurableFile.rename = saved
         }
         assertArrayEquals("the live checkpoint is untouched", old, SavedTransactionsStore.file(c).readBytes())
         assertEquals("the recorded count is the live file's", 2L, sync(c).getLong(SavedTransactionsStore.KEY_COUNT, 0L))

@@ -98,9 +98,14 @@ class TransactionCheckpointPreflightTest {
         // Every ledger write sits behind the gate, and has_synced's writer refuses without it.
         val ledgerWrites = Regex("""CfScanLedgerStore\.write\(""").findAll(src).map { it.range.first }.toList()
         assertTrue("no ledger writes found: re-anchor the gate", ledgerWrites.isNotEmpty())
+        // STORE-DURABILITY: the ledger is written through CfStateFlush, which asks the gate first
+        // (CfStateFlushTest); the write and its gate are two arguments of the one flush call.
         for (at in ledgerWrites) {
-            val before = src.substring(maxOf(0, at - 300), at)
-            assertTrue("a scan-ledger write is not behind the checkpoint gate", before.contains("if (persistWalletTransactionsCheckpoint())"))
+            val call = src.lastIndexOf("CfStateFlush.flush(", at)
+            assertTrue("a scan-ledger write is not inside CfStateFlush.flush", call >= 0 && at - call < 300)
+            val after = src.substring(at, minOf(src.length, at + 300))
+            assertTrue("a scan-ledger write is not behind the checkpoint gate",
+                after.contains("checkpointGate = { persistWalletTransactionsCheckpoint() }"))
         }
         val completion = src.substring(src.indexOf("private fun persistSyncCompletionState(): Boolean {"))
         assertTrue("has_synced no longer waits for the checkpoint",

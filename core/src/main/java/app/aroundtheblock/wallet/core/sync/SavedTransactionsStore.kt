@@ -4,7 +4,6 @@ import android.content.Context
 import app.aroundtheblock.wallet.core.WALLET_NETWORK_SUFFIXES
 import app.aroundtheblock.wallet.core.networkSuffix
 import java.io.File
-import java.io.FileOutputStream
 
 /**
  * File-backed persistence for the wallet's transaction checkpoint: the raw bytes
@@ -40,9 +39,6 @@ object SavedTransactionsStore {
     /** In the network's `dgb_sync_data`: the record count of the last checkpoint that landed. */
     const val KEY_COUNT = "saved_transactions_count"
 
-    /** Test seam: the rename that publishes the tmp file. */
-    @Volatile internal var rename: (File, File) -> Boolean = { from, to -> from.renameTo(to) }
-
     fun file(ctx: Context): File = File(ctx.filesDir, FILE_BASE + networkSuffix(ctx) + ".bin")
 
     private fun tmpFile(ctx: Context): File = File(ctx.filesDir, FILE_BASE + networkSuffix(ctx) + ".bin.tmp")
@@ -67,22 +63,8 @@ object SavedTransactionsStore {
     }
 
     private fun writeLocked(ctx: Context, bytes: ByteArray): Boolean {
-        val f = file(ctx)
-        val tmp = tmpFile(ctx)
-        val landed = runCatching {
-            FileOutputStream(tmp).use { out ->
-                out.write(bytes)
-                out.flush()
-                out.fd.sync()
-            }
-            // No delete-then-rename fallback: a rename that fails leaves the live checkpoint as it was.
-            if (!rename(tmp, f)) error("rename failed")
-            DirectorySync.sync(f.parentFile)
-            f.length() == bytes.size.toLong()
-        }.getOrElse {
-            runCatching { tmp.delete() }
-            false
-        }
+        // STORE-DURABILITY: tmp, fsync, rename, directory fsync; a failed rename keeps the live checkpoint.
+        val landed = DurableFile.write(file(ctx), tmpFile(ctx), bytes)
         // The file is the checkpoint now: a legacy copy left behind is older, and would be pinned again.
         if (landed) runCatching {
             legacyPrefs(ctx).edit()
@@ -141,20 +123,14 @@ object SavedTransactionsStore {
             if (!fileThere) return ByteArray(0)
         }
         if (fileThere) return runCatching { f.readBytes() }.getOrElse { ByteArray(0) }
-        val tmp = tmpFile(ctx)
-        val pending = runCatching { if (tmp.isFile) tmp.readBytes() else null }.getOrNull() ?: return null
-        if (!isComplete(pending)) return null
-        if (!rename(tmp, f)) return pending
-        DirectorySync.sync(f.parentFile)
-        pending
+        DurableFile.recoverTmp(f, tmpFile(ctx), ::isComplete)
     }
 
     /** Delete this network's checkpoint: file, tmp and legacy key. Bumps the epoch so an in-flight
      *  [write] snapshotted before now is dropped. Returns whether, read back, none is left. */
     fun delete(ctx: Context): Boolean = synchronized(ioLock) {
         epoch++
-        runCatching { file(ctx).delete() }
-        runCatching { tmpFile(ctx).delete() }
+        runCatching { DurableFile.delete(file(ctx), tmpFile(ctx)) }
         val keyGone = runCatching { legacyPrefs(ctx).edit().remove(LEGACY_KEY).remove(KEY_COUNT).commit() }.getOrDefault(false)
         keyGone && !runCatching { file(ctx).exists() || tmpFile(ctx).exists() }.getOrDefault(true)
     }
@@ -166,8 +142,7 @@ object SavedTransactionsStore {
         WALLET_NETWORK_SUFFIXES.map { net ->
             val bin = File(ctx.filesDir, "$FILE_BASE$net.bin")
             val tmp = File(ctx.filesDir, "$FILE_BASE$net.bin.tmp")
-            runCatching { bin.delete() }
-            runCatching { tmp.delete() }
+            DurableFile.delete(bin, tmp)
             val legacyGone = runCatching {
                 ctx.getSharedPreferences(LEGACY_PREFS + net, Context.MODE_PRIVATE).edit().remove(LEGACY_KEY).remove(KEY_COUNT).commit()
             }.getOrDefault(false)

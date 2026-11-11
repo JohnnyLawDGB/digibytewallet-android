@@ -24,6 +24,7 @@ import app.aroundtheblock.wallet.core.dandelion.Broadcaster
 import app.aroundtheblock.wallet.core.dandelion.shouldSweepRepublish
 import app.aroundtheblock.wallet.core.sync.CfAbandonmentStore
 import app.aroundtheblock.wallet.core.sync.CfScanLedgerStore
+import app.aroundtheblock.wallet.core.sync.CfStateFlush
 import app.aroundtheblock.wallet.core.sync.FilterHeaderStore
 import app.aroundtheblock.wallet.core.sync.HistoryRebuildOnUpgrade
 import app.aroundtheblock.wallet.core.sync.SavedBlockStore
@@ -2629,12 +2630,16 @@ class SyncService : Service() {
      * rebuild would leave the wallet with a dead manager.
      */
     private fun flushLiveStateBeforeRecreate() {
+        // STORE-DURABILITY: a write that does not land keeps the previous file, so the recreate
+        // restores an older snapshot instead of none; it is logged and the rebuild goes on.
         lastSavedBlocksData?.let { (bytes, epoch) ->
             runCatching { persistBlocks(bytes, epoch, synchronous = true) }
                 .onFailure { android.util.Log.w("SyncService", "pre-recreate block flush failed", it) }
+                .onSuccess { landed -> if (!landed) android.util.Log.w("SyncService", "pre-recreate block flush did not land") }
         }
         runCatching { flushFilterHeaders() }
             .onFailure { android.util.Log.w("SyncService", "pre-recreate ledger flush failed", it) }
+            .onSuccess { if (!it.allLanded) android.util.Log.w("SyncService", "pre-recreate CF flush did not land: $it") }
     }
 
     private suspend fun recreatePeerManagerResumingNearTip(reason: String) {
@@ -3894,14 +3899,10 @@ class SyncService : Service() {
                 if (stoodDownForWipe) break
                 if (filterHeadersDirty) {
                     filterHeadersDirty = false // cleared first; a concurrent callback re-sets it
-                    pendingFilterHeaders?.let { (bytes, ep) -> FilterHeaderStore.write(this@SyncService, bytes, ep) }
-                    pendingCfLedger?.let { (bytes, ep) ->
-                        if (persistWalletTransactionsCheckpoint()) {
-                            CfScanLedgerStore.write(this@SyncService, bytes, ep)
-                        } else {
-                            filterHeadersDirty = true
-                        }
-                    }
+                    val outcome = flushCfState()
+                    // A shut checkpoint gate or a store write that did not land (STORE-DURABILITY: the
+                    // store kept its previous file) is retried on the next tick.
+                    if (!outcome.allLanded) filterHeadersDirty = true
                 }
             }
         }
@@ -3909,24 +3910,28 @@ class SyncService : Service() {
 
     /** Synchronously flush the latest filter-header chain and CF scan ledger — the final
      *  save on teardown, and the pre-recreate flush (see [flushLiveStateBeforeRecreate]). */
-    private fun flushFilterHeaders() {
-        if (stoodDownForWipe) return
-        if (filterHeadersDirty) {
-            filterHeadersDirty = false
-            pendingFilterHeaders?.let { (bytes, ep) -> runCatching { FilterHeaderStore.write(this, bytes, ep) } }
-            pendingCfLedger?.let { (bytes, ep) ->
-                if (persistWalletTransactionsCheckpoint()) {
-                    runCatching { CfScanLedgerStore.write(this, bytes, ep) }
-                } else {
-                    // The checkpoint gate refused, so the ledger was NOT written. Re-mark
-                    // dirty so the coalesced writer retries — exactly what its own loop does
-                    // on the same failure. Without this, a flush that fails its gate drops
-                    // the ledger AND the flag that would have recovered it, which on a
-                    // mid-session recreate means resuming from an older scan frontier.
-                    filterHeadersDirty = true
-                }
-            }
-        }
+    private fun flushFilterHeaders(): CfStateFlush.Outcome {
+        if (stoodDownForWipe || !filterHeadersDirty) return CfStateFlush.Outcome.NOTHING
+        filterHeadersDirty = false
+        val outcome = flushCfState()
+        // The checkpoint gate refused, or a store write did not land (STORE-DURABILITY: the
+        // store kept its previous file). Re-mark dirty so the coalesced writer retries —
+        // exactly what its own loop does on the same failure. Without this, a flush that
+        // fails drops the latest state AND the flag that would have recovered it, which on a
+        // mid-session recreate means resuming from an older scan frontier.
+        if (!outcome.allLanded) filterHeadersDirty = true
+        return outcome
+    }
+
+    /** The one write of the pending filter headers and CF scan ledger ([CfStateFlush]): the
+     *  ledger only behind the transaction-checkpoint gate, each store answering whether it landed. */
+    private fun flushCfState(): CfStateFlush.Outcome {
+        if (stoodDownForWipe) return CfStateFlush.Outcome.NOTHING
+        return CfStateFlush.flush(
+            writeHeaders = pendingFilterHeaders?.let { (bytes, ep) -> { FilterHeaderStore.write(this, bytes, ep) } },
+            writeLedger = pendingCfLedger?.let { (bytes, ep) -> { CfScanLedgerStore.write(this, bytes, ep) } },
+            checkpointGate = { persistWalletTransactionsCheckpoint() },
+        )
     }
 
     /**
@@ -3959,11 +3964,14 @@ class SyncService : Service() {
         // to commit `has_synced` while we still hold un-durable ledger state. Deferring costs a
         // re-mark on the next completion tick; a `has_synced` that outlives its ledger costs the
         // user a full re-sync on the next launch.
-        runCatching { flushFilterHeaders() }
+        val flushed = runCatching { flushFilterHeaders() }
             .onFailure { android.util.Log.w("SyncService", "completion CF-ledger flush failed", it) }
+            .getOrDefault(CfStateFlush.Outcome(headersLanded = false, ledgerLanded = false))
+        // STORE-DURABILITY: a ledger write that did not land keeps the previous file, so a file
+        // being there no longer proves the latest ledger reached disk; this flush's answer does.
         if (!shouldMarkSynced(
                 hasPendingLedger = pendingCfLedger != null,
-                ledgerDurable = CfScanLedgerStore.load(this) != null,
+                ledgerDurable = flushed.ledgerLanded && CfScanLedgerStore.load(this) != null,
             )
         ) {
             android.util.Log.w(
@@ -3990,21 +3998,28 @@ class SyncService : Service() {
      *  file). [synchronous] uses commit() for the onDestroy flush so the tip
      *  survives serviceScope cancellation; the file write itself is always a
      *  synchronous tmp-write+rename regardless of [synchronous]. */
-    private fun persistBlocks(data: ByteArray, snapshotEpoch: Long, synchronous: Boolean) {
-        if (stoodDownForWipe) return
+    private fun persistBlocks(data: ByteArray, snapshotEpoch: Long, synchronous: Boolean): Boolean {
+        if (stoodDownForWipe) return true
         val prefs = getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
         val newTop = parseSavedBlocksTopHeight(data)
         val persistedTop = prefs.getLong("saved_blocks_tip", 0L)
         if (!shouldPersistBlocks(newTop, persistedTop)) {
             android.util.Log.i("SyncService",
                 "saved_blocks: skipping regressive write (new tip $newTop < persisted $persistedTop)")
-            return
+            return true
         }
-        SavedBlockStore.write(this@SyncService, data, snapshotEpoch)
+        // STORE-DURABILITY: the tip guard moves only with the window it describes. A tip recorded
+        // for a window that did not land (the store kept the previous file) would refuse every
+        // later window below it as a regression, while the disk still holds the older one.
+        if (!SavedBlockStore.write(this@SyncService, data, snapshotEpoch)) {
+            android.util.Log.w("SyncService", "saved_blocks: write did not land (tip $newTop); previous window kept")
+            return false
+        }
         if (newTop >= 0L) {
             val editor = prefs.edit().putLong("saved_blocks_tip", newTop)
             if (synchronous) editor.commit() else editor.apply()
         }
+        return true
     }
 
     private val hexChars = "0123456789abcdef".toCharArray()

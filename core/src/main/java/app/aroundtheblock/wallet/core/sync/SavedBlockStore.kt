@@ -28,6 +28,11 @@ import java.io.File
  * Persistence is only a restore optimization — the native chain is authoritative
  * in memory — so best-effort I/O and a dropped oversized/corrupt legacy blob
  * (re-synced) are acceptable.
+ *
+ * STORE-DURABILITY: every write goes through [DurableFile] (tmp, fsync, rename, directory
+ * fsync), reports whether it landed, and never removes the previous file when it fails.
+ * Since the recreate path (`flushLiveStateBeforeRecreate`, [RecreateSequence]) restores the
+ * last PERSISTED snapshot, a lost or torn file costs a resume far behind the tip.
  */
 object SavedBlockStore {
     private const val LEGACY_PREFS = "dgb_sync_data"
@@ -58,48 +63,49 @@ object SavedBlockStore {
     fun currentEpoch(): Long = epoch
 
     /**
-     * Persist the block window as raw bytes, atomically (tmp write + rename) —
+     * Persist the block window as raw bytes, durably ([DurableFile]: tmp, fsync, rename, directory fsync) —
      * UNLESS a [delete] has run since `snapshotEpoch` was taken, in which case the
      * write is dropped so a stale pre-reset window can't be resurrected after the
-     * file was already deleted. Serialized with [delete] on [ioLock]. Best-effort.
+     * file was already deleted. Serialized with [delete] on [ioLock]. Returns true only when
+     * the file now holds [bytes]; on false the previous file is kept as it was (STORE-DURABILITY).
      */
-    fun write(ctx: Context, bytes: ByteArray, snapshotEpoch: Long) {
-        synchronized(ioLock) {
-            if (epoch != snapshotEpoch) return // a delete() invalidated this snapshot
-            writeLocked(ctx, bytes)
-        }
+    fun write(ctx: Context, bytes: ByteArray, snapshotEpoch: Long): Boolean = synchronized(ioLock) {
+        if (epoch != snapshotEpoch) return false // a delete() invalidated this snapshot
+        writeLocked(ctx, bytes)
     }
 
-    private fun writeLocked(ctx: Context, bytes: ByteArray) {
-        val f = file(ctx)
-        val tmp = tmpFile(ctx)
-        runCatching {
-            tmp.writeBytes(bytes)
-            if (!tmp.renameTo(f)) { f.delete(); if (!tmp.renameTo(f)) tmp.delete() }
-        }.onFailure { runCatching { tmp.delete() } }
-    }
+    /** STORE-DURABILITY ([DurableFile]): true only when the file now holds [bytes]; a failed write
+     *  leaves the previous file as it was. */
+    private fun writeLocked(ctx: Context, bytes: ByteArray): Boolean = DurableFile.write(file(ctx), tmpFile(ctx), bytes)
 
     /**
-     * Load the saved-blocks window for restore: prefer the file; otherwise perform
-     * a one-time migration from the legacy `dgb_sync_data`/`saved_blocks` hex
-     * (capped, and decoded with [FilterHeaderStore.decodeHexOrNull] rather than the
-     * `chunked(2).map{}` amplifier), and ALWAYS drop the legacy key — whether the
-     * migration succeeded, was skipped as oversized, or the hex was corrupt — so it
-     * can never re-pin the leaky in-memory floor or wedge a future load. Every
+     * Load the saved-blocks window for restore: prefer the file; then a complete tmp
+     * file (a write that synced but was killed before its rename, recovered into
+     * place); otherwise a one-time migration from the legacy `dgb_sync_data`/`saved_blocks`
+     * hex (capped, and decoded with [FilterHeaderStore.decodeHexOrNull] rather than the
+     * `chunked(2).map{}` amplifier). The legacy key is dropped when it is oversized or
+     * corrupt, or once the file holding it landed, so it cannot re-pin the leaky
+     * in-memory floor; a migration write that fails keeps it, as the last good copy
+     * (STORE-DURABILITY), and the next load tries again. Every
      * OTHER key in `dgb_sync_data` (saved_peers, has_synced, last_balance,
      * saved_transactions, …) is left untouched. Returns null if none / dropped.
      */
-    fun load(ctx: Context): ByteArray? {
+    fun load(ctx: Context): ByteArray? = synchronized(ioLock) {
         val f = file(ctx)
         if (f.exists()) return runCatching { f.readBytes() }.getOrNull()
+        // STORE-DURABILITY: a write that synced its tmp but was killed before the rename.
+        DurableFile.recoverTmp(f, tmpFile(ctx), ::isComplete)?.let { recovered ->
+            runCatching { legacyPrefs(ctx).edit().remove(LEGACY_KEY).apply() } // older than the file
+            return recovered
+        }
         val legacyHex = runCatching { legacyPrefs(ctx).getString(LEGACY_KEY, null) }.getOrNull()
-        // Always drop the leaky legacy key (frees the pinned in-memory hex floor),
-        // leaving every sibling dgb_sync_data field untouched.
-        runCatching { legacyPrefs(ctx).edit().remove(LEGACY_KEY).apply() }
-        if (legacyHex.isNullOrEmpty() || legacyHex.length > MAX_LEGACY_MIGRATE_HEX) return null
-        val bytes = FilterHeaderStore.decodeHexOrNull(legacyHex) ?: return null
-        synchronized(ioLock) { writeLocked(ctx, bytes) } // migrate to the file store (no concurrent reset at load)
-        return bytes
+        val bytes = legacyHex?.takeIf { it.isNotEmpty() && it.length <= MAX_LEGACY_MIGRATE_HEX }?.let { FilterHeaderStore.decodeHexOrNull(it) }
+        // Drop the leaky legacy key (frees the pinned in-memory hex floor) when it is unusable or once
+        // the file holding it landed. A migration write that failed keeps it: it is the last good copy.
+        if (bytes == null || writeLocked(ctx, bytes)) {
+            runCatching { legacyPrefs(ctx).edit().remove(LEGACY_KEY).apply() }
+        }
+        bytes
     }
 
     /** Delete the persisted block window (file, tmp, and legacy prefs key). Used on
@@ -109,8 +115,7 @@ object SavedBlockStore {
     fun delete(ctx: Context) {
         synchronized(ioLock) {
             epoch++
-            runCatching { file(ctx).delete() }
-            runCatching { tmpFile(ctx).delete() }
+            runCatching { DurableFile.delete(file(ctx), tmpFile(ctx)) }
             runCatching { legacyPrefs(ctx).edit().remove(LEGACY_KEY).apply() }
         }
     }
@@ -126,12 +131,39 @@ object SavedBlockStore {
         WALLET_NETWORK_SUFFIXES.map { net ->
             val bin = File(ctx.filesDir, "$FILE_BASE$net.bin")
             val tmp = File(ctx.filesDir, "$FILE_BASE$net.bin.tmp")
-            runCatching { bin.delete() }
-            runCatching { tmp.delete() }
+            DurableFile.delete(bin, tmp)
             val legacyGone = runCatching {
                 ctx.getSharedPreferences(LEGACY_PREFS + net, Context.MODE_PRIVATE).edit().remove(LEGACY_KEY).commit()
             }.getOrDefault(false)
             !bin.exists() && !tmp.exists() && legacyGone
         }.all { it }
     }
+
+    /**
+     * Whether [b] is a whole window as bridge_saveBlocks hands it over: a non-zero u32 count, then
+     * `count` records of [u32 serLen][u32 height][serLen bytes] that end exactly at its length. Only
+     * decides whether a tmp file may be recovered.
+     */
+    internal fun isComplete(b: ByteArray): Boolean {
+        if (b.size < 4) return false
+        val count = b.u32(0)
+        if (count <= 0L) return false
+        val len = b.size.toLong()
+        var pos = 4L
+        var i = 0L
+        while (i < count) {
+            if (pos + 8L > len) return false
+            val size = b.u32(pos)
+            pos += 8L
+            if (size > len - pos) return false
+            pos += size
+            i++
+        }
+        return pos == len
+    }
+
+    private fun ByteArray.u32(at: Long): Long = (this[at.toInt()].toLong() and 0xffL) or
+        ((this[at.toInt() + 1].toLong() and 0xffL) shl 8) or
+        ((this[at.toInt() + 2].toLong() and 0xffL) shl 16) or
+        ((this[at.toInt() + 3].toLong() and 0xffL) shl 24)
 }

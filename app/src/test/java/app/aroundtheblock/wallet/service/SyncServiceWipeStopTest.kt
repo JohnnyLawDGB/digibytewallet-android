@@ -125,7 +125,9 @@ class SyncServiceWipeStopTest {
      */
     @Test fun `the service's writers write nothing once it stood down`() {
         val writes = listOf(".commit()", ".apply()", "Store.write(")
-        for (writer in listOf("persistBlocks", "flushFilterHeaders", "persistPeerPenalties", "persistWalletTransactionsCheckpoint", "startFilterHeaderWriter")) {
+        // The coalesced writer and flushFilterHeaders write the CF state only through flushCfState
+        // (STORE-DURABILITY, pinned by StoreDurabilityCallerGateTest), so it is the writer read here.
+        for (writer in listOf("persistBlocks", "flushCfState", "persistPeerPenalties", "persistWalletTransactionsCheckpoint")) {
             val code = text(body(writer))
             val firstWrite = writes.map { code.indexOf(it) }.filter { it >= 0 }.minOrNull()
                 ?: error("scanner is blind: $writer writes nothing")
