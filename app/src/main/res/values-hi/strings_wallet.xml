@@ -636,10 +636,10 @@
          Machine-assisted. -->
     <string name="reconcile_outputs_found">ब्लॉकचेन पर मिले आउटपुट</string>
     <string name="reconcile_found_not_compared">ब्लॉकचेन पर मिले, तुलना नहीं की गई</string>
-    <string name="reconcile_spendable">खर्च योग्य</string>
-    <string name="reconcile_wallet_spendable">वॉलेट का खर्च योग्य बैलेंस</string>
-    <string name="reconcile_matches_wallet">वॉलेट के खर्च योग्य बैलेंस से मेल खाता है।</string>
-    <string name="reconcile_does_not_match_wallet">वॉलेट के खर्च योग्य बैलेंस से मेल नहीं खाता: नीचे देखें।</string>
+    <string name="reconcile_in_balance">बैलेंस में गिना गया</string>
+    <string name="reconcile_wallet_balance">वॉलेट का बैलेंस</string>
+    <string name="reconcile_matches_wallet_balance">वॉलेट के बैलेंस से मेल खाता है।</string>
+    <string name="reconcile_does_not_match_wallet_balance">वॉलेट के बैलेंस से मेल नहीं खाता: नीचे देखें।</string>
     <string name="reconcile_held_asset">DigiAsset के लिए रोका गया</string>
     <string name="reconcile_held_unknown">रोका गया: एसेट की स्थिति अज्ञात</string>
     <string name="reconcile_proven_plain">साधारण DGB, रीस्टार्ट के बाद खर्च योग्य</string>

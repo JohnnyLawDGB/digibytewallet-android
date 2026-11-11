@@ -644,10 +644,10 @@
          Machine-assisted. -->
     <string name="reconcile_outputs_found">Auf der Blockchain gefundene Outputs</string>
     <string name="reconcile_found_not_compared">Auf der Blockchain gefunden, nicht verglichen</string>
-    <string name="reconcile_spendable">Ausgabefähig</string>
-    <string name="reconcile_wallet_spendable">Ausgabefähiges Guthaben der Wallet</string>
-    <string name="reconcile_matches_wallet">Stimmt mit dem ausgabefähigen Guthaben der Wallet überein.</string>
-    <string name="reconcile_does_not_match_wallet">Stimmt nicht mit dem ausgabefähigen Guthaben der Wallet überein: siehe unten.</string>
+    <string name="reconcile_in_balance">Im Guthaben gezählt</string>
+    <string name="reconcile_wallet_balance">Guthaben der Wallet</string>
+    <string name="reconcile_matches_wallet_balance">Stimmt mit dem Guthaben der Wallet überein.</string>
+    <string name="reconcile_does_not_match_wallet_balance">Stimmt nicht mit dem Guthaben der Wallet überein: siehe unten.</string>
     <string name="reconcile_held_asset">Für ein DigiAsset zurückgehalten</string>
     <string name="reconcile_held_unknown">Zurückgehalten: Asset-Status unbekannt</string>
     <string name="reconcile_proven_plain">Einfache DGB, nach einem Neustart ausgabefähig</string>

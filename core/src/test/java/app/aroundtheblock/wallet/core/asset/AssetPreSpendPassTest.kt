@@ -488,7 +488,7 @@ class AssetPreSpendPassTest {
 
         // Anything past the pass goes into the native bridge, which has no library on the JVM;
         // the result is taken as a value so the first thing to fail here is an assertion.
-        val result = runCatching { mgr.sendAsset("LaFree", 1L, "dgb1qanything", 100_000L) }
+        val result = runCatching { mgr.sendAsset("LaFree", 1L, "dgb1qanything", 100_000L, maxFeeSats = 100_000L) }
 
         assertEquals(listOf("detect"), events)
         assertEquals(TxResult.Error(SpendPreflight.NOT_SENT), result.getOrNull())
@@ -512,7 +512,7 @@ class AssetPreSpendPassTest {
             beforeSpend = { throw CancellationException("the screen went away") },
         )
 
-        val thrown = runCatching { mgr.sendAsset("LaFree", 1L, "dgb1qanything", 100_000L) }.exceptionOrNull()
+        val thrown = runCatching { mgr.sendAsset("LaFree", 1L, "dgb1qanything", 100_000L, maxFeeSats = 100_000L) }.exceptionOrNull()
 
         assertTrue("a cancellation must reach the caller, got $thrown", thrown is CancellationException)
     }

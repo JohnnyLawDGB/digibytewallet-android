@@ -3005,13 +3005,15 @@ class AssetManager(
      *                   always floored at min relay so the tx relays. A
      *                   custom TOTAL-fee override is expressed by the caller
      *                   as an equivalent feePerKb (see AssetViewModel).
+     * @param maxFeeSats The fee the confirmation showed: the most this send may pay. Required
+     *                   (ASSET-SIGN-GATE): native refuses to sign a plan whose fee is above it.
      */
     suspend fun sendAsset(
         assetId: String,
         quantity: Long,
         toAddress: String,
         feePerKb: Long,
-        maxFeeSats: Long = Long.MAX_VALUE,
+        maxFeeSats: Long,
     ): TxResult {
         val plan = when (val planned = planAssetTransfer(assetId, quantity, toAddress, feePerKb)) {
             is AssetTransferPlanning.NotPlanned -> return planned.result
@@ -3064,6 +3066,12 @@ class AssetManager(
             outputAddresses = outAddresses.toTypedArray(),
             outputAmounts = outAmounts.toLongArray(),
             outputScriptsHex = outScripts.toTypedArray(),
+            // ASSET-SIGN-GATE: native signs only one output to this recipient, at the marker amount,
+            // paying this plan's fee, and only when that fee is within the one the user approved.
+            approvedToAddress = toAddress,
+            approvedRecipientSats = app.aroundtheblock.wallet.core.asset.send.DA_MARKER_SATS,
+            planFeeSats = plan.paidFeeSats,
+            approvedMaxFeeSats = maxFeeSats,
         ) ?: return TxResult.Error("Native build/sign failed")
 
         val signedBytes = signedHex.hexToByteArray() ?: return TxResult.Error("Bad signed-tx hex")

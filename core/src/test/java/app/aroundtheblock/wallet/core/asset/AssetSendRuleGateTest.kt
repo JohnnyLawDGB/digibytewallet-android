@@ -43,7 +43,7 @@ class AssetSendRuleGateTest {
         store.putAssets(listOf("iss"), facts(4, true))
         coEvery { metaDao.rulesJsonFor("LaRuled") } returns null
 
-        val r = manager().sendAsset("LaRuled", 1L, "dgb1qanything", 100_000L)
+        val r = manager().sendAsset("LaRuled", 1L, "dgb1qanything", 100_000L, maxFeeSats = 100_000L)
 
         assertEquals(TxResult.Refused(SendRefusal.RULE_BOUND_ASSET), r)
         coVerify(exactly = 0) { utxoDao.getAssetUtxosByIdNow(any()) }
@@ -52,7 +52,7 @@ class AssetSendRuleGateTest {
     @Test fun `an asset whose issuance was never walked is refused as unknown`() = runBlocking {
         coEvery { metaDao.rulesJsonFor("LaRuled") } returns null
 
-        val r = manager().sendAsset("LaRuled", 1L, "dgb1qanything", 100_000L)
+        val r = manager().sendAsset("LaRuled", 1L, "dgb1qanything", 100_000L, maxFeeSats = 100_000L)
 
         assertEquals(TxResult.Refused(SendRefusal.RULES_UNKNOWN), r)
     }
@@ -61,7 +61,7 @@ class AssetSendRuleGateTest {
         store.putAssets(listOf("iss"), facts(1, true))
         coEvery { metaDao.rulesJsonFor("LaRuled") } returns """{"royalty":{"addresses":{"D1":1}}}"""
 
-        val r = manager().sendAsset("LaRuled", 1L, "dgb1qanything", 100_000L)
+        val r = manager().sendAsset("LaRuled", 1L, "dgb1qanything", 100_000L, maxFeeSats = 100_000L)
 
         assertEquals(TxResult.Refused(SendRefusal.RULE_BOUND_ASSET), r)
     }

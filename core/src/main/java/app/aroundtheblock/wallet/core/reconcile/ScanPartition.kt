@@ -6,14 +6,15 @@ import app.aroundtheblock.wallet.core.asset.HeldOutputFacts
 /**
  * How "Scan for missing funds" reports what the node returned: each output is put through the
  * wallet's OWN partition — the one its balance is built from — and listed in exactly one class.
- * The headline [ScanClass.SPENDABLE] figure is therefore the wallet's spendable balance by
- * construction, wherever the node agrees with the wallet; [ScanPartition.walletOnly] and
+ * The headline [ScanClass.IN_BALANCE] figure is therefore the wallet's balance by construction,
+ * wherever the node agrees with the wallet; [ScanPartition.walletOnly] and
  * [ScanClass.NOT_IN_WALLET] are where they disagree. Only [ScanClass.NOT_IN_WALLET] is missing
  * funds.
  */
 enum class ScanClass {
-    /** In the wallet's spendable set: what its DGB balance sums. */
-    SPENDABLE,
+    /** In the set the wallet's DGB balance sums (SEND-GATE-SET: named for that set, which also holds
+     *  an unconfirmed coin someone else sent; the coins selection spends are a subset of it). */
+    IN_BALANCE,
     /** Held out of the spendable set because it carries DigiAsset units. */
     HELD_ASSET,
     /** Held out because what the asset transaction's inputs carried is not known, so the last
@@ -35,7 +36,8 @@ enum class ScanClass {
 /** The codes [app.aroundtheblock.wallet.core.bridge.NativeBridge.classifyOutpoints] answers with. */
 object WalletOutpointCode {
     const val SPENT = 0
-    const val SPENDABLE = 1
+    /** SEND-GATE-SET: in the set the DGB balance sums (BRWalletUTXOs), not "what a send may spend". */
+    const val IN_BALANCE = 1
     const val HELD = 2
     const val DIGIDOLLAR = 3
     const val IMMATURE = 4
@@ -58,21 +60,21 @@ data class ScanPartition(
     val totals: Map<ScanClass, ClassTotal>,
     /** The outputs in each class, for follow-up work (the remainder proof) and logs. */
     val members: Map<ScanClass, List<UtxoEntry>>,
-    /** Outputs in the wallet's spendable set that the node did not report. */
+    /** Outputs in the set the wallet's balance sums that the node did not report. */
     val walletOnly: ClassTotal,
-    /** The wallet's own spendable balance at the time of the scan. */
-    val walletSpendableSat: Long,
+    /** The wallet's own balance at the time of the scan. */
+    val walletBalanceSat: Long,
 ) {
     fun total(c: ScanClass): ClassTotal = totals[c] ?: ClassTotal()
 
-    /** The headline: the node's outputs that the wallet counts as spendable. */
-    val spendableSat: Long get() = total(ScanClass.SPENDABLE).sat
+    /** The headline: the node's outputs that the wallet counts in its balance. */
+    val inBalanceSat: Long get() = total(ScanClass.IN_BALANCE).sat
 
     /** True only when the two views agree output for output: nothing the node reports is missing
      *  from the wallet, nothing the wallet spends is missing from the node, and the sums agree. */
     val matchesWallet: Boolean
         get() = total(ScanClass.NOT_IN_WALLET).count == 0 && walletOnly.count == 0 &&
-            spendableSat == walletSpendableSat
+            inBalanceSat == walletBalanceSat
 
     /** The same partition with [moved] outputs taken from [from] and put in [to]. */
     fun move(moved: Collection<UtxoEntry>, from: ScanClass, to: ScanClass): ScanPartition {
@@ -121,22 +123,22 @@ internal fun heldKindOf(facts: HeldOutputFacts?, vout: Int): HeldKind {
  * @param codes one [WalletOutpointCode] per row, in order (from the bridge); null when the wallet
  *              could not answer, in which case there is no partition.
  * @param heldKind why a [WalletOutpointCode.HELD] row is held.
- * @param walletOnly the wallet's spendable outputs that are not among [utxos] (count, sat); null
+ * @param walletOnly the outputs the wallet's balance sums that are not among [utxos] (count, sat); null
  *                   when the wallet could not answer, in which case there is no partition.
- * @param walletSpendableSat the wallet's spendable balance.
+ * @param walletBalanceSat the wallet's balance.
  */
 internal suspend fun partitionScan(
     utxos: List<UtxoEntry>,
     codes: IntArray?,
     heldKind: suspend (UtxoEntry) -> HeldKind,
     walletOnly: ClassTotal?,
-    walletSpendableSat: Long,
+    walletBalanceSat: Long,
 ): ScanPartition? {
     if (codes == null || codes.size != utxos.size || walletOnly == null) return null
     val members = ScanClass.values().associateWith { mutableListOf<UtxoEntry>() }
     for ((i, u) in utxos.withIndex()) {
         val cls = when (codes[i]) {
-            WalletOutpointCode.SPENDABLE -> ScanClass.SPENDABLE
+            WalletOutpointCode.IN_BALANCE -> ScanClass.IN_BALANCE
             WalletOutpointCode.DIGIDOLLAR -> ScanClass.DIGIDOLLAR
             WalletOutpointCode.IMMATURE -> ScanClass.IMMATURE
             WalletOutpointCode.SPENT, WalletOutpointCode.PENDING -> ScanClass.PENDING
@@ -153,7 +155,7 @@ internal suspend fun partitionScan(
         totals = totalsOf(members),
         members = members,
         walletOnly = walletOnly,
-        walletSpendableSat = walletSpendableSat,
+        walletBalanceSat = walletBalanceSat,
     )
 }
 
@@ -162,7 +164,7 @@ private fun totalsOf(members: Map<ScanClass, List<UtxoEntry>>): Map<ScanClass, C
         members[c].orEmpty().fold(ClassTotal()) { acc, u -> acc + u }
     }
 
-/** [app.aroundtheblock.wallet.core.bridge.NativeBridge.spendableNotListed]'s [count, sat] answer; null when
+/** [app.aroundtheblock.wallet.core.bridge.NativeBridge.balanceCoinsNotListed]'s [count, sat] answer; null when
  *  there is none. */
 internal fun walletOnlyOf(answer: LongArray?): ClassTotal? =
     if (answer == null || answer.size < 2 || answer[0] < 0 || answer[1] < 0) null

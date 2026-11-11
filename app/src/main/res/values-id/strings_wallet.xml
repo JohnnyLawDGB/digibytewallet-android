@@ -633,10 +633,10 @@
          Machine-assisted. -->
     <string name="reconcile_outputs_found">Output yang ditemukan di blockchain</string>
     <string name="reconcile_found_not_compared">Ditemukan di blockchain, tidak dibandingkan</string>
-    <string name="reconcile_spendable">Dapat dibelanjakan</string>
-    <string name="reconcile_wallet_spendable">Saldo dompet yang dapat dibelanjakan</string>
-    <string name="reconcile_matches_wallet">Cocok dengan saldo dompet yang dapat dibelanjakan.</string>
-    <string name="reconcile_does_not_match_wallet">Tidak cocok dengan saldo dompet yang dapat dibelanjakan: lihat di bawah.</string>
+    <string name="reconcile_in_balance">Dihitung dalam saldo</string>
+    <string name="reconcile_wallet_balance">Saldo dompet</string>
+    <string name="reconcile_matches_wallet_balance">Cocok dengan saldo dompet.</string>
+    <string name="reconcile_does_not_match_wallet_balance">Tidak cocok dengan saldo dompet: lihat di bawah.</string>
     <string name="reconcile_held_asset">Ditahan untuk DigiAsset</string>
     <string name="reconcile_held_unknown">Ditahan: status aset tidak diketahui</string>
     <string name="reconcile_proven_plain">DGB biasa, dapat dibelanjakan setelah mulai ulang</string>

@@ -397,7 +397,8 @@ NativeBridge_getBuiltTransactionOutputs(JNIEnv *env, jobject thiz, jbyteArray un
 /* Sign prepared unsigned bytes, or NULL: only the send that was approved -- amountSats to toAddress
  * at approvedFeeSats. Before signing, the bytes' outputs must be exactly that payment plus at most one
  * change output to an address of this wallet, they must pay exactly approvedFeeSats, and they must
- * spend only coins that are still the wallet's spendable plain coins; after signing, the signed
+ * spend only coins the wallet's selection would spend (BRWalletSelectableUTXOs, each asked alone via
+ * BRWalletOutpointSelectable; SEND-GATE-SET); after signing, the signed
  * transaction must pass the same check, or nothing is handed back to be broadcast. It signs those
  * bytes and nothing else: no build, no publish (the publish entry points stay publishTransaction /
  * publishTransactionStem, which tx_publish_ownership_kat watches). */
@@ -457,8 +458,10 @@ NativeBridge_signPreparedTransaction(JNIEnv *env, jobject thiz, jbyteArray unsig
     }
 
     /* Sign with wallet (RFC 6979 deterministic nonces); forkId=0 for DigiByte. */
-    if (!seed_sign_transaction(g_wallet, tx, 0) || !BRTransactionIsSigned(tx)) {
+    int signedOk = seed_sign_transaction(g_wallet, tx, 0);
+    if (!signedOk || !BRTransactionIsSigned(tx)) {
         LOGW("signPreparedTransaction: signing failed");
+        if (signedOk) coin_reservation_release(tx->txHash);   /* the claim seed_sign_transaction took */
         BRTransactionFree(tx);
         return NULL;
     }
@@ -468,6 +471,7 @@ NativeBridge_signPreparedTransaction(JNIEnv *env, jobject thiz, jbyteArray unsig
                                        (uint64_t)approvedFeeSats)) != PREPARED_SEND_OK) {
         LOGE("signPreparedTransaction: the signed transaction is not the approved send (verdict %d); not returned",
              (int)verdict);
+        coin_reservation_release(tx->txHash);   /* never broadcast: its coins are free again */
         BRTransactionFree(tx);
         return NULL;
     }

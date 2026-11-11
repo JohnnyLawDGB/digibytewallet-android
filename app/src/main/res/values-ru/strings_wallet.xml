@@ -642,10 +642,10 @@
          Machine-assisted. -->
     <string name="reconcile_outputs_found">Выходы, найденные в блокчейне</string>
     <string name="reconcile_found_not_compared">Найдено в блокчейне, не сравнивалось</string>
-    <string name="reconcile_spendable">Расходуемые</string>
-    <string name="reconcile_wallet_spendable">Расходуемый баланс кошелька</string>
-    <string name="reconcile_matches_wallet">Совпадает с расходуемым балансом кошелька.</string>
-    <string name="reconcile_does_not_match_wallet">Не совпадает с расходуемым балансом кошелька: см. ниже.</string>
+    <string name="reconcile_in_balance">Учтено в балансе</string>
+    <string name="reconcile_wallet_balance">Баланс кошелька</string>
+    <string name="reconcile_matches_wallet_balance">Совпадает с балансом кошелька.</string>
+    <string name="reconcile_does_not_match_wallet_balance">Не совпадает с балансом кошелька: см. ниже.</string>
     <string name="reconcile_held_asset">Удерживается для DigiAsset</string>
     <string name="reconcile_held_unknown">Удерживается: состояние актива неизвестно</string>
     <string name="reconcile_proven_plain">Обычные DGB, станут расходуемыми после перезапуска</string>

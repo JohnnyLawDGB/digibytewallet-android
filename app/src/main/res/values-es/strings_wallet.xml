@@ -641,10 +641,10 @@
          Machine-assisted. -->
     <string name="reconcile_outputs_found">Salidas encontradas en la blockchain</string>
     <string name="reconcile_found_not_compared">Encontrado en la blockchain, sin comparar</string>
-    <string name="reconcile_spendable">Gastable</string>
-    <string name="reconcile_wallet_spendable">Saldo gastable de la billetera</string>
-    <string name="reconcile_matches_wallet">Coincide con el saldo gastable de la billetera.</string>
-    <string name="reconcile_does_not_match_wallet">No coincide con el saldo gastable de la billetera: ver abajo.</string>
+    <string name="reconcile_in_balance">Contado en el saldo</string>
+    <string name="reconcile_wallet_balance">Saldo de la billetera</string>
+    <string name="reconcile_matches_wallet_balance">Coincide con el saldo de la billetera.</string>
+    <string name="reconcile_does_not_match_wallet_balance">No coincide con el saldo de la billetera: ver abajo.</string>
     <string name="reconcile_held_asset">Retenido para un DigiAsset</string>
     <string name="reconcile_held_unknown">Retenido: estado del activo desconocido</string>
     <string name="reconcile_proven_plain">DGB normal, gastable tras reiniciar</string>

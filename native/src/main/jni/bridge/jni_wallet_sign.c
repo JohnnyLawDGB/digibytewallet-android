@@ -10,6 +10,7 @@
  */
 
 #include "jni_bridge.h"
+#include "signed_message.h"
 #include <stdio.h>
 
 /* ---- Base64 encoding ---- */
@@ -35,23 +36,6 @@ static size_t base64_encode(char *out, size_t outLen,
     }
     out[pos] = '\0';
     return pos;
-}
-
-/* ---- Varint encoding (Bitcoin compact size) ---- */
-
-static size_t write_varint(uint8_t *buf, uint64_t val) {
-    if (val < 0xfd) {
-        buf[0] = (uint8_t)val;
-        return 1;
-    } else if (val <= 0xffff) {
-        buf[0] = 0xfd;
-        buf[1] = (uint8_t)(val & 0xff);
-        buf[2] = (uint8_t)((val >> 8) & 0xff);
-        return 3;
-    }
-    /* Messages over 64KB won't happen for Digi-ID */
-    buf[0] = (uint8_t)val;
-    return 1;
 }
 
 /* ---- The message's bytes, as the app sends them ----
@@ -157,27 +141,17 @@ static jstring sign_with_key(JNIEnv *env, BRKey *key, const char *msgChars,
     }
 
     /*
-     * Construct Bitcoin-style signed message:
-     *   header = "\x19DigiByte Signed Message:\n"   (0x19 = 25 = strlen)
-     *   payload = header + varint(msgLen) + message
+     * Construct Bitcoin-style signed message (signed_message.h):
+     *   payload = "\x19DigiByte Signed Message:\n" + compactSize(msgLen) + message
      *   hash = SHA256(SHA256(payload))
+     * MSG-LEN: the length is a full compact size at every length.
      */
-    static const char header[] = "\x19" "DigiByte Signed Message:\n";
-    size_t headerLen = sizeof(header) - 1; /* exclude null terminator */
-
-    uint8_t varint[9];
-    size_t varintLen = write_varint(varint, msgLen);
-
-    size_t totalLen = headerLen + varintLen + msgLen;
-    uint8_t *payload = malloc(totalLen);
+    size_t totalLen = 0;
+    uint8_t *payload = signed_message_payload((const uint8_t *)msgChars, msgLen, &totalLen);
     if (!payload) {
         BRKeyClean(key);
         return NULL;
     }
-
-    memcpy(payload, header, headerLen);
-    memcpy(payload + headerLen, varint, varintLen);
-    memcpy(payload + headerLen + varintLen, msgChars, msgLen);
 
     /* Double SHA256 */
     UInt256 md;
