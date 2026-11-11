@@ -103,6 +103,56 @@ class LogRedactionSourceGateTest {
         assertTrue("log statements interpolating a full txid:\n" + violations.joinToString("\n"), violations.isEmpty())
     }
 
+    /**
+     * DIGIRUNNER-RUNID: the runId the server issues for a DigiRunner run is the proof that run was
+     * started, so no log line in core/ or app/ may carry it: not by name (`$runId`, `${run.runId}`,
+     * `$id` where it holds one), and not by logging the run endpoint's answer, which is the runId.
+     */
+    @Test
+    fun `no Kotlin log line carries a DigiRunner runId`() {
+        val violations = mutableListOf<String>()
+        listOf("core/src/main/java", "app/src/main/java").forEach { root ->
+            findSourceRoot(root).walkTopDown().filter { it.extension == "kt" }.forEach { file ->
+                runIdLogs(file.readText()).forEach { violations.add("${file.name}: $it") }
+            }
+        }
+        assertTrue("log statements carrying a DigiRunner runId:\n" + violations.joinToString("\n"), violations.isEmpty())
+    }
+
+    /** The runId gate must catch the shapes a runId would leak by. */
+    @Test
+    fun `the runId gate catches a runId by name and the run answer`() {
+        assertTrue(runIdLogs("Log.d(TAG, \"run ${'$'}runId\")").isNotEmpty())
+        assertTrue(runIdLogs("Log.d(TAG,\n \"run ${'$'}{run.runId}\")").isNotEmpty())
+        val answer = """
+            suspend fun startDigiRunnerRun(): String? {
+                val text = BoundedBody.text(response.body, SMALL_BODY_BYTES)
+                Log.d("DigiScope", "run: ${'$'}text")
+            }
+        """.trimIndent()
+        assertTrue("the run answer logged is not caught", runIdLogs(answer).isNotEmpty())
+        assertTrue("a code is not a runId", runIdLogs("fun startDigiRunnerRun() {\nLog.w(TAG, \"run: HTTP ${'$'}{response.code}\")\n}").isEmpty())
+        assertTrue("whether a runId is present is not a runId", runIdLogs("Log.d(TAG, \"run=${'$'}{runId != null}\")").isEmpty())
+    }
+
+    private fun runIdLogs(content: String): List<String> {
+        val byName = Regex("""\$\{?\s*(?:[\w.]*\.)?runId\b(?!\s*(?:!=|==)\s*null)""", RegexOption.IGNORE_CASE)
+        val out = collectLogStatements(content).filter { byName.containsMatchIn(it) }.toMutableList()
+        // In the run call, any interpolation but the HTTP status or an exception's class may be the answer.
+        Regex("""fun\s+startDigiRunnerRun\b""").findAll(content).forEach { m ->
+            val next = Regex("""\n[ \t]*(?:(?:private|internal|public|override|suspend)\s+)*fun\s""").find(content, m.range.last)
+            val body = content.substring(m.range.first, next?.range?.first ?: content.length)
+            collectLogStatements(body).filter { stmt ->
+                Regex("""\$\{([^{}]*)\}|\$([A-Za-z_]\w*)""").findAll(stmt).any { v ->
+                    val expr = v.groupValues[1].ifEmpty { v.groupValues[2] }.trim()
+                    // An HTTP status or an exception's class name is not the answer.
+                    !expr.endsWith(".code") && !expr.endsWith(".javaClass.simpleName")
+                }
+            }.forEach { if (it !in out) out.add(it) }
+        }
+        return out
+    }
+
     /** The gate above must see what it is meant to see. */
     @Test
     fun `the txid gate collects a multi-line log call and Log_wtf`() {
