@@ -1,17 +1,33 @@
 // Host KAT: no JNI entry point reads g_wallet while a create or restore frees it (4.1.2 row 6, N7).
 //
-// Thread B swaps the wallet (NativeBridge_createWalletFromBytes: free g_wallet, install a new one) in a
-// loop while thread A calls readers that do not take PEER_GUARD -- getBalance, getReceiveAddress,
+// Thread B swaps the wallet (NativeBridge_createWalletFromBytes: free g_wallet, install a new one) while
+// thread A calls readers that do not take PEER_GUARD -- getBalance, getReceiveAddress,
 // getTransactionCount, getTransactionDetails -- through the bridge's own code, over the host JNI stand-ins
 // of identity_sign_bytes_kat (host_jni/ is shared). Built under ThreadSanitizer.
-//   RED    -DWALLET_READ_GUARD_UNFIXED: the readers take no guard; TSan reports a race on g_wallet /
-//          the freed wallet (or the run faults).
-//   GREEN  WALLET_READ_GUARD() on every reader, the write side around the swap: TSan clean.
+//
+// Two phases:
+//   interleave  (KAT-RACE: the red arm shows the race on every run.) One swap, then one reader call, per
+//               reader, in that order. The order is enforced with RELAXED atomics only: ThreadSanitizer
+//               gives a relaxed load/store no happens-before edge, so the step flag orders the threads
+//               in real time while leaving the bridge's own synchronization as the only edge between the
+//               swap's write of g_wallet and the reader's read of it. Unguarded, every reader's first
+//               read of g_wallet is a race TSan sees on every run; guarded, the write side's unlock
+//               happens-before the reader's shared lock and the step is clean. No timing is involved:
+//               the old stress loop alone showed the race on about half the runs.
+//               TSan reports a race on a word once and then marks the word as read-only for the rest of
+//               the process, so a red run that proves EVERY reader runs one process per reader
+//               (`interleave <reader>`); the green arm runs all four steps in one process.
+//   stress      the swap loop against the reader loop (green arm only): the guard holds under contention.
+//   RED    -DWALLET_READ_GUARD_UNFIXED, `interleave <reader>` per reader: a TSan data race in its step.
+//   GREEN  WALLET_READ_GUARD() on every reader, the write side around the swap: both phases TSan clean.
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
+#include <sched.h>
+#include <stdatomic.h>
+#include <unistd.h>
 
 #include "jni_bridge.h"   /* the bridge's own header, over host_jni/<jni.h> and host_jni/<android/log.h> */
 #include "BRKey.h"
@@ -176,43 +192,122 @@ jstring JNICALL NativeBridge_getReceiveAddress(JNIEnv *env, jobject thiz, jint i
 jint JNICALL NativeBridge_getTransactionCount(JNIEnv *env, jobject thiz);
 jstring JNICALL NativeBridge_getTransactionDetails(JNIEnv *env, jobject thiz);
 
-#define ITERS 400
+#define SWAPS 40
 static const char *kMnemonic =
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 static HostArray *g_phrase;
 
+/* ---- interleave: one swap, then one read, per reader, ordered without a happens-before edge ---------- */
+
+static void call_balance(void) { (void)NativeBridge_getBalance(env, NULL); }
+static void call_receive(void) { (void)NativeBridge_getReceiveAddress(env, NULL, 0, 0); }
+static void call_count(void) { (void)NativeBridge_getTransactionCount(env, NULL); }
+static void call_details(void) { (void)NativeBridge_getTransactionDetails(env, NULL); }
+static const struct { const char *name; void (*call)(void); } kReaders[] = {
+    { "getBalance", call_balance },
+    { "getReceiveAddress", call_receive },
+    { "getTransactionCount", call_count },
+    { "getTransactionDetails", call_details },
+};
+#define NREADERS ((int)(sizeof(kReaders) / sizeof(*kReaders)))
+
+/* Step 2i: B swaps. Step 2i+1: A calls reader i. Relaxed on purpose -- see the header. */
+static atomic_int g_step;
+static void await_step(int step)
+{
+    while (atomic_load_explicit(&g_step, memory_order_relaxed) != step) sched_yield();
+}
+static void set_step(int step) { atomic_store_explicit(&g_step, step, memory_order_relaxed); }
+
+static int g_first = 0, g_last = NREADERS;   /* the readers this run steps through: [g_first, g_last) */
+
+static void *interleave_swapper(void *arg)
+{
+    (void)arg;
+    for (int i = g_first; i < g_last; i++) {
+        await_step(2 * i);
+        (void)NativeBridge_createWalletFromBytes(env, NULL, g_phrase, NULL);
+        set_step(2 * i + 1);
+    }
+    return NULL;
+}
+
+static void *interleave_reader(void *arg)
+{
+    (void)arg;
+    for (int i = g_first; i < g_last; i++) {
+        await_step(2 * i + 1);
+        /* The marker precedes the call, so a report printed during the call lands after it: run.sh
+         * attributes every report to the step it fell in. stdout is unbuffered, as is TSan's stderr. */
+        printf("   [step] %s after a swap\n", kReaders[i].name);
+        kReaders[i].call();
+        set_step(2 * i + 2);
+    }
+    return NULL;
+}
+
+/* ---- stress: the swap loop against the reader loop --------------------------------------------------- */
+
+/* The reader keeps calling until the swapper is done, so every swap meets readers (the reader used to
+ * run a fixed count and could finish before the swapper's slow BIP39 derivations had begun). */
+static atomic_int g_swapsDone;
+static int g_readerRounds;
+
 static void *swapper(void *arg)
 {
     (void)arg;
-    for (int i = 0; i < ITERS; i++) NativeBridge_createWalletFromBytes(env, NULL, g_phrase, NULL);
+    for (int i = 0; i < SWAPS; i++) NativeBridge_createWalletFromBytes(env, NULL, g_phrase, NULL);
+    atomic_store_explicit(&g_swapsDone, 1, memory_order_relaxed);
     return NULL;
 }
 
 static void *reader(void *arg)
 {
     (void)arg;
-    for (int i = 0; i < ITERS * 4; i++) {
+    while (! atomic_load_explicit(&g_swapsDone, memory_order_relaxed)) {
         (void)NativeBridge_getBalance(env, NULL);
         (void)NativeBridge_getReceiveAddress(env, NULL, 0, 0);
         (void)NativeBridge_getTransactionCount(env, NULL);
         (void)NativeBridge_getTransactionDetails(env, NULL);
+        g_readerRounds++;
     }
     return NULL;
 }
 
-int main(void)
+static void run_pair(void *(*fa)(void *), void *(*fb)(void *))
 {
+    pthread_t a, b;
+    pthread_create(&b, NULL, fb, NULL);
+    pthread_create(&a, NULL, fa, NULL);
+    pthread_join(a, NULL);
+    pthread_join(b, NULL);
+}
+
+/* usage: wallet_read_guard_kat all                  both phases, every reader (the default)
+ *        wallet_read_guard_kat interleave [reader]  the interleave phase only, for one reader or all */
+int main(int argc, char **argv)
+{
+    int stress = !(argc > 1 && strcmp(argv[1], "interleave") == 0);
+    if (! stress && argc > 2) {
+        g_first = -1;
+        for (int i = 0; i < NREADERS; i++)
+            if (strcmp(argv[2], kReaders[i].name) == 0) { g_first = i; g_last = i + 1; }
+        if (g_first < 0) { printf("unknown reader: %s\n", argv[2]); return 2; }
+    }
+    atomic_store_explicit(&g_step, 2 * g_first, memory_order_relaxed);
     setvbuf(stdout, NULL, _IONBF, 0);
+    /* In-process watchdog behind run.sh's: a step that never comes (a thread that died) ends the run. */
+    alarm(240);
     check(JNI_OnLoad(&g_vmValue, NULL) == JNI_VERSION_1_6, "the bridge boots (JNI_OnLoad)");
     g_phrase = hostArray(kMnemonic, strlen(kMnemonic));
     check(NativeBridge_createWalletFromBytes(env, NULL, g_phrase, NULL) == JNI_TRUE, "a wallet is created");
-    pthread_t a, b;
-    pthread_create(&b, NULL, swapper, NULL);
-    pthread_create(&a, NULL, reader, NULL);
-    pthread_join(a, NULL);
-    pthread_join(b, NULL);
+
+    run_pair(interleave_reader, interleave_swapper);
+    printf("   [interleave] %d swap-then-read steps finished\n", g_last - g_first);
+
+    if (stress) run_pair(reader, swapper);
     check(NativeBridge_getBalance(env, NULL) >= 0, "the wallet still answers after the swaps");
     if (g_fail) { printf("wallet_read_guard_kat: %d check(s) failed\n", g_fail); return 1; }
-    printf("wallet_read_guard_kat: %d swaps against %d reader rounds finished\n", ITERS, ITERS * 4);
+    if (stress) printf("wallet_read_guard_kat: %d swaps against %d reader rounds finished\n", SWAPS, g_readerRounds);
     return 0;
 }
