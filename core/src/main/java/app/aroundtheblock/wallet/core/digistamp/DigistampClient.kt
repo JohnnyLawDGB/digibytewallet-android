@@ -1,5 +1,6 @@
 package app.aroundtheblock.wallet.core.digistamp
 
+import app.aroundtheblock.wallet.core.LogSafe
 import app.aroundtheblock.wallet.core.asset.network.endpointOf
 import app.aroundtheblock.wallet.core.network.BoundedBody
 import kotlinx.coroutines.Dispatchers
@@ -58,7 +59,8 @@ class DigistampClient(
         }
     } catch (e: Exception) {
         // Never swallow silently — a blank digistamp screen with no log line is undebuggable.
-        android.util.Log.w("DigistampClient", "GET ${endpointOf(url)} failed", e)
+        // ASSET-LOG-CRLF: not the throwable -- its message and stack trace can quote the remote body.
+        android.util.Log.w("DigistampClient", "GET ${endpointOf(url)} failed: ${e::class.java.simpleName}: ${LogSafe.text(e.message)}")
         null
     }
 

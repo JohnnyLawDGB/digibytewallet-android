@@ -8,8 +8,13 @@ package app.aroundtheblock.wallet.core
  * either -- without neutralising its control characters and bounding its length. Logcat starts a new
  * line at every line break inside a message, so a raw value could print text that reads as another
  * line; this returns a value with no control, line-separator or format character left in it, and
- * no more than [max] characters of the input. `LogRedactionSourceGateTest` fails a log line that
- * interpolates such a value any other way.
+ * no more than [max] characters of the input. A caught throwable from a remote parse is logged as its
+ * class name and `text(message)`, never passed to Log: its message and stack trace quote the input.
+ *
+ * `LogRedactionSourceGateTest` checks this by source pattern, not by data flow: it follows the reads it
+ * names (JSON fields, HTTP bodies, WebSocket strings, metadata fields, exception messages) through
+ * assignments in one function, and passes what it cannot trace -- a value handed in from another
+ * function, a field not on its list. It catches the common forms; it does not prove the invariant.
  *
  * Escapes: `\n` `\r` `\t` by name, a backslash as `\\` (so a backslash sequence in the input cannot pass
  * for one of these), every other control, line/paragraph separator, format character (bidi override,

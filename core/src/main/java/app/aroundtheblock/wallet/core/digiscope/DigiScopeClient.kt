@@ -155,7 +155,8 @@ class DigiScopeClient(
             android.util.Log.i("DigiScope", "quickLogin: token=${if (token != null) "received" else "null"}")
             token != null
         } catch (e: Exception) {
-            android.util.Log.e("DigiScope", "quickLogin: exception: ${LogSafe.text(e.message)}", e)
+            // ASSET-LOG-CRLF: not the throwable -- the challenge parse would quote the server body in its trace.
+            android.util.Log.e("DigiScope", "quickLogin: exception: ${e::class.java.simpleName}: ${LogSafe.text(e.message)}")
             false
         }
     }

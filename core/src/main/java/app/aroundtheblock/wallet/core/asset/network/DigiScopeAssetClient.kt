@@ -157,8 +157,9 @@ class DigiScopeAssetClient(
     } catch (t: Throwable) {
         android.util.Log.w(
             "DigiScopeAssetClient",
-            "GET ${endpointOf(url)} threw ${t::class.java.simpleName}: ${LogSafe.text(t.message)}",
-            t
+            // ASSET-LOG-CRLF: not the throwable -- org.json quotes the whole input in its message,
+            // and the stack trace prints that message raw.
+            "GET ${endpointOf(url)} threw ${t::class.java.simpleName}: ${LogSafe.text(t.message)}"
         )
         null
     }
