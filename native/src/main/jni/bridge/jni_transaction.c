@@ -164,8 +164,11 @@ static void _registerWalletCopy(BRTransaction *tx)
     if (BRWalletTransactionForHash(g_wallet, tx->txHash)) return;   /* already held: nothing to copy */
     BRTransaction *walletCopy = BRTransactionCopy(tx);
     if (!walletCopy) return;                                        /* the peer relay-back re-registers */
-    BRWalletRegisterTransactionTrusted(g_wallet, walletCopy);   /* this wallet signed it: no input check */
-    if (BRWalletTransactionForHash(g_wallet, tx->txHash) != walletCopy) BRTransactionFree(walletCopy);
+    BRWalletRegisterOutcome held = BR_WALLET_REGISTER_REFUSED;
+    /* this wallet signed it: no input check. Whether the wallet took the copy is the registration's own
+     * answer (REGISTER-RESULT), read under the wallet's lock, not a lookup made after it. */
+    BRWalletRegisterTransactionOutcome(g_wallet, walletCopy, BR_WALLET_REGISTER_TRUSTED, &held);
+    if (!BRWalletRegisterOutcomeHeld(held)) BRTransactionFree(walletCopy);
 }
 
 /* ---------- createTransaction ---------- */
@@ -829,13 +832,16 @@ NativeBridge_registerRawTransaction(JNIEnv *env, jobject thiz,
     UInt256 txHash = tx->txHash;
     /* The height is the server's, not proven by this wallet: the tx's signatures on wallet coins are
      * checked at any height (BRWalletRegisterTransactionUnproven), now and at every balance rebuild. */
-    int ok = BRWalletRegisterTransactionUnproven(g_wallet, tx);
+    BRWalletRegisterOutcome held = BR_WALLET_REGISTER_REFUSED;
+    int ok = BRWalletRegisterTransactionOutcome(g_wallet, tx, BR_WALLET_REGISTER_UNPROVEN, &held);
+    /* Who owns tx now is the registration's own answer (REGISTER-RESULT): the wallet, when it kept tx as
+     * one of its transactions or as an unconfirmed non-wallet tx; otherwise this function, which frees it --
+     * a refused tx (confirmed non-wallet, out of range, an unconfirmed tx that does not validly sign a
+     * wallet output), or a copy of a hash a peer thread registered since the lookup above. tx is not named
+     * again below. */
+    if (!BRWalletRegisterOutcomeHeld(held)) BRTransactionFree(tx);
+    tx = NULL;
     if (!ok) {
-        /* Not taken by the wallet. It keeps an unconfirmed non-wallet tx in its allTx set; anything
-         * else it refused -- a confirmed non-wallet tx, an out-of-range tx, an unconfirmed tx that
-         * does not validly sign a wallet output -- is not kept at any height, so ask the wallet
-         * whether it holds this object rather than infer it from the height, and free it if not. */
-        if (BRWalletTransactionForHash(g_wallet, txHash) != tx) BRTransactionFree(tx);
         LOGW("registerRawTransaction: tx not associated with wallet");
         return JNI_FALSE;
     }
