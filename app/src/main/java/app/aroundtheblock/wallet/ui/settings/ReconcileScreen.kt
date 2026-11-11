@@ -458,11 +458,11 @@ fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
                             ResultRow(stringResource(R.string.reconcile_found_not_compared), dgb(s.totalChainBalanceSat))
                         } else {
                             Spacer(Modifier.height(8.dp))
-                            ResultRow(stringResource(R.string.reconcile_spendable), dgb(p.inBalanceSat), emphasize = true)
-                            ResultRow(stringResource(R.string.reconcile_wallet_spendable), dgb(p.walletBalanceSat))
+                            ResultRow(stringResource(R.string.reconcile_in_balance), dgb(p.inBalanceSat), emphasize = true)
+                            ResultRow(stringResource(R.string.reconcile_wallet_balance), dgb(p.walletBalanceSat))
                             Text(
-                                if (p.matchesWallet) stringResource(R.string.reconcile_matches_wallet)
-                                else stringResource(R.string.reconcile_does_not_match_wallet),
+                                if (p.matchesWallet) stringResource(R.string.reconcile_matches_wallet_balance)
+                                else stringResource(R.string.reconcile_does_not_match_wallet_balance),
                                 color = if (p.matchesWallet) Color(0xFF6BE8A3) else Color(0xFFFFB74D),
                                 fontSize = 12.sp
                             )

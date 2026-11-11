@@ -633,10 +633,10 @@
          Machine-assisted. -->
     <string name="reconcile_outputs_found">Đầu ra tìm thấy trên blockchain</string>
     <string name="reconcile_found_not_compared">Tìm thấy trên blockchain, chưa so sánh</string>
-    <string name="reconcile_spendable">Có thể chi tiêu</string>
-    <string name="reconcile_wallet_spendable">Số dư có thể chi tiêu của ví</string>
-    <string name="reconcile_matches_wallet">Khớp với số dư có thể chi tiêu của ví.</string>
-    <string name="reconcile_does_not_match_wallet">Không khớp với số dư có thể chi tiêu của ví: xem bên dưới.</string>
+    <string name="reconcile_in_balance">Được tính vào số dư</string>
+    <string name="reconcile_wallet_balance">Số dư của ví</string>
+    <string name="reconcile_matches_wallet_balance">Khớp với số dư của ví.</string>
+    <string name="reconcile_does_not_match_wallet_balance">Không khớp với số dư của ví: xem bên dưới.</string>
     <string name="reconcile_held_asset">Được giữ cho một DigiAsset</string>
     <string name="reconcile_held_unknown">Được giữ: trạng thái tài sản không rõ</string>
     <string name="reconcile_proven_plain">DGB thông thường, có thể chi tiêu sau khi khởi động lại</string>

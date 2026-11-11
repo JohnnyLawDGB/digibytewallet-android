@@ -773,10 +773,10 @@
          Machine-assisted. -->
     <string name="reconcile_outputs_found">Outputs found on chain</string>
     <string name="reconcile_found_not_compared">Found on chain, not compared</string>
-    <string name="reconcile_spendable">Spendable</string>
-    <string name="reconcile_wallet_spendable">Wallet spendable balance</string>
-    <string name="reconcile_matches_wallet">Matches the wallet\'s spendable balance.</string>
-    <string name="reconcile_does_not_match_wallet">Does not match the wallet\'s spendable balance: see below.</string>
+    <string name="reconcile_in_balance">Counted in balance</string>
+    <string name="reconcile_wallet_balance">Wallet balance</string>
+    <string name="reconcile_matches_wallet_balance">Matches the wallet\'s balance.</string>
+    <string name="reconcile_does_not_match_wallet_balance">Does not match the wallet\'s balance: see below.</string>
     <string name="reconcile_held_asset">Held for a DigiAsset</string>
     <string name="reconcile_held_unknown">Held: asset state unknown</string>
     <string name="reconcile_proven_plain">Plain DGB, spendable after restart</string>

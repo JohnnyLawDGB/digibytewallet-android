@@ -636,10 +636,10 @@
          Machine-assisted. -->
     <string name="reconcile_outputs_found">Mga output na nakita sa blockchain</string>
     <string name="reconcile_found_not_compared">Nakita sa blockchain, hindi naikumpara</string>
-    <string name="reconcile_spendable">Magagastos</string>
-    <string name="reconcile_wallet_spendable">Magagastos na balanse ng wallet</string>
-    <string name="reconcile_matches_wallet">Tugma sa magagastos na balanse ng wallet.</string>
-    <string name="reconcile_does_not_match_wallet">Hindi tugma sa magagastos na balanse ng wallet: tingnan sa ibaba.</string>
+    <string name="reconcile_in_balance">Kasama sa balanse</string>
+    <string name="reconcile_wallet_balance">Balanse ng wallet</string>
+    <string name="reconcile_matches_wallet_balance">Tugma sa balanse ng wallet.</string>
+    <string name="reconcile_does_not_match_wallet_balance">Hindi tugma sa balanse ng wallet: tingnan sa ibaba.</string>
     <string name="reconcile_held_asset">Nakalaan para sa isang DigiAsset</string>
     <string name="reconcile_held_unknown">Nakalaan: hindi alam ang estado ng asset</string>
     <string name="reconcile_proven_plain">Karaniwang DGB, magagastos pagkatapos mag-restart</string>

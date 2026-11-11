@@ -58,6 +58,7 @@ CASES=(
     check_self_send_signs:pass
     check_coin_foreign_unconfirmed:fail
     check_own_change_signs:pass
+    check_budget_own_change:pass
     dd_transfer_builds:pass
 )
 # SEND-GATE-SET arm: -DSEND_GATE_SET_UNFIXED=1 (and PREPARED_SEND_UNFIXED=0): every check as shipped but
@@ -68,6 +69,15 @@ SET_CASES=(
     check_own_change_signs:pass
     check_coin_spent:pass
     check_coin_held:pass
+    check_approved_signs:pass
+    check_budget_own_change:pass
+)
+# Enumeration arm: -DSEND_GATE_SET_UNFIXED=2: the selectable set, but listed whole under one walk budget
+# (the first SEND-GATE-SET version) instead of each input asked alone.
+BUDGET_CASES=(
+    check_budget_own_change:fail
+    check_coin_foreign_unconfirmed:pass
+    check_own_change_signs:pass
     check_approved_signs:pass
 )
 
@@ -179,25 +189,28 @@ for bits in 64 32; do
         esac
     done
 
-    echo "--- SEND-GATE-SET ARM (-DSEND_GATE_SET_UNFIXED=1): the raw coin set; each case meets its expectation ---"
-    if ! build "$BUILD_DIR/set$bits" "$bits" 0 1; then
-        echo "GATE FAILURE: ${bits}-bit SEND-GATE-SET arm did not compile."; FAIL=1
-    else
-        for entry in "${SET_CASES[@]}"; do
-            c="${entry%%:*}"; want="${entry##*:}"; out="$BUILD_DIR/set$bits.$c.out"
-            bounded "$out" "$BUILD_DIR/set$bits" "$c"; rc=$?
+    for setarm in 1 2; do
+        if [ "$setarm" = 1 ]; then arm_cases=("${SET_CASES[@]}"); label="the raw coin set"
+        else arm_cases=("${BUDGET_CASES[@]}"); label="the selectable set enumerated under one walk budget"; fi
+        echo "--- SEND-GATE-SET ARM (-DSEND_GATE_SET_UNFIXED=$setarm): $label; each case meets its expectation ---"
+        if ! build "$BUILD_DIR/set$setarm-$bits" "$bits" 0 "$setarm"; then
+            echo "GATE FAILURE: ${bits}-bit SEND-GATE-SET arm $setarm did not compile."; FAIL=1; continue
+        fi
+        for entry in "${arm_cases[@]}"; do
+            c="${entry%%:*}"; want="${entry##*:}"; out="$BUILD_DIR/set$setarm-$bits.$c.out"
+            bounded "$out" "$BUILD_DIR/set$setarm-$bits" "$c"; rc=$?
             if [ $rc -eq 124 ] || grep -Eq "$SAN_RE" "$out"; then
-                echo "  [set$bits $c] GATE FAILURE: stopped or sanitizer report (rc=$rc)"; show "$out"; FAIL=1; continue
+                echo "  [set$setarm/$bits $c] GATE FAILURE: stopped or sanitizer report (rc=$rc)"; show "$out"; FAIL=1; continue
             fi
             if [ "$want" = fail ] && [ $rc -ne 0 ] && grep -q "^RESULT $c fail$" "$out"; then
-                echo "  [set$bits $c] failed, as it must: $(grep -m1 '^FAIL:' "$out" | cut -c1-150)"
+                echo "  [set$setarm/$bits $c] failed, as it must: $(grep -m1 '^FAIL:' "$out" | cut -c1-150)"
             elif [ "$want" = pass ] && [ $rc -eq 0 ] && grep -q "^RESULT $c pass$" "$out"; then
-                echo "  [set$bits $c] passed (guard)"
+                echo "  [set$setarm/$bits $c] passed (guard)"
             else
-                echo "  [set$bits $c] GATE FAILURE: expected $want (rc=$rc)"; show "$out" 12; FAIL=1
+                echo "  [set$setarm/$bits $c] GATE FAILURE: expected $want (rc=$rc)"; show "$out" 12; FAIL=1
             fi
         done
-    fi
+    done
 
     echo "--- SHIPPED ARM (-DPREPARED_SEND_UNFIXED=0): every case passes, no sanitizer report ---"
     for entry in "${CASES[@]}"; do

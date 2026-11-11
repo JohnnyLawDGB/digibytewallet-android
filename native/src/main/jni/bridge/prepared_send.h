@@ -38,8 +38,10 @@
  * arm, the behaviour before this header existed: the typical 141-vbyte figure every confirmation
  * showed, and nothing checked before signing. Unset or =0 is what ships.
  *
- * SEND_GATE_SET_UNFIXED, also tested by VALUE: =1 is fee_quote_kat's SEND-GATE-SET comparison arm, the
- * membership set before that item (BRWalletUTXOs, the raw set the balance sums). Unset or =0 ships.
+ * SEND_GATE_SET_UNFIXED, also tested by VALUE: fee_quote_kat's SEND-GATE-SET comparison arms. =1 is the
+ * membership set before that item (BRWalletUTXOs, the raw set the balance sums); =2 is the selectable set
+ * enumerated whole (BRWalletSelectableUTXOs), whose one walk budget can run out before the gate reaches a
+ * coin selection took. Unset or =0 ships: each input asked alone (BRWalletOutpointSelectable).
  */
 
 #ifndef PREPARED_SEND_UNFIXED
@@ -49,14 +51,34 @@
 #define SEND_GATE_SET_UNFIXED 0
 #endif
 
-/* SEND-GATE-SET: the coins a prepared send may spend are the coins the wallet's own selection would
- * spend. Writes them to utxos and returns the number written, or the total when utxos is NULL. */
-static inline size_t prepared_send_coins(BRWallet *wallet, BRUTXO *utxos, size_t count)
+/* SEND-GATE-SET: 1 when the coin (hash, n) is one a prepared send may spend: one the wallet's own
+ * selection would spend. Asked of that outpoint alone (BRWalletOutpointSelectable, its own walk budget),
+ * so a wallet with many unconfirmed coins cannot exhaust a shared budget before the gate reaches a coin
+ * selection already took. */
+static inline int prepared_send_coin_ok(BRWallet *wallet, UInt256 hash, uint32_t n)
 {
-#if SEND_GATE_SET_UNFIXED
-    return BRWalletUTXOs(wallet, utxos, count);
+#if SEND_GATE_SET_UNFIXED == 1
+    /* comparison: the raw set the balance sums */
+    size_t count = BRWalletUTXOs(wallet, NULL, 0), i;
+    BRUTXO *u = calloc(count ? count : 1, sizeof(*u));
+    int r = 0;
+    if (! u) return 0;
+    count = BRWalletUTXOs(wallet, u, count);
+    for (i = 0; i < count && ! r; i++) r = u[i].n == n && UInt256Eq(u[i].hash, hash);
+    free(u);
+    return r;
+#elif SEND_GATE_SET_UNFIXED == 2
+    /* comparison: the whole selectable set enumerated, one walk budget shared by every coin */
+    size_t count = BRWalletSelectableUTXOs(wallet, NULL, 0), i;
+    BRUTXO *u = calloc(count ? count : 1, sizeof(*u));
+    int r = 0;
+    if (! u) return 0;
+    count = BRWalletSelectableUTXOs(wallet, u, count);
+    for (i = 0; i < count && ! r; i++) r = u[i].n == n && UInt256Eq(u[i].hash, hash);
+    free(u);
+    return r;
 #else
-    return BRWalletSelectableUTXOs(wallet, utxos, count);
+    return BRWalletOutpointSelectable(wallet, hash, n);
 #endif
 }
 
@@ -118,14 +140,6 @@ static inline int prepared_send_pays_as_approved(BRWallet *wallet, const BRTrans
     return payments == 1 && change <= 1;
 }
 
-/* 1 when the outpoint (hash, n) is among utxos[0..count). */
-static inline int prepared_send_has_coin(const BRUTXO *utxos, size_t count, UInt256 hash, uint32_t n)
-{
-    for (size_t i = 0; i < count; i++) {
-        if (utxos[i].n == n && UInt256Eq(utxos[i].hash, hash)) return 1;
-    }
-    return 0;
-}
 #endif
 
 /* Whether tx may be signed -- or, once signed, handed back to be broadcast -- as the approved send:
@@ -139,8 +153,6 @@ static inline PreparedSendVerdict prepared_send_check(BRWallet *wallet, const BR
     return PREPARED_SEND_OK;
 #else
     uint64_t fee;
-    size_t count;
-    BRUTXO *coins;
     PreparedSendVerdict verdict = PREPARED_SEND_OK;
 
     if (! wallet || ! tx) return PREPARED_SEND_FEE_UNKNOWN;
@@ -150,19 +162,13 @@ static inline PreparedSendVerdict prepared_send_check(BRWallet *wallet, const BR
     if (! prepared_send_pays_as_approved(wallet, tx, payScript, payScriptLen, payAmount)) return PREPARED_SEND_NOT_APPROVED;
     if (tx->inCount == 0) return PREPARED_SEND_COIN_UNAVAILABLE;
 
-    /* The coins the wallet's own selection would spend now (SEND-GATE-SET): spent coins, asset
-     * carriers, DigiDollar and ONE-FAMILY-held outputs, unsignable outputs and unconfirmed coins someone
-     * else sent are not among them. One copy, taken under the wallet's lock. A coin that arrived between
-     * the two calls is not in it, which can only refuse -- and reviewing again builds afresh. */
-    count = prepared_send_coins(wallet, NULL, 0);
-    coins = calloc(count ? count : 1, sizeof(*coins));
-    if (! coins) return PREPARED_SEND_COIN_UNAVAILABLE;   /* cannot tell, so do not sign */
-    count = prepared_send_coins(wallet, coins, count);
+    /* Each coin must be one the wallet's own selection would spend now (SEND-GATE-SET): spent coins,
+     * asset carriers, DigiDollar and ONE-FAMILY-held outputs, unsignable outputs and unconfirmed coins
+     * someone else sent are not. Each is asked alone, under the wallet's lock. */
     for (size_t i = 0; i < tx->inCount && verdict == PREPARED_SEND_OK; i++) {
-        if (! prepared_send_has_coin(coins, count, tx->inputs[i].txHash, tx->inputs[i].index))
+        if (! prepared_send_coin_ok(wallet, tx->inputs[i].txHash, tx->inputs[i].index))
             verdict = PREPARED_SEND_COIN_UNAVAILABLE;
     }
-    free(coins);
     return verdict;
 #endif
 }
