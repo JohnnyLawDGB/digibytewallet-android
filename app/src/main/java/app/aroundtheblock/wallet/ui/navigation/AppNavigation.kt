@@ -466,15 +466,30 @@ fun AppNavigation(
             composable("digirunner") {
                 val gameContext = LocalContext.current
                 val coroutineScope = rememberCoroutineScope()
+                // DIGIRUNNER-RUNID: each run (the first, every Play Again) asks the server for its
+                // runId, and the score submit carries it; a failed run call never holds up play.
+                // Known, accepted: a rotation recreates this screen and starts a new run, leaving the
+                // old one open on the server; enough of them (MAX_OPEN_RUNS within MAX_RUN_SECONDS)
+                // and /run answers 429, so the score goes out without a runId, stored unverified.
+                val runs = remember(coroutineScope) {
+                    app.aroundtheblock.wallet.core.hub.DigiRunnerRuns(
+                        scope = coroutineScope,
+                        startRun = { digiScopeClient.startDigiRunnerRun() },
+                        submitScore = { score, distance, coins, livesRemaining, runId ->
+                            digiScopeClient.submitDigiRunnerScore(score, distance, coins, livesRemaining, runId)
+                        },
+                    )
+                }
 
                 Box(modifier = Modifier.fillMaxSize()) {
                     DigiRunnerGame(
                         standalone = true,
+                        onRunStart = { runs.onRunStarted() },
                         onScoreSubmit = { score, distance, coins, livesRemaining ->
+                            // Taken in the tap, before a Play Again can start the next run.
+                            val run = runs.capture()
                             coroutineScope.launch {
-                                val ok = digiScopeClient.submitDigiRunnerScore(
-                                    score, distance, coins, livesRemaining
-                                )
+                                val ok = runs.submit(run, score, distance, coins, livesRemaining)
                                 val msg = if (ok) context.getString(R.string.game_score_submitted) else context.getString(R.string.game_score_failed)
                                 Toast.makeText(gameContext, msg, Toast.LENGTH_SHORT).show()
                             }
