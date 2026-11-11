@@ -887,11 +887,15 @@ object NativeBridge {
      *  (e.g. for the OP_RETURN). Otherwise the address is resolved via
      *  BRAddressScriptPubKey and outputScriptsHex[i] is ignored.
      *
-     *  ASSET-SIGN-GATE: [approvedToAddress] and [approvedFeeSats] are the recipient and fee the
-     *  confirmation showed. Native refuses, before signing and again on the signed transaction,
-     *  unless every input is a wallet or held-asset coin at the amount the wallet holds, every
-     *  output pays that recipient, the wallet or a zero-value data output, and the fee is exactly
-     *  [approvedFeeSats].
+     *  ASSET-SIGN-GATE: [approvedToAddress] is the recipient the confirmation showed and
+     *  [approvedRecipientSats] the DGB its output carries (the DigiAsset marker); [planFeeSats] is the
+     *  fee of the plan being signed and [approvedMaxFeeSats] the fee the confirmation showed. Native
+     *  refuses, before signing and again on the signed transaction, unless every input is a wallet or
+     *  held-asset coin at the amount the wallet holds, the recipient is paid by exactly one output at
+     *  [approvedRecipientSats], every other output pays the wallet or is the one zero-value data
+     *  output, the fee is exactly [planFeeSats], and [planFeeSats] is no more than
+     *  [approvedMaxFeeSats]. (The plan's fee alone would check the plan against itself; the
+     *  approved fee is what bounds it.)
      *
      *  Returns signed tx hex, or null on any failure (invalid address,
      *  hex parse error, signing failure, a refused approval check, etc.). */
@@ -904,7 +908,9 @@ object NativeBridge {
         outputAmounts: LongArray,
         outputScriptsHex: Array<String>,
         approvedToAddress: String,
-        approvedFeeSats: Long,
+        approvedRecipientSats: Long,
+        planFeeSats: Long,
+        approvedMaxFeeSats: Long,
     ): String?
 
     /**
