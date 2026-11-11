@@ -86,6 +86,8 @@ WALLET_CASES=(
     wallet_redeemed_second_output:fail
     wallet_received_others_output:pass
     wallet_received_missing_output:pass
+    wallet_redeemed_two_coins:fail
+    wallet_redeemed_others_coin:fail
 )
 
 # ---- the seam is real ----------------------------------------------------------------------
