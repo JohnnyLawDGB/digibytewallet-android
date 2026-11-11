@@ -181,18 +181,17 @@ fun PinSetupScreen(
                                                     // decided by what is loaded in memory — after a wipe
                                                     // in this process that can be the wiped wallet.
                                                     if (walletManager.pinSetupCreatesWallet()) {
-                                                        // KS-BIND: the record is written right after this, so this is
+                                                        // KS-BIND: the record is written by this create, so this is
                                                         // where the seed key must be usable. Usually the device unlock
                                                         // still covers it and nothing shows; otherwise ONE device-
-                                                        // credential prompt, then the create (whatever its outcome).
+                                                        // credential prompt, then the create (whatever its outcome),
+                                                        // both in the ViewModel's scope so leaving this screen while
+                                                        // the prompt is up cannot orphan the create.
                                                         // No wallet is open yet, so the prompt's onStop locks nothing.
-                                                        scope.launch {
-                                                            prepareSeedKeyBeforeRecordWrite(
-                                                                walletManager, biometricAuth, activity,
-                                                                ksbPromptTitle, ksbPromptSubtitle,
-                                                            )
-                                                            viewModel.createWallet(afterWalletReady)
-                                                        }
+                                                        viewModel.createWallet(
+                                                            seedKeyPromptFor(biometricAuth, activity, ksbPromptTitle, ksbPromptSubtitle),
+                                                            afterWalletReady,
+                                                        )
                                                     } else {
                                                         afterWalletReady(walletManager.isWalletReady())
                                                     }

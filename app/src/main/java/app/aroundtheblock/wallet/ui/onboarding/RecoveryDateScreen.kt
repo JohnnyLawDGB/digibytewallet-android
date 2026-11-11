@@ -26,7 +26,6 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import app.aroundtheblock.wallet.R
-import kotlinx.coroutines.launch
 import app.aroundtheblock.wallet.ui.theme.DigiByteAccent
 import app.aroundtheblock.wallet.ui.theme.DigiByteBlue
 import app.aroundtheblock.wallet.ui.theme.DigiByteNavy
@@ -45,15 +44,9 @@ fun RecoveryDateScreen(
 ) {
     var selectedOption by remember { mutableStateOf<RecoveryDateOption?>(null) }
     // KS-BIND: the restore writes the wallet record, so its start is where the seed key must be
-    // usable (see prepareSeedKeyBeforeRecordWrite). No wallet is open yet, so a prompt locks nothing.
+    // usable (see seedKeyPromptFor). No wallet is open yet, so a prompt locks nothing.
     val context = androidx.compose.ui.platform.LocalContext.current
-    val scope = rememberCoroutineScope()
     val biometricAuth = remember { app.aroundtheblock.wallet.core.security.BiometricAuth() }
-    val walletManager = remember {
-        dagger.hilt.android.EntryPointAccessors
-            .fromApplication(context.applicationContext, PinSetupEntryPoint::class.java)
-            .walletManager()
-    }
     val ksbPromptTitle = stringResource(R.string.app_name_display)
     val ksbPromptSubtitle = stringResource(R.string.ksb_prompt_subtitle)
     // One restore per tap: the prompt opens a gap in which a second tap would start a second one.
@@ -195,18 +188,19 @@ fun RecoveryDateScreen(
                     viewModel.setRecoveryTimestamp(ts)
                     if (restoreStarting) return@Button
                     restoreStarting = true
-                    scope.launch {
-                        prepareSeedKeyBeforeRecordWrite(
-                            walletManager, biometricAuth,
+                    // KS-BIND: the probe, the one prompt if needed, and the restore run in the
+                    // ViewModel's scope, in one coroutine, so leaving this screen cannot orphan them.
+                    viewModel.recoverWallet(
+                        seedKeyPromptFor(
+                            biometricAuth,
                             context as? androidx.fragment.app.FragmentActivity,
                             ksbPromptTitle, ksbPromptSubtitle,
-                        )
-                        viewModel.recoverWallet { success ->
-                            restoreStarting = false
-                            if (success) {
-                                navController.navigate("pin_setup") {
-                                    popUpTo("onboarding") { inclusive = true }
-                                }
+                        ),
+                    ) { success ->
+                        restoreStarting = false
+                        if (success) {
+                            navController.navigate("pin_setup") {
+                                popUpTo("onboarding") { inclusive = true }
                             }
                         }
                     }

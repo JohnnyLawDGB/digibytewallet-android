@@ -62,6 +62,8 @@ class SeedKeyBindAtCreationTest {
         /** The auth-bound key's window: closed means every bound op throws, as the Keystore does. */
         var authWindowOpen = windowOpen
         var prompts = 0
+        /** The auth window lapses while the native create/restore runs (a slow derivation at 299 s). */
+        var closeWindowDuringNative = false
 
         init {
             vault.failure = { op, alias, _ ->
@@ -88,8 +90,8 @@ class SeedKeyBindAtCreationTest {
             utxoManager = mockk(relaxed = true),
             dataEraser = mockk(relaxed = true),
             quiesceNative = { },
-            createNative = { _, _ -> true },
-            recoverNative = { _, _, _ -> true },
+            createNative = { _, _ -> if (closeWindowDuringNative) authWindowOpen = false; true },
+            recoverNative = { _, _, _ -> if (closeWindowDuringNative) authWindowOpen = false; true },
             seedNative = { m, p -> MessageDigest.getInstance("SHA-512").apply { update(m); p?.let { update(it) } }.digest() },
             rescanNative = { },
             birthHeightNative = { 21_500_000L },
@@ -231,7 +233,38 @@ class SeedKeyBindAtCreationTest {
         h.prepareAsTheStepDoes(h.walletManager)
         assertTrue(h.walletManager.createWallet(phrase))
         every { h.ksm.authBoundKeyExists() } returns null
-        assertEquals(SeedKeyStatus.BOUND, h.walletManager.seedKeyStatus())
+        assertEquals("no evidence either way: neither LOCK_REMOVED nor BOUND", SeedKeyStatus.UNCHECKED, h.walletManager.seedKeyStatus())
+    }
+
+    @Test fun `KS-BIND a key that throws an unmapped error is not reported BOUND`() {
+        // A vendor Keystore raising a generic error for a key that no longer opens (not
+        // KeyPermanentlyInvalidated, no matching message): the status must not claim the lock ties it.
+        val h = Harness(windowOpen = true)
+        h.prepareAsTheStepDoes(h.walletManager)
+        assertTrue(h.walletManager.createWallet(phrase))
+        assertTrue(h.recordIsBound())
+        h.vault.failure = { op, alias, _ ->
+            if (alias == BOUND_ALIAS && op == "encrypt") java.security.ProviderException("vendor keystore") else null
+        }
+        assertEquals(SeedKeyStatus.UNCHECKED, h.walletManager.seedKeyStatus())
+    }
+
+    @Test fun `KS-BIND a create that outlasts the auth window is still sealed bound`() {
+        // The probe answers READY with the window about to lapse, and the native create (seed
+        // derivation) runs past its end. The seal must already have happened by then.
+        val h = Harness(windowOpen = true)
+        h.closeWindowDuringNative = true
+        assertEquals(SeedKeyReadiness.READY, h.prepareAsTheStepDoes(h.walletManager))
+        assertTrue(h.walletManager.createWallet(phrase))
+        assertTrue("the window lapsed during the native create and the record fell back to the legacy key", h.recordIsBound())
+    }
+
+    @Test fun `KS-BIND a restore that outlasts the auth window is still sealed bound`() {
+        val h = Harness(windowOpen = true)
+        h.closeWindowDuringNative = true
+        assertEquals(SeedKeyReadiness.READY, h.prepareAsTheStepDoes(h.walletManager))
+        assertTrue(h.walletManager.recoverWallet(phrase, 1_600_000_000L, null))
+        assertTrue("the window lapsed during the native restore and the record fell back to the legacy key", h.recordIsBound())
     }
 
     @Test fun `KS-BIND legacy record beside an invalidated leftover key is CANNOT_BIND, not PENDING`() {
@@ -243,6 +276,23 @@ class SeedKeyBindAtCreationTest {
             if (alias == BOUND_ALIAS) KeystoreKeyInvalidatedException(RuntimeException("invalidated")) else null
         }
         assertEquals("PENDING promises a move that can never happen", SeedKeyStatus.CANNOT_BIND, h.walletManager.seedKeyStatus())
+    }
+
+    @Test fun `KS-BIND a prompt whose answer never comes back does not hold the write forever`() = kotlinx.coroutines.test.runTest {
+        // Its activity recreated while it was up, the prompt's callback may never fire.
+        val r = prepareSeedKeyThenPrompt(
+            prepare = { SeedKeyReadiness.NEEDS_DEVICE_CREDENTIAL },
+            prompt = { kotlinx.coroutines.awaitCancellation() },
+        )
+        assertEquals(SeedKeyReadiness.NEEDS_DEVICE_CREDENTIAL, r)
+        assertTrue("the wait was not bounded", testScheduler.currentTime >= SEED_KEY_PROMPT_TIMEOUT_MS)
+    }
+
+    @Test fun `KS-BIND a prompt that throws does not stop the write`() {
+        val r = runBlocking {
+            prepareSeedKeyThenPrompt(prepare = { SeedKeyReadiness.NEEDS_DEVICE_CREDENTIAL }, prompt = { error("prompt blew up") })
+        }
+        assertEquals(SeedKeyReadiness.NEEDS_DEVICE_CREDENTIAL, r)
     }
 
     @Test fun `KS-BIND no wallet stored - status is NO_WALLET`() {

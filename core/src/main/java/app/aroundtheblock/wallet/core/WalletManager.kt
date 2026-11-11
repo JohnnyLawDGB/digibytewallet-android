@@ -242,9 +242,13 @@ class WalletManager @Suppress("LongParameterList") constructor(
         if (passphrase != null && (passphrase.size > Bip39Passphrase.MAX_BYTES || Bip39Passphrase.hasNul(passphrase))) return false
         val mnemonicBytes = mnemonic.toByteArray(Charsets.UTF_8)
         try {
+            // KS-BIND: sealed BEFORE the native create, so the seal follows the step's seed-key probe
+            // (prepareSeedKeyForNewRecord) with nothing slow between them. Sealed after it, a create
+            // that ran past the end of the auth window landed on the legacy key without a prompt.
+            val sealed = sealForNewRecord(mnemonicBytes, passphrase) ?: return false
             // Persist creation time so restoreFromDisk uses the right sync checkpoint — in the record.
             val created = createNative(mnemonicBytes, passphrase) &&
-                writeSeedRecord(mnemonicBytes, passphrase, System.currentTimeMillis() / 1000, ORIGIN_CREATED)
+                storeSeedRecord(sealed, mnemonicBytes, passphrase, System.currentTimeMillis() / 1000, ORIGIN_CREATED)
             if (created) {
                 _walletState.value = WalletState.Unlocked
                 clearSyncData()
@@ -277,8 +281,10 @@ class WalletManager @Suppress("LongParameterList") constructor(
             // stays consistent with the first sync.
             val creationTimeSecs =
                 if (creationTimestamp > 0L) creationTimestamp else System.currentTimeMillis() / 1000
+            // KS-BIND: sealed before the native restore's derivation, as in createWallet.
+            val sealed = sealForNewRecord(mnemonicBytes, passphrase) ?: return false
             val recovered = recoverNative(mnemonicBytes, creationTimestamp, passphrase) &&
-                writeSeedRecord(mnemonicBytes, passphrase, creationTimeSecs, ORIGIN_RESTORED)
+                storeSeedRecord(sealed, mnemonicBytes, passphrase, creationTimeSecs, ORIGIN_RESTORED)
             if (recovered) {
                 _walletState.value = WalletState.Unlocked
                 clearSyncData()
@@ -1128,13 +1134,27 @@ class WalletManager @Suppress("LongParameterList") constructor(
      * "mnemonic"), so the two must remain the same wallet.
      */
     private fun writeSeedRecord(mnemonicBytes: ByteArray, passphrase: ByteArray?, creationTimeSecs: Long, origin: String): Boolean {
+        val sealed = sealForNewRecord(mnemonicBytes, passphrase) ?: return false
+        return storeSeedRecord(sealed, mnemonicBytes, passphrase, creationTimeSecs, origin)
+    }
+
+    /** The seal half of [writeSeedRecord]: null (logged) when nothing could seal the record. */
+    private fun sealForNewRecord(mnemonicBytes: ByteArray, passphrase: ByteArray?): SealedRecord? = try {
+        sealRecord(mnemonicBytes, passphrase?.takeIf { it.isNotEmpty() })
+    } catch (e: Exception) {
+        android.util.Log.e("WalletManager", "wallet record not sealed (${e::class.java.simpleName}); no wallet was made")
+        null
+    }
+
+    /** The store half of [writeSeedRecord], for a record [sealed] from the same [mnemonicBytes] and [passphrase]. */
+    private fun storeSeedRecord(
+        sealed: SealedRecord,
+        mnemonicBytes: ByteArray,
+        passphrase: ByteArray?,
+        creationTimeSecs: Long,
+        origin: String,
+    ): Boolean {
         val pass = passphrase?.takeIf { it.isNotEmpty() }
-        val sealed = try {
-            sealRecord(mnemonicBytes, pass)
-        } catch (e: Exception) {
-            android.util.Log.e("WalletManager", "wallet record not sealed (${e::class.java.simpleName}); no wallet was made")
-            return false
-        }
         val identity = identityOf(mnemonicBytes, pass)
         val fields = if (sealed.authBound) V2_ENVELOPE_FIELDS else LEGACY_ENVELOPE_FIELDS
         val (seedCt, seedIv) = fields

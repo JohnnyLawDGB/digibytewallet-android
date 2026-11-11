@@ -84,7 +84,8 @@ class SeedKeyBindingTest {
     private val statusRows: List<Pair<Triple<Boolean, BoundKeyState, Boolean>, SeedKeyStatus>> = listOf(
         // A bound record: BOUND only while the key still opens AND the device has a lock.
         Triple(true, BoundKeyState.USABLE, true) to SeedKeyStatus.BOUND,
-        Triple(true, BoundKeyState.UNKNOWN, true) to SeedKeyStatus.BOUND,
+        // The key could not be asked: no evidence it opens, so no positive claim either way.
+        Triple(true, BoundKeyState.UNKNOWN, true) to SeedKeyStatus.UNCHECKED,
         // The lock was removed and a new one set: the record says bound, the key is gone (API 31+)
         // or invalidated (API 26-30). Never BOUND.
         Triple(true, BoundKeyState.ABSENT, true) to SeedKeyStatus.LOCK_REMOVED,

@@ -4,12 +4,13 @@ import app.aroundtheblock.wallet.core.security.SeedKeyReadiness
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * KS-BIND. The one copy of what the step that is about to write a NEW wallet record does first —
- * PIN setup for a create, the restore's start for a restore. The app's
- * `prepareSeedKeyBeforeRecordWrite` supplies the device-credential prompt; the core tests supply a
- * fake one. Both run THIS function, so a test of it is a test of the shipped decision.
+ * PIN setup for a create, the restore's start for a restore. `OnboardingViewModel` runs it in the
+ * same coroutine as the write, with the prompt the app's `seedKeyPromptFor` builds; the core tests
+ * supply a fake one. Both run THIS function, so a test of it is a test of the shipped decision.
  *
  * Invariant: on a device with a secure lock screen the record is sealed under the auth-bound key
  * from creation. [prepare] (normally [WalletManager.prepareSeedKeyForNewRecord]) probes the key off
@@ -30,10 +31,22 @@ suspend fun prepareSeedKeyThenPrompt(
         SeedKeyReadiness.UNAVAILABLE
     }
     if (shouldPromptForDeviceCredential(readiness) && prompt != null) {
-        prompt()
+        // Bounded and contained: a prompt whose answer never comes back (its activity was recreated
+        // while it was up) or that throws must not keep the write from happening. The write then
+        // falls back to the legacy key, as for a declined prompt.
+        try {
+            withTimeoutOrNull(SEED_KEY_PROMPT_TIMEOUT_MS) { prompt() }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            // fall through to the write
+        }
     }
     return readiness
 }
+
+/** KS-BIND: the longest the record write waits on the device-credential prompt. */
+const val SEED_KEY_PROMPT_TIMEOUT_MS = 180_000L
 
 /** KS-BIND: the one readiness that shows a prompt. Every other readiness writes without one. */
 fun shouldPromptForDeviceCredential(readiness: SeedKeyReadiness): Boolean =

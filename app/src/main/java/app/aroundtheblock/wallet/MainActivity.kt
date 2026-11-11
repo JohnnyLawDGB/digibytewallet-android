@@ -51,6 +51,11 @@ class MainActivity : FragmentActivity() {
         /** Poll interval for the inactivity lock. Bounds the overshoot past the configured
          *  timeout (shortest option is 60 s, so at most ~8%) without waking every second. */
         const val AUTO_LOCK_TICK_MS = 5_000L
+
+        /** KS-BIND: how long a due no-screen-lock notice waits for a PIN to exist (10 min), then gives
+         *  up for this unlock; the next unlock asks again. */
+        const val NO_LOCK_NOTICE_PIN_CHECK_MS = 2_000L
+        const val NO_LOCK_NOTICE_PIN_CHECKS = 300
     }
 
     /**
@@ -377,8 +382,15 @@ class MainActivity : FragmentActivity() {
                 var showNoLockNotice by remember { mutableStateOf(false) }
                 androidx.compose.runtime.LaunchedEffect(walletState) {
                     if (walletState !is app.aroundtheblock.wallet.core.WalletState.Unlocked) return@LaunchedEffect
-                    while (!pinManager.pinKnownToExist()) kotlinx.coroutines.delay(500)
+                    // Due first: almost every session owes no notice and must pay nothing here.
                     if (!app.aroundtheblock.wallet.ui.onboarding.NoScreenLockNoticeFlags.isDue(this@MainActivity)) return@LaunchedEffect
+                    // Only behind a PIN. PIN setup marks the notice due after the PIN is saved, so
+                    // this nearly always answers at once; the wait is bounded and off the main thread.
+                    var pinChecks = 0
+                    while (!kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { pinManager.pinKnownToExist() }.getOrDefault(false) }) {
+                        if (++pinChecks > NO_LOCK_NOTICE_PIN_CHECKS) return@LaunchedEffect
+                        kotlinx.coroutines.delay(NO_LOCK_NOTICE_PIN_CHECK_MS)
+                    }
                     val status = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                         runCatching { walletManager.seedKeyStatus() }.getOrNull()
                     }

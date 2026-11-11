@@ -17,42 +17,35 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
 import app.aroundtheblock.wallet.R
-import app.aroundtheblock.wallet.core.WalletManager
 import app.aroundtheblock.wallet.core.security.BiometricAuth
-import app.aroundtheblock.wallet.core.prepareSeedKeyThenPrompt
-import app.aroundtheblock.wallet.core.security.SeedKeyReadiness
 
 /**
- * KS-BIND. Run by the step that is about to write a NEW wallet record — PIN setup for a create, the
- * restore's start for a restore — immediately before the write, and AWAITED by it.
+ * KS-BIND. The device-credential prompt for the step that is about to write a NEW wallet record —
+ * PIN setup for a create, the restore's start for a restore. The step hands it to
+ * [OnboardingViewModel.createWallet] / [OnboardingViewModel.recoverWallet], which run
+ * [app.aroundtheblock.wallet.core.prepareSeedKeyThenPrompt] and then the write in ONE coroutine in
+ * the ViewModel's scope, so the screen leaving composition while the prompt is up cannot orphan
+ * the write.
  *
  * Invariant: on a device with a secure lock screen the record is sealed under the auth-bound key
  * from creation. The bound key opens for 300 s after any device authentication; the keyguard unlock
  * that opened the phone usually still covers this step, so usually nothing is shown. When it does
- * not (the user spent longer than the window writing the phrase down or typing it in), ONE
- * device-credential prompt opens a fresh window and the write follows inside it.
+ * not (the user spent longer than the window writing the phrase down or typing it in), this ONE
+ * prompt opens a fresh window and the write follows inside it.
  *
- * The decision itself is [prepareSeedKeyThenPrompt] in core (one copy, tested there and here); this
- * only supplies the prompt, which needs an activity. Never blocks onboarding: a declined or failed
- * prompt, no activity, or any error lets the write go ahead, which then falls back to the legacy
- * key. Returns the readiness.
+ * Null when there is no activity to show it on: the write then goes ahead without a probe or a
+ * prompt and falls back to the legacy key if the window has lapsed. The prompt's outcome does not
+ * matter to the write: success opens the window, anything else leaves the seal to fall back.
+ * [BiometricAuth.authenticateDeviceCredential] never throws.
  */
-suspend fun prepareSeedKeyBeforeRecordWrite(
-    walletManager: WalletManager,
+fun seedKeyPromptFor(
     biometricAuth: BiometricAuth,
     activity: FragmentActivity?,
     promptTitle: String,
     promptSubtitle: String,
-): SeedKeyReadiness = prepareSeedKeyThenPrompt(
-    prepare = { walletManager.prepareSeedKeyForNewRecord() },
-    prompt = activity?.let { a ->
-        {
-            // The outcome does not matter here: success opens the window, anything else leaves the
-            // seal to fall back. authenticateDeviceCredential never throws.
-            biometricAuth.authenticateDeviceCredential(a, title = promptTitle, subtitle = promptSubtitle)
-        }
-    },
-)
+): (suspend () -> Unit)? = activity?.let { a ->
+    { biometricAuth.authenticateDeviceCredential(a, title = promptTitle, subtitle = promptSubtitle) }
+}
 
 /**
  * KS-BIND: the no-screen-lock notice is shown once per install. PIN setup marks it due when it

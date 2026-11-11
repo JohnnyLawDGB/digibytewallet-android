@@ -125,10 +125,22 @@ back to the legacy key until a wipe. This is recorded as an owner decision.
 
 The decision is one function, `prepareSeedKeyThenPrompt(prepare, prompt)` in core
 (`SeedKeyPreparation.kt`): it runs the probe off the main thread and, on `NEEDS_DEVICE_CREDENTIAL`
-only, runs the prompt once and awaits it. The app's `prepareSeedKeyBeforeRecordWrite` only supplies
-the prompt (it needs an activity); the core tests call the same function with a fake prompt. The PIN
-keypad takes no input while the wallet is being created, so a second create cannot start in the gap
-the probe and prompt open; the restore button is guarded the same way.
+only, runs the prompt once and awaits it (bounded at `SEED_KEY_PROMPT_TIMEOUT_MS`, 180 s, so a
+prompt whose answer never arrives cannot hold the write back; a prompt that throws is contained). It
+runs in `OnboardingViewModel.createWallet(seedKeyPrompt, …)` / `recoverWallet(seedKeyPrompt, …)`, in
+the SAME `viewModelScope` coroutine as the write: a screen that leaves composition while the prompt
+is up (activity recreated, navigated away) cancels nothing, so a saved PIN is never left without its
+record. The app's `seedKeyPromptFor` only builds the prompt (it needs an activity); the core tests
+call `prepareSeedKeyThenPrompt` with a fake prompt. The PIN keypad takes no input while the wallet is
+being created, so a second create cannot start in the gap the probe and prompt open; the restore
+button is guarded the same way.
+
+**Probe to seal.** `createWallet` / `recoverWallet` seal the record (`sealForNewRecord`) BEFORE the
+native create or restore, then store it after. Sealed after, a derivation that ran past the end of
+the window left a READY probe's record on the legacy key without a prompt. What remains between a
+READY probe and the seal is a dispatcher hop (milliseconds); a window that lapses inside it still
+falls back to the legacy key silently. The Keystore does not say how much of a window is left, so a
+"READY but nearly out" probe cannot be told apart; this residual is part of option (a) below.
 
 Keystore auth failures are recognised anywhere in the cause chain (`keystoreAuthFailureOf`), since
 some vendor Keystores raise not-authenticated at `doFinal`, wrapped as an `IllegalBlockSizeException`
@@ -140,8 +152,10 @@ and the create fell back without a prompt.
 evidence: removing the device lock invalidates the `_v2` key for good (API 31+ deletes it), and a
 lock set again later does not bring it back. So the key is asked too (`BoundKeyState`: a throwaway
 ENCRYPT that succeeds or refuses with not-authenticated is `USABLE`; absent or permanently
-invalidated is not; a Keystore that cannot be asked is `UNKNOWN`, which is not read as a removed
-lock). States: `BOUND` (bound record, key opens, device has a lock), `LOCK_REMOVED` (bound record
+invalidated is not; a Keystore that cannot be asked, or an encrypt that fails in a way not mapped
+to either, is `UNKNOWN`, which is read neither as a removed lock nor as a key that opens). States:
+`BOUND` (bound record, key `USABLE`, device has a lock), `UNCHECKED` (bound record, key `UNKNOWN`:
+no claim is made, and Security settings hides the line for that visit), `LOCK_REMOVED` (bound record
 whose key no longer opens, or no lock now: the text tells the user to check the phrase or move funds
 while the wallet is still open, since the next cold start needs the phrase), `PENDING` (legacy key
 on a secure device; moved the next time the app starts and opens the wallet's key: the warm unlock
@@ -163,7 +177,11 @@ invalidated leftover `_v2` key all land the new record on the legacy key, and se
 silent fallback (built); (b) show a short "not tied yet" notice whenever the readiness was
 `NEEDS_DEVICE_CREDENTIAL` and the record still landed legacy; (c) delete an invalidated `_v2` key
 that no stored record references (it wraps nothing), so new creates can bind. (c) touches the rule
-that nothing deletes a key outside the user's wipe, so it is the owner's.
+that nothing deletes a key outside the user's wipe, so it is the owner's. Two more cases sit under
+(a): the millisecond probe-to-seal residual above, and `PENDING` on a secure device whose keygen is
+always refused (the API 35 inconsistency, vendor quirks): it says the key "will be tied" at the next
+start, which on that device never happens. A `PENDING` variant for "keygen refused" would need the
+refusal recorded at seal time; not built.
 
 Tests: `SeedKeyBindingTest` (literal rows for API 26–37 × secure/insecure, readiness, and every
 record × key × lock status combination), `KeystoreAuthErrorMappingTest` (wrapped forms),
@@ -171,5 +189,9 @@ record × key × lock status combination), `KeystoreAuthErrorMappingTest` (wrapp
 open or lapsed, a declined prompt, no activity, a throwing probe, no lock screen, refused keygen, an
 invalidated key, an existing wallet left unchanged, and the status line against a deleted,
 invalidated, lapsed or unaskable key), the app's `SeedKeyBindingStepTest` (the shipped prompt
-decision with mocks) and `SeedKeyBindAtCreationWiringTest` (call order and awaiting at both call
-sites, notice flags, keypad guard, the status row).
+decision through the real `OnboardingViewModel`, including a screen scope cancelled while the
+prompt is up) and `SeedKeyBindAtCreationWiringTest` (both screens hand the prompt to the ViewModel
+and launch nothing of their own around the write; the ViewModel prepares before each write in one
+coroutine; notice flags and the bounded, due-first wait in `MainActivity`; keypad guard; the status
+row). `SeedKeyBindAtCreationTest` also covers a create and a restore whose native step outlasts the
+window (sealed bound), and a key that throws an unmapped error (`UNCHECKED`, not `BOUND`).

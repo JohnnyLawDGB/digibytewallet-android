@@ -141,12 +141,18 @@ enum class SeedKeyStatus {
      *  earlier lock is invalidated, so the move can never happen on this install: PENDING would be
      *  a promise that cannot come true. */
     CANNOT_BIND,
+
+    /** The record says bound, but the key could not be asked just now ([BoundKeyState.UNKNOWN]):
+     *  no evidence that it still opens, so nothing is claimed. Security settings hides the line for
+     *  that visit rather than say "tied to this phone's screen lock" without evidence. */
+    UNCHECKED,
 }
 
 /**
  * Pure: the status line, from what is stored, what the auth-bound key answers, and whether the
  * device is secure now. BOUND is claimed only when the record is bound AND the key still opens AND
- * the device has a lock: the record alone is not evidence (KS-BIND).
+ * the device has a lock: the record alone is not evidence (KS-BIND), and neither is a key that could
+ * not be asked (UNCHECKED).
  */
 fun seedKeyStatusFor(
     hasWallet: Boolean,
@@ -158,7 +164,8 @@ fun seedKeyStatusFor(
     recordBound -> when {
         !deviceSecure -> SeedKeyStatus.LOCK_REMOVED
         boundKey == BoundKeyState.ABSENT || boundKey == BoundKeyState.INVALIDATED -> SeedKeyStatus.LOCK_REMOVED
-        else -> SeedKeyStatus.BOUND
+        boundKey == BoundKeyState.USABLE -> SeedKeyStatus.BOUND
+        else -> SeedKeyStatus.UNCHECKED
     }
     !deviceSecure -> SeedKeyStatus.NO_LOCK_SCREEN
     boundKey == BoundKeyState.INVALIDATED -> SeedKeyStatus.CANNOT_BIND
