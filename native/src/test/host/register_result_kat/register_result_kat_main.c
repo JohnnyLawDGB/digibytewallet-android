@@ -22,13 +22,19 @@
 //                it registered trusted: the wallet moves its OWN record in            -> DUPLICATE
 //   held-refused the wallet's own foreign record passed back when it now spends a wallet
 //                coin without a valid signature (refused, but still the wallet's)     -> KEPT_FOREIGN
+//   sig-refused  a fresh unconfirmed spend of a wallet coin without a valid signature
+//                (checked), and the same spend confirmed but unproven                  -> REFUSED, REFUSED
+//   unproven-bound  registerRawTransaction's shape (unproven, forced unconfirmed): a
+//                non-wallet tx inside the kept set's bounds, then one past them        -> KEPT_FOREIGN, REFUSED
 //   legacy       the three int forms still return what they always have (control)
 //
 // Comparison arm (-DREGISTER_RESULT_UNFIXED): the earlier shape, where the only answer was the int
 // return value, so "held" was read from it. Every case in which the wallet keeps a non-wallet record
-// (foreign, bound, same, promote, held-refused) then releases an object the wallet still holds
-// (AddressSanitizer report); duplicate leaves a copy with no owner (LeakSanitizer report); kept,
-// confirmed, range and legacy hold in both arms.
+// (foreign, bound, same, promote, held-refused, unproven-bound) then releases an object the wallet
+// still holds (AddressSanitizer report); duplicate leaves a copy with no owner (LeakSanitizer report);
+// kept, confirmed, range, sig-refused and legacy hold in both arms (the int answers 0 and the caller
+// owns tx: the earlier shape got those right). sig-refused guards the fixed arm against reporting a
+// signature-refused object as held (a leak); run.sh shows it red on such a mutation.
 //
 // BRWallet.c is #included, so it is NOT on the clang line. Exit 0 = the case held.
 #include <stdio.h>
@@ -207,6 +213,36 @@ static int runCase(const char *c) {
             ck(BRWalletBalance(w) == 5000000, "the unsigned spend is not counted");
         }
         ck(touchAll(w) == 2, "the coin and the spend are held, once each");
+    }
+    else if (strcmp(c, "sig-refused") == 0) {
+        printf("[sig-refused] a fresh spend of a wallet coin without a valid signature\n");
+        BRTransaction *p = spend(NULL, 14, a.s, 5000000, 700000);
+        UInt256 ph = p->txHash;
+        expectOutcome(reg(w, p, BR_WALLET_REGISTER_TRUSTED, NULL), BR_WALLET_REGISTER_KEPT, "the wallet's coin");
+        expectOutcome(reg(w, spend(&ph, 0, kOther, 4000000, TX_UNCONFIRMED), BR_WALLET_REGISTER_CHECKED, &legacy),
+                      BR_WALLET_REGISTER_REFUSED, "an unconfirmed spend of it, junk scriptSig, checked");
+        ck(legacy == 0, "legacy answer 0");
+        BRTransaction *u = spend(&ph, 0, kOther, 3000000, 700001);   // a different spend: a different hash
+        expectOutcome(reg(w, u, BR_WALLET_REGISTER_UNPROVEN, &legacy),
+                      BR_WALLET_REGISTER_REFUSED, "a confirmed-but-unproven spend of it, junk scriptSig");
+        ck(legacy == 0, "legacy answer 0");
+        ck(BRWalletBalance(w) == 5000000, "the coin is not spent by either");
+        ck(touchAll(w) == 1, "only the coin is held");
+    }
+    else if (strcmp(c, "unproven-bound") == 0) {
+        printf("[unproven-bound] registerRawTransaction's shape: unproven, forced unconfirmed, non-wallet\n");
+        for (uint32_t i = 0; i < WALLET_FOREIGN_TX_MAX_COUNT; i++) {
+            BRTransaction *f = spend(NULL, 300 + i, kOther, 100000, 700000);
+            f->blockHeight = TX_UNCONFIRMED; f->timestamp = 0;   // as registerRawTransaction does
+            if (! expectOutcome(reg(w, f, BR_WALLET_REGISTER_UNPROVEN, i == 0 ? &legacy : NULL),
+                                BR_WALLET_REGISTER_KEPT_FOREIGN, "a non-wallet tx inside the bounds")) break;
+            if (i == 0) ck(legacy == 0, "legacy answer 0 (the same as for a refusal)");
+        }
+        BRTransaction *x = spend(NULL, 299, kOther, 100000, 700000);
+        x->blockHeight = TX_UNCONFIRMED; x->timestamp = 0;
+        expectOutcome(reg(w, x, BR_WALLET_REGISTER_UNPROVEN, &legacy), BR_WALLET_REGISTER_REFUSED, "one past the bounds");
+        ck(legacy == 0, "legacy answer 0");
+        ck(touchAll(w) == WALLET_FOREIGN_TX_MAX_COUNT, "the kept set, and nothing past it");
     }
     else if (strcmp(c, "legacy") == 0) {
         printf("[legacy] the int forms keep their answers\n");

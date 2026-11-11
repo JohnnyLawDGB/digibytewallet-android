@@ -835,10 +835,11 @@ NativeBridge_registerRawTransaction(JNIEnv *env, jobject thiz,
     BRWalletRegisterOutcome held = BR_WALLET_REGISTER_REFUSED;
     int ok = BRWalletRegisterTransactionOutcome(g_wallet, tx, BR_WALLET_REGISTER_UNPROVEN, &held);
     /* Who owns tx now is the registration's own answer (REGISTER-RESULT): the wallet, when it kept tx as
-     * one of its transactions or as an unconfirmed non-wallet tx; otherwise this function, which frees it --
-     * a refused tx (confirmed non-wallet, out of range, an unconfirmed tx that does not validly sign a
-     * wallet output), or a copy of a hash a peer thread registered since the lookup above. tx is not named
-     * again below. */
+     * one of its transactions or as an unconfirmed non-wallet tx (tx is forced unconfirmed above, so a
+     * non-wallet tx registered here is kept as foreign while the kept set has room); otherwise this
+     * function, which frees it -- a refused tx (a non-wallet tx past the kept set's bounds, out of range,
+     * an unconfirmed tx that does not validly sign a wallet output), or a copy of a hash a peer thread
+     * registered since the lookup above. tx is not named again below. */
     if (!BRWalletRegisterOutcomeHeld(held)) BRTransactionFree(tx);
     tx = NULL;
     if (!ok) {
