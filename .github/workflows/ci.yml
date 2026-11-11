@@ -10,8 +10,40 @@ on:
   schedule:
     - cron: '17 6 * * 1'
 
+# THE SHAPE OF A PUSH OR PULL-REQUEST RUN. One job used to do everything in turn and took two to
+# three hours, all but a quarter of an hour of it the native host KATs run one after another. Now:
+#   app        the Gradle side: guard scripts, unit tests, the debug APKs;
+#   kat-plan   lists the host KAT suites and splits them into KAT_SHARDS lists;
+#   kat-shard  one job per list, side by side, each running its suites one at a time;
+#   build      the gate. Passes only if `app`, the plan and every shard succeeded and the suites
+#              that passed are exactly the suites in the checkout. `build` is the name that says
+#              "CI passed"; wait on it, not on the jobs above.
+# The scheduled run is separate (native-kats-weekly, at the end) and is not sharded.
+#
+# The shard scripts are in .github/kat-shards/. They began as copies of the core repo's, which runs
+# these same suites against a core change; plan.py there says how the two are kept in step.
+env:
+  # How many parallel jobs the suites are split across. Chosen from the timings (2026-11-10): the
+  # suites add up to about 173 runner-minutes at their slowest recorded times, and the longest
+  # single suite (cf_scan_ledger_drive_kat) has taken 19, which no split can go below. 8 lists
+  # plan at 21.6 minutes each; 7 at 24.7; 10 would save under three minutes.
+  KAT_SHARDS: 8
+  # The gate fails if fewer suites than this passed. The plan is already compared with the
+  # runner's own list, so this only catches both being wrong together (the suite directory
+  # moved, say). 209 suites when written; raise it now and then, it need not track the count.
+  KAT_FLOOR: 200
+
+# A push to a pull request cancels that pull request's run still in progress: each run now takes
+# nine runners at once, and the result for a commit that has been replaced is of no use. Any other
+# run (a push to a branch, the schedule) is in a group of its own and is never cancelled.
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  build:
+  # The Gradle side. These were the steps of `build` before the host KATs moved to their own jobs,
+  # and are unchanged; `build` is now the gate at the end, which needs this job.
+  app:
     # The scheduled run is the native sweep below and nothing else.
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
@@ -100,30 +132,6 @@ jobs:
         # the root-level testMainnetDebugUnitTest would silently skip it. Name both.
         run: ./gradlew testMainnetDebugUnitTest :app:testMainnetSideloadDebugUnitTest :app:testMainnetPlayDebugUnitTest
 
-      # ASan known-answer tests compiled against the live C submodule sources. These cover
-      # memory safety and wire/protocol invariants the JVM tests structurally cannot reach:
-      # NativeBridge's static initializer throws UnsatisfiedLinkError on a host JVM, so the
-      # native layer is unmockable there. Nothing ran these before, and two had rotted into
-      # a permanently broken state unnoticed.
-      #
-      # Two suites build a 32-bit arm as well as a 64-bit one (`clang -m32`). The runner image
-      # ships clang and its 32-bit sanitizer runtime but not the 32-bit libc headers, so those
-      # arms died in <stdint.h> and the suites failed without having tested anything.
-      # gcc-multilib brings libc6-dev-i386 and the 32-bit libgcc. A suite that cannot build an
-      # arm fails rather than skips, on purpose: install the toolchain, never relax the suite.
-      - name: 32-bit toolchain for the native sweep
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq gcc-multilib
-
-      - name: Native host KATs
-        env:
-          # LeakSanitizer on for every ASan arm, as core CI does (core #49). LSAN_OPTIONS is read
-          # after ASAN_OPTIONS, so this overrides a run.sh's detect_leaks=0; a run.sh that sets
-          # LSAN_OPTIONS itself for one run (a comparison arm whose defect is the leak another case
-          # asserts) keeps its own. A suite must free what it allocates, so a leak shows up as a
-          # failing suite.
-          LSAN_OPTIONS: detect_leaks=1
-        run: ./scripts/run-host-kats.sh
-
       # The parity tests (core/src/androidTest: Kotlin against the C core through JNI) run only on
       # a device, so nothing here ran them, and nothing even compiled them: a typo in one merged
       # unnoticed until someone ran it by hand. Compiling them is cheap and catches that much.
@@ -140,9 +148,203 @@ jobs:
           path: app/build/outputs/apk/mainnet*/debug/*.apk
           retention-days: 30
 
+  # Lists the host KAT suites and splits them. Needs neither the submodule nor a compiler.
+  kat-plan:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Least privilege: the checkout only.
+    permissions:
+      contents: read
+    outputs:
+      shards: ${{ steps.plan.outputs.shards }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # plan.py takes every *_kat directory, so a new suite is planned without anyone adding it to
+      # a list; one with no recorded timing is planned at a default weight. The plan is then
+      # compared with the list the runner itself would sweep (`run-host-kats.sh --list`): two
+      # scripts now decide what a suite is, and if they ever disagree a suite could go unrun.
+      - name: Plan the shards
+        id: plan
+        run: |
+          set -euo pipefail
+          python3 .github/kat-shards/plan.py native/src/test/host \
+            .github/kat-shards/timings.txt "$KAT_SHARDS" plan
+          ./scripts/run-host-kats.sh --list | LC_ALL=C sort > "$RUNNER_TEMP/runner-list.txt"
+          if ! diff "$RUNNER_TEMP/runner-list.txt" plan/all.txt; then
+            echo "::error::the plan (>) is not the list scripts/run-host-kats.sh would run (<)"
+            exit 1
+          fi
+          echo "shards=$(python3 -c 'import json,sys; print(json.dumps(list(range(int(sys.argv[1])))))' "$KAT_SHARDS")" >> "$GITHUB_OUTPUT"
+
+      - name: Upload the plan
+        uses: actions/upload-artifact@v7
+        with:
+          name: kat-plan
+          path: plan/
+          if-no-files-found: error
+          # A re-run uploads under the same name.
+          overwrite: true
+          retention-days: 30
+
+  # ASan known-answer tests compiled against the live C submodule sources. These cover
+  # memory safety and wire/protocol invariants the JVM tests structurally cannot reach:
+  # NativeBridge's static initializer throws UnsatisfiedLinkError on a host JVM, so the
+  # native layer is unmockable there. Nothing ran these before, and two had rotted into
+  # a permanently broken state unnoticed.
+  #
+  # One job per list from the plan. Each suite still goes through scripts/run-host-kats.sh, one
+  # at a time, on a full checkout with the submodule, so it is built and judged as the single
+  # sweep built and judged it -- including the suites that check the whole tree rather than one
+  # piece of it (seam_macros_unbuilt_kat, harness_pipe_status_kat), which see the same tree in
+  # whichever shard they land. Needs no SDK, no JDK and no Gradle, as the weekly sweep shows.
+  kat-shard:
+    name: kat-shard ${{ matrix.shard }}
+    needs: kat-plan
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    # The longest list plans at about 22 minutes and the same suite can take twice as long on a
+    # slow runner. Past an hour something is hung, and the gate reports the suites that never ran.
+    timeout-minutes: 60
+    # Least privilege: the checkout and its submodule only.
+    permissions:
+      contents: read
+    strategy:
+      # Every shard runs to the end, so one failure does not hide another.
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.kat-plan.outputs.shards) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      # Outside the checkout, like the results below: the suites that scan the tree should find
+      # in it only what the repository has.
+      - name: Download the plan
+        uses: actions/download-artifact@v8
+        with:
+          name: kat-plan
+          path: ${{ runner.temp }}/kat-plan
+
+      # Two suites build a 32-bit arm as well as a 64-bit one (`clang -m32`). The runner image
+      # ships clang and its 32-bit sanitizer runtime but not the 32-bit libc headers, so those
+      # arms died in <stdint.h> and the suites failed without having tested anything.
+      # gcc-multilib brings libc6-dev-i386 and the 32-bit libgcc. A suite that cannot build an
+      # arm fails rather than skips, on purpose: install the toolchain, never relax the suite.
+      # Every shard installs it: which shard a suite lands in changes with the timings.
+      - name: 32-bit toolchain for the native sweep
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq gcc-multilib
+
+      - name: Native host KATs (shard ${{ matrix.shard }})
+        env:
+          SHARD: ${{ matrix.shard }}
+          # LeakSanitizer on for every ASan arm, as core CI does (core #49). LSAN_OPTIONS is read
+          # after ASAN_OPTIONS, so this overrides a run.sh's detect_leaks=0; a run.sh that sets
+          # LSAN_OPTIONS itself for one run (a comparison arm whose defect is the leak another case
+          # asserts) keeps its own. A suite must free what it allocates, so a leak shows up as a
+          # failing suite.
+          LSAN_OPTIONS: detect_leaks=1
+        run: |
+          mkdir -p "$RUNNER_TEMP/kat-results"
+          bash .github/kat-shards/run-shard.sh . "$RUNNER_TEMP/kat-plan/shard-$SHARD.txt" \
+            "$RUNNER_TEMP/kat-results/results-$SHARD.txt"
+
+      # After a failure too: the gate names every suite that did not pass from these.
+      - name: Upload the shard's results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: kat-results-${{ matrix.shard }}
+          path: ${{ runner.temp }}/kat-results/
+          if-no-files-found: ignore
+          # A re-run of a failed shard replaces its earlier results.
+          overwrite: true
+          retention-days: 30
+
+  # THE GATE, under the name the whole job used to have. It runs whatever happened above
+  # (`always()`: a job that is skipped because one it needs failed would otherwise read as
+  # passing) and fails unless `app`, the plan and every shard succeeded and the suites that passed
+  # are exactly the planned list, each in the shard it was planned for (check.sh). Nothing but
+  # this job needs to be waited on. It needs `app` rather than holding the Gradle steps itself so
+  # that the Gradle side runs alongside the shards instead of after them.
+  build:
+    needs: [app, kat-plan, kat-shard]
+    if: always() && github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Least privilege: the checkout only.
+    permissions:
+      contents: read
+    steps:
+      - name: Every job succeeded
+        env:
+          APP: ${{ needs.app.result }}
+          PLAN: ${{ needs.kat-plan.result }}
+          SHARDS: ${{ needs.kat-shard.result }}
+        run: |
+          echo "app: $APP, plan: $PLAN, shards: $SHARDS"
+          if [ "$APP" != success ] || [ "$PLAN" != success ] || [ "$SHARDS" != success ]; then
+            echo "::error::app $APP, plan $PLAN, shards $SHARDS"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+        if: always()
+
+      - name: Download the plan
+        if: always()
+        uses: actions/download-artifact@v8
+        with:
+          name: kat-plan
+          path: ${{ runner.temp }}/kat-plan
+
+      - name: Download the shards' results
+        if: always()
+        uses: actions/download-artifact@v8
+        with:
+          pattern: kat-results-*
+          path: ${{ runner.temp }}/kat-results
+          merge-multiple: true
+
+      # Runs after a failed shard too, to name every suite that did not pass.
+      - name: Coverage (every planned suite passed, in its shard)
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/kat-results"
+          bash .github/kat-shards/check.sh "$RUNNER_TEMP/kat-plan" "$RUNNER_TEMP/kat-results" \
+            "$KAT_SHARDS" "$KAT_FLOOR" 2>&1 | tee "$RUNNER_TEMP/coverage.txt"
+          {
+            echo '```'
+            cat "$RUNNER_TEMP/coverage.txt"
+            echo '```'
+            echo '<details><summary>Slowest suites</summary>'
+            echo
+            echo '```'
+            grep -v '^#' "$RUNNER_TEMP/kat-results/timings.txt" | sort -rn | head -25
+            echo '```'
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # What .github/kat-shards/timings.txt is refreshed from.
+      - name: Upload the timings
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: kat-timings
+          path: ${{ runner.temp }}/kat-results/timings.txt
+          if-no-files-found: ignore
+          overwrite: true
+          retention-days: 30
+
   # Weekly native sweep, on a quiet repository too. Needs no SDK, no JDK and no Gradle: the
   # KATs compile the C core on the host, and scripts/run-host-kats.sh finds its own compiler
   # and prints which one it used.
+  #
+  # One job, not shards: nobody waits on it, and it is the one run of the runner's own sweep from
+  # start to finish, which the shards go around (they ask it for one suite at a time).
   native-kats-weekly:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
@@ -154,13 +356,13 @@ jobs:
         with:
           submodules: recursive
 
-      # Same toolchain as the per-push sweep above, for the same two suites.
+      # Same toolchain as the per-push shards above, for the same two suites.
       - name: 32-bit toolchain for the native sweep
         run: sudo apt-get update -qq && sudo apt-get install -y -qq gcc-multilib
 
       - name: Native host KATs (full sweep)
         env:
-          # LeakSanitizer on, as in the per-push sweep above.
+          # LeakSanitizer on, as in the per-push shards above.
           LSAN_OPTIONS: detect_leaks=1
         run: ./scripts/run-host-kats.sh
 
