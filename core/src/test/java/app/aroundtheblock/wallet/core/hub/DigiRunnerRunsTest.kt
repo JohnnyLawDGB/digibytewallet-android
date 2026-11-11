@@ -5,6 +5,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -38,7 +39,7 @@ class DigiRunnerRunsTest {
         val h = Harness(this, mutableListOf({ first }))
         h.runs.onRunStarted()
         advanceUntilIdle()
-        assertTrue(h.runs.submit(10, 1000, 0, 2))
+        assertTrue(h.runs.submit(h.runs.capture(), 10, 1000, 0, 2))
         assertEquals(1, h.starts)
         assertEquals(listOf(first), h.submitted.map { it.runId })
     }
@@ -47,10 +48,10 @@ class DigiRunnerRunsTest {
         val h = Harness(this, mutableListOf({ first }, { second }))
         h.runs.onRunStarted()
         advanceUntilIdle()
-        h.runs.submit(10, 1000, 0, 2)
+        h.runs.submit(h.runs.capture(), 10, 1000, 0, 2)
         h.runs.onRunStarted() // Play Again
         advanceUntilIdle()
-        h.runs.submit(20, 2000, 0, 1)
+        h.runs.submit(h.runs.capture(), 20, 2000, 0, 1)
         assertEquals(2, h.starts)
         assertEquals(listOf(first, second), h.submitted.map { it.runId })
     }
@@ -61,7 +62,7 @@ class DigiRunnerRunsTest {
         advanceUntilIdle()
         h.runs.onRunStarted()
         advanceUntilIdle()
-        h.runs.submit(20, 2000, 0, 1)
+        h.runs.submit(h.runs.capture(), 20, 2000, 0, 1)
         assertEquals(listOf<String?>(null), h.submitted.map { it.runId })
     }
 
@@ -69,7 +70,7 @@ class DigiRunnerRunsTest {
         val h = Harness(this, mutableListOf({ null }))
         h.runs.onRunStarted()
         advanceUntilIdle()
-        assertTrue(h.runs.submit(10, 1000, 0, 2))
+        assertTrue(h.runs.submit(h.runs.capture(), 10, 1000, 0, 2))
         assertEquals(1, h.submitted.size)
         assertNull(h.submitted.single().runId)
     }
@@ -78,7 +79,7 @@ class DigiRunnerRunsTest {
         val h = Harness(this, mutableListOf({ throw IllegalStateException("offline") }))
         h.runs.onRunStarted()
         advanceUntilIdle()
-        assertTrue(h.runs.submit(10, 1000, 0, 2))
+        assertTrue(h.runs.submit(h.runs.capture(), 10, 1000, 0, 2))
         assertNull(h.submitted.single().runId)
     }
 
@@ -93,14 +94,16 @@ class DigiRunnerRunsTest {
             runIdWaitMs = 1_000,
         )
         runs.onRunStarted()
-        runs.submit(10, 1000, 0, 2)
+        val before = currentTime
+        runs.submit(runs.capture(), 10, 1000, 0, 2)
+        assertEquals("the submit waited for the bounded wait, and no longer", 1_000L, currentTime - before)
         assertEquals(1, starts)
         assertEquals(listOf<String?>(null), submitted)
     }
 
     @Test fun `a submit before any run started goes out without a runId`() = runTest {
         val h = Harness(this, mutableListOf())
-        h.runs.submit(10, 1000, 0, 2)
+        h.runs.submit(h.runs.capture(), 10, 1000, 0, 2)
         assertEquals(0, h.starts)
         assertNull(h.submitted.single().runId)
     }
@@ -114,10 +117,22 @@ class DigiRunnerRunsTest {
             submitScore = { _, _, _, _, runId -> submitted += runId; true },
         )
         runs.onRunStarted()
-        val pending = async { runs.submit(10, 1000, 0, 2) }
+        val captured = runs.capture()
+        val pending = async { runs.submit(captured, 10, 1000, 0, 2) }
         testScheduler.advanceTimeBy(100)
         gate.complete(first)
         pending.await()
         assertEquals(listOf<String?>(first), submitted)
+    }
+
+    @Test fun `a submit captured before a Play Again carries the old run's runId, not the new one's`() = runTest {
+        val h = Harness(this, mutableListOf({ first }, { second }))
+        h.runs.onRunStarted()
+        advanceUntilIdle()
+        val tapped = h.runs.capture() // Submit Score tapped ...
+        h.runs.onRunStarted()         // ... then Play Again, before the submit coroutine ran
+        advanceUntilIdle()
+        h.runs.submit(tapped, 10, 1000, 0, 2)
+        assertEquals(listOf<String?>(first), h.submitted.map { it.runId })
     }
 }

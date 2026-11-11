@@ -11,8 +11,11 @@ import kotlinx.coroutines.withTimeoutOrNull
  *
  * [onRunStarted] is called as each run starts (the first one and every "Play Again"); it asks the
  * server for that run's runId in the background and forgets the previous one, so a runId is never
- * reused across runs. [submit] sends the score with the current run's runId, waiting at most
- * [runIdWaitMs] for a run call still in flight. A run call that fails, throws or never answers leaves
+ * reused across runs. [capture] takes the run being scored at the moment its score is submitted,
+ * synchronously in the tap, and [submit] sends the score with that run's runId, waiting at most
+ * [runIdWaitMs] for a run call still in flight. Capturing in the tap matters: read later, inside
+ * the coroutine, a Play Again tapped before it is dispatched would bind the old score to the new
+ * run's runId, and the server refuses that honest score. A run call that fails, throws or never answers leaves
  * the score to go out without a runId: play is never blocked and nothing here throws but cancellation.
  *
  * The runId is never logged (LogRedactionSourceGateTest).
@@ -43,9 +46,13 @@ class DigiRunnerRuns(
         }
     }
 
-    suspend fun submit(score: Int, distance: Int, coins: Int, livesRemaining: Int): Boolean {
-        val run = current
-        val runId = run?.let { withTimeoutOrNull(runIdWaitMs) { it.await() } }
+    /** The run being played now, as a submit made at this moment must use it. */
+    class Run internal constructor(internal val runId: Deferred<String?>?)
+
+    fun capture(): Run = Run(current)
+
+    suspend fun submit(run: Run, score: Int, distance: Int, coins: Int, livesRemaining: Int): Boolean {
+        val runId = run.runId?.let { withTimeoutOrNull(runIdWaitMs) { it.await() } }
         return submitScore(score, distance, coins, livesRemaining, runId)
     }
 }
