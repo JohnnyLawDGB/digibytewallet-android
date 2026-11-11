@@ -76,6 +76,7 @@ object SavedBlockStore {
         runCatching {
             tmp.writeBytes(bytes)
             if (!tmp.renameTo(f)) { f.delete(); if (!tmp.renameTo(f)) tmp.delete() }
+            DirectorySync.sync(f.parentFile) // make the rename durable (TX-CKPT-CAP review: added to every file store)
         }.onFailure { runCatching { tmp.delete() } }
     }
 

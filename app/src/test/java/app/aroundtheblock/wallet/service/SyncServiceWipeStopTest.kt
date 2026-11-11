@@ -139,7 +139,7 @@ class SyncServiceWipeStopTest {
         // (WalletTxPersister, TX-CKPT-CAP), which asks the abort check after its native read and
         // before its file write; every service call must hand it the stood-down flag.
         val written = service.written
-        val sites = Regex("""WalletTxPersister\([^)]*\)\.persistCheckpoint""").findAll(written).map { it.range.first }.toList()
+        val sites = Regex("""\.persistCheckpoint\b""").findAll(written).map { it.range.first }.toList()
         assertTrue("scanner is blind: found ${sites.size} writes of the transaction set", sites.size >= 3)
         for (site in sites) {
             val call = service.code.substring(site, minOf(service.code.length, site + 120))

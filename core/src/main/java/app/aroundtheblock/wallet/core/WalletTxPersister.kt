@@ -48,6 +48,11 @@ class WalletTxPersister(
         ABORTED(false),
     }
 
+    /** The record count of the checkpoint the last [persistCheckpoint] wrote (0 for EMPTY, -1 before
+     *  any landed): what the sync service records beside `transactions_checkpointed`. */
+    @Volatile var lastDeclaredCount: Long = -1L
+        private set
+
     /**
      * Serialize the wallet's set and write it through to disk, synchronously. [shouldAbort] is asked
      * after the native read and before the write, so a wipe in between leaves the wiped store as it is.
@@ -55,7 +60,7 @@ class WalletTxPersister(
     fun persistCheckpoint(shouldAbort: () -> Boolean = { false }): Result {
         val epoch = SavedTransactionsStore.currentEpoch()
         val count = runCatching { source.transactionCount() }.getOrDefault(-1L)
-        if (count == 0L) return Result.EMPTY
+        if (count == 0L) { lastDeclaredCount = 0L; return Result.EMPTY }
         val data = runCatching { source.serialized() }.getOrNull()
         if (data == null) {
             if (count > SavedTransactionsCheckpoint.MAX_RECORDS) {
@@ -75,6 +80,7 @@ class WalletTxPersister(
         }
         if (shouldAbort()) return Result.ABORTED
         if (!SavedTransactionsStore.write(context, data, epoch)) return Result.FAILED
+        lastDeclaredCount = SavedTransactionsCheckpoint.declaredCount(data) ?: 0L
         runCatching { SavedTransactionsCheckpoint.noteWriterAccepted(diagPrefs()) }
         return Result.WRITTEN
     }

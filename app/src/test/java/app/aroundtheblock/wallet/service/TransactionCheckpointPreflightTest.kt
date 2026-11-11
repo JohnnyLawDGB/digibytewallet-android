@@ -90,7 +90,8 @@ class TransactionCheckpointPreflightTest {
         val gate = src.substring(src.indexOf("private fun persistWalletTransactionsCheckpoint()"))
             .let { it.substring(0, it.indexOf("}.getOrDefault(false)")) }
         assertTrue("the gate no longer goes through the one writer",
-            gate.contains("WalletTxPersister(this).persistCheckpoint { stoodDownForWipe }"))
+            gate.contains("val persister = WalletTxPersister(this)") &&
+                gate.contains("persister.persistCheckpoint { stoodDownForWipe }"))
         assertTrue("the gate no longer stops on a refused checkpoint",
             gate.contains("if (!checkpointGateOpen(result) || stoodDownForWipe) return@runCatching false"))
         assertTrue("the marker must follow the gate", gate.indexOf("checkpointGateOpen") < gate.indexOf("transactions_checkpointed"))

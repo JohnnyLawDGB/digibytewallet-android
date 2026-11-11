@@ -8,7 +8,6 @@ import app.aroundtheblock.wallet.core.asset.OrphanSendPredicate
 import app.aroundtheblock.wallet.core.bridge.NativeBridge
 import app.aroundtheblock.wallet.core.model.SyncFrontierSession
 import app.aroundtheblock.wallet.core.model.SyncState
-import app.aroundtheblock.wallet.core.sync.FilterHeaderStore
 import app.aroundtheblock.wallet.core.sync.HistoryRebuildOnUpgrade
 import app.aroundtheblock.wallet.core.sync.clearTransactionCacheForRebuild
 import app.aroundtheblock.wallet.core.sync.SavedBlockStore
@@ -408,13 +407,32 @@ class WalletManager @Suppress("LongParameterList") constructor(
             // A rebuild that started clearing and did not finish leaves a partial cache: do not load it.
             // TX-CKPT-CAP: the checkpoint is a file of raw bytes (SavedTransactionsStore), migrated once
             // from the legacy dgb_sync_data hex key, so no 50 MB string is pinned in the prefs map here.
-            val savedTx = if (HistoryRebuildOnUpgrade.isInProgress(context)) {
+            val rebuildInProgress = HistoryRebuildOnUpgrade.isInProgress(context)
+            val savedTx = if (rebuildInProgress) {
                 android.util.Log.w(HistoryRebuildOnUpgrade.TAG, "history rebuild in progress; not loading the transaction cache")
                 null
             } else {
                 runCatching { SavedTransactionsStore.load(context) }
                     .onFailure { android.util.Log.w("WalletManager", "transaction checkpoint read failed", it) }
                     .getOrElse { ByteArray(0) }   // present but unreadable: recorded as a short restore below
+            }
+            // TX-CKPT-CAP: the flag says a checkpoint of this many records landed; no file beside it means
+            // the file was lost, and the restore is short (never a near-tip resume with no history).
+            val checkpointedCount = if (syncPrefs.getBoolean("transactions_checkpointed", false)) {
+                syncPrefs.getLong(SavedTransactionsStore.KEY_COUNT, 0L)
+            } else {
+                0L
+            }
+            if (savedTx == null && !rebuildInProgress && checkpointedCount > 0L) {
+                runCatching {
+                    if (SavedTransactionsCheckpoint.recordRestore(syncPrefs, null, 0L, checkpointedCount)) {
+                        android.util.Log.w(
+                            "WalletManager",
+                            "Transaction checkpoint of $checkpointedCount records is missing: recorded a short " +
+                                "restore, the sync start rebuilds from the birth floor",
+                        )
+                    }
+                }.onFailure { android.util.Log.w("WalletManager", "short-restore record failed", it) }
             }
             if (savedTx != null) {
                 // A bad tx cache must NEVER abort the restore or block the seed load below — it is a
@@ -1494,26 +1512,4 @@ class WalletManager @Suppress("LongParameterList") constructor(
 
     private fun hexToBytes(hex: String): ByteArray =
         hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
-}
-
-/**
- * Validate + hex-decode the `saved_transactions` restore blob for
- * [WalletManager.restoreFromDisk]. Pure and side-effect-free so it's testable
- * without constructing a [WalletManager] (which would require mocking
- * `NativeBridge`'s JNI surface).
- *
- * Reuses [FilterHeaderStore.decodeHexOrNull]'s hex-validity guard (odd length
- * or a non-hex character -> `null`) instead of the throwing
- * `chunked(2).map { it.toInt(16) }` decoder it replaces in `restoreFromDisk` —
- * that decoder threw [NumberFormatException] on any corrupt byte, and nothing
- * in `restoreFromDisk` caught it (only `finally { seedBytes.fill(0) }` ran), so
- * a corrupt tx cache crashed the whole restore instead of just being dropped.
- *
- * @return the decoded bytes, or `null` if [hex] is `null` or malformed. The
- *   caller drops a `null` result and continues restoring the wallet from the
- *   seed — the tx cache is just a cache, re-derivable from chain.
- */
-internal fun decodeSavedTransactionsOrNull(hex: String?): ByteArray? {
-    if (hex == null) return null
-    return FilterHeaderStore.decodeHexOrNull(hex)
 }

@@ -67,12 +67,19 @@ object SavedTransactionsCheckpoint {
 
     /**
      * Records a restore whose reader loaded [readerLoadedCount] records from the checkpoint [bytes]
-     * (0 when the load threw). A short load is committed under [KEY_SHORT_RESTORE] and true returned;
-     * a complete one changes nothing (an earlier record stays until the rebuild clears it). No
-     * checkpoint, no record.
+     * (0 when the load threw). [checkpointedCount] is the record count the sync service last recorded
+     * beside `transactions_checkpointed` ([SavedTransactionsStore.KEY_COUNT], 0 when the flag is not
+     * set): with no checkpoint file at all, a count above 0 means the file was lost, and that restore
+     * is short too. A short load is committed under [KEY_SHORT_RESTORE] and true returned; a complete
+     * one changes nothing (an earlier record stays until the rebuild clears it).
      */
-    fun recordRestore(syncPrefs: SharedPreferences, bytes: ByteArray?, readerLoadedCount: Long): Boolean {
-        val declared = declaredCount(bytes)
+    fun recordRestore(
+        syncPrefs: SharedPreferences,
+        bytes: ByteArray?,
+        readerLoadedCount: Long,
+        checkpointedCount: Long = 0L,
+    ): Boolean {
+        val declared = if (bytes == null && checkpointedCount > 0L) checkpointedCount else declaredCount(bytes)
         if (!isShort(declared, readerLoadedCount)) return false
         syncPrefs.edit().putLong(KEY_SHORT_RESTORE, declared ?: UNREADABLE).commit()
         return true

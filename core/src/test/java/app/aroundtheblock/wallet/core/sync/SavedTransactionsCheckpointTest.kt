@@ -65,6 +65,31 @@ class SavedTransactionsCheckpointTest {
         assertTrue(prefs.contains(SavedTransactionsCheckpoint.KEY_SHORT_RESTORE))
     }
 
+    // The flag outlived its file: transactions_checkpointed with a recorded count, and no file at all.
+    @Test fun `a checkpointed count with no file is a short restore`() {
+        val prefs = FakeSharedPreferences()
+        assertTrue(SavedTransactionsCheckpoint.recordRestore(prefs, null, 0, checkpointedCount = 22))
+        assertEquals(22L, prefs.getLong(SavedTransactionsCheckpoint.KEY_SHORT_RESTORE, 0L))
+        val empty = FakeSharedPreferences()
+        assertFalse("an empty wallet's checkpoint (count 0) with no file is not short",
+            SavedTransactionsCheckpoint.recordRestore(empty, null, 0, checkpointedCount = 0))
+        assertFalse("a file that is there is judged by what it declares, not by the recorded count",
+            SavedTransactionsCheckpoint.recordRestore(empty, declaring(3), 3, checkpointedCount = 22))
+    }
+
+    @Test fun `the restore checks the recorded count when no file is there`() {
+        val wm = File("src/main/java/app/aroundtheblock/wallet/core/WalletManager.kt").readText()
+        val count = wm.indexOf("syncPrefs.getLong(SavedTransactionsStore.KEY_COUNT, 0L)")
+        val flag = wm.lastIndexOf("syncPrefs.getBoolean(\"transactions_checkpointed\", false)", count)
+        val record = wm.indexOf("SavedTransactionsCheckpoint.recordRestore(syncPrefs, null, 0L, checkpointedCount)")
+        val build = wm.indexOf("NativeBridge.restoreWalletFromBytes(seedBytes, restoreTime, storedPass)")
+        assertTrue("the restore no longer reads the count beside the flag", count > 0 && flag in 0 until count)
+        assertTrue("the restore no longer records a lost file as short, before the build", record in (count + 1) until build)
+        val sync = File(repo, "app/src/main/java/app/aroundtheblock/wallet/service/SyncService.kt").readText()
+        val commit = sync.substring(sync.indexOf(".putBoolean(\"transactions_checkpointed\", true)")).substringBefore(".commit()")
+        assertTrue("the flag's commit no longer carries the count", commit.contains(".putLong(SavedTransactionsStore.KEY_COUNT,"))
+    }
+
     // (a) The false-positive guard. real_writer_3.hex is BRWalletSerializeTransactions' own blob for a
     // fixed 3-record wallet; tx_ckpt_cap_kat holds it current and shows the C readers load all 3.
     // Fed to the restore's check with that reader count, it must not be short: a normal restore

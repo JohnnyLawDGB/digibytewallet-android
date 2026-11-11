@@ -23,12 +23,25 @@ import java.io.FileOutputStream
  *    gate (the scan ledger and `has_synced` are only written after a checkpoint lands) needs to know;
  *  - the legacy key is migrated once, and removed only after the file holding it has landed: a failed
  *    write keeps the key, so the checkpoint is never lost on the way;
- *  - a write that lands also removes a legacy key still present: the file is newer.
+ *  - a write that lands also removes a legacy key still present, and records the count the file
+ *    declares under [KEY_COUNT] in the same commit; the sync service's `transactions_checkpointed`
+ *    commit carries it too. A restore that finds that count above 0 and no file is short (the file
+ *    was lost), never a near-tip resume with no history;
+ *  - a rename that fails leaves the live file as it was and reports failure; a live file that is
+ *    missing beside a COMPLETE tmp file (its records end exactly at its length) is recovered from it;
+ *  - a legacy key found beside the file was written by an older build after a downgrade, so it is the
+ *    newer copy: it replaces the file, then goes.
  */
 object SavedTransactionsStore {
     private const val LEGACY_PREFS = "dgb_sync_data"
     internal const val LEGACY_KEY = "saved_transactions"
     private const val FILE_BASE = "saved_transactions"
+
+    /** In the network's `dgb_sync_data`: the record count of the last checkpoint that landed. */
+    const val KEY_COUNT = "saved_transactions_count"
+
+    /** Test seam: the rename that publishes the tmp file. */
+    @Volatile internal var rename: (File, File) -> Boolean = { from, to -> from.renameTo(to) }
 
     fun file(ctx: Context): File = File(ctx.filesDir, FILE_BASE + networkSuffix(ctx) + ".bin")
 
@@ -62,10 +75,9 @@ object SavedTransactionsStore {
                 out.flush()
                 out.fd.sync()
             }
-            if (!tmp.renameTo(f)) {
-                f.delete()
-                if (!tmp.renameTo(f)) error("rename failed")
-            }
+            // No delete-then-rename fallback: a rename that fails leaves the live checkpoint as it was.
+            if (!rename(tmp, f)) error("rename failed")
+            DirectorySync.sync(f.parentFile)
             f.length() == bytes.size.toLong()
         }.getOrElse {
             runCatching { tmp.delete() }
@@ -73,10 +85,31 @@ object SavedTransactionsStore {
         }
         // The file is the checkpoint now: a legacy copy left behind is older, and would be pinned again.
         if (landed) runCatching {
-            val p = legacyPrefs(ctx)
-            if (p.contains(LEGACY_KEY)) p.edit().remove(LEGACY_KEY).commit()
+            legacyPrefs(ctx).edit()
+                .remove(LEGACY_KEY)
+                .putLong(KEY_COUNT, SavedTransactionsCheckpoint.declaredCount(bytes)?.coerceAtLeast(0L) ?: 0L)
+                .commit()
         }
         return landed
+    }
+
+    /** Whether [b] is a whole checkpoint: a non-zero count whose records end exactly at its length. */
+    internal fun isComplete(b: ByteArray): Boolean {
+        val count = SavedTransactionsCheckpoint.declaredCount(b) ?: return false
+        if (count <= 0L) return false
+        var pos = 4L
+        val len = b.size.toLong()
+        var i = 0L
+        while (i < count) {
+            if (pos + 12L > len) return false
+            val size = (b[pos.toInt()].toLong() and 0xffL) or ((b[pos.toInt() + 1].toLong() and 0xffL) shl 8) or
+                ((b[pos.toInt() + 2].toLong() and 0xffL) shl 16) or ((b[pos.toInt() + 3].toLong() and 0xffL) shl 24)
+            pos += 12L
+            if (size > len - pos) return false
+            pos += size
+            i++
+        }
+        return pos == len
     }
 
     /** Whether a checkpoint is stored (the file, or a legacy key not yet migrated). */
@@ -85,21 +118,35 @@ object SavedTransactionsStore {
             runCatching { legacyPrefs(ctx).contains(LEGACY_KEY) }.getOrDefault(false)
 
     /**
-     * The stored checkpoint, or null when there is none. A legacy key whose hex is not readable gives
-     * an EMPTY array (a checkpoint is present and declares nothing readable: [SavedTransactionsCheckpoint]
-     * treats that as a short restore) and is left in place. A readable legacy key is migrated: written
-     * to the file, and removed only once that write landed; if it did not, the key stays and the bytes
-     * are still returned, so the restore uses them and the next launch migrates again.
+     * The stored checkpoint, or null when there is none. In order:
+     *  - a legacy key (a migration, or an older build's write after a downgrade, which is newer than
+     *    the file): written to the file, and removed only once that write landed; if it did not, the
+     *    key stays and its bytes are still returned. A legacy key that is not readable hex gives the
+     *    file if there is one, else an EMPTY array (present, declares nothing readable: a short
+     *    restore), and is left in place;
+     *  - the file;
+     *  - no file but a complete tmp file (a write that synced but did not get to its rename): renamed
+     *    into place and returned. A partial tmp file is ignored.
      */
     fun load(ctx: Context): ByteArray? = synchronized(ioLock) {
         val f = file(ctx)
-        if (runCatching { f.exists() }.getOrDefault(false)) {
-            return runCatching { f.readBytes() }.getOrElse { ByteArray(0) }
+        val fileThere = runCatching { f.exists() }.getOrDefault(false)
+        val legacyHex = runCatching { legacyPrefs(ctx).getString(LEGACY_KEY, null) }.getOrNull()
+        if (legacyHex != null) {
+            val bytes = FilterHeaderStore.decodeHexOrNull(legacyHex)
+            if (bytes != null) {
+                writeLocked(ctx, bytes) // removes the key only if the file landed
+                return bytes
+            }
+            if (!fileThere) return ByteArray(0)
         }
-        val legacyHex = runCatching { legacyPrefs(ctx).getString(LEGACY_KEY, null) }.getOrNull() ?: return null
-        val bytes = FilterHeaderStore.decodeHexOrNull(legacyHex) ?: return ByteArray(0)
-        writeLocked(ctx, bytes) // removes the key only if the file landed
-        bytes
+        if (fileThere) return runCatching { f.readBytes() }.getOrElse { ByteArray(0) }
+        val tmp = tmpFile(ctx)
+        val pending = runCatching { if (tmp.isFile) tmp.readBytes() else null }.getOrNull() ?: return null
+        if (!isComplete(pending)) return null
+        if (!rename(tmp, f)) return pending
+        DirectorySync.sync(f.parentFile)
+        pending
     }
 
     /** Delete this network's checkpoint: file, tmp and legacy key. Bumps the epoch so an in-flight
@@ -108,7 +155,7 @@ object SavedTransactionsStore {
         epoch++
         runCatching { file(ctx).delete() }
         runCatching { tmpFile(ctx).delete() }
-        val keyGone = runCatching { legacyPrefs(ctx).edit().remove(LEGACY_KEY).commit() }.getOrDefault(false)
+        val keyGone = runCatching { legacyPrefs(ctx).edit().remove(LEGACY_KEY).remove(KEY_COUNT).commit() }.getOrDefault(false)
         keyGone && !runCatching { file(ctx).exists() || tmpFile(ctx).exists() }.getOrDefault(true)
     }
 
@@ -122,7 +169,7 @@ object SavedTransactionsStore {
             runCatching { bin.delete() }
             runCatching { tmp.delete() }
             val legacyGone = runCatching {
-                ctx.getSharedPreferences(LEGACY_PREFS + net, Context.MODE_PRIVATE).edit().remove(LEGACY_KEY).commit()
+                ctx.getSharedPreferences(LEGACY_PREFS + net, Context.MODE_PRIVATE).edit().remove(LEGACY_KEY).remove(KEY_COUNT).commit()
             }.getOrDefault(false)
             !bin.exists() && !tmp.exists() && legacyGone
         }.all { it }

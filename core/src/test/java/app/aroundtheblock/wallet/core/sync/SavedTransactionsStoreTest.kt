@@ -104,6 +104,70 @@ class SavedTransactionsStoreTest {
         assertArrayEquals(blob, SavedTransactionsStore.file(c).readBytes())
     }
 
+    /** A whole checkpoint of [n] records of [size] bytes each, as the writer frames it. */
+    private fun framed(n: Int, size: Int = 3): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        fun u32(v: Int) { for (i in 0 until 4) out.write((v shr (8 * i)) and 0xff) }
+        u32(n)
+        repeat(n) { i -> u32(size); u32(1_000 + i); u32(2_000 + i); repeat(size) { out.write(i) } }
+        return out.toByteArray()
+    }
+
+    @Test fun `a landed write records the count it declares, and delete removes it`() {
+        val c = ctx()
+        assertTrue(SavedTransactionsStore.write(c, framed(4), SavedTransactionsStore.currentEpoch()))
+        assertEquals(4L, sync(c).getLong(SavedTransactionsStore.KEY_COUNT, 0L))
+        assertTrue(SavedTransactionsStore.delete(c))
+        assertFalse(sync(c).contains(SavedTransactionsStore.KEY_COUNT))
+    }
+
+    @Test fun `a rename that fails keeps the old file and reports failure`() {
+        val c = ctx()
+        val old = framed(2)
+        assertTrue(SavedTransactionsStore.write(c, old, SavedTransactionsStore.currentEpoch()))
+        val saved = SavedTransactionsStore.rename
+        try {
+            SavedTransactionsStore.rename = { _, _ -> false }
+            assertFalse(SavedTransactionsStore.write(c, framed(3), SavedTransactionsStore.currentEpoch()))
+        } finally {
+            SavedTransactionsStore.rename = saved
+        }
+        assertArrayEquals("the live checkpoint is untouched", old, SavedTransactionsStore.file(c).readBytes())
+        assertEquals("the recorded count is the live file's", 2L, sync(c).getLong(SavedTransactionsStore.KEY_COUNT, 0L))
+    }
+
+    @Test fun `a complete tmp file is recovered when the live file is missing`() {
+        val c = ctx()
+        val whole = framed(3)
+        File(dir, "saved_transactions.bin.tmp").writeBytes(whole)
+        assertArrayEquals(whole, SavedTransactionsStore.load(c))
+        assertArrayEquals("renamed into place", whole, SavedTransactionsStore.file(c).readBytes())
+        assertFalse(File(dir, "saved_transactions.bin.tmp").exists())
+    }
+
+    @Test fun `a partial tmp file is ignored`() {
+        val c = ctx()
+        val whole = framed(3)
+        File(dir, "saved_transactions.bin.tmp").writeBytes(whole.copyOf(whole.size - 1))
+        assertNull(SavedTransactionsStore.load(c))
+        assertFalse(SavedTransactionsStore.file(c).exists())
+        File(dir, "saved_transactions.bin.tmp").writeBytes(whole + byteArrayOf(0))   // trailing bytes: not whole either
+        assertNull(SavedTransactionsStore.load(c))
+        assertFalse(SavedTransactionsStore.isComplete(byteArrayOf(0, 0, 0, 0)))      // a zero count is not a checkpoint
+        assertTrue(SavedTransactionsStore.isComplete(whole))
+    }
+
+    @Test fun `a legacy key beside the file is a downgrade's newer write and replaces the file`() {
+        val c = ctx()
+        assertTrue(SavedTransactionsStore.write(c, framed(2), SavedTransactionsStore.currentEpoch()))
+        val newer = framed(5)   // an older build, after a downgrade, wrote the key and not the file
+        sync(c).edit().putString("saved_transactions", hex(newer)).commit()
+        assertArrayEquals(newer, SavedTransactionsStore.load(c))
+        assertArrayEquals("the file is rewritten from the key", newer, SavedTransactionsStore.file(c).readBytes())
+        assertFalse("then the key goes", sync(c).contains("saved_transactions"))
+        assertEquals(5L, sync(c).getLong(SavedTransactionsStore.KEY_COUNT, 0L))
+    }
+
     // (e) the wipe
     @Test fun `delete removes the file, its tmp and the legacy key`() {
         val c = ctx()

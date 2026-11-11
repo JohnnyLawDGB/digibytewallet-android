@@ -3938,10 +3938,15 @@ class SyncService : Service() {
     private fun persistWalletTransactionsCheckpoint(): Boolean = runCatching {
         // A wipe that stands the service down between the native read and the write leaves the wiped
         // stores as it erased them (asked again inside, after the read).
-        val result = WalletTxPersister(this).persistCheckpoint { stoodDownForWipe }
+        val persister = WalletTxPersister(this)
+        val result = persister.persistCheckpoint { stoodDownForWipe }
         if (!checkpointGateOpen(result) || stoodDownForWipe) return@runCatching false
-        getSharedPreferences("dgb_sync_data" + networkSuffix(this), MODE_PRIVATE)
-            .edit().putBoolean("transactions_checkpointed", true).commit()
+        // The flag and the count of the checkpoint it vouches for, in one commit, after the file landed:
+        // a restore that finds the flag and the count but no file knows the file was lost (TX-CKPT-CAP).
+        getSharedPreferences("dgb_sync_data" + networkSuffix(this), MODE_PRIVATE).edit()
+            .putBoolean("transactions_checkpointed", true)
+            .putLong(SavedTransactionsStore.KEY_COUNT, persister.lastDeclaredCount.coerceAtLeast(0L))
+            .commit()
     }.getOrDefault(false)
 
     private fun persistSyncCompletionState(): Boolean {
