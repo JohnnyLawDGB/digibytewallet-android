@@ -732,6 +732,7 @@
     <string name="reconcile_rebuild_body">Se as confirmações, a ordem ou o saldo ainda parecerem errados, isto limpa o cache local de transações e examina de novo toda a cadeia com filtros compactos, detectando novamente cada transação e marcando o bloco dela a partir dos dados da cadeia. Sua seed e suas moedas não são tocadas; tudo é reconstruído a partir da cadeia. O app reinicia e a varredura começa da criação da sua carteira, então leva um tempo para terminar.</string>
     <string name="reconcile_rebuild_in_progress">Reconstruindo — limpando o cache, reiniciando…</string>
     <string name="reconcile_rebuild_not_started">Nada foi reconstruído. Uma etapa necessária não foi concluída, então nada foi apagado e sua carteira continua como estava. Tente de novo.</string>
+    <string name="reconcile_rebuild_button">Reconstrução completa a partir da cadeia (nova varredura)</string>
     <string name="rf_capped_body">A varredura chegou ao limite em %1$s enquanto esse caminho ainda estava em uso, então pode haver mais fundos lá do que o mostrado. O que não aparece continua seguro na cadeia.</string>
     <string name="reconcile_stuck_stale_cleared">, %1$d delas nunca foram retransmitidas (após um dia a rede não tinha nem elas nem nada gastando suas moedas). Se algum desses pagamentos chegou ao destinatário, ele ainda pode ser confirmado: confirme com ele antes de pagar de novo</string>
 </resources>

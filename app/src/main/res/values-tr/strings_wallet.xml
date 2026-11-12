@@ -727,6 +727,7 @@
     <string name="reconcile_rebuild_body">Onaylar, sıralama veya bakiye hâlâ yanlış görünüyorsa bu işlem yerel işlem önbelleğini temizler ve tüm zinciri kompakt filtrelerle yeniden tarar — her işlemi zincir üzerindeki verilerden yeniden algılar ve bloğunu işaretler. Kurtarma ifadeniz ve paranız etkilenmez; her şey zincirden yeniden oluşturulur. Uygulama yeniden başlar ve tarama cüzdanınızın oluşturulduğu andan itibaren çalışır, bu yüzden bitmesi biraz sürer.</string>
     <string name="reconcile_rebuild_in_progress">Yeniden oluşturuluyor — önbellek temizleniyor, yeniden başlatılıyor…</string>
     <string name="reconcile_rebuild_not_started">Hiçbir şey yeniden oluşturulmadı. Gerekli bir adım tamamlanmadı, bu yüzden hiçbir şey silinmedi ve cüzdanınız olduğu gibi duruyor. Tekrar deneyin.</string>
+    <string name="reconcile_rebuild_button">Zincirden tam yeniden oluşturma (yeniden tarama)</string>
     <string name="rf_capped_body">Tarama, %1$s yolunda bu yol hâlâ kullanılırken sınırına ulaştı; orada gösterilenden fazla bakiye olabilir. Gösterilmeyenler zincirde güvende kalır.</string>
     <string name="reconcile_stuck_stale_cleared">, bunlardan %1$d tanesi hiç iletilmedi (bir gün sonra ağda ne bunlar ne de coin\'lerini harcayan bir işlem vardı). Bu ödemelerden biri alıcısına ulaştıysa yine de onaylanabilir: yeniden ödemeden önce alıcıya danışın</string>
 </resources>

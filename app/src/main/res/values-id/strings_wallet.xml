@@ -722,6 +722,7 @@
     <string name="reconcile_rebuild_body">Jika konfirmasi, urutan, atau saldo masih tampak salah, ini menghapus cache transaksi lokal dan memindai ulang seluruh chain dengan compact filter — mendeteksi ulang setiap transaksi dan menandai bloknya dari data on-chain. Seed dan koin Anda tidak tersentuh; semuanya dibangun ulang dari chain. Aplikasi dimulai ulang dan pemindaian berjalan sejak wallet Anda dibuat, jadi perlu waktu cukup lama.</string>
     <string name="reconcile_rebuild_in_progress">Membangun ulang — menghapus cache, memulai ulang…</string>
     <string name="reconcile_rebuild_not_started">Tidak ada yang dibangun ulang. Satu langkah yang diperlukan tidak selesai, jadi tidak ada yang dihapus dan wallet Anda tetap seperti semula. Coba lagi.</string>
+    <string name="reconcile_rebuild_button">Bangun ulang penuh dari chain (pindai ulang)</string>
     <string name="rf_capped_body">Pemindaian berhenti di batasnya pada %1$s saat jalur itu masih dipakai, jadi mungkin ada dana lebih banyak di sana daripada yang ditampilkan. Yang tidak ditampilkan tetap aman di rantai.</string>
     <string name="reconcile_stuck_stale_cleared">, %1$d di antaranya tidak pernah diteruskan (setelah sehari jaringan tidak memiliki transaksi itu maupun apa pun yang membelanjakan koinnya). Jika salah satu pembayaran itu ternyata sampai ke penerima, pembayaran itu masih bisa terkonfirmasi: tanyakan kepada penerima sebelum membayar lagi</string>
 </resources>

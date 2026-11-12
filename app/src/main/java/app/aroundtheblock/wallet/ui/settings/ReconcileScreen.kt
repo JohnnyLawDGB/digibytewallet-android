@@ -373,6 +373,7 @@ fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
                                 rebuilding = false
                                 armRebuild = false
                                 rebuildNotStarted = true
+                                requestSyncResumeNearTip(context)
                                 return@launch
                             }
                             val li = context.packageManager.getLaunchIntentForPackage(context.packageName)
@@ -396,8 +397,8 @@ fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
                 Text(
                     when {
                         rebuilding -> stringResource(R.string.reconcile_rebuild_in_progress)
-                        armRebuild -> "Tap again to confirm — clears cache & restarts"
-                        else       -> "Full rebuild from chain (rescan)"
+                        armRebuild -> stringResource(R.string.reconcile_unprovable_confirm)
+                        else       -> stringResource(R.string.reconcile_rebuild_button)
                     }
                 )
             }
@@ -559,6 +560,7 @@ fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
                                                 rescanningFrom = false
                                                 armRescanFrom = false
                                                 rescanFromNotStarted = true
+                                                requestSyncResumeNearTip(context)
                                                 return@launch
                                             }
                                             val li = context.packageManager.getLaunchIntentForPackage(context.packageName)
@@ -626,5 +628,22 @@ private fun ResultRow(label: String, value: String, emphasize: Boolean = false) 
             fontWeight = if (emphasize) FontWeight.SemiBold else FontWeight.Normal,
             fontSize = 13.sp
         )
+    }
+}
+
+/**
+ * A rebuild that stopped before clearing anything may already have stopped sync: hand the manager
+ * to SyncService's reload-first rebuild (recreatePeerManagerResumingNearTip, the same request as the
+ * main screen's pull-to-refresh) so the wallet reconnects near its tip instead of sitting
+ * disconnected until the keepalive notices. Best effort: a refused foreground start only leaves
+ * that recovery to the keepalive.
+ */
+private fun requestSyncResumeNearTip(context: android.content.Context) {
+    try {
+        val intent = android.content.Intent(context, app.aroundtheblock.wallet.service.SyncService::class.java)
+            .setAction(app.aroundtheblock.wallet.service.SyncService.ACTION_RECREATE_NEAR_TIP)
+        androidx.core.content.ContextCompat.startForegroundService(context, intent)
+    } catch (t: Throwable) {
+        android.util.Log.w("ReconcileScreen", "rebuild stopped: the sync resume request was not delivered", t)
     }
 }

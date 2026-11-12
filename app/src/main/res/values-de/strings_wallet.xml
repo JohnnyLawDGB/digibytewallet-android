@@ -735,6 +735,7 @@
     <string name="reconcile_rebuild_body">Wenn Bestätigungen, Reihenfolge oder Guthaben weiterhin falsch aussehen, leert dies den lokalen Transaktions-Cache und durchsucht die gesamte Blockchain erneut mit Compact Filters – jede Transaktion wird anhand der On-Chain-Daten neu erkannt und ihrem Block zugeordnet. Ihr Seed und Ihre Coins bleiben unberührt; alles wird aus der Blockchain neu aufgebaut. Die App startet neu und der Scan läuft ab der Erstellung Ihrer Wallet, daher dauert er eine Weile.</string>
     <string name="reconcile_rebuild_in_progress">Wird neu aufgebaut – Cache wird geleert, Neustart…</string>
     <string name="reconcile_rebuild_not_started">Es wurde nichts neu aufgebaut. Ein dafür nötiger Schritt wurde nicht abgeschlossen, daher wurde nichts gelöscht und Ihre Wallet ist unverändert. Versuchen Sie es erneut.</string>
+    <string name="reconcile_rebuild_button">Vollständiger Neuaufbau aus der Blockchain (Rescan)</string>
     <string name="rf_capped_body">Der Scan hat auf %1$s sein Limit erreicht, während dieser Pfad noch genutzt wurde. Dort kann also mehr Guthaben liegen als angezeigt. Was nicht angezeigt wird, bleibt sicher auf der Blockchain.</string>
     <string name="reconcile_stuck_stale_cleared">, davon %1$d nie weitergeleitet (nach einem Tag kannte das Netzwerk weder sie noch etwas, das ihre Coins ausgibt). Falls eine dieser Zahlungen den Empfänger doch erreicht hat, kann sie noch bestätigt werden: Frage beim Empfänger nach, bevor du erneut zahlst</string>
 </resources>

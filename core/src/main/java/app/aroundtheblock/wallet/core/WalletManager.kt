@@ -727,16 +727,18 @@ class WalletManager @Suppress("LongParameterList") constructor(
         // not stop could write the stores back over the clears: stop here.
         val stopped = runCatching { stopSyncForRebuild() }
         if (stopped.isFailure) {
-            runCatching { android.util.Log.w(HistoryRebuildOnUpgrade.TAG, "manual rebuild: stopping sync failed; nothing cleared", stopped.exceptionOrNull()) }
+            logRebuildStopped("stopSync", "the rerun was not armed", stopped.exceptionOrNull())
             return false
         }
         // ARM_RERUN before clearing (done unset, in progress, floors kept). A coalesced writer
         // can still put a cache back between the clear below and the process exit; the runner
         // then clears it again at the next start before anything loads it, and only then stamps
-        // done. Without it nothing would repeat a clear that did not land: stop here.
+        // done. Without it nothing would repeat a clear that did not land: stop here. A commit
+        // that returns false has still put the armed values in memory, where the next commit to
+        // the file in this process would write them to disk: disarm on this path too.
         val prior = HistoryRebuildOnUpgrade.readState(context)
         if (!HistoryRebuildOnUpgrade.armRerun(context)) {
-            runCatching { android.util.Log.w(HistoryRebuildOnUpgrade.TAG, "manual rebuild: arming the rerun did not land; nothing cleared") }
+            logRebuildStopped("armRerun", disarmedNote(HistoryRebuildOnUpgrade.disarmRerun(context, prior)))
             return false
         }
         // FLOOR_FROM_CACHE before the cache goes: its oldest confirmed height and record time
@@ -745,8 +747,7 @@ class WalletManager @Suppress("LongParameterList") constructor(
         // the rerun back as it was (if that does not land either, the rerun stays armed, which
         // only defers the rebuild to the next start: its run carries the floor before it clears).
         if (!HistoryRebuildOnUpgrade.floorFromCache(context)) {
-            val disarmed = HistoryRebuildOnUpgrade.disarmRerun(context, prior)
-            runCatching { android.util.Log.w(HistoryRebuildOnUpgrade.TAG, "manual rebuild: carrying the cache's floor did not land; nothing cleared (rerun disarmed: $disarmed)") }
+            logRebuildStopped("floorFromCache", disarmedNote(HistoryRebuildOnUpgrade.disarmRerun(context, prior)))
             return false
         }
         // NOTE: synchronous (commit), NOT apply(). The caller kills the process
@@ -783,11 +784,36 @@ class WalletManager @Suppress("LongParameterList") constructor(
      */
     fun rebuildFromChainRescanFrom(height: Long): Boolean {
         if (!HistoryRebuildOnUpgrade.lowerFloorTo(context, height)) {
-            runCatching { android.util.Log.w(HistoryRebuildOnUpgrade.TAG, "rescan from $height: lowering the floor did not land; nothing cleared") }
+            // The record's values may still be in memory (a commit that returns false keeps them
+            // there); they only ever lower the floor, so a later write of them costs a longer scan.
+            logRebuildStopped(
+                "lowerFloorTo($height)",
+                "the rerun was not armed; the lowered floor may stay in the record (floor height " +
+                    "${HistoryRebuildOnUpgrade.floorHint(context)}, pending ${HistoryRebuildOnUpgrade.floorPending(context)})",
+            )
             return false
         }
-        return rebuildFromChainRescan()
+        return rebuildFromChainRescan().also { rebuilt ->
+            if (!rebuilt) runCatching {
+                android.util.Log.w(
+                    HistoryRebuildOnUpgrade.TAG,
+                    "rescan from $height: the floor was lowered (floor height ${HistoryRebuildOnUpgrade.floorHint(context)}) " +
+                        "and stays in the record; the next sync start carries it into the stored floor",
+                )
+            }
+        }
     }
+
+    /** The log line of a rebuild that stopped before it cleared anything (BRChainRebuild.h's stop rules). */
+    private fun logRebuildStopped(step: String, rerun: String, cause: Throwable? = null) {
+        runCatching {
+            android.util.Log.w(HistoryRebuildOnUpgrade.TAG, "manual rebuild stopped at $step: nothing cleared; $rerun", cause)
+        }
+    }
+
+    private fun disarmedNote(disarmed: Boolean): String =
+        if (disarmed) "the rerun was put back as it was"
+        else "the rerun is STILL ARMED (the disarm did not land either): the next start runs the one-time rebuild"
 
     /**
      * The wallet's DigiDollar receive address (TD… testnet / DD… mainnet). Null if locked.

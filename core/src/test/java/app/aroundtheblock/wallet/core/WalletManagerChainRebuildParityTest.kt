@@ -35,7 +35,12 @@ class WalletManagerChainRebuildParityTest {
     private val cacheHeight = 21_777_216L
     private val cacheTime = 1_656_283_264L
 
-    /** Fails (and does not write) any commit that puts [failKey]; every other commit lands. */
+    /**
+     * Fails any commit that puts [failKey], as the platform does: SharedPreferences puts the new
+     * values in memory before the disk write, so a commit that returns false still leaves them in
+     * memory, where any later commit to the file in the same process writes them to disk. Every
+     * other commit lands.
+     */
     private class FailOnKeyPrefs(private val inner: FakeSharedPreferences, private val failKey: String) :
         SharedPreferences by inner {
         override fun edit(): SharedPreferences.Editor {
@@ -50,8 +55,8 @@ class WalletManagerChainRebuildParityTest {
                 override fun putBoolean(key: String, value: Boolean) = apply { poisoned = poisoned || key == failKey; e.putBoolean(key, value) }
                 override fun remove(key: String) = apply { e.remove(key) }
                 override fun clear() = apply { e.clear() }
-                override fun commit(): Boolean = if (poisoned) false else e.commit()
-                override fun apply() { if (!poisoned) e.apply() }
+                override fun commit(): Boolean { val landed = e.commit(); return landed && !poisoned }
+                override fun apply() { e.apply() }
             }
         }
     }
@@ -145,13 +150,18 @@ class WalletManagerChainRebuildParityTest {
         assertFalse(HistoryRebuildOnUpgrade.isInProgress(c))
     }
 
-    @Test fun anArmRerunThatDoesNotLand_stopsTheRebuild_nothingCleared() {
+    @Test fun anArmRerunThatDoesNotLand_stopsTheRebuild_nothingCleared_andDisarmsTheRerun() {
         val c = ctx(failKey = HistoryRebuildOnUpgrade.KEY_IN_PROGRESS)
         seed(c)
 
         assertFalse(walletManager(c).rebuildFromChainRescan())
 
         assertNothingCleared(c)
+        // The failed arm is still in memory; the next commit to the file in this process would write
+        // it to disk and the next start would run a rebuild the user was told did not happen.
+        val s = HistoryRebuildOnUpgrade.readState(c)
+        assertTrue("the failed arm's done=false is left in memory", s.done)
+        assertFalse("the failed arm's in_progress=true is left in memory", s.inProgress)
     }
 
     @Test fun aFloorFromCacheThatDoesNotLand_stopsTheRebuild_andDisarmsTheRerun() {
