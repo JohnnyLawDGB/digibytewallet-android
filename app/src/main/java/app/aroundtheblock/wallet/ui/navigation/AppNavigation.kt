@@ -587,7 +587,8 @@ fun AppNavigation(
                     SeedViewScreen(
                         navController = navController,
                         walletManager = walletManager,
-                        keyStoreManager = keyStoreManager
+                        keyStoreManager = keyStoreManager,
+                        biometricAuth = biometricAuth,
                     )
                 } else {
                     LaunchedEffect(Unit) {

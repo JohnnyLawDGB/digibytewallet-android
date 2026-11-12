@@ -720,6 +720,9 @@
     <string name="seedview_pass_unreadable_title">Parola okunamadı</string>
     <string name="seedview_pass_unreadable_body">Bu cüzdanın parolası şu anda okunamadı. Kurtarma kelimeleriniz tek başına bu cüzdanı geri yüklemeyebilir; bu nedenle parola onlarla birlikte gösterilebilene kadar gösterilmezler. Tekrar deneyin.</string>
     <string name="seedview_pass_retry">Yeniden dene</string>
+    <!-- SEED-VIEW-AUTH -->
+    <string name="seedview_device_lock_title">Ekran kilidinizi doğrulayın</string>
+    <string name="seedview_device_lock_body">Kurtarma ifadeniz bu telefonun ekran kilidiyle korunuyor. Göstermek için ekran kilidini PIN, desen veya şifrenizle doğrulayın.</string>
     <!-- /pkg E2-keys -->
     <string name="pinstore_title">PIN\'iniz şu anda doğrulanamıyor</string>
     <string name="pinstore_body">Telefonun güvenli anahtar deposu açılamadı, bu yüzden cüzdan kilitli kalıyor. Hiçbir şey silinmedi. Uygulamayı kapatıp yeniden açın. Bu tekrar olursa telefonu yeniden başlatın; kurtarma ifadeniz cüzdanı yine her cihazda geri yükler.</string>

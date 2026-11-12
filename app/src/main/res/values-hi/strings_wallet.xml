@@ -720,6 +720,9 @@
     <string name="seedview_pass_unreadable_title">पासफ़्रेज़ पढ़ा नहीं जा सका</string>
     <string name="seedview_pass_unreadable_body">इस वॉलेट का पासफ़्रेज़ अभी पढ़ा नहीं जा सका। केवल आपके रिकवरी शब्द इस वॉलेट को बहाल नहीं कर सकते, इसलिए वे तब तक नहीं दिखाए जाते जब तक पासफ़्रेज़ उनके साथ नहीं दिखाया जा सकता। फिर से कोशिश करें।</string>
     <string name="seedview_pass_retry">फिर से कोशिश करें</string>
+    <!-- SEED-VIEW-AUTH -->
+    <string name="seedview_device_lock_title">अपना स्क्रीन लॉक पुष्टि करें</string>
+    <string name="seedview_device_lock_body">आपका रिकवरी फ़्रेज़ इस फ़ोन के स्क्रीन लॉक से सुरक्षित है। इसे दिखाने के लिए अपने PIN, पैटर्न या पासवर्ड से स्क्रीन लॉक की पुष्टि करें।</string>
     <!-- /pkg E2-keys -->
     <string name="pinstore_title">अभी आपका PIN जाँचा नहीं जा सकता</string>
     <string name="pinstore_body">फ़ोन का सुरक्षित कुंजी भंडार नहीं खुला, इसलिए वॉलेट लॉक रहेगा। कुछ भी हटाया नहीं गया है। ऐप बंद करें और फिर से खोलें। अगर ऐसा बार-बार हो, तो फ़ोन रीस्टार्ट करें; आपका रिकवरी फ़्रेज़ किसी भी डिवाइस पर वॉलेट को अब भी वापस ला सकता है।</string>

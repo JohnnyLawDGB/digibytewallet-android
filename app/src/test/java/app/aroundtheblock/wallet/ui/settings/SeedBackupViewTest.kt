@@ -1,7 +1,6 @@
 package app.aroundtheblock.wallet.ui.settings
 
 import android.util.Log
-import app.aroundtheblock.wallet.core.security.KeystoreUserAuthRequiredException
 import app.aroundtheblock.wallet.ui.KotlinSourceGate
 import io.mockk.every
 import io.mockk.mockkStatic
@@ -45,7 +44,7 @@ class SeedBackupViewTest {
         val unreadable = listOf<Pair<String, () -> ByteArray?>>(
             "a record that cannot say whether it has one" to { throw IllegalStateException("wallet record incomplete") },
             "a Keystore that could not answer just now" to { throw java.security.ProviderException("keystore busy") },
-            "a lapsed device-unlock window" to { throw KeystoreUserAuthRequiredException(RuntimeException("auth")) },
+            "a malformed envelope" to { throw IllegalArgumentException("half an envelope") },
         )
         for ((case, read) in unreadable) {
             val reads = Reads(read, words)

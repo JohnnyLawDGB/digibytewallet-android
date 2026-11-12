@@ -728,6 +728,9 @@
     <string name="seedview_pass_unreadable_title">Passphrase konnte nicht gelesen werden</string>
     <string name="seedview_pass_unreadable_body">Die Passphrase dieser Wallet konnte gerade nicht gelesen werden. Ihre Wiederherstellungswörter allein stellen diese Wallet möglicherweise nicht wieder her. Deshalb werden sie erst angezeigt, wenn die Passphrase zusammen mit ihnen angezeigt werden kann. Versuchen Sie es erneut.</string>
     <string name="seedview_pass_retry">Erneut versuchen</string>
+    <!-- SEED-VIEW-AUTH -->
+    <string name="seedview_device_lock_title">Displaysperre bestätigen</string>
+    <string name="seedview_device_lock_body">Ihre Wiederherstellungsphrase ist durch die Displaysperre dieses Telefons geschützt. Bestätigen Sie die Displaysperre mit Ihrer PIN, Ihrem Muster oder Ihrem Passwort, um sie anzuzeigen.</string>
     <!-- /pkg E2-keys -->
     <string name="pinstore_title">Deine PIN kann gerade nicht geprüft werden</string>
     <string name="pinstore_body">Der sichere Schlüsselspeicher des Telefons ließ sich nicht öffnen, daher bleibt die Wallet gesperrt. Es wurde nichts gelöscht. Schließe die App und öffne sie erneut. Wenn das wieder passiert, starte das Telefon neu; deine Wiederherstellungsphrase stellt die Wallet weiterhin auf jedem Gerät wieder her.</string>

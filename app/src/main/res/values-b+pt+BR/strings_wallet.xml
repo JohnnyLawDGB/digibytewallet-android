@@ -725,6 +725,9 @@
     <string name="seedview_pass_unreadable_title">Não foi possível ler a frase-senha</string>
     <string name="seedview_pass_unreadable_body">A frase-senha desta carteira não pôde ser lida agora. Suas palavras de recuperação sozinhas podem não restaurar esta carteira, por isso elas só aparecem quando a frase-senha puder aparecer junto. Tente novamente.</string>
     <string name="seedview_pass_retry">Tentar novamente</string>
+    <!-- SEED-VIEW-AUTH -->
+    <string name="seedview_device_lock_title">Confirme o bloqueio de tela</string>
+    <string name="seedview_device_lock_body">Sua frase de recuperação é protegida pelo bloqueio de tela deste telefone. Para exibi-la, confirme o bloqueio de tela com seu PIN, padrão ou senha.</string>
     <!-- /pkg E2-keys -->
     <string name="pinstore_title">Seu PIN não pode ser verificado agora</string>
     <string name="pinstore_body">O armazenamento seguro de chaves do celular não abriu, então a carteira continua bloqueada. Nada foi apagado. Feche o app e abra de novo. Se continuar acontecendo, reinicie o celular; sua frase de recuperação ainda restaura a carteira em qualquer aparelho.</string>

@@ -727,6 +727,9 @@
     <string name="seedview_pass_unreadable_title">No se pudo leer la frase de contraseña</string>
     <string name="seedview_pass_unreadable_body">La frase de contraseña de esta billetera no se pudo leer en este momento. Es posible que tus palabras de recuperación por sí solas no restauren esta billetera, así que no se muestran hasta que la frase de contraseña pueda mostrarse con ellas. Inténtalo de nuevo.</string>
     <string name="seedview_pass_retry">Reintentar</string>
+    <!-- SEED-VIEW-AUTH -->
+    <string name="seedview_device_lock_title">Confirma el bloqueo de pantalla</string>
+    <string name="seedview_device_lock_body">Tu frase de recuperación está protegida por el bloqueo de pantalla de este teléfono. Para mostrarla, confirma el bloqueo de pantalla con tu PIN, patrón o contraseña.</string>
     <!-- /pkg E2-keys -->
     <string name="pinstore_title">Ahora no se puede comprobar tu PIN</string>
     <string name="pinstore_body">El almacén seguro de claves del teléfono no se abrió, así que la billetera sigue bloqueada. No se ha borrado nada. Cierra la app y vuelve a abrirla. Si sigue pasando, reinicia el teléfono; tu frase de recuperación sigue restaurando la billetera en cualquier dispositivo.</string>

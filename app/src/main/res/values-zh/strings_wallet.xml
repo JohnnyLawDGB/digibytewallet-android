@@ -715,6 +715,9 @@
     <string name="seedview_pass_unreadable_title">无法读取密码短语</string>
     <string name="seedview_pass_unreadable_body">暂时无法读取此钱包的密码短语。仅凭您的助记词可能无法恢复此钱包，因此在密码短语能够与它们一起显示之前，不会显示这些助记词。请重试。</string>
     <string name="seedview_pass_retry">重试</string>
+    <!-- SEED-VIEW-AUTH -->
+    <string name="seedview_device_lock_title">请确认屏幕锁定</string>
+    <string name="seedview_device_lock_body">您的助记词受此手机的屏幕锁定保护。要显示它，请使用您的 PIN 码、图案或密码确认屏幕锁定。</string>
     <!-- /pkg E2-keys -->
     <string name="pinstore_title">暂时无法验证您的 PIN</string>
     <string name="pinstore_body">手机的安全密钥存储未能打开，因此钱包保持锁定。没有删除任何内容。请关闭应用后重新打开。如果仍然出现，请重启手机；您的恢复短语仍可在任何设备上恢复钱包。</string>
