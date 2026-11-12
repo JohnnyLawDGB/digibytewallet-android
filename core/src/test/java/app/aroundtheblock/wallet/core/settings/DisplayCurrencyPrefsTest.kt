@@ -55,7 +55,7 @@ class DisplayCurrencyPrefsTest {
         old().seed(DisplayCurrencyPrefs.KEY, "EUR")
         prefs.refuseWritesTo(DisplayCurrencyPrefs.prefsName(""))
 
-        DisplayCurrencyPrefs.moveFromLegacy(ctx, "")
+        assertEquals("this session still shows the old value", "EUR", DisplayCurrencyPrefs.moveFromLegacy(ctx, ""))
 
         assertNull("the refused write is not on disk", new().durable[DisplayCurrencyPrefs.KEY])
         assertEquals("so the old value stays, for the next start to move", "EUR", old().durable[DisplayCurrencyPrefs.KEY])

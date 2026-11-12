@@ -38,8 +38,19 @@ object DisplayCurrencyPrefs {
         context.getSharedPreferences(prefsName(networkSuffix), Context.MODE_PRIVATE).getString(KEY, null)
     }.getOrNull() ?: moveFromLegacy(context, networkSuffix)
 
-    /** Persist a choice. commit(), so a wipe that follows at once cannot overtake it. */
-    fun write(context: Context, networkSuffix: String, enumName: String): Boolean = runCatching {
+    /**
+     * Persist the user's choice. apply(): it is called from UI handlers, and no wipe path clears
+     * this file, so there is nothing for an asynchronous write to race.
+     */
+    fun write(context: Context, networkSuffix: String, enumName: String) {
+        runCatching {
+            context.getSharedPreferences(prefsName(networkSuffix), Context.MODE_PRIVATE)
+                .edit().putString(KEY, enumName).apply()
+        }
+    }
+
+    /** The move's write: commit(), because the old key is removed only once this has landed. */
+    private fun writeNow(context: Context, networkSuffix: String, enumName: String): Boolean = runCatching {
         context.getSharedPreferences(prefsName(networkSuffix), Context.MODE_PRIVATE)
             .edit().putString(KEY, enumName).commit()
     }.getOrDefault(false)
@@ -47,9 +58,12 @@ object DisplayCurrencyPrefs {
     /**
      * Move the value out of the old file, if it is there. The new file keeps a value it already has
      * (a choice made since the update wins), and the old key is removed only once the new file holds
-     * a value, so a failed write loses nothing. Never throws: this runs at start and before a wipe.
+     * a value. If that write does not land, the old value is still returned, so this session shows
+     * it, and outside a wipe path the old file keeps it for the next start to move again. On a wipe
+     * path the clear that follows removes the old file, so a refused write there loses the choice;
+     * that is logged. Never throws: this runs at start and before a wipe.
      *
-     * @return the value the new file holds afterwards, or null.
+     * @return the value to show: the new file's, else the old file's, else null.
      */
     fun moveFromLegacy(context: Context, networkSuffix: String): String? = runCatching {
         val legacy = context.getSharedPreferences(LEGACY_PREFS_BASE + networkSuffix, Context.MODE_PRIVATE)
@@ -57,8 +71,11 @@ object DisplayCurrencyPrefs {
         val current = context.getSharedPreferences(prefsName(networkSuffix), Context.MODE_PRIVATE)
             .getString(KEY, null)
         if (old == null) return@runCatching current
-        val held = current ?: old.takeIf { write(context, networkSuffix, it) }
-        if (held != null) legacy.edit().remove(KEY).commit()
-        held
+        if (current != null || writeNow(context, networkSuffix, old)) {
+            legacy.edit().remove(KEY).commit()
+        } else {
+            runCatching { android.util.Log.w("DisplayCurrencyPrefs", "display currency not moved: the write did not land") }
+        }
+        current ?: old
     }.getOrNull()
 }

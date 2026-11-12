@@ -16,7 +16,8 @@ import kotlinx.coroutines.flow.asStateFlow
  *
  * A wallet wipe or restore does NOT touch it (owner decision, 2026-11-09): like the own node and
  * the balance mask it is a device setting. The wipe drops only the cached price (Room's price
- * cache, deleted with the database), so the flow and the file never disagree after a wipe. *
+ * cache, deleted with the database), so the flow and the file never disagree after a wipe.
+ *
  * The display currency shares this file on mainnet ([DisplayCurrencyPrefs], network-suffixed),
  * kept by a wipe for the same reason (owner decision, 2026-11-12).
  */
