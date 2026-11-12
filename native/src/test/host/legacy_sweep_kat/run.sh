@@ -37,8 +37,9 @@ SWEEP_KT="$REPO_ROOT/core/src/main/java/app/aroundtheblock/wallet/core/recovery/
 [ -f "$SWEEP_KT" ] || gate_fail "no LegacySweepService.kt (moved? update this gate)"
 [ "$(grep -c 'feePerKb: Long = 100_000L' "$SWEEP_KT")" -eq 2 ] \
     || gate_fail "LegacySweepService.kt: sweep and sweepFromSeed no longer both default feePerKb to 100_000L"
-if grep -rn -A12 -E 'LegacySweepService\(.*\)\.(sweep|sweepFromSeed)\(' "$REPO_ROOT/app/src/main" "$REPO_ROOT/core/src/main" \
-       | grep -q 'feePerKb'; then
+# Read into a variable, not piped to grep -q: under pipefail an early-exit reader can fail the pipe.
+SWEEP_CALLERS="$(grep -rn -A12 -E 'LegacySweepService\(.*\)\.(sweep|sweepFromSeed)\(' "$REPO_ROOT/app/src/main" "$REPO_ROOT/core/src/main" || true)"
+if [[ "$SWEEP_CALLERS" == *feePerKb* ]]; then
     gate_fail "a caller passes its own feePerKb to LegacySweepService: android_default_rate no longer covers Android"
 fi
 
