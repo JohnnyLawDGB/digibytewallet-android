@@ -73,6 +73,12 @@ struct JNINativeInterface {
     void         (*SetByteArrayRegion)(JNIEnv *, jbyteArray, jsize, jsize, const jbyte *);
     void         (*SetIntArrayRegion)(JNIEnv *, jintArray, jsize, jsize, const jint *);
     void         (*SetLongArrayRegion)(JNIEnv *, jlongArray, jsize, jsize, const jlong *);
+    jint *       (*GetIntArrayElements)(JNIEnv *, jintArray, jboolean *);
+    void         (*ReleaseIntArrayElements)(JNIEnv *, jintArray, jint *, jint);
+    jlong *      (*GetLongArrayElements)(JNIEnv *, jlongArray, jboolean *);
+    void         (*ReleaseLongArrayElements)(JNIEnv *, jlongArray, jlong *, jint);
+    void         (*GetIntArrayRegion)(JNIEnv *, jintArray, jsize, jsize, jint *);
+    void         (*GetLongArrayRegion)(JNIEnv *, jlongArray, jsize, jsize, jlong *);
 };
 
 struct JNIInvokeInterface {

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Host gate: no Android build input defines a test seam.
 #
-# The C sources carry comparison-arm seams -- macros named *_UNFIXED or *_RED -- that host KATs
+# The C sources carry comparison-arm seams -- macros named *_UNFIXED or *_RED, or either followed by
+# the one thing it turns off (*_RED_<WHAT>, as in DUST_POLICY_RED_RATE) -- that host KATs
 # define to build the code as it was before a fix (prepared_send.h's PREPARED_SEND_UNFIXED turns the
 # signer's check into "always OK"), and test-only hooks named *_KAT_* / KAT_* that count or expose
 # internals. Defined in an app build, any of them ships the unfixed code or a test hook. Nothing in
@@ -36,7 +37,7 @@ SRC_DIR="$REPO_ROOT/native/src/main/jni"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-SEAM_RE='\b[A-Z][A-Z0-9_]*_(UNFIXED|RED)\b'
+SEAM_RE='\b[A-Z][A-Z0-9_]*_(UNFIXED|RED)(_[A-Z0-9_]+)?\b'
 HOOK_RE='\b([A-Z][A-Z0-9_]*_KAT_[A-Z0-9_]+|KAT_[A-Z0-9_]+|[A-Z][A-Z0-9_]*_KAT)\b'
 
 # The build inputs under a root, one relative path per line.
@@ -112,7 +113,8 @@ INVENTORY="$(grep -oE -- "$SEAM_RE|$HOOK_RE" <<<"$COND" | sort -u)"
 N_INV="$(grep -c . <<<"$INVENTORY")"
 echo "  $N_INV distinct names in preprocessor conditions under native/src/main/jni"
 if [ "$N_INV" -lt 50 ]; then echo "  GATE FAILURE: the inventory found only $N_INV names -- blind, not clean"; FAIL=1; fi
-for must in PREPARED_SEND_UNFIXED REJECT_QUORUM_UNFIXED FEE_POLICY_RED WALLET_KAT_COUNT_REBUILD PUBLISH_REJECT_UNFIXED; do
+for must in PREPARED_SEND_UNFIXED REJECT_QUORUM_UNFIXED FEE_POLICY_RED WALLET_KAT_COUNT_REBUILD PUBLISH_REJECT_UNFIXED \
+            DUST_POLICY_RED_RATE BR_COIN_RESERVATION_RED_NO_LOCK; do
     if ! grep -qx -- "$must" <<<"$INVENTORY"; then echo "  GATE FAILURE: the inventory misses $must -- blind"; FAIL=1; fi
 done
 
@@ -148,6 +150,7 @@ plant() {
 FORMS=8
 k=0; caught=0; missed=0
 NAMES="$INVENTORY"$'\n'"UNLISTED_FUTURE_CHECK_UNFIXED"$'\n'"UNLISTED_FUTURE_GATE_RED"$'\n'"UNLISTED_COUNTER_KAT_HOOK"
+NAMES="$NAMES"$'\n'"UNLISTED_FUTURE_GATE_RED_ONE_CASE"$'\n'"UNLISTED_FUTURE_CHECK_UNFIXED_ONE_CASE"
 while IFS= read -r name; do
     [ -n "$name" ] || continue
     form=$(( k % FORMS )); k=$((k + 1))
