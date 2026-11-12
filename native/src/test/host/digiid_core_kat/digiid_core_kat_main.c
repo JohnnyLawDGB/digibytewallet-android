@@ -690,7 +690,9 @@ static void message_prefix(void)
         m = b_write_varint(q, V[i].len);
         ck(n == V[i].n && memcmp(p, V[i].bytes, n) == 0 && n == m && memcmp(p, q, n) == 0, "a %zu-byte message: prefix %zu byte(s) %02x...",
            V[i].len, V[i].n, V[i].bytes[0]);
-        ck(BRDigiIdDigestWorkSize(V[i].len) == 26 + V[i].n + V[i].len, "and its digest work is header + prefix + message");
+        // On a 32-bit size_t the 0xffffffff-byte message does not fit with its header: no work size.
+        ck(BRDigiIdDigestWorkSize(V[i].len) == (V[i].len > SIZE_MAX - 26 - V[i].n ? 0 : 26 + V[i].n + V[i].len),
+           "and its digest work is header + prefix + message");
     }
     ck(BRDigiIdMessagePrefix(p, SIZE_MAX) == 1 && p[0] == 0xff, "SIZE_MAX: one byte, 0xff");
     ck(BRDigiIdDigestWorkSize(SIZE_MAX) == 0 && BRDigiIdDigestWorkSize(SIZE_MAX - 27) == SIZE_MAX && BRDigiIdDigestWorkSize(SIZE_MAX - 26) == 0,
