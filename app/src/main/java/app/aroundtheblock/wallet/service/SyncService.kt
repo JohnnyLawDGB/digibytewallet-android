@@ -1,5 +1,6 @@
 package app.aroundtheblock.wallet.service
 
+import app.aroundtheblock.wallet.core.LogSafe
 import app.aroundtheblock.wallet.core.LogTag
 
 import android.app.*
@@ -3419,7 +3420,7 @@ class SyncService : Service() {
                 return
             }
             is OwnNodeAddress.Result.Unresolved -> {
-                android.util.Log.w("SyncService", "custom node DNS resolve failed: ${node.host} (${found.reason})")
+                android.util.Log.w("SyncService", "custom node DNS resolve failed: ${node.host} (${LogSafe.text(found.reason)})")
                 NativeBridge.clearPinnedPeer()
                 ownNodePinned = false; ownNodePinnedAddr = null
                 return
@@ -3637,7 +3638,7 @@ class SyncService : Service() {
             val capability = root.optString("capability", "unknown")
             val arr = root.getJSONArray("peers")
             android.util.Log.i("SyncService",
-                "Seeder response: capability=$capability, ${arr.length()} peer(s)")
+                "Seeder response: capability=${LogSafe.text(capability, 32)}, ${arr.length()} peer(s)")
             val out = ArrayList<Triple<String, Int, Long>>(arr.length())
             for (i in 0 until arr.length()) {
                 val peer = arr.getJSONObject(i)
@@ -3646,7 +3647,7 @@ class SyncService : Service() {
             }
             out
         } catch (e: Exception) {
-            android.util.Log.w("SyncService", "Failed to parse seeder peer JSON: ${e.message}")
+            android.util.Log.w("SyncService", "Failed to parse seeder peer JSON: ${LogSafe.text(e.message)}")
             emptyList()
         }
     }

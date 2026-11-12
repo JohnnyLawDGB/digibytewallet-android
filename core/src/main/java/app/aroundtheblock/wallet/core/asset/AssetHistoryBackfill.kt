@@ -1,5 +1,6 @@
 package app.aroundtheblock.wallet.core.asset
 
+import app.aroundtheblock.wallet.core.LogSafe
 import app.aroundtheblock.wallet.core.LogTag
 
 import android.content.Context
@@ -74,7 +75,7 @@ class AssetHistoryBackfill(
                         decoded++
                         progressedThisBatch = true
                     } catch (e: Exception) {
-                        Log.w(TAG, "Decode failed for txid=${LogTag.tx(tx.txid)}: ${e.message}")
+                        Log.w(TAG, "Decode failed for txid=${LogTag.tx(tx.txid)}: ${LogSafe.text(e.message)}")
                     }
                 }
                 // If a batch came back non-empty but we couldn't update any

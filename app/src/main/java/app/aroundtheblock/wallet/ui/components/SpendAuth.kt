@@ -17,6 +17,7 @@ import androidx.fragment.app.FragmentActivity
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import app.aroundtheblock.wallet.core.LogSafe
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import app.aroundtheblock.wallet.R
@@ -96,7 +97,7 @@ class AuthGateViewModel @Inject constructor(
 ) : ViewModel() {
 
     fun hasPin(): Boolean = try { pinManager.hasPin() } catch (e: Exception) {
-        Log.e(TAG, "hasPin() failed: ${e.message}")
+        Log.e(TAG, "hasPin() failed: ${LogSafe.text(e.message)}")
         false
     }
 

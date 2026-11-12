@@ -318,6 +318,328 @@ class LogRedactionSourceGateTest {
         return out
     }
 
+    /**
+     * ASSET-LOG-CRLF: no log line in core/ or app/ interpolates an untrusted remote string without
+     * neutralising its control characters and bounding its length, which `LogSafe.text` does.
+     * Logcat starts a new line at every line break in a message, so a raw value prints text that reads
+     * as lines of its own. Untrusted here: a value read from a remote JSON document or HTTP body (and
+     * anything derived from one in the same function), a String a WebSocket callback is handed, an
+     * issuer-metadata field by name, a parameter [REMOTE_TEXT_PARAMS] lists, and an exception's message
+     * (org.json and OkHttp quote what they failed on). A length, a count or a null check of one is fine.
+     * A caught throwable may not be passed to Log in a function that reads or parses a remote body:
+     * its message and stack trace print that body raw.
+     */
+    @Test
+    fun `ASSET-LOG-CRLF no log line interpolates an untrusted remote string unescaped`() {
+        val violations = mutableListOf<String>()
+        listOf("core/src/main/java", "app/src/main/java").forEach { root ->
+            findSourceRoot(root).walkTopDown().filter { it.extension == "kt" }.forEach { file ->
+                remoteTextLogs(file.readText(), REMOTE_TEXT_PARAMS[file.name].orEmpty())
+                    .forEach { violations.add("${file.name}: $it") }
+            }
+        }
+        assertTrue("log statements carrying an untrusted remote string unescaped (use LogSafe.text):\n" +
+            violations.joinToString("\n"), violations.isEmpty())
+    }
+
+    /** The remote-text rule must flag each source it names and pass the forms it allows. */
+    @Test
+    fun `ASSET-LOG-CRLF rule flags each remote source and passes LogSafe, lengths and codes`() {
+        val d = '$'
+        // The shipped line (AssetImageResolver): a listed remote parameter, trimmed, then logged.
+        val resolver = "fun resolve(raw: String?): Any? {\n val trimmed = raw.trim()\n" +
+            " android.util.Log.w(\"AssetImageResolver\", \"Unrecognised imageUrl format: ${d}trimmed\")\n}"
+        assertTrue("the shipped resolver line is not caught", remoteTextLogs(resolver, setOf("raw")).isNotEmpty())
+        // A server body (DigiScopeClient.submitScore) and remote JSON fields (SyncService seeder).
+        assertTrue(remoteTextLogs("fun f() {\n val respBody = BoundedBody.text(response.body, 4096)\n" +
+            " Log.d(T, \"submitScore: ${d}{response.code} - ${d}respBody\")\n}").isNotEmpty())
+        assertTrue(remoteTextLogs("fun f() {\n val capability = root.optString(\"capability\", \"unknown\")\n" +
+            " Log.i(T, \"capability=${d}capability\")\n}").isNotEmpty())
+        assertTrue(remoteTextLogs("fun f() {\n val v = o.getString(\"name\")\n Log.i(T, \"n=${d}{v.trim()}\")\n}").isNotEmpty())
+        // A WebSocket close reason, an exception's message, a metadata field, a concatenated value.
+        assertTrue(remoteTextLogs("override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {\n" +
+            " Log.w(T, \"closed: ${d}code ${d}reason\")\n}").isNotEmpty())
+        assertTrue(remoteTextLogs("fun f() { Log.w(T, \"failed: ${d}{e.message}\") }").isNotEmpty())
+        assertTrue(remoteTextLogs("fun f() { Log.w(T, \"failed: ${d}{t.localizedMessage}\") }").isNotEmpty())
+        assertTrue(remoteTextLogs("fun f() { Log.w(T, \"img ${d}{meta.imageUrl}\") }").isNotEmpty())
+        assertTrue(remoteTextLogs("fun f() {\n val body = r.body?.string()\n Log.w(T, \"got \" + body)\n}").isNotEmpty())
+        // Allowed: through LogSafe, a length, a code, a null check, a class name.
+        assertTrue(remoteTextLogs(resolver.replace("${d}trimmed\"", "${d}{LogSafe.text(trimmed)}\""), setOf("raw")).isEmpty())
+        assertTrue(remoteTextLogs("fun f() {\n val responseBody = BoundedBody.text(r.body, 4096)\n" +
+            " Log.i(T, \"HTTP ${d}{r.code} bodyLength=${d}{responseBody?.length ?: -1}\")\n}").isEmpty())
+        assertTrue(remoteTextLogs("fun f() { Log.w(T, \"failed: ${d}{LogSafe.text(e.message)}\") }").isEmpty())
+        assertTrue(remoteTextLogs("fun f() { Log.w(T, \"failed: ${d}{e.javaClass.simpleName}\") }").isEmpty())
+        assertTrue(remoteTextLogs("fun f() {\n val tok = o.optString(\"token\")\n Log.i(T, \"t=${d}{tok != null}\")\n}").isEmpty())
+        assertTrue(remoteTextLogs("fun f() {\n val body = r.body?.string()\n Log.w(T, \"got \" + LogSafe.text(body))\n}").isEmpty())
+        // SharedPreferences.getString(key, default) and resources are local, not remote JSON.
+        assertTrue(remoteTextLogs("fun f() {\n val h = prefs.getString(\"k\", null)\n Log.i(T, \"h=${d}h\")\n}").isEmpty())
+    }
+
+    /**
+     * The forms the first version of the rule passed. The first two are the shipped shapes: a function
+     * that parses a remote body and hands the caught throwable to Log, whose message (org.json quotes
+     * the whole input) and stack trace print the body raw.
+     */
+    @Test
+    fun `ASSET-LOG-CRLF rule sees a logged throwable of a remote parse, aliases and indirect forms`() {
+        val d = '$'
+        val getJson = "private fun getJson(url: String, cap: Long): Any? = try {\n" +
+            " val body = BoundedBody.text(resp.body, cap)\n JSONObject(body)\n" +
+            "} catch (t: Throwable) {\n android.util.Log.w(\n \"C\",\n \"threw ${d}{LogSafe.text(t.message)}\",\n t\n )\n null\n}"
+        assertTrue("getJson's throwable is not caught", remoteTextLogs(getJson).isNotEmpty())
+        val quickLogin = "suspend fun quickLogin(): Boolean = try {\n" +
+            " val challenge = JSONObject(BoundedBody.text(r.body, SMALL_BODY_BYTES))\n true\n" +
+            "} catch (e: Exception) {\n Log.e(\"D\", \"quickLogin: ${d}{LogSafe.text(e.message)}\", e)\n false\n}"
+        assertTrue("quickLogin's throwable is not caught", remoteTextLogs(quickLogin).isNotEmpty())
+        // The same throwable in a function that reads nothing remote is a local failure: allowed.
+        assertTrue(remoteTextLogs("fun f() = try { File(p).readBytes() } catch (e: IOException) { Log.w(T, \"io\", e) }").isEmpty())
+
+        val flagged = mapOf(
+            "alias of e.message" to "fun f() { try { g() } catch (e: Exception) {\n val reason = e.message\n Log.w(T, \"x ${d}reason\") } }",
+            "exception toString" to "fun f() { try { g() } catch (e: Exception) { Log.w(T, \"x ${d}e\") } }",
+            "braced exception" to "fun f() { try { g() } catch (e: Exception) { Log.w(T, \"x ${d}{e}\") } }",
+            "concat e.message" to "fun f() { Log.w(T, \"x \" + e.message) }",
+            "direct arg e.message" to "fun f() { Log.w(T, e.message ?: \"\") }",
+            "asset name field" to "fun f() { Log.i(T, \"n=${d}{meta.name}\") }",
+            "metadata field" to "fun f() { Log.i(T, \"n=${d}{metadata?.title}\") }",
+            "lambda it of optString" to "fun f() { o.optString(\"n\").let { Log.i(T, \"n=${d}it\") } }",
+            "lambda it of tainted" to "fun f() {\n val b = BoundedBody.text(r.body, 9)\n b?.let { Log.i(T, \"b=${d}{it.trim()}\") }\n}",
+            "multiline rhs" to "fun f() {\n val v =\n  o.optString(\"n\")\n Log.i(T, \"v=${d}v\")\n}",
+            "multiline call rhs" to "fun f() {\n val v = BoundedBody.text(\n  r.body,\n  9)\n Log.i(T, \"v=${d}v\")\n}",
+            "getString var key" to "fun f() {\n val v = o.getString(key)\n Log.i(T, \"v=${d}v\")\n}",
+            "jsonobject toString" to "fun f() { Log.i(T, \"o=${d}{JSONObject(text)}\") }",
+            "parsed object" to "fun f() {\n val o = JSONObject(text)\n Log.i(T, \"o=${d}o\")\n}",
+            "body read inline" to "fun f() { Log.i(T, \"b=${d}{r.body?.string()}\") }",
+            "LogSafe.text max cut" to "fun f() { Log.i(T, \"b=${d}{LogSafe.text(v, 99999)}\") }",
+            "LogSafe.text variable cut" to "fun f() { Log.i(T, \"b=${d}{LogSafe.text(v, n)}\") }",
+        )
+        val missed = flagged.filter { (_, src) -> remoteTextLogs(src).isEmpty() }.keys
+        assertTrue("forms the rule does not see: $missed", missed.isEmpty())
+
+        // Still allowed: LogSafe with its default or a small cut, a resource string, a class name,
+        // a nested LogSafe call inside a lambda over remote text, a count.
+        val allowed = listOf(
+            "fun f() { Log.i(T, \"b=${d}{LogSafe.text(v, 48)}\") }",
+            "fun f() { Log.i(T, \"b=${d}{LogSafe.text(e.message)}\") }",
+            "fun f() {\n val s = context.getString(R.string.x)\n Log.i(T, \"s=${d}s\")\n}",
+            "fun f() { try { g() } catch (e: Exception) { Log.w(T, \"x ${d}{e::class.java.simpleName}\") } }",
+            "fun f() { o.optString(\"n\").let { Log.i(T, \"n=${d}{LogSafe.text(it)} len=${d}{it.length}\") } }",
+            "fun f() {\n val o = JSONObject()\n o.put(\"a\", 1)\n Log.i(T, \"keys=${d}{o.length()}\")\n}",
+        )
+        val overFlagged = allowed.filter { remoteTextLogs(it).isNotEmpty() }
+        assertTrue("allowed forms flagged: $overFlagged", overFlagged.isEmpty())
+    }
+
+    /**
+     * ASSET-LOG-CRLF: no string built anywhere in core/ or app/ main sources -- not only inside a Log
+     * call -- carries an exception's message raw. A string handed to a callback, added to a list or
+     * stored in a result is logged later by a sink that cannot know it holds remote text (OkHttp and
+     * org.json quote what they failed on), so the message is escaped where the string is built.
+     */
+    @Test
+    fun `ASSET-LOG-CRLF no string anywhere carries a raw exception message`() {
+        val violations = mutableListOf<String>()
+        listOf("core/src/main/java", "app/src/main/java").forEach { root ->
+            findSourceRoot(root).walkTopDown().filter { it.extension == "kt" }.forEach { file ->
+                rawMessageStrings(file.readText()).forEach { violations.add("${file.name}: $it") }
+            }
+        }
+        assertTrue("strings carrying an exception message raw (use LogSafe.text):\n" +
+            violations.joinToString("\n"), violations.isEmpty())
+    }
+
+    /** The string-builder rule flags a raw message in any string and passes LogSafe and lengths. */
+    @Test
+    fun `ASSET-LOG-CRLF string rule flags a message built outside a Log call`() {
+        val d = '$'
+        val flagged = mapOf(
+            "callback builder" to "fun f() { try { g() } catch (e: Exception) { onFailure(\"down: ${d}{e.message}\") } }",
+            "list entry" to "fun f() { try { g() } catch (t: Throwable) { failures += \"flush: ${d}{t.message}\" } }",
+            "safe call" to "fun f() { val s = \"x ${d}{err?.localizedMessage}\" }",
+            "elvis" to "fun f() { val s = \"x ${d}{e.message ?: \"none\"}\" }",
+            "concat" to "fun f() { val s = \"x \" + e.message }",
+        )
+        val missed = flagged.filter { (_, src) -> rawMessageStrings(src).isEmpty() }.keys
+        assertTrue("forms the string rule does not see: $missed", missed.isEmpty())
+        val allowed = listOf(
+            "fun f() { onFailure(\"down: ${d}{e::class.java.simpleName}: ${d}{LogSafe.text(e.message)}\") }",
+            "fun f() { val s = \"len ${d}{e.message?.length}\" }",
+            "fun f() { val s = \"chat ${d}{event.messageId}\" }",
+            "/** e.g. \"x ${d}{e.message}\" */",
+            "fun f() { // \"x ${d}{e.message}\"\n}",
+        )
+        val overFlagged = allowed.filter { rawMessageStrings(it).isNotEmpty() }
+        assertTrue("allowed forms flagged: $overFlagged", overFlagged.isEmpty())
+    }
+
+    private fun rawMessageStrings(content: String): List<String> {
+        val message = Regex("""\.(message|localizedMessage)\b(?!\s*\??\.length)""")
+        val template = Regex("""\$\{((?:[^{}]|\{[^{}]*\})*)\}""")
+        val concat = Regex(""""\s*\+\s*[\w.?]+\.(?:message|localizedMessage)\b""")
+        val out = mutableListOf<String>()
+        content.lines().forEach { raw ->
+            val line = raw.substringBefore("//").trim()
+            if (line.startsWith("*") || line.startsWith("/*")) return@forEach
+            template.findAll(line).forEach { m ->
+                if (message.containsMatchIn(stripLogSafe(m.groupValues[1]))) out.add(m.value)
+            }
+            concat.findAll(line).forEach { out.add(it.value) }
+        }
+        return out
+    }
+
+    /** [expr] with every `LogSafe.text(...)` call taken out, so what it escapes is not counted. */
+    private fun stripLogSafe(expr: String): String {
+        val sb = StringBuilder()
+        var i = 0
+        while (i < expr.length) {
+            if (expr.startsWith("LogSafe.text(", i)) {
+                var depth = 0
+                var j = i + "LogSafe.text".length
+                do {
+                    if (expr[j] == '(') depth++ else if (expr[j] == ')') depth--
+                    j++
+                } while (depth > 0 && j < expr.length)
+                i = j
+            } else {
+                sb.append(expr[i]); i++
+            }
+        }
+        return sb.toString()
+    }
+
+    /** Per function, like [txRowLogs]: a name is remote text only in the function that read it. */
+    private fun remoteTextLogs(content: String, remoteParams: Set<String> = emptySet()): List<String> {
+        val sinks = injectedLoggerNames(content)
+        return Regex("""(?=\n[ \t]*(?:(?:private|internal|public|override|suspend|inline|protected)\s+)*fun\s)""")
+            .split(content).flatMap { remoteTextLogsIn(it, sinks, remoteParams) }
+    }
+
+    private fun remoteTextLogsIn(content: String, sinks: Set<String>, remoteParams: Set<String>): List<String> {
+        val tainted = mutableSetOf<String>()
+        // Parameters: those listed for the file, and every String a WebSocket callback is handed.
+        val params = Regex("""\bfun\s+[\w.<>]+\s*\(([^)]*)\)""").find(content)?.groupValues?.get(1).orEmpty()
+        tainted += Regex("""\b(\w+)\s*:""").findAll(params).map { it.groupValues[1] }.filter { it in remoteParams }
+        if (Regex("""\bWebSocket\b""").containsMatchIn(params)) {
+            tainted += Regex("""\b(\w+)\s*:\s*String\b""").findAll(params).map { it.groupValues[1] }
+        }
+        // The function reads remote text: a caught throwable here may quote it (org.json puts the whole
+        // input in its message, and the stack trace prints the message).
+        // A JSON field read (`optString`, `getString`) is not counted here: the parse it reads from is,
+        // and a Bundle's `getString("k")` is the same text.
+        val readsRemote = tainted.isNotEmpty() || REMOTE_BODY_READ.containsMatchIn(content) || JSON_PARSE.containsMatchIn(content)
+        val caught = Regex("""\bcatch\s*\(\s*(\w+)\s*:""").findAll(content).map { it.groupValues[1] }.toSet()
+        val exceptionText = Regex("""\.(message|localizedMessage)\b""")
+        val fieldText = Regex("""\.(${REMOTE_FIELD_NAMES.joinToString("|")})\b""")
+        // Any field of an issuer-metadata object (`meta.name`, `metadata?.title`).
+        val metaField = Regex("""(?<![.\w])(meta|metadata)\??\.\w+""")
+        val remoteExpr = { e: String ->
+            REMOTE_TEXT_SOURCE.containsMatchIn(e) || JSON_PARSE.containsMatchIn(e) || exceptionText.containsMatchIn(e) ||
+                fieldText.containsMatchIn(e) || metaField.containsMatchIn(e)
+        }
+        val assigns = assignmentsOf(content)
+        var grew = true
+        while (grew) {
+            grew = false
+            assigns.forEach { (name, rhs) ->
+                val head = Regex("""^\s*([A-Za-z_]\w*)""").find(rhs)?.groupValues?.get(1)
+                if (name !in tainted && (remoteExpr(rhs) || head in tainted)) {
+                    tainted.add(name); grew = true
+                }
+            }
+        }
+        // A length, a count, a null or emptiness check, a class name: not the text.
+        val shape = Regex("""\.(length|size|count|isEmpty|isNotEmpty|isBlank|isNotBlank|isNullOrEmpty|isNullOrBlank|javaClass|hashCode)\b|::class|[!=]=\s*null|\bLogTag\.""")
+        val out = mutableListOf<String>()
+        val check = { stmt: String, inRemoteLambda: Boolean ->
+            val bad = mutableListOf<String>()
+            val names = { n: String -> n in tainted || n in REMOTE_FIELD_NAMES || n in caught || (inRemoteLambda && n == "it") }
+            bad += logSafeCutLeaks(stmt)
+            Regex("""\$(?!\{)([A-Za-z_]\w*)""").findAll(stmt).map { it.groupValues[1] }
+                .filter(names).forEach { bad.add("\$$it") }
+            Regex("""\$\{([^{}]*)\}""").findAll(stmt).map { it.groupValues[1].trim() }
+                .filter { !it.startsWith("LogSafe.") && !shape.containsMatchIn(it) }
+                .filter { expr ->
+                    val head = Regex("""^([A-Za-z_]\w*)""").find(expr)?.groupValues?.get(1)
+                    (head != null && names(head)) || remoteExpr(expr)
+                }
+                .forEach { bad.add("\${$it}") }
+            // Outside any string literal and outside LogSafe.text(...): concatenation, a direct argument,
+            // and the throwable argument.
+            val outside = stmt.replace(Regex(""""(?:[^"\\]|\\.)*""""), "\"\"")
+                .replace(Regex("""LogSafe\.text\([^()]*(?:\([^()]*\)[^()]*)*\)"""), "")
+            val trailing = Regex(""",\s*([A-Za-z_]\w*)\s*\)\s*$""").find(outside)?.groupValues?.get(1)
+            if (trailing != null && trailing in caught && readsRemote) bad.add("throwable $trailing of a remote read")
+            val body = if (trailing != null) outside.substring(0, outside.lastIndexOf(trailing)) else outside
+            Regex("""(?<![.\w$])([A-Za-z_]\w*)\b(?!\s*\()(?!\s*(?:\.javaClass|::class))""").findAll(body).map { it.groupValues[1] }
+                .filter(names).forEach { bad.add("arg $it") }
+            if (remoteExpr(body)) bad.add("remote expression outside a literal")
+            if (bad.isNotEmpty()) out.add("$bad in $stmt")
+        }
+        collectLogStatements(content, sinks).forEach { check(it, false) }
+        // `it` inside a block whose receiver is remote text (`o.optString("n").let { ... }`, `body?.let { ... }`).
+        Regex("""\.(let|also|run|forEach|onEach|map|mapNotNull|filter|forEachIndexed|takeIf|takeUnless)\s*\{""")
+            .findAll(content).forEach { m ->
+                val lineStart = content.lastIndexOf('\n', m.range.first) + 1
+                val receiver = content.substring(lineStart, m.range.first)
+                val remote = remoteExpr(receiver) ||
+                    Regex("""(?<![.\w])([A-Za-z_]\w*)""").findAll(receiver).any { it.groupValues[1] in tainted }
+                if (!remote) return@forEach
+                var depth = 0; var i = m.range.last
+                while (i < content.length) {
+                    when (content[i]) { '{' -> depth++; '}' -> depth-- }
+                    if (depth == 0) break
+                    i++
+                }
+                collectLogStatements(content.substring(m.range.last, minOf(i + 1, content.length)), sinks)
+                    .forEach { check(it, true) }
+            }
+        return out.distinct()
+    }
+
+    /** `LogSafe.text(v, max)` with a cut that is not a small literal does not bound the line. */
+    private fun logSafeCutLeaks(stmt: String): List<String> {
+        val out = mutableListOf<String>()
+        Regex("""LogSafe\.text\(""").findAll(stmt).forEach { m ->
+            var depth = 0; var i = m.range.last; var lastComma = -1
+            while (i < stmt.length) {
+                when (stmt[i]) { '(' -> depth++; ')' -> depth--; ',' -> if (depth == 1) lastComma = i }
+                if (depth == 0) break
+                i++
+            }
+            if (lastComma < 0) return@forEach
+            val cut = stmt.substring(lastComma + 1, minOf(i, stmt.length)).trim().removePrefix("max").trim().removePrefix("=").trim()
+            val n = cut.toIntOrNull()
+            if (n == null || n > LOG_SAFE_MAX_CUT) out.add("LogSafe cut $cut")
+        }
+        return out
+    }
+
+    /**
+     * Each `val`/`var` of [content] with its whole right-hand side: to the end of the line, or further
+     * while a parenthesis or bracket is open, the line ends in an operator, or the next line continues the chain.
+     */
+    private fun assignmentsOf(content: String): List<Pair<String, String>> =
+        Regex("""\b(?:val|var)\s+(\w+)\s*(?::[^=\n]+)?=(?!=)""").findAll(content).map { m ->
+            var depth = 0; var i = m.range.last + 1
+            val limit = minOf(content.length, i + 2000)
+            while (i < limit) {
+                val c = content[i]
+                // Brackets only: a `when`/`try` block's branches are not the value's text.
+                when (c) { '(', '[' -> depth++; ')', ']' -> depth-- }
+                if (depth < 0) break
+                if (c == '\n' && depth == 0) {
+                    val sofar = content.substring(m.range.last + 1, i).trimEnd()
+                    val next = content.substring(i + 1, limit).trimStart()
+                    val continues = sofar.isEmpty() || Regex("""(=|\(|\.|\+|\?:|,|->|&&|\|\|)$""").containsMatchIn(sofar) ||
+                        next.startsWith(".") || next.startsWith("?.") || next.startsWith("?:")
+                    if (!continues) break
+                }
+                i++
+            }
+            m.groupValues[1] to content.substring(m.range.last + 1, i)
+        }.toList()
+
     /** The gate above must see what it is meant to see. */
     @Test
     fun `the txid gate collects a multi-line log call and Log_wtf`() {
@@ -492,6 +814,34 @@ class LogRedactionSourceGateTest {
             "outcome", "verdicts", "assetBearing", "sweepable", "unclassified", "heldAssets", "heldUnknown",
             "heldForAssets", "unproven", "unreadInputs", "unreadPlain", "feePool", "feeInputs", "derivedAddresses",
             "holdings", "excludeOutpoints", "spentInputs",
+        )
+
+        /** ASSET-LOG-CRLF: reads of remote text -- a JSON field (`optString(`, a one-argument `getString(key)`;
+         *  a SharedPreferences `getString(key, default)` takes two and `getString(R.string.x)` is a resource),
+         *  an HTTP body. */
+        val REMOTE_TEXT_SOURCE = Regex(
+            """\boptString\(|\bgetString\(\s*(?!R\.)[^,()]+\)|\bBoundedBody\.text\(|\.string\(\)|\bpeekBody\(|\breadUtf8\("""
+        )
+
+        /** ASSET-LOG-CRLF: a read of a remote body. */
+        val REMOTE_BODY_READ = Regex("""\bBoundedBody\.text\(|\.string\(\)|\bpeekBody\(|\breadUtf8\(""")
+
+        /** ASSET-LOG-CRLF: a parse of remote text; `JSONObject()` with no argument is a local builder. */
+        val JSON_PARSE = Regex("""\bJSON(?:Object|Array|Tokener)\(\s*[^)\s]""")
+
+        /** ASSET-LOG-CRLF: the largest cut a log line may ask of `LogSafe.text`. */
+        const val LOG_SAFE_MAX_CUT = 256
+
+        /** ASSET-LOG-CRLF: issuer-metadata fields, remote by nature wherever they are read from. */
+        val REMOTE_FIELD_NAMES = setOf(
+            "imageUrl", "image", "description", "issuer", "issuerName", "symbol", "ticker",
+            "metadataJson", "rulesJson", "assetName",
+        )
+
+        /** ASSET-LOG-CRLF: parameters that carry remote text into a file, by file. `raw` is the issuer's
+         *  image value (AssetImageResolver.resolve). */
+        val REMOTE_TEXT_PARAMS = mapOf(
+            "AssetImageResolver.kt" to setOf("raw"),
         )
 
         /** Shared clients brought into the K1-RECOVERY rule (they parse answers that carry chain data). */

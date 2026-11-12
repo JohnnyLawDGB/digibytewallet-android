@@ -1,6 +1,7 @@
 package app.aroundtheblock.wallet.ui.asset
 
 import android.net.Uri
+import app.aroundtheblock.wallet.core.LogSafe
 
 /**
  * Normalises the `AssetMetadata.imageUrl` field — which IPFS-hosted asset
@@ -49,7 +50,9 @@ object AssetImageResolver {
             trimmed.startsWith("/ipfs/") -> Uri.parse("ipfs://${trimmed.removePrefix("/ipfs/")}")
             isCid(trimmed) -> Uri.parse("ipfs://$trimmed")
             else -> {
-                android.util.Log.w("AssetImageResolver", "Unrecognised imageUrl format: $trimmed")
+                // ASSET-LOG-CRLF: the value is the issuer's; it reaches the log only escaped and cut short.
+                android.util.Log.w("AssetImageResolver",
+                    "Unrecognised imageUrl format (${trimmed.length} chars): ${LogSafe.text(trimmed, 48)}")
                 null
             }
         }
