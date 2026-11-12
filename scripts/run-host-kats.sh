@@ -15,6 +15,7 @@
 # Usage:
 #   scripts/run-host-kats.sh              # run all KATs
 #   scripts/run-host-kats.sh watched      # run only KATs whose name matches "watched"
+#   scripts/run-host-kats.sh --list       # print the suites a full sweep runs, one per line; runs nothing
 #
 # Every suite is built at the header check levels the app ships -- proof of work and difficulty
 # target, both read from native/build.gradle.kts and printed in the header line -- unless the suite
@@ -31,6 +32,27 @@ FILTER="${1:-}"
 if [ ! -d "$HOST_DIR" ]; then
     echo "error: $HOST_DIR not found" >&2
     exit 1
+fi
+
+# THE SUITE LIST. One rule, used by the sweep below and by --list. CI runs the suites in parallel
+# shards (.github/kat-shards/), planned by a script that lists the directories itself; its plan is
+# compared with --list, so the two lists cannot drift apart and leave a suite that no shard runs.
+kat_names() {
+    local dir name
+    for dir in "$HOST_DIR"/*/; do
+        name="$(basename "$dir")"
+        # Only *_kat directories. A tool once lived here and the runner executed it with no
+        # arguments, so its usage message failed CI as though a known-answer test had regressed.
+        # Filtering by name means anything dropped in here that is not a KAT is ignored rather than
+        # run — while a real KAT missing its runner is still surfaced below.
+        [[ "$name" != *_kat ]] && continue
+        printf '%s\n' "$name"
+    done
+}
+# Before the compiler search: listing needs no compiler.
+if [ "$FILTER" = "--list" ]; then
+    kat_names
+    exit 0
 fi
 
 # The KATs build with `clang -fsanitize=address`. Rather than insist that a `clang` already
@@ -102,14 +124,13 @@ failed_kats=""
 norunner_kats=""
 start=$SECONDS
 
-for dir in "$HOST_DIR"/*/; do
-    name="$(basename "$dir")"
+# Read into an array first: a `while read` around the loop would hand its input to every run.sh.
+KATS=()
+while IFS= read -r name; do KATS+=("$name"); done < <(kat_names)
 
-    # Only *_kat directories. A tool once lived here and the runner executed it with no
-    # arguments, so its usage message failed CI as though a known-answer test had regressed.
-    # Filtering by name means anything dropped in here that is not a KAT is ignored rather than
-    # run — while a real KAT missing its runner is still surfaced below.
-    [[ "$name" != *_kat ]] && continue
+# ${KATS[@]+...}: an empty array is "unbound" under `set -u` in bash 3.2 (macOS).
+for name in ${KATS[@]+"${KATS[@]}"}; do
+    dir="$HOST_DIR/$name/"
 
     [ -n "$FILTER" ] && [[ "$name" != *"$FILTER"* ]] && continue
 
