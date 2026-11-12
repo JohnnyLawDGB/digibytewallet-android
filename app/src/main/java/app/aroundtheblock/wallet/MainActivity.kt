@@ -4,6 +4,7 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.fragment.app.FragmentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.material3.AlertDialog
 import androidx.compose.ui.res.stringResource
@@ -366,13 +367,21 @@ class MainActivity : FragmentActivity() {
                     )
                 }
 
-                AppNavigation(
-                    walletManager = walletManager,
-                    pinManager = pinManager,
-                    biometricAuth = biometricAuth,
-                    keyStoreManager = keyStoreManager,
-                    digiScopeClient = digiScopeClient
-                )
+                androidx.compose.foundation.layout.Box(
+                    modifier = androidx.compose.ui.Modifier.fillMaxSize()
+                ) {
+                    AppNavigation(
+                        walletManager = walletManager,
+                        pinManager = pinManager,
+                        biometricAuth = biometricAuth,
+                        keyStoreManager = keyStoreManager,
+                        digiScopeClient = digiScopeClient
+                    )
+                    // Debug builds only; draws nothing in release.
+                    app.aroundtheblock.wallet.ui.components.DebugBuildBanner(
+                        androidx.compose.ui.Modifier.align(androidx.compose.ui.Alignment.TopCenter)
+                    )
+                }
             }
         }
     }
