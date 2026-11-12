@@ -130,7 +130,7 @@ static int64_t kt_u32le(const uint8_t *b, int32_t off)
 static KtSummary kt_summarize(const uint8_t *bytes, int32_t size)
 {
     KtSummary empty = { 0, 0, 0, 0 };
-    const int64_t MAX_RECORDS = 10000, UNCONFIRMED_HEIGHT = 0x7fffffffLL;
+    const int64_t MAX_RECORDS = 100000, UNCONFIRMED_HEIGHT = 0x7fffffffLL;
     if (bytes == NULL || size <= 4) return empty;
     int64_t count = kt_u32le(bytes, 0);
     if (count == 0) return empty;
@@ -266,7 +266,7 @@ static void kt_summarize_size_past_the_end_stops_without_a_hint(void)
 static void kt_summarize_count_above_the_cap_gives_no_hint(void)
 {
     int ok = 1; uint8_t b[64]; Rec r[] = { R(1000, 1400000000, BODY3) };
-    BRSavedTransactionsFloor f = minima(b, blobOf(b, r, 1, 10001));
+    BRSavedTransactionsFloor f = minima(b, blobOf(b, r, 1, (int64_t)BR_SAVED_TRANSACTIONS_MAX_COUNT + 1));
     CHECK(! isEmpty(f) && f.records == 0 && f.minConfirmedHeight == 0);
     const uint8_t huge[] = { 0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0 };
     f = minima(huge, sizeof(huge));
@@ -920,7 +920,7 @@ static void model_agrees_minima(void)
             r[i].body = BODY3; r[i].bodyLen = (uint32_t)(rnd() % 4);
             r[i].declaredSize = (rnd() % 8) ? -1 : (int64_t)(rnd() % 6);
         }
-        int64_t count = (rnd() % 5) ? -1 : (int64_t)(rnd() % 12) + ((rnd() & 1) ? 9995 : 0);
+        int64_t count = (rnd() % 5) ? -1 : (int64_t)(rnd() % 12) + ((rnd() & 1) ? (int64_t)BR_SAVED_TRANSACTIONS_MAX_COUNT - 5 : 0);
         size_t len = blobOf(b, r, nr, count);
         if (rnd() & 1) len = (size_t)(rnd() % (len + 1));
         uint8_t *exact = malloc(len ? len : 1);
@@ -1103,7 +1103,7 @@ static void order_reload_matches_android_source(const char *wmPath, const char *
         if (load && sync) {
             long at[BR_CHAIN_REBUILD_RELOAD_COUNT];
             at[BR_CHAIN_REBUILD_RERUN_ON_LOAD] = posIn(load, e1, "HistoryRebuildOnUpgrade.beforeWalletLoad(context)");
-            at[BR_CHAIN_REBUILD_LOAD_SKIPS_CACHE] = posIn(load, e1, "if (HistoryRebuildOnUpgrade.isInProgress(context))");
+            at[BR_CHAIN_REBUILD_LOAD_SKIPS_CACHE] = posIn(load, e1, "HistoryRebuildOnUpgrade.isInProgress(context)");
             at[BR_CHAIN_REBUILD_RESTORE_AT_FLOOR_TIME] = posIn(load, e1, "creationTimeForRestore(creationTime, HistoryRebuildOnUpgrade.floorTime(context))");
             at[BR_CHAIN_REBUILD_SYNC_START_FLOOR_STEP] = (long)(e1 - load) + 1;   // SyncService, after the load
             for (int i = 0; i < BR_CHAIN_REBUILD_RELOAD_COUNT; i++) CHECK(at[i] >= 0);

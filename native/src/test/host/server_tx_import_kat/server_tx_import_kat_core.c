@@ -21,7 +21,7 @@
 #endif
 
 #ifdef KAT_RED_NO_FREE_REFUSED
-#define BRWalletTransactionForHash(wallet, hash) ((void)(wallet), (void)(hash), tx)
+#define BRWalletRegisterOutcomeHeld(outcome) ((void)(outcome), 1)
 #endif
 
 #include "BRServerTxImport.h"

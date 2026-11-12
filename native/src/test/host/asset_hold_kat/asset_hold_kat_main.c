@@ -1202,7 +1202,18 @@ static void prespend_plain_opreturn_first(void)
     in(f, tid(T_FUNDING), 1);
     wadd(&WAL, f);
     h[0] = f->tx.txHash;
-    heldExactly("a plain OP_RETURN before the carrier does not hide the carrier", pass(&WAL), h, n, 1);
+    // The decoder alone: the plain OP_RETURN does not hide the carrier.
+    WAL.classifier = &NEVER;
+    heldExactly("a plain OP_RETURN before the carrier does not hide the carrier (the decoder's reading)", passReading(&WAL, 1), h, n, 1);
+    WAL.classifier = NULL;
+    // DA-014-REF: two nulldata outputs -- the reference reads neither as decided; the core's classifier
+    // holds every owned output (fail closed), and the pass holds the union.
+    {
+        UInt256 h2[2];
+        uint32_t n2[2] = { 2, 3 };
+        h2[0] = h2[1] = f->tx.txHash;
+        heldExactly("a plain OP_RETURN beside the carrier is undecided (DA-014-REF): every owned output held", pass(&WAL), h2, n2, 2);
+    }
 }
 
 static void prespend_unclassifiable_beside_readable(void)
@@ -1281,13 +1292,21 @@ static void prespend_two_carriers(void)
     in(f, tid(T_FUNDING), 1);
     row(&WAL, tid(T_FUNDING), 1, 10, 1);
     wadd(&WAL, f);
-    r = pass(&WAL);
+    WAL.classifier = &NEVER;
+    r = passReading(&WAL, 1);
+    WAL.classifier = NULL;
     ck(r.status == BR_ASSET_HOLD_COMPLETE && heldIn(r, f->tx.txHash, 3) && ! heldIn(r, f->tx.txHash, 2) && r.heldCount == 1,
-       "two readable carriers: the last one's output is held, the first one's is not (%zu held)", r.heldCount);
-    ck(BRTxOutputIsAsset(&f->tx, &f->outs[3]) == 1 && BRTxOutputIsAsset(&f->tx, &f->outs[2]) == 0,
-       "the classifier chooses the same carrier");
+       "two readable carriers, the decoder's reading: the last one's output is held, the first one's is not (%zu held)", r.heldCount);
     model(&WAL);
     ck(sameAsModel(r), "and the model agrees");
+    // DA-014-REF: two tagged outputs are undecided: the classifier fails closed on every output and
+    // the pass holds every owned one.
+    ck(BRTxOutputIsAsset(&f->tx, &f->outs[3]) == 1 && BRTxOutputIsAsset(&f->tx, &f->outs[2]) == 1 &&
+       BRTxOutputIsAsset(&f->tx, &f->outs[4]) == 1, "the classifier holds every output of an undecided transaction");
+    r = pass(&WAL);
+    ck(r.status == BR_ASSET_HOLD_COMPLETE && heldIn(r, f->tx.txHash, 2) && heldIn(r, f->tx.txHash, 3) &&
+       heldIn(r, f->tx.txHash, 4) && r.heldCount == 3, "two readable carriers: the pass holds every owned output (%zu held)", r.heldCount);
+    ck(coversModel(r), "and at least the model");
 }
 
 static void prespend_refusals(void)
@@ -1844,9 +1863,24 @@ static void walk_record_units(void)
     model(&WAL);
     ck(r.status == BR_ASSET_HOLD_COMPLETE && sameAsModel(r),
        "the walk's recorded total is what it resolved: the decoder's reading is the model's");
+    // DA-014-REF: the core's classifier holds A (two carriers) whole, which would hide the other
+    // reading's choice of carrier. The classifier the reading is asked about here answers as the
+    // last-carrier rule did: each carrier's named output 0 (the classifier never sees a remainder).
+    absReset();
+    ABS.yes[ABS.yesN].h = a->tx.txHash; ABS.yes[ABS.yesN++].n = 0;
+    ABS.yes[ABS.yesN].h = b->tx.txHash; ABS.yes[ABS.yesN++].n = 0;
+    ABS.yes[ABS.yesN].h = c->tx.txHash; ABS.yes[ABS.yesN++].n = 0;
+    ABS.contains[ABS.containsN++] = a->tx.txHash;
+    ABS.contains[ABS.containsN++] = b->tx.txHash;
+    ABS.contains[ABS.containsN++] = c->tx.txHash;
+    WAL.classifier = &ABSTRACT;
     r = pass(&WAL);
+    WAL.classifier = NULL;
     ck(r.status == BR_ASSET_HOLD_COMPLETE && heldIn(r, c->tx.txHash, 2) && coversModel(r),
        "the other reading reads a funding transaction by the pass's carrier or not at all, and the pass holds the union");
+    r = pass(&WAL);
+    ck(r.status == BR_ASSET_HOLD_COMPLETE && heldIn(r, c->tx.txHash, 2) && coversModel(r),
+       "with the core's classifier (DA-014-REF holds A whole): the same output is held");
 }
 
 // A cycle (only a forged txid makes one): A spends (B, 2), B spends (A, 2), both stored zero, B's
@@ -2444,10 +2478,15 @@ static void edges(void)
     out(t, "6a03aabbcc", 0);
     wadd(&WAL, t);
     row(&WAL, t->tx.txHash, 0, 0, 0);
-    r = pass(&WAL);
+    WAL.classifier = &NEVER;
+    r = passReading(&WAL, 1);
+    WAL.classifier = NULL;
     model(&WAL);
     ck(r.status == BR_ASSET_HOLD_COMPLETE && ! heldIn(r, t->tx.txHash, 0) && sameAsModel(r),
-       "an issuance with no output that is not OP_RETURN: a row on output 0 is not the issuer's");
+       "an issuance with no output that is not OP_RETURN: a row on output 0 is not the issuer's (the decoder's reading)");
+    r = pass(&WAL);
+    ck(r.status == BR_ASSET_HOLD_COMPLETE && heldIn(r, t->tx.txHash, 0),
+       "the same, two nulldata outputs: undecided (DA-014-REF), the pass holds the row's output");
 
     // an input index of exactly INT32_MAX is read: here a plain output carrying nothing
     preSpendWallet();
@@ -2705,8 +2744,8 @@ static void wallet_agree(void)
 // ---- the sweeps ---------------------------------------------------------------------------------------
 
 // A pseudo-random wallet. `any`: any scripts (random tails after the tag, a plain OP_RETURN anywhere,
-// two carriers, an index past INT32_MAX). Otherwise one well-formed carrier at most, a plain OP_RETURN
-// only after it: scripts the decoder and the classifier read alike.
+// two carriers, an index past INT32_MAX). Otherwise one well-formed carrier at most and no plain OP_RETURN
+// beside it (DA-014-REF holds such a transaction whole): scripts the decoder and the classifier read alike.
 static void genWallet(int any)
 {
     size_t nTx = 1 + (size_t)below(9), i, j, k;
@@ -2762,7 +2801,7 @@ static void genWallet(int any)
         if (below(4) == 0) plainAt = any ? (size_t)below(outs + 1) : at + 1;
 
         for (j = 0; j <= outs; j++) {
-            if (j == plainAt && (any || len == 0 || j > at)) out(f, "6a03aabbcc", 0);
+            if (j == plainAt && (any || len == 0)) out(f, "6a03aabbcc", 0);   // DA-014-REF: beside a carrier, undecided
             if (j == at && len > 0) outBytes(f, script, len, 0);
             if (j < outs) out(f, below(3) ? OURS : THEIRS, below(3) != 0);
         }

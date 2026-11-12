@@ -3,6 +3,10 @@
 
 #include <stdint.h>
 #include <stddef.h>
+/* The rule and every limit below are the core's, the one copy the core's own sweep
+ * (BRLegacySweepBuildAndSign) also applies: this header maps its verdicts and keeps the
+ * pre-SWEEP-ABS-CEIL comparison arm. */
+#include "../digibytewallet-core/BRLegacySweepFee.h"
 
 /*
  * The fee backstop of buildAndSignLegacySweep, kept free of JNI so sweep_fee_ceiling_kat pins its exact
@@ -40,6 +44,10 @@
  * TX_MAX_SIZE, so the ceiling refuses no sweep the default rate could relay. A single-input sweep
  * estimates 204 bytes: 20,400 sats at the default rate, at most 204,000 at the rate ceiling.
  *
+ * ONE COPY: the shipped arm is BRLegacySweepFeeCheck (digibytewallet-core/BRLegacySweepFee.h), and the
+ * SWEEP_* limits are its BR_LEGACY_SWEEP_* constants. legacy_sweep_kat holds the core's sweep to signing
+ * byte for byte what this bridge signs and refusing what it refuses.
+ *
  * MACRO CONVENTION: SWEEP_ABS_CEIL_UNFIXED is tested by VALUE (#if). =1 is sweep_fee_ceiling_kat's
  * comparison arm, the guard before this item: no rate range, no ceiling, single-input sweeps exempt from
  * every bound but dust. Unset or =0 is what ships.
@@ -49,11 +57,11 @@
 #define SWEEP_ABS_CEIL_UNFIXED 0
 #endif
 
-#define SWEEP_MIN_RELAY_SATS     1000ULL
-#define SWEEP_DUST_SATS          546ULL
-#define SWEEP_MIN_FEE_PER_KB     100000ULL       /* DGB minimum relay rate, 100 sat/byte (= DEFAULT_FEE_PER_KB) */
-#define SWEEP_MAX_FEE_PER_KB     1000000ULL      /* 10 x DEFAULT_FEE_PER_KB */
-#define SWEEP_FEE_CEILING_SATS   10000000ULL     /* TX_MAX_SIZE at DEFAULT_FEE_PER_KB */
+#define SWEEP_MIN_RELAY_SATS     ((uint64_t)BR_LEGACY_SWEEP_MIN_FEE)         /* 1,000 */
+#define SWEEP_DUST_SATS          ((uint64_t)BR_LEGACY_SWEEP_DUST)            /* 546 */
+#define SWEEP_MIN_FEE_PER_KB     ((uint64_t)BR_LEGACY_SWEEP_MIN_FEE_PER_KB)  /* 100,000: DGB minimum relay rate */
+#define SWEEP_MAX_FEE_PER_KB     ((uint64_t)BR_LEGACY_SWEEP_MAX_FEE_PER_KB)  /* 1,000,000: 10 x the minimum */
+#define SWEEP_FEE_CEILING_SATS   ((uint64_t)BR_LEGACY_SWEEP_FEE_CEILING)     /* 10,000,000: TX_MAX_SIZE at it */
 
 typedef enum {
     SWEEP_FEE_OK = 0,
@@ -72,27 +80,38 @@ typedef enum {
 static inline SweepFeeVerdict sweep_fee_check(uint64_t totalIn, size_t inputCount, int64_t feePerKb,
                                               uint64_t *feeOut)
 {
-    uint64_t estSize = 10ULL + (uint64_t)inputCount * 160ULL + 34ULL;
+#if SWEEP_ABS_CEIL_UNFIXED
+    uint64_t estSize = (uint64_t)BR_LEGACY_SWEEP_BASE_BYTES + (uint64_t)inputCount * BR_LEGACY_SWEEP_INPUT_BYTES
+                     + BR_LEGACY_SWEEP_OUTPUT_BYTES;
     uint64_t fee;
 
     if (feeOut) *feeOut = 0;
-#if SWEEP_ABS_CEIL_UNFIXED
     fee = (estSize * (uint64_t)feePerKb) / 1000ULL;
     if (fee < SWEEP_MIN_RELAY_SATS) fee = SWEEP_MIN_RELAY_SATS;
     if (feeOut) *feeOut = fee;
     if (inputCount > 1 && totalIn <= fee * 20) return SWEEP_FEE_UNDER_REPORTED;
-#else
-    if (feePerKb < (int64_t)SWEEP_MIN_FEE_PER_KB || (uint64_t)feePerKb > SWEEP_MAX_FEE_PER_KB)
-        return SWEEP_FEE_RATE_OUT_OF_RANGE;
-    /* No wrap: inputCount is a JNI array length (< 2^31), so estSize < 2^39, and the rate is < 2^20. */
-    fee = (estSize * (uint64_t)feePerKb) / 1000ULL;
-    if (fee < SWEEP_MIN_RELAY_SATS) fee = SWEEP_MIN_RELAY_SATS;
-    if (feeOut) *feeOut = fee;
-    if (fee > SWEEP_FEE_CEILING_SATS) return SWEEP_FEE_ABOVE_CEILING;
-    if (totalIn <= fee * 20) return SWEEP_FEE_UNDER_REPORTED;   /* every sweep: no single-input exemption */
-#endif
     if (totalIn <= fee + SWEEP_DUST_SATS) return SWEEP_FEE_DUST;
     return SWEEP_FEE_OK;
+#else
+    /* A negative jlong rate reads as above 2^63: a wrap or above the range, refused either way. */
+    uint64_t fee = 0;
+    const BRLegacySweepFeeVerdict v = BRLegacySweepFeeCheck(totalIn, inputCount, (uint64_t)feePerKb, NULL, &fee);
+
+    if (feeOut) *feeOut = 0;
+    switch (v) {
+    case BR_LEGACY_SWEEP_FEE_CHECK_WRAPS:
+    case BR_LEGACY_SWEEP_FEE_CHECK_RATE_TOO_LOW:
+    case BR_LEGACY_SWEEP_FEE_CHECK_RATE_TOO_HIGH: return SWEEP_FEE_RATE_OUT_OF_RANGE;   /* *feeOut stays 0 */
+    default: break;
+    }
+    if (feeOut) *feeOut = fee;
+    switch (v) {
+    case BR_LEGACY_SWEEP_FEE_CHECK_OK: return SWEEP_FEE_OK;
+    case BR_LEGACY_SWEEP_FEE_CHECK_ABOVE_CEILING: return SWEEP_FEE_ABOVE_CEILING;
+    case BR_LEGACY_SWEEP_FEE_CHECK_RATIO: return SWEEP_FEE_UNDER_REPORTED;   /* every sweep: no single-input exemption */
+    default: return SWEEP_FEE_DUST;                                          /* BR_LEGACY_SWEEP_FEE_CHECK_DUST */
+    }
+#endif
 }
 
 #endif /* SWEEP_FEE_GUARD_H */

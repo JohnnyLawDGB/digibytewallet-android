@@ -68,11 +68,11 @@ CASES=(
     prespend_targeted_held:1,64
     prespend_untargeted_spendable:1,64
     prespend_not_ours:1,64
-    prespend_plain_opreturn_first:1
+    prespend_plain_opreturn_first:1,2
     prespend_unclassifiable_beside_readable:-
     prespend_unclassifiable_every_owned:64
     prespend_plain_pushdata2:-
-    prespend_two_carriers:256
+    prespend_two_carriers:1,2,256
     prespend_refusals:4096
     prespend_amount_unused:1,64
     prespend_unreadable_input:1,64,512
@@ -103,7 +103,7 @@ CASES=(
     refusal_arguments:-
     refusal_unreadable:4096
     capacity:1,16,64,2048,4096
-    edges:1,16,64
+    edges:1,2,16,64
     implicit_change_wallet:1,16,64,4096
     wallet_agree:-
     sweep_decoder:1,8,16,32,64,128,256,512
