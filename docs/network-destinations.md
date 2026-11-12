@@ -177,11 +177,11 @@ This section is byte-identical in `digibytewallet-android/docs/network-destinati
 | Saved peers | Restored | Not restored (absent until the push-down, iOS plan §19.3) | Absent |
 | Explorer, own-node guide, About links to DigiScope, Around The Block, digibyte.org | Same URLs | Same URLs | Same |
 | GitHub About links (source, licence, issues), bug-report page | Present | Absent | Absent |
-| Price (CoinGecko, Binance) | Same two requests, through Tor when it is on; 22 currencies on the price card, the balance and Send; on Send a successful fetch is reused for a minute. A cached price over an hour old is not used ("Price unavailable"); Settings → Display → Show prices off: no price requests, no prices shown | Same two requests, read for USD on Send only, after unlock; a successful fetch is reused for a minute. The same hour ("Price unavailable") and the same switch (Settings → Show prices off: no price requests, no prices shown) | Same rules (owner decisions, 2026-11-09); prices outside Send are absent on iOS |
+| Price (CoinGecko, Binance) | Same two requests, through Tor when it is on; 22 currencies on the price card and the balance, USD on Send; on Send a successful fetch is reused for a minute. A cached price over an hour old is not used ("Price unavailable"); Settings → Display → Show prices off: no price requests, no prices shown | Same two requests, after unlock: 22 currencies on the price card and the balance, USD on Send; on Send a successful fetch is reused for a minute. The same hour ("Price unavailable") and the same switch (Settings → Display → Show prices off: no price requests, no prices shown) | Same rules (owner decisions, 2026-11-09). Tor: absent on iOS (M10) |
 | DigiAsset indexers, IPFS gateways, DigiStamp | Present | Absent (M8) | Absent |
 | Digi-ID callbacks | Present | Absent (M6) | Absent |
 | Hub, chat, DigiRunner (`api.digiscope.me`) | Present | Absent | Absent |
-| Reconcile / Recover funds | Present | Absent (M9) | Absent |
+| Reconcile / Recover funds | Present; Android also reconciles by itself after an upgrade (`PostUpgradeReconciler`) | Scan for missing funds, on the user's tap only; Recover funds absent (Stage 1) | iOS asks only on a user action (owner's rule, 2026-11-10); Recover funds absent |
 | Update check (GitHub) | Sideload flavor only | Absent (the App Store updates) | Absent |
 | Tor, Dandelion | Opt-in | Absent (M10) | Absent |
 | Local Network permission probe | None (Android has no Local Network permission) | `LocalNetworkAccess` opens a connection to the own node's address to read the permission state; sends no byte | iOS-only platform need, no Android counterpart |
