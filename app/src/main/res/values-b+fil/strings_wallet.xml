@@ -724,6 +724,9 @@
     <string name="reconcile_unprovable_body">Nag-ulat ang node ng mga transaksyon mula sa block %1$s o mas maaga na hindi masuri ng wallet na ito gamit ang sarili nitong kopya ng chain, kaya hindi sila idinagdag. Ang muling pag-scan mula sa block na iyon ay susuri sa kanila sa DigiByte network.</string>
     <string name="reconcile_unprovable_rescan">Muling i-scan mula sa block %1$s</string>
     <string name="reconcile_unprovable_confirm">I-tap ulit para kumpirmahin — buburahin ang cache at magre-restart</string>
+    <string name="reconcile_rebuild_body">Kung mukhang mali pa rin ang mga kumpirmasyon, pagkakasunod-sunod, o balanse, buburahin nito ang lokal na cache ng mga transaksyon at muling isi-scan ang buong chain gamit ang compact filters — muling matutukoy ang bawat transaksyon at matatatakan ng block nito mula sa on-chain na data. Hindi gagalawin ang iyong seed at mga coin; lahat ay bubuuin muli mula sa chain. Magre-restart ang app at tatakbo ang scan mula sa pagkakagawa ng iyong wallet, kaya matatagalan bago ito matapos.</string>
+    <string name="reconcile_rebuild_in_progress">Binubuo muli — binubura ang cache, nagre-restart…</string>
+    <string name="reconcile_rebuild_not_started">Walang nabuo muli. May kinakailangang hakbang na hindi natapos, kaya walang nabura at ganoon pa rin ang iyong wallet. Subukang muli.</string>
     <string name="rf_capped_body">Huminto ang scan sa limitasyon nito sa %1$s habang ginagamit pa ang path na iyon, kaya maaaring mas marami ang pondo roon kaysa sa ipinapakita. Ligtas pa rin sa chain ang hindi naipakita.</string>
     <string name="reconcile_stuck_stale_cleared">, %1$d sa mga ito ang hindi kailanman na-relay (pagkalipas ng isang araw, wala sa network ang mga ito o anumang gumagastos sa kanilang coin). Kung naabot ng isa sa mga bayad na iyon ang tatanggap, maaari pa rin itong makumpirma: kumpirmahin muna sa kanila bago magbayad ulit</string>
 </resources>

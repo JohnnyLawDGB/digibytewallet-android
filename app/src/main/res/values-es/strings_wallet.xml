@@ -731,6 +731,9 @@
     <string name="reconcile_unprovable_body">El nodo informó transacciones del bloque %1$s o anteriores que esta billetera no puede comprobar con su propia copia de la cadena, así que no se añadieron. Un reescaneo desde ese bloque las comprueba a través de la red DigiByte.</string>
     <string name="reconcile_unprovable_rescan">Reescanear desde el bloque %1$s</string>
     <string name="reconcile_unprovable_confirm">Toca de nuevo para confirmar: borra la caché y reinicia</string>
+    <string name="reconcile_rebuild_body">Si las confirmaciones, el orden o el saldo siguen pareciendo incorrectos, esto borra la caché local de transacciones y vuelve a escanear toda la cadena con filtros compactos, detectando de nuevo cada transacción y asignándole su bloque a partir de los datos de la cadena. Tu semilla y tus monedas no se tocan; todo se reconstruye desde la cadena. La app se reinicia y el escaneo empieza desde la creación de tu billetera, así que tarda un rato en terminar.</string>
+    <string name="reconcile_rebuild_in_progress">Reconstruyendo: borrando la caché, reiniciando…</string>
+    <string name="reconcile_rebuild_not_started">No se reconstruyó nada. Un paso necesario no se completó, así que no se borró nada y tu billetera sigue igual. Inténtalo de nuevo.</string>
     <string name="rf_capped_body">El escaneo llegó a su límite en %1$s mientras esa ruta seguía en uso, así que puede haber más fondos allí de los que se muestran. Lo que no se muestra sigue a salvo en la cadena.</string>
     <string name="reconcile_stuck_stale_cleared">, %1$d de ellas nunca se retransmitieron (tras un día la red no tenía ni ellas ni nada que gastara sus monedas). Si alguno de esos pagos llegó a su destinatario, todavía puede confirmarse: consúltalo con él antes de volver a pagar</string>
 </resources>
