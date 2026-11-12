@@ -82,10 +82,14 @@ ALL_CASES=(profile_count hard_bit seed_match seed_bounds seed_nul_refused phrase
            all_formats derive_refusals slot_positions independent_vectors independent_profiles
            caller_seed_untouched address_probes)
 
+# One arm takes about 85 s on a laptop (the four took 272 s with their builds in CI); the limit only bounds a hang.
+ARM_LIMIT_S="${DERIVATION_PROFILES_LIMIT:-900}"
+
 # $1 arm name, $2 binary, $3 the cases that must fail, space-separated ("" = none).
 check_arm() {
     local arm="$1" bin="$2" red="$3" out rc c
-    out="$(timeout -k 5 300 "$bin" "${VECTOR_FILES[@]}" 2>&1)"; rc=$?
+    out="$(timeout -k 5 "$ARM_LIMIT_S" "$bin" "${VECTOR_FILES[@]}" 2>&1)"; rc=$?
+    if [ $rc -eq 124 ] || [ $rc -eq 137 ]; then gate_fail "[$arm] stopped at the ${ARM_LIMIT_S} s limit (rc=$rc)"; fi
     <<<"$out" grep -Eq "$SAN_RE" && { gate_fail "[$arm] sanitizer report"; <<<"$out" grep -E "$SAN_RE" | head -3; }
     for c in "${ALL_CASES[@]}"; do
         if [[ " $red " == *" $c "* ]]; then
