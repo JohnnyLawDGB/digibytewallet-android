@@ -505,7 +505,7 @@ class WalletViewModel @Inject constructor(
      * the old Settings store happens in [adoptLegacyCurrencyIfUnset] just after.
      */
     val displayCurrency = MutableStateFlow(
-        DisplayCurrencyStore.resolve(pref = prefs.getString("display_currency", null), legacy = null)
+        DisplayCurrencyStore.resolve(pref = DisplayCurrencyStore.storedPref(application), legacy = null)
     )
 
     /**
@@ -517,14 +517,14 @@ class WalletViewModel @Inject constructor(
      * written to the preference, so the next start needs no database read at all.
      */
     private fun adoptLegacyCurrencyIfUnset() {
-        if (prefs.getString("display_currency", null) != null) return
+        if (DisplayCurrencyStore.storedPref(application) != null) return
         viewModelScope.launch {
             val legacy = withContext(Dispatchers.IO) {
                 runCatching { walletConfigDao.get()?.fiatCurrency }.getOrNull()
             }
             val resolved = DisplayCurrencyStore.resolve(pref = null, legacy = legacy)
             if (resolved != displayCurrency.value) displayCurrency.value = resolved
-            prefs.edit().putString("display_currency", resolved.name).apply()
+            DisplayCurrencyStore.save(application, resolved)
         }
     }
 
@@ -532,7 +532,7 @@ class WalletViewModel @Inject constructor(
      *  the two screens can no longer disagree about what the user chose. */
     fun selectCurrency(currency: DisplayCurrency) {
         displayCurrency.value = currency
-        prefs.edit().putString("display_currency", currency.name).apply()
+        DisplayCurrencyStore.save(application, currency)
     }
 
     /**
