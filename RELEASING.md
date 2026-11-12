@@ -148,7 +148,12 @@ one signer, and the wrong package. Output, under `dist/vX.Y.Z/`:
    and is checked by its certificate, never by `SHA256SUMS`. Release
    notes written by hand, **with reporter credits as they are written** (§8).
 2. **Play:** the AAB to open testing, with that release's "what's new" text.
-3. **digiscope.me downloads page:** link the new release.
+3. **digiscope.me downloads page:** link the new release. Every version field moves together, or
+   the page sells one version under another's name (4.1.3 shipped with the 4.1.2 badge, summary
+   and "What's new" link): the version badge (`class="ver"`, version and date), the summary
+   paragraph's first sentences, the "What's new" link and its text, the APK file name and both
+   download links, the SHA-256, and the source tag and commit. Then check the live page:
+   `curl -s https://digiscope.me/downloads/ | grep -c 'X.Y.(Z-1)'` should print 0.
    **Never repoint `digibyte-wallet-latest.apk` or `latest.json`.** The retired io.digibyte
    app's in-app updater polls them; they must keep pointing at io.digibyte 4.0.87.2.
 4. If the privacy policy changed, update its effective date where it is published.
