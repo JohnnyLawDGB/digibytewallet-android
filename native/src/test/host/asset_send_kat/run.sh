@@ -89,7 +89,8 @@ int strict_tu1(void)
 {
     BRTransaction *tx = NULL;
     BRAssetTransferReport r;
-    return (int)BRWalletBuildAssetTransfer(&tx, NULL, NULL, NULL, 0, NULL, 0, "La", 1, "x", 1, NULL, 0, "s", 1, 0.0, &r);
+    return (int)BRWalletBuildAssetTransfer(&tx, NULL, BR_SWEEP_RULE_NONE, NULL, NULL, 0, NULL, 0, "La", 1, "x", 1, NULL, 0, "s", 1,
+                                           0.0, &r);
 }
 EOF
 cat > "$BUILD_DIR/strict2.c" <<'EOF'
@@ -98,7 +99,7 @@ cat > "$BUILD_DIR/strict2.c" <<'EOF'
 int strict_tu1(void);
 int main(void)
 {
-    return (strict_tu1() == BR_ASSET_TRANSFER_BAD_ARGUMENT && BR_ASSET_TRANSFER_GATE_REFUSED == 21) ? 0 : 1;
+    return (strict_tu1() == BR_ASSET_TRANSFER_BAD_ARGUMENT && BR_ASSET_TRANSFER_RULE_STATE == 22) ? 0 : 1;
 }
 EOF
 SYS=(-isystem "$CORE_DIR" -isystem "$CORE_DIR/secp256k1/include")
@@ -134,8 +135,8 @@ if [ "$(uname -s)" = Darwin ] && command -v swiftc >/dev/null 2>&1; then
 var tx: UnsafeMutablePointer<BRTransaction>? = nil
 var report = BRAssetTransferReport()
 var outcome = BRAssetSendOutcome()
-let status: BRAssetTransferStatus = BRWalletBuildAssetTransfer(&tx, nil, &outcome, nil, 0, nil, 0, "La", 1, "x", Int64.max,
-                                                               nil, 0, nil, 0, 0, &report)
+let status: BRAssetTransferStatus = BRWalletBuildAssetTransfer(&tx, nil, BR_SWEEP_RULE_NONE, &outcome, nil, 0, nil, 0, "La", 1,
+                                                               "x", Int64.max, nil, 0, nil, 0, 0, &report)
 print(status == BR_ASSET_TRANSFER_BAD_ARGUMENT, report.input, report.paidFeeSats, BR_ASSET_TRANSFER_SEED_MAX, BR_ASSET_TRANSFER_SCRIPT_MAX)
 EOF
     if swiftc -typecheck -import-objc-header "$BUILD_DIR/bridging.h" -Xcc -I"$BUILD_DIR/swift_inc" "$BUILD_DIR/use.swift" \
@@ -247,6 +248,7 @@ red 4096  not-plain      "fee_coin_not_plain"
 red 8192  prespent       "conflicted_spent_funding spent_before_sign"
 red 16384 gate           "gate_claims"
 red 32768 duplicate      "duplicate_input"
+red 65536 rules          "rule_state fuzz"
 
 # ---- MUTANTS -----------------------------------------------------------------------------------------------------
 # Each `if (` of BRAssetSend.c in turn is made never to fire: its whole condition C becomes `0 && (C)`. A line the
@@ -330,7 +332,7 @@ fi
 echo "  [leaks] $leak_note"
 
 if [ "$FAIL" -eq 0 ]; then
-    arms_note="sixteen comparison arms red on exactly theirs"
+    arms_note="seventeen comparison arms red on exactly theirs"
     [ "$ARMS" = "0" ] && arms_note="comparison arms skipped (KAT_ARMS=0)"
     echo "PASS: asset_send_kat (bridge and core sign the same bytes wherever both sign; $arms_note; $mutant_note; ASan+UBSan; portability; leaks: $leak_note)"
     exit 0

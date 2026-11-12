@@ -19,12 +19,16 @@
 //   binding_*        AssetSendBindingTest's rules as the builder sees them: the units approved are the units
 //                    sent, the asset is the approval's, the recipient is the approval's address without
 //                    whitespace (with it, both sides refuse), the fee is at most the approval.
+//   rule_state       a PLANNED outcome signed under a rule state other than NONE (BOUND, UNKNOWN, a value
+//                    BRSweepRuleState does not define): refused before anything else is read.
 //   conflicted_*     asset_conflicted_send_kat's wallet (a stuck send replaced by a re-send): its assertions on
 //                    BRWalletOutpointAssetState, then a send from each outpoint it names.
 //   shape_*, bounds_*, duplicate_input, carrier_*, fee_mismatch, held_*, fee_coin_*, record_*, spent_*,
 //   gate_*, sign_failed, no_memory, not_planned, arguments: every check of BRAssetSend.h, each status.
 //   keys_wiped       checked after EVERY core call in every scenario too: no block the core's unit frees holds
-//                    the seed, and the caller's seed is unchanged.
+//                    the seed, and the caller's seed is unchanged. A regression guard, not a witness of the
+//                    wipe: the core's unit puts nothing of the seed on the heap, and the derived keys live on
+//                    BRWalletSignTransaction's stack (BRKeyClean there), which this recorder cannot see.
 //
 // The bridge's reservation table (coin_reservation.c) and the core's (BRCoinReservation.c) are separate: each
 // side claims in its own, and both are cleared before each send unless the scenario sets claims itself.
@@ -182,7 +186,7 @@ static const char *statusName(BRAssetTransferStatus s)
     static const char *n[] = { "SIGNED", "BAD_ARGUMENT", "NOT_PLANNED", "BAD_SEED", "NO_MEMORY", "PLAN_SHAPE",
         "WRONG_ASSET", "BAD_INPUT", "DUPLICATE_INPUT", "BAD_RECIPIENT", "CARRIER_MISMATCH", "UNITS_MISPLACED",
         "FEE_MISMATCH", "FEE_NOT_APPROVED", "INPUT_SPENT", "INPUT_CONFLICTED", "INPUT_UNKNOWN", "INPUT_MISMATCH",
-        "INPUT_HELD", "FEE_COIN_NOT_PLAIN", "SIGN_FAILED", "GATE_REFUSED" };
+        "INPUT_HELD", "FEE_COIN_NOT_PLAIN", "SIGN_FAILED", "GATE_REFUSED", "RULE_STATE" };
     return ((unsigned)s < sizeof(n) / sizeof(*n)) ? n[s] : "?";
 }
 
@@ -433,6 +437,8 @@ static size_t planInputs(const Plan *p, const BRAssetSendOutcome *o, BRTxInput *
 
 static BRTransaction g_sentinel;
 static int g_keepClaims = 0;   // a scenario sets claims itself: no clearing, no refusal probe
+static BRSweepRuleState g_ruleState = BR_SWEEP_RULE_NONE;   // the rule state every core call passes
+static BRAssetTransferReport g_lastReport;                  // the report of the last core call
 static int g_lastSignedValid = 0;
 static UInt256 g_lastSignedHash;
 
@@ -447,8 +453,8 @@ static BRAssetTransferStatus coreSign(const Plan *p, const BRAssetSendOutcome *o
     uint8_t before[64];
     memcpy(before, g_seedBytes, 64);
     memset(&r, 0xab, sizeof(r));
-    BRAssetTransferStatus s = BRWalletBuildAssetTransfer(&tx, g_wallet, o, p->a, p->na, p->d, p->nd, assetId, qty, recipient,
-                                                         approved, held, nh, g_seedBytes, 64, 1000.0, &r);
+    BRAssetTransferStatus s = BRWalletBuildAssetTransfer(&tx, g_wallet, g_ruleState, o, p->a, p->na, p->d, p->nd, assetId, qty,
+                                                         recipient, approved, held, nh, g_seedBytes, 64, 1000.0, &r);
     *serLen = 0;
     g_lastSignedValid = 0;
     check(memcmp(before, g_seedBytes, 64) == 0, "the caller's seed changed");
@@ -466,7 +472,10 @@ static BRAssetTransferStatus coreSign(const Plan *p, const BRAssetSendOutcome *o
               (long long)r.paidFeeSats, (long long)o->plan.paidFeeSats);
     } else {
         check(tx == NULL, "refused (%s) and *txOut is not NULL", statusName(s));
-        if (s != BR_ASSET_TRANSFER_BAD_INPUT && s < BR_ASSET_TRANSFER_INPUT_SPENT) check(r.input == SIZE_MAX, "%s reports input %zu", statusName(s), r.input);
+        // The wallet's checks (15) name the input they refuse, as BAD_INPUT does; every other refusal names none.
+        if (s >= BR_ASSET_TRANSFER_INPUT_SPENT && s <= BR_ASSET_TRANSFER_FEE_COIN_NOT_PLAIN)
+            check(r.input < o->plan.assetInputCount + o->plan.dgbInputCount, "%s reports input %zu", statusName(s), r.input);
+        else if (s != BR_ASSET_TRANSFER_BAD_INPUT) check(r.input == SIZE_MAX, "%s reports input %zu", statusName(s), r.input);
         // Nothing claimed on a refusal: another owner may claim every coin of the plan.
         BRTxInput ins[64];
         size_t n = planInputs(p, o, ins, 64);
@@ -477,6 +486,7 @@ static BRAssetTransferStatus coreSign(const Plan *p, const BRAssetSendOutcome *o
             BRCoinReservationRelease(probe);
         }
     }
+    g_lastReport = r;
     if (rep) *rep = r;
     return s;
 }
@@ -617,6 +627,14 @@ static void binding_quantity_bounds(void)
     sendBoth("zero units approved", &p, &p.o, kAsset, 0, recip(), NOLIMIT, NULL, 0, BR_ASSET_TRANSFER_WRONG_ASSET, -1);
     sendBoth("negative units approved", &p, &p.o, kAsset, -800, recip(), NOLIMIT, NULL, 0, BR_ASSET_TRANSFER_WRONG_ASSET, -1);
     sendBoth("more units than the inputs hold", &p, &p.o, kAsset, 1301, recip(), NOLIMIT, NULL, 0, BR_ASSET_TRANSFER_WRONG_ASSET, -1);
+    // An asset input that holds no units (or fewer than none), the sum kept at the plan's: the row is refused itself.
+    BRAssetRow *r0 = &p.a[p.o.plan.assetInputs[0]], *r1 = &p.a[p.o.plan.assetInputs[1]];
+    int64_t q0 = r0->assetQuantity, q1 = r1->assetQuantity;
+    r0->assetQuantity = q0 + q1; r1->assetQuantity = 0;
+    sendBoth("an asset input of 0 units", &p, &p.o, kAsset, 800, recip(), NOLIMIT, NULL, 0, BR_ASSET_TRANSFER_WRONG_ASSET, -1);
+    r0->assetQuantity = q0 + q1 + 5; r1->assetQuantity = -5;
+    sendBoth("an asset input of -5 units", &p, &p.o, kAsset, 800, recip(), NOLIMIT, NULL, 0, BR_ASSET_TRANSFER_WRONG_ASSET, -1);
+    r0->assetQuantity = q0; r1->assetQuantity = q1;
     cleanup();
 }
 
@@ -664,6 +682,23 @@ static void binding_fee_approval(void)
     sendBoth("an approval one below the fee", &p, &p.o, kAsset, 100, recip(), paid - 1, NULL, 0, BR_ASSET_TRANSFER_FEE_NOT_APPROVED, -1);
     sendBoth("an approval of zero", &p, &p.o, kAsset, 100, recip(), 0, NULL, 0, BR_ASSET_TRANSFER_FEE_NOT_APPROVED, -1);
     sendBoth("a negative approval", &p, &p.o, kAsset, 100, recip(), -1, NULL, 0, BR_ASSET_TRANSFER_FEE_NOT_APPROVED, -1);
+    cleanup();
+}
+
+static void rule_state(void)
+{
+    Coin a[1], f[1];
+    Plan p;
+    basicPlan(&p, a, 1, f, 1, 100);   // planned under NONE
+    BRSweepRuleState states[3] = { BR_SWEEP_RULE_BOUND, BR_SWEEP_RULE_UNKNOWN, (BRSweepRuleState)99 };
+    for (int i = 0; i < 3; i++) {
+        g_ruleState = states[i];
+        sendBoth("a PLANNED outcome under a rule state other than NONE", &p, &p.o, kAsset, 100, recip(), NOLIMIT, NULL, 0,
+                 BR_ASSET_TRANSFER_RULE_STATE, -2);
+        check(g_lastReport.input == SIZE_MAX && g_lastReport.paidFeeSats == 0, "refused before any input is read");
+    }
+    g_ruleState = BR_SWEEP_RULE_NONE;
+    sendBoth("the same outcome under NONE", &p, &p.o, kAsset, 100, recip(), NOLIMIT, NULL, 0, BR_ASSET_TRANSFER_SIGNED, 2);
     cleanup();
 }
 
@@ -748,6 +783,7 @@ static void conflicted_stuck_change(void)
     Conflict c;
     conflictSetup(&c);
     conflictSendFrom("the stuck attempt's change", &c, c.stuck, 2, 6000, BR_ASSET_TRANSFER_INPUT_CONFLICTED, -1);
+    check(g_lastReport.input == 0, "INPUT_CONFLICTED names the asset input (%zu)", g_lastReport.input);
     // The stuck attempt's DGB change as a fee coin.
     Coin a[1], f[1];
     Plan p;
@@ -756,6 +792,7 @@ static void conflicted_stuck_change(void)
     Coin *as[1] = { &a[0] }, *fs[1] = { &f[0] };
     check(choose(&p, as, 1, fs, 1, 4, 100000), "planned");
     sendBoth("the stuck attempt's DGB change as the fee", &p, &p.o, kAsset, 4, recip(), NOLIMIT, NULL, 0, BR_ASSET_TRANSFER_INPUT_CONFLICTED, -1);
+    check(g_lastReport.input == 1, "INPUT_CONFLICTED names the fee input (%zu)", g_lastReport.input);
     cleanup();
 }
 
@@ -818,7 +855,7 @@ static void arguments(void)
     memset(held, 0, sizeof(held));
     const uint8_t *seed = g_seedBytes;
 #define CALL(txp, w, o, ar, an, dr, dn, id, rc, h, hn, sd, sl) \
-    BRWalletBuildAssetTransfer(txp, w, o, ar, an, dr, dn, id, 100, rc, NOLIMIT, h, hn, sd, sl, 1000.0, NULL)
+    BRWalletBuildAssetTransfer(txp, w, BR_SWEEP_RULE_NONE, o, ar, an, dr, dn, id, 100, rc, NOLIMIT, h, hn, sd, sl, 1000.0, NULL)
     check(CALL(NULL, g_wallet, &p.o, p.a, 1, p.d, 1, kAsset, recip(), NULL, 0, seed, 64) == BR_ASSET_TRANSFER_BAD_ARGUMENT, "txOut NULL");
     tx = &g_sentinel;
     check(CALL(&tx, NULL, &p.o, p.a, 1, p.d, 1, kAsset, recip(), NULL, 0, seed, 64) == BR_ASSET_TRANSFER_BAD_ARGUMENT && ! tx, "wallet NULL");
@@ -849,7 +886,7 @@ static void arguments(void)
     BRAssetTransferReport rep;
     memset(&rep, 0xab, sizeof(rep));
     tx = &g_sentinel;
-    check(BRWalletBuildAssetTransfer(&tx, g_wallet, &p.o, p.a, 1, p.d, 1, kAsset, 100, recip(), NOLIMIT, NULL, 0, seed, 0,
+    check(BRWalletBuildAssetTransfer(&tx, g_wallet, BR_SWEEP_RULE_NONE, &p.o, p.a, 1, p.d, 1, kAsset, 100, recip(), NOLIMIT, NULL, 0, seed, 0,
                                      1000.0, &rep) == BR_ASSET_TRANSFER_BAD_SEED && rep.input == SIZE_MAX && rep.paidFeeSats == 0,
           "a refusal before any input is read reports none");
 #undef CALL
@@ -917,6 +954,13 @@ static void shape_outputs(void)
     sendBoth("a DGB change at the dust line", &p, &o, kAsset, 800, recip(), NOLIMIT, NULL, 0, BR_ASSET_TRANSFER_PLAN_SHAPE, -1);
     o = p.o; o.plan.sourceScript = g_ownSpk[1][7]; o.plan.sourceScriptLen = g_ownLen[1][7];
     sendBoth("change to another of our scripts than the asset inputs'", &p, &o, kAsset, 800, recip(), NOLIMIT, NULL, 0, BR_ASSET_TRANSFER_PLAN_SHAPE, -1);
+    // Every asset input is held to the source script, not only the first.
+    BRAssetRow *second = &p.a[p.o.plan.assetInputs[1]];
+    const uint8_t *ss = second->script;
+    size_t sl = second->scriptLen;
+    second->script = g_ownSpk[1][7]; second->scriptLen = g_ownLen[1][7];
+    sendBoth("a second asset input at another of our scripts", &p, &p.o, kAsset, 800, recip(), NOLIMIT, NULL, 0, BR_ASSET_TRANSFER_PLAN_SHAPE, -1);
+    second->script = ss; second->scriptLen = sl;
     cleanup();
 }
 
@@ -1004,6 +1048,21 @@ static void duplicate_input(void)
     twice[1] = p.nd;
     p.nd++;
     sendBoth("an asset coin as a fee coin too", &p, &o, kAsset, 100, recip(), NOLIMIT, NULL, 0, BR_ASSET_TRANSFER_DUPLICATE_INPUT, 0);
+    cleanup();
+    // Two outputs of one transaction are two outpoints: a send spending both signs.
+    Coin a2[1], f2[2];
+    Plan q;
+    assetCoin(&a2[0], 1, 0, 10, 6000);
+    const uint8_t *s2[2] = { g_ownSpk[1][2], g_ownSpk[1][3] };
+    size_t l2[2] = { g_ownLen[1][2], g_ownLen[1][3] };
+    uint64_t amt2[2] = { 50000, 50000 };
+    UInt256 h2 = fund(s2, l2, amt2, 2, 0, 1);
+    coinSet(&f2[0], h2, 0, s2[0], l2[0], 50000, NULL, 0);
+    coinSet(&f2[1], h2, 1, s2[1], l2[1], 50000, NULL, 0);
+    Coin *as2[1] = { &a2[0] }, *fs2[2] = { &f2[0], &f2[1] };
+    check(choose(&q, as2, 1, fs2, 2, 4, 100000), "planned");
+    check(q.o.plan.dgbInputCount == 2, "both outputs of the one transaction pay the fee (%zu)", q.o.plan.dgbInputCount);
+    sendBoth("two outputs of one transaction as fee coins", &q, &q.o, kAsset, 4, recip(), NOLIMIT, NULL, 0, BR_ASSET_TRANSFER_SIGNED, 2);
     cleanup();
 }
 
@@ -1162,6 +1221,34 @@ static void fee_mismatch(void)
     sendBoth("a DGB change 1000 sats short of the plan's fee", &p, &o, kAsset, 100, recip(), NOLIMIT, NULL, 0, BR_ASSET_TRANSFER_FEE_MISMATCH, -1);
     o = p.o; o.plan.outputs[2].sats = (int64_t)MAX_MONEY;
     sendBoth("outputs worth more than the inputs", &p, &o, kAsset, 100, recip(), NOLIMIT, NULL, 0, BR_ASSET_TRANSFER_FEE_MISMATCH, -1);
+    // The plan's fee rule (the estimate plus 0..dust), with the fee paid and the plan agreeing.
+    int64_t paid = p.o.plan.paidFeeSats;
+    o = p.o; o.plan.outputs[2].sats -= BR_ASSET_CHANGE_DUST_SATS + 1; o.plan.paidFeeSats += BR_ASSET_CHANGE_DUST_SATS + 1;
+    sendBoth("change above the dust line moved into the fee", &p, &o, kAsset, 100, recip(), NOLIMIT, NULL, 0, BR_ASSET_TRANSFER_FEE_MISMATCH, -1);
+    o = p.o; o.plan.estimatedFeeSats = 0;
+    sendBoth("an estimate of 0", &p, &o, kAsset, 100, recip(), NOLIMIT, NULL, 0, BR_ASSET_TRANSFER_FEE_MISMATCH, -1);
+    o = p.o; o.plan.estimatedFeeSats = paid + 1;
+    sendBoth("an estimate above the fee paid", &p, &o, kAsset, 100, recip(), NOLIMIT, NULL, 0, BR_ASSET_TRANSFER_FEE_MISMATCH, -1);
+    o = p.o; o.plan.estimatedFeeSats = paid - BR_ASSET_CHANGE_DUST_SATS - 1;
+    sendBoth("a fee one sat past the estimate and dust", &p, &o, kAsset, 100, recip(), NOLIMIT, NULL, 0, BR_ASSET_TRANSFER_FEE_MISMATCH, -1);
+    o = p.o; o.plan.estimatedFeeSats = paid - BR_ASSET_CHANGE_DUST_SATS;
+    sendBoth("a fee of the estimate and dust exactly", &p, &o, kAsset, 100, recip(), NOLIMIT, NULL, 0, BR_ASSET_TRANSFER_SIGNED, 2);
+    // A fee within dust of nothing: only the estimate's own bound (above 0) refuses an estimate of 0 or less.
+    o = p.o; o.plan.outputs[2].sats += paid - 1000; o.plan.paidFeeSats = 1000;
+    o.plan.estimatedFeeSats = 0;
+    sendBoth("an estimate of 0 under a fee of 1000", &p, &o, kAsset, 100, recip(), NOLIMIT, NULL, 0, BR_ASSET_TRANSFER_FEE_MISMATCH, -1);
+    o.plan.estimatedFeeSats = -1;
+    sendBoth("an estimate of -1 under a fee of 1000", &p, &o, kAsset, 100, recip(), NOLIMIT, NULL, 0, BR_ASSET_TRANSFER_FEE_MISMATCH, -1);
+    o.plan.estimatedFeeSats = 1;
+    sendBoth("an estimate of 1 under a fee of 1000", &p, &o, kAsset, 100, recip(), NOLIMIT, NULL, 0, BR_ASSET_TRANSFER_SIGNED, 2);
+    cleanup();
+    // Every unit sent (no asset change), the DGB change dropped and paid as fee: the outputs still read as a plan's.
+    Coin a2[1], f2[1];
+    Plan q;
+    basicPlan(&q, a2, 1, f2, 1, 600);
+    check(q.o.plan.outputCount == 4, "four outputs");
+    o = q.o; o.plan.paidFeeSats += o.plan.outputs[2].sats; o.plan.outputs[2] = o.plan.outputs[3]; o.plan.outputCount = 3;
+    sendBoth("the DGB change folded into the fee", &q, &o, kAsset, 600, recip(), NOLIMIT, NULL, 0, BR_ASSET_TRANSFER_FEE_MISMATCH, -1);
     cleanup();
 }
 
@@ -1178,6 +1265,7 @@ static void held_fee_coin(void)
     sendBoth("the asset input held, an unrelated outpoint held", &p, &p.o, kAsset, 100, recip(), NOLIMIT, held, 2, BR_ASSET_TRANSFER_SIGNED, 2);
     held[2].hash = f[0].hash; held[2].n = f[0].n;
     sendBoth("the fee coin held", &p, &p.o, kAsset, 100, recip(), NOLIMIT, held, 3, BR_ASSET_TRANSFER_INPUT_HELD, -1);
+    check(g_lastReport.input == p.o.plan.assetInputCount, "INPUT_HELD names the fee input (%zu)", g_lastReport.input);
     held[2].n = f[0].n + 1;
     sendBoth("another output of the fee coin's transaction held", &p, &p.o, kAsset, 100, recip(), NOLIMIT, held, 3, BR_ASSET_TRANSFER_SIGNED, 2);
     cleanup();
@@ -1203,6 +1291,53 @@ static void fee_coin_not_plain(void)
     f[1].row.isAsset = 0; f[1].row.assetId = NULL; f[1].row.assetQuantity = 0;
     check(choose(&p, as, 1, fs2, 1, 100, 100000), "planned");
     sendBoth("an asset output as the fee", &p, &p.o, kAsset, 100, recip(), NOLIMIT, NULL, 0, BR_ASSET_TRANSFER_FEE_COIN_NOT_PLAIN, -1);
+    check(g_lastReport.input == 1, "FEE_COIN_NOT_PLAIN names the fee input (%zu)", g_lastReport.input);
+    // An output of a transaction whose other output is a plain coin: an outpoint is its txid and its vout.
+    // (Someone else's script, so a coin of the wallet's own at the other vout is the only plain one.)
+    {
+        const uint8_t *s3[2] = { g_ownSpk[1][4], g_foreignSpk };
+        size_t l3[2] = { g_ownLen[1][4], g_foreignLen };
+        uint64_t amt3[2] = { 30000000, 40000000 };
+        UInt256 h3 = fund(s3, l3, amt3, 2, 0, 1);
+        Coin f3[1];
+        coinSet(&f3[0], h3, 1, g_foreignSpk, g_foreignLen, 40000000, NULL, 0);
+        Coin *fs3[1] = { &f3[0] };
+        check(choose(&p, as, 1, fs3, 1, 100, 100000), "planned");
+        sendBoth("the other output of a plain coin's transaction as the fee", &p, &p.o, kAsset, 100, recip(), NOLIMIT, NULL, 0,
+                 BR_ASSET_TRANSFER_FEE_COIN_NOT_PLAIN, -1);
+    }
+    // The planner's fee-coin rule, read from the funding transaction: a coin from a transaction with a data
+    // output (here one that is no carrier) pays the fee only at the source script.
+    for (int atSource = 0; atSource < 2; atSource++) {
+        const uint8_t *spk = atSource ? a[0].script : g_ownSpk[1][10];
+        size_t spkLen = atSource ? a[0].scriptLen : g_ownLen[1][10];
+        static const uint8_t kData[6] = { 0x6a, 0x04, 0x58, 0x58, 0x58, 0x58 };
+        static const uint8_t kPh[1] = { 0 };
+        BRTransaction *tx = BRTransactionNew();
+        UInt256 prev;
+        memset(prev.u8, 0, 32);
+        uint32_t t = g_tag++;
+        memcpy(prev.u8, &t, sizeof(t));
+        prev.u8[31] = 0xa5;
+        BRTransactionAddInput(tx, prev, 0, 0, g_foreignSpk, g_foreignLen, kPh, 0, kPh, 0, TXIN_SEQUENCE);
+        BRTransactionAddOutput(tx, 40000000, spk, spkLen);
+        BRTransactionAddOutput(tx, 0, kData, sizeof(kData));
+        finalizeTxHash(tx);
+        UInt256 h4 = tx->txHash;
+        check(BRWalletRegisterTransaction(g_wallet, tx) != 0, "a receive with a data output registered");
+        BRWalletUpdateTransactions(g_wallet, &h4, 1, 1000000 + t, 1780000000u + t);
+        if (g_fundedCount < sizeof(g_funded) / sizeof(*g_funded)) g_funded[g_fundedCount++] = h4;
+        Coin f4[1];
+        coinSet(&f4[0], h4, 0, spk, spkLen, 40000000, NULL, 0);
+        Coin *fs4[1] = { &f4[0] };
+        check(choose(&p, as, 1, fs4, 1, 100, 100000), "planned (the KAT tells the choice the parent has no data output)");
+        if (atSource)
+            sendBoth("a coin at the source script from a transaction with a data output", &p, &p.o, kAsset, 100, recip(), NOLIMIT,
+                     NULL, 0, BR_ASSET_TRANSFER_SIGNED, 2);
+        else
+            sendBoth("a coin at another script from a transaction with a data output", &p, &p.o, kAsset, 100, recip(), NOLIMIT,
+                     NULL, 0, BR_ASSET_TRANSFER_FEE_COIN_NOT_PLAIN, -1);
+    }
     cleanup();
 }
 
@@ -1374,8 +1509,9 @@ static void fuzz(void)
         char padded[120];
         size_t nh = 0;
         BRAssetTransferStatus want = BR_ASSET_TRANSFER_SIGNED, alt;
-        int kind = (int)rndBelow(7);
+        int kind = (int)rndBelow(9);
         if (kind == 4 && o.plan.dgbInputCount == 0) kind = 1;
+        if (kind == 7 && ! (o.plan.outputCount == 4 && o.plan.outputs[2].sats > 2 * BR_ASSET_CHANGE_DUST_SATS + 2)) kind = 1;
         switch (kind) {
         case 0: {   // an instruction's amount changed by one, re-encoded: the units land elsewhere or the list differs
             BRAssetHeader h;
@@ -1401,6 +1537,14 @@ static void fuzz(void)
             break;
         }
         case 5: o.plan.outputs[0].sats += 1; want = BR_ASSET_TRANSFER_PLAN_SHAPE; break;
+        case 7: {   // change above the dust line moved into the fee, the plan's fee agreeing
+            int64_t x = BR_ASSET_CHANGE_DUST_SATS + 1 + (int64_t)rndBelow((uint64_t)(o.plan.outputs[2].sats - 2 * BR_ASSET_CHANGE_DUST_SATS - 2));
+            o.plan.outputs[2].sats -= x;
+            o.plan.paidFeeSats += x;
+            want = BR_ASSET_TRANSFER_FEE_MISMATCH;
+            break;
+        }
+        case 8: g_ruleState = rndBelow(2) ? BR_SWEEP_RULE_BOUND : BR_SWEEP_RULE_UNKNOWN; want = BR_ASSET_TRANSFER_RULE_STATE; break;
         default: snprintf(padded, sizeof(padded), "%s ", to); to2 = padded; want = BR_ASSET_TRANSFER_BAD_RECIPIENT; break;
         }
         if (kind != 0) alt = want;
@@ -1409,6 +1553,7 @@ static void fuzz(void)
         size_t n;
         coin_reservation_clear(); BRCoinReservationClear();   // the planned send above holds its claim
         BRAssetTransferStatus s = coreSign(&p, &o, kAsset, q2, to2, approved, held, nh, ser, &n, NULL);
+        g_ruleState = BR_SWEEP_RULE_NONE;
         check(s == want || s == alt, "tamper %d: the core answered %s, want %s", kind, statusName(s), statusName(want));
         if ((unsigned)s < 32) refusedBy[s]++;
         coin_reservation_clear(); BRCoinReservationClear();
@@ -1427,6 +1572,7 @@ static const Scenario kScenarios[] = {
     { "sign_many_inputs", sign_many_inputs }, { "sign_txid_case", sign_txid_case },
     { "binding_quantity", binding_quantity }, { "binding_quantity_bounds", binding_quantity_bounds },
     { "binding_asset", binding_asset }, { "binding_recipient", binding_recipient }, { "binding_fee_approval", binding_fee_approval },
+    { "rule_state", rule_state },
     { "conflicted_states", conflicted_states }, { "conflicted_resend_change", conflicted_resend_change },
     { "conflicted_stuck_change", conflicted_stuck_change }, { "conflicted_spent_funding", conflicted_spent_funding },
     { "conflicted_undetected", conflicted_undetected },
