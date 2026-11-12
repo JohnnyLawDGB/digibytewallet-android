@@ -271,6 +271,10 @@ fun UnlockScreen(
             errorMessage = unlockFailedMsg
         } finally {
             isUnlocking = false
+            // However the attempt ended, the entry it was made with is spent. Left full, the
+            // keypad ignores every later digit, so after a cancelled device-lock prompt the PIN
+            // could never be entered again in this process (UnlockPinEntry).
+            currentInput = UnlockPinEntry.afterUnlockEnded(currentInput)
         }
     }
 
@@ -536,11 +540,16 @@ fun UnlockScreen(
                                             .background(Color(0xFF1A2742))
                                             .border(1.dp, Color(0xFF243352), CircleShape)
                                             .clickable(enabled = !isLocked && !isUnlocking) {
-                                                if (currentInput.length < UNLOCK_PIN_LENGTH) {
-                                                    currentInput += key
-                                                    errorMessage = null
-                                                    if (currentInput.length == UNLOCK_PIN_LENGTH) {
-                                                        attemptUnlock(currentInput)
+                                                when (val press = UnlockPinEntry.press(currentInput, key, UNLOCK_PIN_LENGTH)) {
+                                                    UnlockPinEntry.Press.Ignored -> Unit
+                                                    is UnlockPinEntry.Press.Typed -> {
+                                                        currentInput = press.entry
+                                                        errorMessage = null
+                                                    }
+                                                    is UnlockPinEntry.Press.Complete -> {
+                                                        currentInput = press.entry
+                                                        errorMessage = null
+                                                        attemptUnlock(press.entry)
                                                     }
                                                 }
                                             },

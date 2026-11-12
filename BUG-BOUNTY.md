@@ -39,6 +39,9 @@ HoldFast Wallet release and name its exact version.
 | Source code | https://github.com/JohnnyLawDGB/digibytewallet-android at the latest release tag (`develop` follows it). The `phase1-modernization` branch is frozen at v3.9.2 and out of scope. |
 | C core (submodule) | https://github.com/JohnnyLawDGB/digibytewallet-core |
 
+To confirm the build you tested is the genuine release, see [VERIFICATION.md](VERIFICATION.md):
+the APK by its `SHA256SUMS` and certificate, a Play install by its certificate only.
+
 ### DigiScope services the app uses
 
 The app signs in to and talks to DigiScope at `api.digiscope.me` (the Hub, Digi-ID sign-in,

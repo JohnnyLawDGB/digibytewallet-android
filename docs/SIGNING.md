@@ -129,7 +129,8 @@ apksigner verify --print-certs <file>.apk        # "certificate SHA-256 digest" 
 keytool -printcert -jarfile <file>.aab            # "SHA256:" must be 7E:36:DD:…:DF:87
 ```
 
-Users can check a sideloaded APK the same way before installing it.
+How users check a sideload APK (hash and certificate) or a Play install (certificate only: Play's split APKs never match
+the published hash) is in [VERIFICATION.md](../VERIFICATION.md), the one copy of those instructions.
 
 ## If the key leaks, or must be replaced
 
