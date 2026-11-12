@@ -14,7 +14,7 @@
 # AGP floor is set by KSP, not by Android: KSP 2.3.11 refuses AGP < 8.10.0
 # (MINIMUM_SUPPORTED_AGP_VERSION; 2.3.12+ refuses < 8.12.0). AGP 8.10 needs
 # Gradle 8.11.1+ (gradle/wrapper/gradle-wrapper.properties).
-agp = "8.10.1"
+agp = "9.5.1"
 # R8 (and D8, the same jar) is overridden on the root buildscript classpath
 # (build.gradle.kts), ahead of the copy AGP bundles. AGP 8.10.1 bundles R8
 # 8.10.x, which cannot parse Kotlin 2.4 @Metadata: it printed ~100 "error
