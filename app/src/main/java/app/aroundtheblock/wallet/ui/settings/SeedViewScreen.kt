@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import app.aroundtheblock.wallet.core.WalletManager
+import app.aroundtheblock.wallet.core.WalletState
 import app.aroundtheblock.wallet.core.security.BiometricAuth
 import app.aroundtheblock.wallet.core.security.BiometricResult
 import app.aroundtheblock.wallet.core.security.KeyStoreManager
@@ -70,6 +71,12 @@ fun SeedViewScreen(
      * SEED-VIEW-AUTH: outside the auth-bound key's device-unlock window the read asks for the device
      * lock with the unlock path's own prompt (BiometricAuth.authenticateDeviceCredential) and reads
      * again once; "Try again" prompts afresh, so a cancelled prompt never wedges the screen.
+     *
+     * Known, left as the owner's security decision: on API 26-29 the device-credential confirm is a
+     * separate activity, so MainActivity.onStop() locks the UI while it is up and the app reroutes to
+     * the unlock screen. The words are then shown only on a second visit (the key's window is open by
+     * then); a read that lands while locked is discarded (readConfirmingDeviceLock's `unlocked`).
+     * Exempting that onStop lock would change the lock policy and is not done here.
      */
     val activity = LocalContext.current as? FragmentActivity
     var attempt by remember { mutableIntStateOf(0) }
@@ -85,6 +92,7 @@ fun SeedViewScreen(
             confirmDeviceLock = {
                 activity != null && biometricAuth.authenticateDeviceCredential(activity) is BiometricResult.Success
             },
+            unlocked = { walletManager.walletState.value is WalletState.Unlocked },
         )
     }
 

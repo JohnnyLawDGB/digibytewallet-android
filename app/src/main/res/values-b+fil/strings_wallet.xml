@@ -722,7 +722,7 @@
     <string name="seedview_pass_retry">Subukan ulit</string>
     <!-- SEED-VIEW-AUTH -->
     <string name="seedview_device_lock_title">Kumpirmahin ang screen lock</string>
-    <string name="seedview_device_lock_body">Protektado ng screen lock ng teleponong ito ang iyong recovery phrase. Kumpirmahin ang screen lock para maipakita ito. Subukan ulit.</string>
+    <string name="seedview_device_lock_body">Protektado ng screen lock ng teleponong ito ang iyong recovery phrase. Para maipakita ito, kumpirmahin ang screen lock gamit ang iyong PIN, pattern o password.</string>
     <!-- /pkg E2-keys -->
     <string name="pinstore_title">Hindi masuri ang iyong PIN ngayon</string>
     <string name="pinstore_body">Hindi nagbukas ang ligtas na key store ng telepono, kaya nananatiling naka-lock ang wallet. Walang binura. Isara ang app at buksan muli. Kung paulit-ulit ito, i-restart ang telepono; maibabalik pa rin ng iyong recovery phrase ang wallet sa anumang device.</string>

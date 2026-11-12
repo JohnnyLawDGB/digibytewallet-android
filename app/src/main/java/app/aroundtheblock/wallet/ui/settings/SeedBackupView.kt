@@ -33,16 +33,23 @@ internal sealed class SeedBackupView {
         /**
          * SEED-VIEW-AUTH: [read]; when the key needs the device lock, [confirmDeviceLock] once and, if it
          * was confirmed, [read] exactly once more. A prompt not confirmed, or a key still refused after
-         * one, ends in [DeviceLockNeeded], from which the screen's "Try again" runs this again.
+         * one, ends in [DeviceLockNeeded], from which the screen's "Try again" runs this again. A
+         * [Shown] read while the app is not [unlocked] is discarded the same way.
          */
         suspend fun readConfirmingDeviceLock(
             read: suspend () -> SeedBackupView,
             confirmDeviceLock: suspend () -> Boolean,
+            unlocked: () -> Boolean,
         ): SeedBackupView {
             val first = read()
-            if (first !== DeviceLockNeeded) return first
-            if (!confirmDeviceLock()) return DeviceLockNeeded
-            return read()
+            val view = when {
+                first !== DeviceLockNeeded -> first
+                !confirmDeviceLock() -> DeviceLockNeeded
+                else -> read()
+            }
+            // The app may have locked while this read or its prompt ran (on return from the
+            // credential activity): the words are not handed to a locked app. Try again reads anew.
+            return if (view is Shown && !unlocked()) DeviceLockNeeded else view
         }
 
         /**

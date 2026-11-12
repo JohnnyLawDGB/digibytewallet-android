@@ -94,6 +94,9 @@ class BiometricAuth {
                 .setAllowedAuthenticators(authenticators)
                 .build()
             prompt.authenticate(info)
+            // A caller cancelled (its effect left the composition): take the prompt down with it, so it
+            // is not left over the next screen with nothing waiting on its answer. Main thread only.
+            cont.invokeOnCancellation { executor.execute { runCatching { prompt.cancelAuthentication() } } }
         } catch (t: Throwable) {
             // A credential prompt must never be able to crash the wallet - the
             // caller treats this like any other prompt failure.

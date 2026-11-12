@@ -31,6 +31,7 @@ class SeedViewDeviceLockTest {
         private val opensAfterPrompts: Int = 1,
         private val confirms: Boolean = true,
         private val invalid: Boolean = false,
+        private val unlocked: () -> Boolean = { true },
     ) {
         var prompts = 0
         var reads = 0
@@ -49,7 +50,7 @@ class SeedViewDeviceLockTest {
         }
         fun read(): SeedBackupView { reads++; return SeedBackupView.read(::passphrase, ::mnemonic) }
         suspend fun prompt(): Boolean { prompts++; if (confirms) confirmed++; return confirms }
-        fun view() = runBlocking { SeedBackupView.readConfirmingDeviceLock(read = { read() }, confirmDeviceLock = { prompt() }) }
+        fun view() = runBlocking { SeedBackupView.readConfirmingDeviceLock(read = { read() }, confirmDeviceLock = { prompt() }, unlocked = unlocked) }
     }
 
     @Test fun `a lapsed window on either read asks for the device lock, never shows the words`() {
@@ -58,6 +59,32 @@ class SeedViewDeviceLockTest {
         // A wallet with no passphrase reads none without the key; the words then need it.
         val onWords = SeedBackupView.read({ null }, { lapsed() })
         assertEquals("a lapsed window on the words was shown as words ($onWords)", SeedBackupView.DeviceLockNeeded, onWords)
+    }
+
+    @Test fun `a key refusal on the passphrase does not read the words`() {
+        for ((case, refusal) in listOf<Pair<String, () -> Nothing>>("lapsed" to ::lapsed, "invalidated" to ::invalidated)) {
+            var wordsRead = 0
+            SeedBackupView.read({ refusal() }, { wordsRead++; words.toByteArray() })
+            assertEquals("$case: the words were read although the passphrase was refused", 0, wordsRead)
+        }
+    }
+
+    @Test fun `a read that lands while the app is locked is discarded`() {
+        // Already open (no prompt), and after a confirmed prompt: the app locked meanwhile.
+        for (opensAfterPrompts in listOf(0, 1)) {
+            val device = Device(hasPassphrase = true, opensAfterPrompts = opensAfterPrompts, unlocked = { false })
+            assertEquals("opensAfterPrompts=$opensAfterPrompts: words handed to a locked app", SeedBackupView.DeviceLockNeeded, device.view())
+        }
+        // GUARD: the same reads with the app unlocked are shown.
+        assertTrue(Device(hasPassphrase = true, opensAfterPrompts = 0).view() is SeedBackupView.Shown)
+    }
+
+    @Test fun `the screen discards a read unless the wallet is unlocked`() {
+        val call = screen.calls("SeedBackupView.readConfirmingDeviceLock").single()
+        assertTrue(
+            "the screen does not pass the wallet's unlocked state",
+            KotlinSourceGate.squeeze(screen.code.substring(call.range)).contains("walletManager.walletState.value is WalletState.Unlocked"),
+        )
     }
 
     @Test fun `an invalidated key says restore from the phrase, on either read`() {

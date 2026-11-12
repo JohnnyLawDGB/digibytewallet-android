@@ -717,7 +717,7 @@
     <string name="seedview_pass_retry">再試行</string>
     <!-- SEED-VIEW-AUTH -->
     <string name="seedview_device_lock_title">画面ロックを確認してください</string>
-    <string name="seedview_device_lock_body">リカバリーフレーズはこの端末の画面ロックで保護されています。表示するには画面ロックを確認してください。もう一度お試しください。</string>
+    <string name="seedview_device_lock_body">リカバリーフレーズはこの端末の画面ロックで保護されています。表示するには、PIN、パターン、またはパスワードで画面ロックを確認してください。</string>
     <!-- /pkg E2-keys -->
     <string name="pinstore_title">現在 PIN を確認できません</string>
     <string name="pinstore_body">端末の安全なキーストアを開けなかったため、ウォレットはロックされたままです。何も削除されていません。アプリを閉じてもう一度開いてください。繰り返し起きる場合は端末を再起動してください。リカバリーフレーズがあれば、どの端末でもウォレットを復元できます。</string>

@@ -707,7 +707,7 @@
     <string name="seedview_pass_retry">Réessayer</string>
     <!-- SEED-VIEW-AUTH -->
     <string name="seedview_device_lock_title">Confirmez le verrouillage de l\'écran</string>
-    <string name="seedview_device_lock_body">Votre phrase de récupération est protégée par le verrouillage de l\'écran de ce téléphone. Confirmez le verrouillage pour l\'afficher. Réessayez.</string>
+    <string name="seedview_device_lock_body">Votre phrase de récupération est protégée par le verrouillage de l\'écran de ce téléphone. Pour l\'afficher, confirmez le verrouillage avec votre code PIN, votre schéma ou votre mot de passe.</string>
     <!-- /pkg E2-keys -->
     <string name="pinstore_title">Votre code PIN ne peut pas être vérifié pour l\'instant</string>
     <string name="pinstore_body">Le stockage sécurisé des clés du téléphone ne s\'est pas ouvert : le portefeuille reste verrouillé. Rien n\'a été supprimé. Fermez l\'application et rouvrez-la. Si cela se reproduit, redémarrez le téléphone ; votre phrase de récupération restaure toujours le portefeuille sur n\'importe quel appareil.</string>

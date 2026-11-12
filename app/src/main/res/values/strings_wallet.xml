@@ -860,7 +860,7 @@
     <string name="seedview_pass_retry">Try again</string>
     <!-- SEED-VIEW-AUTH -->
     <string name="seedview_device_lock_title">Confirm your screen lock</string>
-    <string name="seedview_device_lock_body">Your recovery phrase is protected by this phone\'s screen lock. Confirm the screen lock to show it. Try again.</string>
+    <string name="seedview_device_lock_body">Your recovery phrase is protected by this phone\'s screen lock. To show it, confirm the screen lock with your PIN, pattern or password.</string>
     <!-- /pkg E2-keys -->
     <string name="pinstore_title">Your PIN can\'t be checked right now</string>
     <string name="pinstore_body">The phone\'s secure key store did not open, so the wallet stays locked. Nothing has been deleted. Close the app and open it again. If this keeps happening, restart the phone; your recovery phrase still restores the wallet on any device.</string>
