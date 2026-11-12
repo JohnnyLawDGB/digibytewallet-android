@@ -40,7 +40,9 @@
 //
 //  One case per process: `asset_hold_kat <case>` prints PASS:/FAIL: lines and `RESULT <case> pass|fail`;
 //  `list` prints the case names. run.sh builds one binary per ASSET_HOLD_UNFIXED arm and holds each
-//  comparison arm to failing exactly its cases.
+//  comparison arm to failing exactly its cases. This file is built with ASSET_HOLD_TEST_SEAMS=1, which
+//  honours the view's classifier and a single reading; run.sh's third unit is built without it, as what
+//  ships, and seams_off holds it to refusing both.
 //
 
 #include "BRAssetHold.h"
@@ -55,6 +57,10 @@
 #include <string.h>
 
 int asset_hold_kat_tu2(void);   // run.sh's second translation unit, which includes the header twice
+// run.sh's third translation unit, built WITHOUT ASSET_HOLD_TEST_SEAMS, as what ships: `v` as given, then
+// naming `c`, then each reading alone, then both, into out[0..4]. Returns its ASSET_HOLD_TEST_SEAMS.
+int asset_hold_kat_seams_off(const BRAssetHoldView *v, const BRAssetHoldClassifier *c, BRAssetHoldWork *work, size_t workCap,
+                             BRUTXO *held, size_t heldCap, BRAssetHoldResult out[5]);
 
 static int FAILED = 0;
 
@@ -412,7 +418,7 @@ static size_t heldOf(BRAssetHoldResult r, UInt256 txHash)   // how many outputs 
     return k;
 }
 
-static const char *STATUS[] = { "REFUSED", "COMPLETE", "ARGUMENTS", "UNREADABLE", "CAPACITY" };
+static const char *STATUS[] = { "REFUSED", "COMPLETE", "ARGUMENTS", "UNREADABLE", "CAPACITY", "ROWS" };
 
 static const char *st(BRAssetHoldStatus s) { return ((unsigned)s < N(STATUS)) ? STATUS[s] : "?"; }
 
@@ -2180,7 +2186,8 @@ static void union_two_carriers(void)
     }
 }
 
-// Rows for one outpoint must agree. T spends (F, 1) and sends ten to its output 0; F is not held.
+// Rows for one outpoint must agree, or the pass refuses with ROWS (its own status, apart from ARGUMENTS).
+// T spends (F, 1) and sends ten to its output 0; F is not held.
 static void rows_disagree(void)
 {
     static const int64_t qa[] = { 0, 10, 10 }, qb[] = { 10, 10, 10 };
@@ -2194,7 +2201,7 @@ static void rows_disagree(void)
         row(&WAL, tid(T_FUNDING), 1, qb[k], sb[k]);
         r = pass(&WAL);
         refused(k == 0 ? "two rows for one outpoint, quantity 0 and 10" : "two rows for one outpoint, one spent and one not", r,
-                BR_ASSET_HOLD_REFUSED_ARGUMENTS);
+                BR_ASSET_HOLD_REFUSED_ROWS);
         WAL.rows[0] = WAL.rows[1];   // the same row twice
         r = pass(&WAL);
         ck(r.status == BR_ASSET_HOLD_COMPLETE && r.heldCount == 0,
@@ -2209,7 +2216,7 @@ static void rows_disagree(void)
     row(&WAL, tid(0x03), 0, 4, 1);
     row(&WAL, tid(T_FUNDING), 1, 0, 1);
     row(&WAL, tid(0xfe), 0, 4, 1);
-    refused("two rows for one outpoint among others", pass(&WAL), BR_ASSET_HOLD_REFUSED_ARGUMENTS);
+    refused("two rows for one outpoint among others", pass(&WAL), BR_ASSET_HOLD_REFUSED_ROWS);
     WAL.rows[5].quantity = 10;
     r = pass(&WAL);
     ck(r.status == BR_ASSET_HOLD_COMPLETE && r.heldCount == 0, "and once they agree, the pass reads them (%s, %zu)", st(r.status), r.heldCount);
@@ -2242,6 +2249,18 @@ static void refusal_arguments(void)
     v.proven = NULL;
     v.provenCount = 1;
     refused("no proofs where the count says there are", BRAssetHoldOutputs(&v, WORK, N(WORK), HELD, N(HELD)), BR_ASSET_HOLD_REFUSED_ARGUMENTS);
+    v = view(&WAL);
+    {   // a choice of readings that makes no reading refuses, in a test build too
+        static const int none[] = { 0, 4, 8, -1 };
+        size_t k;
+
+        for (k = 0; k < N(none); k++) {
+            BRAssetHoldResult r = _BRAssetHoldOutputsReading(&v, WORK, N(WORK), HELD, N(HELD), none[k]);
+
+            ck(r.status == BR_ASSET_HOLD_REFUSED_ARGUMENTS && r.heldCount == 0, "readings %d: refused ARGUMENTS with nothing held (%s, %zu)",
+               none[k], st(r.status), r.heldCount);
+        }
+    }
     {
         BRAssetHoldResult unfilled;
 
@@ -2303,6 +2322,12 @@ static void capacity(void)
        "the replay's outpoint does not fit: CAPACITY, never shortened");
     r = BRAssetHoldOutputs(&v, WORK, 3, HELD, 2);
     ck(r.status == BR_ASSET_HOLD_COMPLETE && r.heldCount == 2, "room for both");
+    row(&WAL, tid(0xde), 1, 7, 0);   // the same unspent row listed twice
+    v = view(&WAL);
+    r = BRAssetHoldOutputs(&v, WORK, 3, HELD, 2);
+    ck(r.status == BR_ASSET_HOLD_COMPLETE && r.heldCount == 2 && heldIn(r, tid(0xde), 1),
+       "the same unspent row listed twice: room for the answer's two is enough (%s, %zu)", st(r.status), r.heldCount);
+    WAL.rowN--;
     WAL.rows[0].txHash = XFER->tx.txHash;   // the row now on the outpoint the pass holds
     WAL.rows[0].n = 3;
     v = view(&WAL);
@@ -2929,6 +2954,32 @@ static void second_unit(void)
     ck(asset_hold_kat_tu2(), "the header included twice in a second translation unit links and runs");
 }
 
+// What ships honours no test seam: built without ASSET_HOLD_TEST_SEAMS, a view that names a classifier
+// and a single reading are refused (ARGUMENTS), and the pass with the core's classifier completes. (The
+// third unit carries no comparison arm but 65536, so its answers are the shipped ones in every arm.)
+static void seams_off(void)
+{
+    BRAssetHoldView v;
+    BRAssetHoldResult on, out[5];
+    int seams;
+
+    preSpendWallet();
+    v = view(&WAL);
+    on = BRAssetHoldOutputs(&v, WORK, N(WORK), HELD, N(HELD));
+    complete("the test build, the core's classifier", on);
+    memset(out, 0, sizeof(out));
+    seams = asset_hold_kat_seams_off(&v, &NEVER, WORK, N(WORK), HELD, N(HELD), out);
+    ck(seams == 0, "the third unit is built as what ships: ASSET_HOLD_TEST_SEAMS is 0 there (%d)", seams);
+    ck(out[0].status == BR_ASSET_HOLD_COMPLETE, "without the seams, the core's classifier: complete (%s)", st(out[0].status));
+    refused("without the seams, a view that names a classifier", out[1], BR_ASSET_HOLD_REFUSED_ARGUMENTS);
+    refused("without the seams, the decoder's reading alone", out[2], BR_ASSET_HOLD_REFUSED_ARGUMENTS);
+    refused("without the seams, the other reading alone", out[3], BR_ASSET_HOLD_REFUSED_ARGUMENTS);
+    ck(out[4].status == BR_ASSET_HOLD_COMPLETE && out[4].heldCount == out[0].heldCount,
+       "without the seams, both readings: complete, the pass's answer (%s, %zu)", st(out[4].status), out[4].heldCount);
+    v.classifier = &NEVER;
+    complete("the test build honours the classifier seam", BRAssetHoldOutputs(&v, WORK, N(WORK), HELD, N(HELD)));
+}
+
 // ---- the registry -------------------------------------------------------------------------------
 
 typedef struct { const char *name; void (*fn)(void); } Case;
@@ -2982,6 +3033,7 @@ static const Case CASES[] = {
     { "sweep_union", sweep_union },
     { "sweep_must_be_excluded", sweep_must_be_excluded },
     { "second_unit", second_unit },
+    { "seams_off", seams_off },
 };
 
 int main(int argc, char **argv)

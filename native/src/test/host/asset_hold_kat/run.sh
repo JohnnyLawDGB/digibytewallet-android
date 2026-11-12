@@ -21,11 +21,15 @@
 #               under them was resolved; 2048 a held list the buffer cannot hold is shortened; 4096 a pass
 #               that cannot complete answers "complete, nothing held"; 8192 only the decoder's reading is
 #               made; 16384 the other reading too reads a funding transaction by its first OP_RETURN;
-#               32768 two rows for one outpoint that differ are read, one of them winning. Each arm fails
-#               exactly the cases CASES lists for its bit and passes every other.
+#               32768 two rows for one outpoint that differ are read, one of them winning; 65536 a build
+#               without ASSET_HOLD_TEST_SEAMS honours the test seams. Each arm fails exactly the cases CASES
+#               lists for its bit and passes every other.
 #   shipped     -DASSET_HOLD_UNFIXED=0: every case passes, exit 0.
 # All arms under ASan + UBSan, 64-bit. The unit under test is the header, and BRWallet.c, which includes
-# it, built once per arm; the rest of the core is built once, without the seam. The arms run with
+# it, built once per arm with -DASSET_HOLD_TEST_SEAMS=1 (the view's classifier and a single reading are
+# test seams); a third unit, seamoff.c, is built per arm WITHOUT it, as what ships (only the arm's 65536
+# bit reaches it), and seams_off holds it to refusing both. The rest of the core is built once, without
+# the seams. The strict, portability and Swift gates build without ASSET_HOLD_TEST_SEAMS. The arms run with
 # detect_leaks=0; then every case runs once more on the shipped arm under LeakSanitizer where the platform
 # has one (said so, and skipped, where it does not -- Apple clang on macOS).
 #
@@ -95,7 +99,7 @@ CASES=(
     union_proof:1,16,64
     union_agree:1
     union_two_carriers:1,4,256,16384
-    rows_disagree:1,16,64,32768
+    rows_disagree:1,16,64,4096,32768
     refusal_arguments:-
     refusal_unreadable:4096
     capacity:1,16,64,2048,4096
@@ -107,10 +111,12 @@ CASES=(
     sweep_union:1,2,16,256,512
     sweep_must_be_excluded:1
     second_unit:-
+    seams_off:65536
 )
 ARMS=(1:decoder-dropped 2:classifier-dropped 4:unknown-free 8:walk-stops 16:replay-skipped 32:absent-held
       64:ownership-ignored 128:proof-ignored 256:first-carrier 512:input-dropped 1024:settled-ungated
-      2048:capacity-shortens 4096:refusal-empty 8192:facts-decoder-only 16384:shape-first-only 32768:duplicate-rows)
+      2048:capacity-shortens 4096:refusal-empty 8192:facts-decoder-only 16384:shape-first-only 32768:duplicate-rows
+      65536:seams-open)
 
 # ---- the seam is real ----------------------------------------------------------------------
 if [ ! -f "$HEADER" ]; then
@@ -128,6 +134,12 @@ if ! grep -Eq '^BRAssetHoldResult BRWalletHoldAssetOutputs\(' <<<"$HDR" ||
 fi
 if ! grep -Eq '^[[:space:]]*#[[:space:]]*(el)?if[[:space:]]+!?\(?ASSET_HOLD_UNFIXED' <<<"$HDR"; then
     echo "GATE FAILURE: $HEADER does not test the value of ASSET_HOLD_UNFIXED; the arms would not differ."; exit 1
+fi
+if ! grep -Eq '^[[:space:]]*#[[:space:]]*ifndef[[:space:]]+ASSET_HOLD_TEST_SEAMS' <<<"$HDR" ||
+   ! grep -Eq '^[[:space:]]*#[[:space:]]*define[[:space:]]+ASSET_HOLD_TEST_SEAMS[[:space:]]+0[[:space:]]*$' <<<"$HDR" ||
+   ! grep -Eq '^[[:space:]]*#[[:space:]]*if[[:space:]]+!ASSET_HOLD_TEST_SEAMS' <<<"$HDR" ||
+   grep -Eq '^[[:space:]]*#[[:space:]]*ifdef[[:space:]]+ASSET_HOLD_TEST_SEAMS' <<<"$HDR"; then
+    echo "GATE FAILURE: $HEADER does not default ASSET_HOLD_TEST_SEAMS to 0 and test its value; what ships would honour the seams."; exit 1
 fi
 if ! grep -Eq '^[[:space:]]*#[[:space:]]*ifndef[[:space:]]+ASSET_HOLD_UNFIXED' <<<"$HDR" ||
    grep -Eq '^[[:space:]]*#[[:space:]]*ifdef[[:space:]]+ASSET_HOLD_UNFIXED' <<<"$HDR"; then
@@ -182,8 +194,10 @@ cat > "$BUILD_DIR/strict2.c" <<'EOF'
 #include "BRAssetHold.h"
 int strict_tu1(void);
 static int owned(void *info, const BRTransaction *tx, size_t vout) { (void)info; (void)tx; (void)vout; return 1; }
+static int never(void *info, const BRTransaction *tx, size_t vout) { (void)info; (void)tx; (void)vout; return 0; }
 int main(void)
 {
+    static const BRAssetHoldClassifier c = { never, NULL, NULL };
     static uint8_t script[] = { 0x6a, 0x06, 0x44, 0x41, 0x01, 0x15, 0x00, 0x0a }, ours[] = { 0x00, 0x14 };
     BRTransaction tx;
     BRTxOutput outs[3];
@@ -207,8 +221,10 @@ int main(void)
     memset(&v, 0, sizeof(v));
     v.txs = txs; v.txCount = 1; v.owned = owned;
     r = BRAssetHoldOutputs(&v, w, 1, held, 4);
-    return (r.status == BR_ASSET_HOLD_COMPLETE && r.heldCount == 2 && BRAssetHoldBounds(&v, &workNeeded, &heldNeeded) &&
-            workNeeded == 1 && heldNeeded == 3 && strict_tu1()) ? 0 : 1;
+    if (! (r.status == BR_ASSET_HOLD_COMPLETE && r.heldCount == 2 && BRAssetHoldBounds(&v, &workNeeded, &heldNeeded) &&
+           workNeeded == 1 && heldNeeded == 3 && strict_tu1())) return 1;
+    v.classifier = &c;   /* a test seam, in a build without ASSET_HOLD_TEST_SEAMS */
+    return (BRAssetHoldOutputs(&v, w, 1, held, 4).status == BR_ASSET_HOLD_REFUSED_ARGUMENTS) ? 0 : 1;
 }
 EOF
 shopt -s nullglob
@@ -279,6 +295,7 @@ let walletPass: (OpaquePointer?, UnsafePointer<BRAssetHoldRow>?, Int, UnsafePoin
                  UnsafeMutablePointer<BRAssetHoldWork>?, Int, UnsafeMutablePointer<BRUTXO>?, Int) -> BRAssetHoldResult = BRWalletHoldAssetOutputs
 print(union == BR_ASSET_FACT_YES, status == BR_ASSET_HOLD_COMPLETE, r.heldCount, r.newlyHeld, r.workNeeded, r.heldNeeded, bounded,
       BR_ASSET_HOLD_REFUSED_CAPACITY, BR_ASSET_HOLD_REFUSED_UNREADABLE, BR_ASSET_HOLD_REFUSED_ARGUMENTS, BR_ASSET_HOLD_REFUSED,
+      BR_ASSET_HOLD_REFUSED_ROWS,
       row.n, classifier.containsAsset == nil, walletPass)
 EOF
     mkdir -p "$BUILD_DIR/swift_inc/crypto"
@@ -312,9 +329,33 @@ int asset_hold_kat_tu2(void)
 }
 EOF
 
+# The third unit: what ships, no ASSET_HOLD_TEST_SEAMS (seams_off). Only the arm's 65536 bit reaches it.
+cat > "$BUILD_DIR/seamoff.c" <<'EOF'
+#include "BRAssetHold.h"
+int asset_hold_kat_seams_off(const BRAssetHoldView *v, const BRAssetHoldClassifier *c, BRAssetHoldWork *work, size_t workCap,
+                             BRUTXO *held, size_t heldCap, BRAssetHoldResult out[5]);
+int asset_hold_kat_seams_off(const BRAssetHoldView *v, const BRAssetHoldClassifier *c, BRAssetHoldWork *work, size_t workCap,
+                             BRUTXO *held, size_t heldCap, BRAssetHoldResult out[5])
+{
+    BRAssetHoldView w = *v;
+
+    out[0] = BRAssetHoldOutputs(&w, work, workCap, held, heldCap);
+    w.classifier = c;
+    out[1] = BRAssetHoldOutputs(&w, work, workCap, held, heldCap);
+    w.classifier = NULL;
+    out[2] = _BRAssetHoldOutputsReading(&w, work, workCap, held, heldCap, 1);
+    out[3] = _BRAssetHoldOutputsReading(&w, work, workCap, held, heldCap, 2);
+    out[4] = _BRAssetHoldOutputsReading(&w, work, workCap, held, heldCap, 3);
+    return ASSET_HOLD_TEST_SEAMS;
+}
+EOF
+
 build() {   # <out> <ASSET_HOLD_UNFIXED bits>
-    "$CC" -w -std=c99 -include stdint.h "${SAN[@]}" -DASSET_HOLD_UNFIXED="$2" "${INC[@]}" \
-        "$SCRIPT_DIR/asset_hold_kat_main.c" "$BUILD_DIR/tu2.c" "$CORE_DIR/BRWallet.c" "${CORE_OBJS[@]}" -lm -lpthread -o "$1"
+    "$CC" -w -std=c99 -include stdint.h "${SAN[@]}" -DASSET_HOLD_UNFIXED="$(( $2 & 65536 ))" "${INC[@]}" \
+        -c "$BUILD_DIR/seamoff.c" -o "$1.seamoff.o" &&
+    "$CC" -w -std=c99 -include stdint.h "${SAN[@]}" -DASSET_HOLD_TEST_SEAMS=1 -DASSET_HOLD_UNFIXED="$2" "${INC[@]}" \
+        "$SCRIPT_DIR/asset_hold_kat_main.c" "$BUILD_DIR/tu2.c" "$CORE_DIR/BRWallet.c" "$1.seamoff.o" "${CORE_OBJS[@]}" \
+        -lm -lpthread -o "$1"
 }
 
 for arm in "${ARMS[@]}"; do
