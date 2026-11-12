@@ -1419,6 +1419,9 @@ class WalletManager @Suppress("LongParameterList") constructor(
         // commit(), not apply(): the one-time history rebuild is stamped not needed below, and
         // that stamp must not reach disk before the clear it relies on — nor at all if the
         // clear did not land.
+        // The display currency used to live in this file and is a device setting: a create or a
+        // restore keeps it (owner decision, 2026-11-12), so move it out before the clear.
+        app.aroundtheblock.wallet.core.settings.DisplayCurrencyPrefs.moveFromLegacy(context, networkSuffix(context))
         val cleared = context.getSharedPreferences("dgb_sync_data" + networkSuffix(context), Context.MODE_PRIVATE)
             .edit().clear().commit()
         // Drop ChainTipStore's in-memory mirror too — see the note in

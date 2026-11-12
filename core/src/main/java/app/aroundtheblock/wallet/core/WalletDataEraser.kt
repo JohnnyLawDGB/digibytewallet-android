@@ -203,6 +203,11 @@ class AndroidWalletDataEraser internal constructor(
         clearPrefs("dgb_wallet_seed")
 
     override fun eraseSyncData(): Boolean {
+        // The display currency is a device setting that used to live in this file, and a wipe keeps
+        // it (owner decision, 2026-11-12): move it out on both networks before the clear.
+        WALLET_NETWORK_SUFFIXES.forEach {
+            app.aroundtheblock.wallet.core.settings.DisplayCurrencyPrefs.moveFromLegacy(context, it)
+        }
         val cleared = clearPrefsOnEveryNetwork("dgb_sync_data")
         // The .clear() above removes the persisted display tip, but ChainTipStore mirrors it in a
         // process-lifetime field so the 5s UI poll doesn't hit disk. Without this the mirror would
@@ -283,6 +288,7 @@ class AndroidWalletDataEraser internal constructor(
         // NOT Settings → Display → Show prices (PricePrefs, "dgb_price"): a device setting, like the
         // own node (dgb_settings) and the balance mask (dgb_privacy), it survives a wipe or a restore
         // (owner decision, 2026-11-09). The cached price itself is in the database erased above.
+        // Nor the display currency it shares that file with (DisplayCurrencyPrefs, 2026-11-12).
         // ONE key, not the file: dgb_settings also holds the language and the network selection.
         val scanFloor = step("scan floor") {
             val settings = context.getSharedPreferences("dgb_settings", Context.MODE_PRIVATE)

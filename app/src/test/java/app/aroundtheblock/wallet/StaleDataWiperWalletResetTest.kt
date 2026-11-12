@@ -74,6 +74,22 @@ class StaleDataWiperWalletResetTest {
         h.assertWalletReset("the crash-loop breaker")
     }
 
+    /** Owner decision, 2026-11-12: the display currency is a device setting the breaker keeps. */
+    @Test
+    fun `the crash-loop breaker keeps the display currency`() {
+        val h = Harness()
+        h.syncState()
+        val key = app.aroundtheblock.wallet.core.settings.DisplayCurrencyPrefs.KEY
+        // Still in the old file: the breaker can run before anything has read (and so moved) it.
+        h.prefs.store("dgb_sync_data")[key] = "EUR"
+        h.prefs.store("dgb_boot_guard")["pending_boots"] = BootGuard.THRESHOLD_BLOBS
+
+        BootGuard.beginBoot(h.context)
+
+        h.assertWalletReset("the crash-loop breaker")
+        assertEquals("EUR", app.aroundtheblock.wallet.core.settings.DisplayCurrencyPrefs.read(h.context, ""))
+    }
+
     @Test
     fun `the crash-loop breaker's escalated cleanup takes what a wallet reset takes`() {
         val h = Harness()

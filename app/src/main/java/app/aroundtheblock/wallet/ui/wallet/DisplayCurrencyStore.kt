@@ -27,20 +27,14 @@ import java.util.Locale
 object DisplayCurrencyStore {
 
     /**
-     * The SAME file the wallet writes: "dgb_sync_data" plus the network suffix, NOT "dgb_settings".
+     * Where it is stored: [app.aroundtheblock.wallet.core.settings.DisplayCurrencyPrefs] (Show
+     * prices' file, network-suffixed). It moved there from `dgb_sync_data` so a wipe, a restore and
+     * the crash-loop breaker keep it (owner decision, 2026-11-12); that object moves an old value.
      *
-     * Getting this wrong is silent — the store reads null, resolves to USD, and Settings shows a
-     * confident "USD — US Dollar" while the wallet shows BTC. Which is exactly what the bug being
-     * fixed here looked like, so it was worth catching on a device rather than assuming.
-     *
-     * The suffix matters too: testnet and mainnet keep separate preferences, and dropping it
-     * would make a testnet currency choice leak into mainnet.
+     * The suffix matters: testnet and mainnet keep separate choices, and dropping it would make a
+     * testnet currency choice leak into mainnet.
      */
-    private const val PREFS_BASE = "dgb_sync_data"
-    private const val KEY = "display_currency"
-
-    private fun prefsName(context: Context) =
-        PREFS_BASE + app.aroundtheblock.wallet.core.networkSuffix(context)
+    private fun suffix(context: Context) = app.aroundtheblock.wallet.core.networkSuffix(context)
 
     /**
      * Resolve the effective currency from both stores.
@@ -71,14 +65,13 @@ object DisplayCurrencyStore {
 
     /** Read the stored preference, without the legacy fallback. */
     fun storedPref(context: Context): String? = runCatching {
-        context.getSharedPreferences(prefsName(context), Context.MODE_PRIVATE).getString(KEY, null)
+        app.aroundtheblock.wallet.core.settings.DisplayCurrencyPrefs.read(context, suffix(context))
     }.getOrNull()
 
     /** Persist a choice. Both pickers call this, so both screens agree afterwards. */
     fun save(context: Context, currency: DisplayCurrency) {
         runCatching {
-            context.getSharedPreferences(prefsName(context), Context.MODE_PRIVATE)
-                .edit().putString(KEY, currency.name).apply()
+            app.aroundtheblock.wallet.core.settings.DisplayCurrencyPrefs.write(context, suffix(context), currency.name)
         }
     }
 }

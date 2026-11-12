@@ -43,6 +43,9 @@ object StaleDataWiper {
         val suffix = networkSuffix(context)
         // commit(), not apply(): the risky start this breaker guards follows at once, and a clear
         // still queued when that start dies is lost — the next launch would find what it cleared.
+        // The display currency is a device setting that used to live in this file: move it out
+        // first (owner decision, 2026-11-12). The breaker can run before anything has read it.
+        app.aroundtheblock.wallet.core.settings.DisplayCurrencyPrefs.moveFromLegacy(context, suffix)
         val syncData = clearPrefs(context, "dgb_sync_data$suffix")
         val peerCache = clearPrefs(context, "dgb_bloom_peers$suffix")
 
