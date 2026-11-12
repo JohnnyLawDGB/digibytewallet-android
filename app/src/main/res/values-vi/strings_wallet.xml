@@ -715,6 +715,9 @@
     <string name="seedview_pass_unreadable_title">Không thể đọc cụm mật khẩu</string>
     <string name="seedview_pass_unreadable_body">Hiện không thể đọc cụm mật khẩu của ví này. Chỉ riêng các từ khôi phục có thể không khôi phục được ví này, vì vậy chúng sẽ không được hiển thị cho đến khi cụm mật khẩu có thể được hiển thị cùng với chúng. Hãy thử lại.</string>
     <string name="seedview_pass_retry">Thử lại</string>
+    <!-- SEED-VIEW-AUTH -->
+    <string name="seedview_device_lock_title">Xác nhận khóa màn hình</string>
+    <string name="seedview_device_lock_body">Cụm từ khôi phục của bạn được bảo vệ bằng khóa màn hình của điện thoại này. Hãy xác nhận khóa màn hình để hiển thị. Thử lại.</string>
     <!-- /pkg E2-keys -->
     <string name="pinstore_title">Hiện không thể kiểm tra mã PIN của bạn</string>
     <string name="pinstore_body">Kho khóa an toàn của điện thoại không mở được, nên ví vẫn bị khóa. Không có gì bị xóa. Hãy đóng ứng dụng rồi mở lại. Nếu vẫn xảy ra, hãy khởi động lại điện thoại; cụm từ khôi phục vẫn khôi phục được ví trên mọi thiết bị.</string>

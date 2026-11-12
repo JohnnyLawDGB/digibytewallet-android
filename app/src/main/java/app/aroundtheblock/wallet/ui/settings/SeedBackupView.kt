@@ -1,5 +1,8 @@
 package app.aroundtheblock.wallet.ui.settings
 
+import app.aroundtheblock.wallet.core.security.KeystoreKeyInvalidatedException
+import app.aroundtheblock.wallet.core.security.KeystoreUserAuthRequiredException
+
 /**
  * What the recovery-phrase screen shows, read from the wallet: the words, and the passphrase when the
  * wallet has one. A plain function so the decision runs on a JVM.
@@ -15,7 +18,33 @@ internal sealed class SeedBackupView {
      */
     data object PassphraseUnreadable : SeedBackupView()
 
+    /**
+     * SEED-VIEW-AUTH: the auth-bound key is outside its device-unlock window
+     * (docs/specs/keystore-auth-binding.md). Nothing is shown; the device lock must be confirmed and the
+     * read made again — which "Try again" does, prompting afresh every time.
+     */
+    data object DeviceLockNeeded : SeedBackupView()
+
+    /** The device lock screen was removed and the key with it: only the written phrase restores this
+     *  wallet. Never retried, never prompted for. */
+    data object KeyInvalidated : SeedBackupView()
+
     companion object {
+        /**
+         * SEED-VIEW-AUTH: [read]; when the key needs the device lock, [confirmDeviceLock] once and, if it
+         * was confirmed, [read] exactly once more. A prompt not confirmed, or a key still refused after
+         * one, ends in [DeviceLockNeeded], from which the screen's "Try again" runs this again.
+         */
+        suspend fun readConfirmingDeviceLock(
+            read: suspend () -> SeedBackupView,
+            confirmDeviceLock: suspend () -> Boolean,
+        ): SeedBackupView {
+            val first = read()
+            if (first !== DeviceLockNeeded) return first
+            if (!confirmDeviceLock()) return DeviceLockNeeded
+            return read()
+        }
+
         /**
          * The passphrase first: when it cannot be read, the words are not read at all.
          *
@@ -27,12 +56,25 @@ internal sealed class SeedBackupView {
                 passphrase()
             } catch (e: Exception) {
                 runCatching { android.util.Log.w("SeedViewScreen", "stored envelope not readable (${e.javaClass.simpleName})") }
-                return PassphraseUnreadable
+                return keyRefusal(e) ?: PassphraseUnreadable
+            }
+            val shownWords = try {
+                words(mnemonic)
+            } catch (e: Exception) {
+                bytes?.fill(0)
+                return keyRefusal(e) ?: throw e
             }
             val shownPassphrase = bytes?.let { String(it, Charsets.UTF_8).also { _ -> it.fill(0) } }
-            return Shown(words(mnemonic), shownPassphrase)
+            return Shown(shownWords, shownPassphrase)
         }
 
+        private fun keyRefusal(e: Exception): SeedBackupView? = when (e) {
+            is KeystoreUserAuthRequiredException -> DeviceLockNeeded
+            is KeystoreKeyInvalidatedException -> KeyInvalidated
+            else -> null
+        }
+
+        /** Throws only the key's refusals ([keyRefusal]); any other failure reads as placeholder words. */
         private fun words(mnemonic: () -> ByteArray?): List<String> = try {
             val decrypted = mnemonic()
             if (decrypted != null) {
@@ -42,6 +84,10 @@ internal sealed class SeedBackupView {
             } else {
                 List(12) { "••••••" }
             }
+        } catch (e: KeystoreUserAuthRequiredException) {
+            throw e
+        } catch (e: KeystoreKeyInvalidatedException) {
+            throw e
         } catch (e: Exception) {
             runCatching { android.util.Log.e("SeedViewScreen", "Failed to decrypt the recovery words: ${e.javaClass.simpleName}") }
             List(12) { "error" }

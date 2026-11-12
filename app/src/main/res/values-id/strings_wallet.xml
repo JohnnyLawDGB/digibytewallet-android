@@ -715,6 +715,9 @@
     <string name="seedview_pass_unreadable_title">Frasa sandi tidak dapat dibaca</string>
     <string name="seedview_pass_unreadable_body">Frasa sandi dompet ini tidak dapat dibaca saat ini. Kata-kata pemulihan Anda saja mungkin tidak dapat memulihkan dompet ini, jadi kata-kata itu tidak ditampilkan sampai frasa sandi dapat ditampilkan bersamanya. Coba lagi.</string>
     <string name="seedview_pass_retry">Coba lagi</string>
+    <!-- SEED-VIEW-AUTH -->
+    <string name="seedview_device_lock_title">Konfirmasi kunci layar Anda</string>
+    <string name="seedview_device_lock_body">Frasa pemulihan Anda dilindungi oleh kunci layar ponsel ini. Konfirmasi kunci layar untuk menampilkannya. Coba lagi.</string>
     <!-- /pkg E2-keys -->
     <string name="pinstore_title">PIN Anda tidak bisa diperiksa saat ini</string>
     <string name="pinstore_body">Penyimpanan kunci aman ponsel tidak terbuka, jadi dompet tetap terkunci. Tidak ada yang dihapus. Tutup aplikasi lalu buka lagi. Jika terus terjadi, mulai ulang ponsel; frasa pemulihan Anda tetap bisa memulihkan dompet di perangkat mana pun.</string>

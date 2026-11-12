@@ -14,7 +14,11 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.fragment.app.FragmentActivity
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -23,6 +27,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import app.aroundtheblock.wallet.core.WalletManager
+import app.aroundtheblock.wallet.core.security.BiometricAuth
+import app.aroundtheblock.wallet.core.security.BiometricResult
 import app.aroundtheblock.wallet.core.security.KeyStoreManager
 import app.aroundtheblock.wallet.ui.components.SecureWindow
 import app.aroundtheblock.wallet.ui.theme.DigiByteRed
@@ -38,7 +44,8 @@ import app.aroundtheblock.wallet.R
 fun SeedViewScreen(
     navController: NavController,
     walletManager: WalletManager,
-    keyStoreManager: KeyStoreManager
+    keyStoreManager: KeyStoreManager,
+    biometricAuth: BiometricAuth,
 ) {
     // FLAG_SECURE through the counted holder: a raw clear on leaving would take the flag off the
     // window under any other screen still holding it (the unlock screen when the app locks here).
@@ -59,10 +66,26 @@ fun SeedViewScreen(
      * Behind the same PIN + biometric gate as the phrase, because it is the same secret material.
      * v2-aware decrypts live in WalletManager (docs/specs/keystore-auth-binding.md) — no raw prefs
      * reads here. Read again on "Try again".
+     *
+     * SEED-VIEW-AUTH: outside the auth-bound key's device-unlock window the read asks for the device
+     * lock with the unlock path's own prompt (BiometricAuth.authenticateDeviceCredential) and reads
+     * again once; "Try again" prompts afresh, so a cancelled prompt never wedges the screen.
      */
+    val activity = LocalContext.current as? FragmentActivity
     var attempt by remember { mutableIntStateOf(0) }
-    val backup = remember(attempt) {
-        SeedBackupView.read(walletManager::decryptStoredPassphrase, walletManager::decryptStoredMnemonic)
+    var backup by remember { mutableStateOf<SeedBackupView?>(null) }
+    LaunchedEffect(attempt) {
+        backup = null
+        backup = SeedBackupView.readConfirmingDeviceLock(
+            read = {
+                withContext(Dispatchers.IO) {
+                    SeedBackupView.read(walletManager::decryptStoredPassphrase, walletManager::decryptStoredMnemonic)
+                }
+            },
+            confirmDeviceLock = {
+                activity != null && biometricAuth.authenticateDeviceCredential(activity) is BiometricResult.Success
+            },
+        )
     }
 
     Column(
@@ -114,7 +137,7 @@ fun SeedViewScreen(
                 }
             }
 
-            when (backup) {
+            when (val backup = backup) {
                 is SeedBackupView.PassphraseUnreadable -> {
                     // The passphrase could not be read: the words alone may not restore this wallet,
                     // so they are not shown as the backup. Say so, and offer to read again.
@@ -149,6 +172,20 @@ fun SeedViewScreen(
                         Text(stringResource(R.string.seedview_pass_retry), color = Color.White)
                     }
                 }
+                null -> {
+                    Spacer(Modifier.height(32.dp))
+                    CircularProgressIndicator(color = Color.White)
+                }
+                is SeedBackupView.DeviceLockNeeded -> SeedViewNotice(
+                    title = stringResource(R.string.seedview_device_lock_title),
+                    body = stringResource(R.string.seedview_device_lock_body),
+                    onRetry = { attempt++ },
+                )
+                is SeedBackupView.KeyInvalidated -> SeedViewNotice(
+                    title = null,
+                    body = stringResource(R.string.unlock_device_lock_removed),
+                    onRetry = null,
+                )
                 is SeedBackupView.Shown -> {
                 Spacer(Modifier.height(20.dp))
 
@@ -253,6 +290,41 @@ fun SeedViewScreen(
             }
 
             Spacer(Modifier.height(16.dp))
+        }
+    }
+}
+
+/** A message in place of the phrase, with "Try again" when [onRetry] is given. */
+@Composable
+private fun SeedViewNotice(title: String?, body: String, onRetry: (() -> Unit)?) {
+    Spacer(Modifier.height(20.dp))
+    Card(
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = DigiByteRed.copy(alpha = 0.15f)),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(14.dp)) {
+            if (title != null) {
+                Text(
+                    text = title,
+                    color = DigiByteRed,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+                Spacer(Modifier.height(6.dp))
+            }
+            Text(text = body, color = Color(0xFFB0BEC5), style = MaterialTheme.typography.bodySmall)
+        }
+    }
+    if (onRetry != null) {
+        Spacer(Modifier.height(16.dp))
+        Button(
+            onClick = onRetry,
+            modifier = Modifier.fillMaxWidth().height(50.dp),
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = DigiByteRed),
+        ) {
+            Text(stringResource(R.string.seedview_pass_retry), color = Color.White)
         }
     }
 }

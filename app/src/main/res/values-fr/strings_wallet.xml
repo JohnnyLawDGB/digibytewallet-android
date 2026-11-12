@@ -705,6 +705,9 @@
     <string name="seedview_pass_unreadable_title">Impossible de lire la phrase secrète</string>
     <string name="seedview_pass_unreadable_body">La phrase secrète de ce portefeuille n\'a pas pu être lue pour le moment. Vos mots de récupération seuls risquent de ne pas restaurer ce portefeuille : ils ne s\'affichent donc que lorsque la phrase secrète peut s\'afficher avec eux. Réessayez.</string>
     <string name="seedview_pass_retry">Réessayer</string>
+    <!-- SEED-VIEW-AUTH -->
+    <string name="seedview_device_lock_title">Confirmez le verrouillage de l\'écran</string>
+    <string name="seedview_device_lock_body">Votre phrase de récupération est protégée par le verrouillage de l\'écran de ce téléphone. Confirmez le verrouillage pour l\'afficher. Réessayez.</string>
     <!-- /pkg E2-keys -->
     <string name="pinstore_title">Votre code PIN ne peut pas être vérifié pour l\'instant</string>
     <string name="pinstore_body">Le stockage sécurisé des clés du téléphone ne s\'est pas ouvert : le portefeuille reste verrouillé. Rien n\'a été supprimé. Fermez l\'application et rouvrez-la. Si cela se reproduit, redémarrez le téléphone ; votre phrase de récupération restaure toujours le portefeuille sur n\'importe quel appareil.</string>
