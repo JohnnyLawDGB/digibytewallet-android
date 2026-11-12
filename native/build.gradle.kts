@@ -105,10 +105,12 @@ android {
         sourceCompatibility = JavaVersion.VERSION_1_8
         targetCompatibility = JavaVersion.VERSION_1_8
     }
+}
 
-    kotlinOptions {
-        jvmTarget = "1.8"
-    }
+// KGP 2.3 made the `android { kotlinOptions { } }` properties a compile error; this is the
+// compilerOptions form of the same setting (must match compileOptions.targetCompatibility).
+kotlin {
+    compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_1_8) }
 }
 
 dependencies {

@@ -1,8 +1,21 @@
 // Plugin versions come from gradle/libs.versions.toml so they stay locked to
 // the matching runtime artifacts — the Hilt plugin must never drift from
-// hilt-android/hilt-android-compiler, and KSP + the Compose compiler plugin
-// must never drift from the Kotlin version. Subprojects apply these by plain
+// hilt-android/hilt-android-compiler, and the Compose compiler plugin must
+// never drift from the Kotlin version (KSP is versioned on its own since 2.3,
+// see gradle/libs.versions.toml). Subprojects apply these by plain
 // id(), inheriting the version resolved here.
+// R8/D8 override: AGP 8.10's bundled R8 cannot read Kotlin 2.4 class metadata.
+// A classpath entry here wins over the R8 inside AGP (Google's documented
+// override). Version and the reason live in gradle/libs.versions.toml.
+buildscript {
+    repositories {
+        google()
+    }
+    dependencies {
+        classpath(libs.android.tools.r8)
+    }
+}
+
 plugins {
     alias(libs.plugins.android.application) apply false
     alias(libs.plugins.android.library) apply false
@@ -25,6 +38,26 @@ subprojects {
         extensions.findByType<io.gitlab.arturbosch.detekt.extensions.DetektExtension>()?.apply {
             config.setFrom("$rootDir/config/detekt.yml")
             buildUponDefaultConfig = true
+        }
+    }
+}
+
+// Annotation processors read the @Metadata of compiled Kotlin classes with
+// org.jetbrains.kotlin:kotlin-metadata-jvm, which only reads metadata up to one
+// minor version past its own. Dagger/Hilt 2.58 asks for 2.2.20, which rejects
+// Kotlin 2.4 classes ("Provided Metadata instance has version 2.4.0, while
+// maximum supported version is 2.2.0") in :app:hiltJavaCompile*. Dagger stopped
+// shading it in 2.57 precisely so that a build can raise it, so every
+// configuration that asks for it gets the Kotlin compiler's own version. It is
+// a processor-classpath library only: no app runtime classpath contains it.
+val kotlinVersion = libs.versions.kotlin.get()
+subprojects {
+    configurations.configureEach {
+        resolutionStrategy.eachDependency {
+            if (requested.group == "org.jetbrains.kotlin" && requested.name == "kotlin-metadata-jvm") {
+                useVersion(kotlinVersion)
+                because("read Kotlin $kotlinVersion class metadata in annotation processors (Dagger/Hilt)")
+            }
         }
     }
 }
