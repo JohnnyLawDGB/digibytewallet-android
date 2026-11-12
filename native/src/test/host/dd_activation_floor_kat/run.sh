@@ -61,7 +61,7 @@ build() {
     local m=()
     [ "$bits" = "32" ] && m=(-m32)
     clang -w -include stdint.h -g -fsanitize=address -fno-omit-frame-pointer \
-        "${m[@]}" "$@" \
+        ${m[@]+"${m[@]}"} "$@" \
         -I "$CORE_DIR" \
         -I "$CORE_DIR/secp256k1/include" \
         "$SCRIPT_DIR/dd_activation_floor_kat_main.c" \

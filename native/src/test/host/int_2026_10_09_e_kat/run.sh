@@ -80,7 +80,7 @@ build() {
     [ "$bits" = "32" ] && m=(-m32)
     # -DDEBUG: on the host peer_log is compiled out without it (BRPeer.h); the log lines are evidence.
     clang -w -include stdint.h -g -DDEBUG -fsanitize=address -fno-omit-frame-pointer \
-        -DDGB_HEADER_POW_CHECK="$POW_LEVEL" -DDGB_HEADER_DIFF_CHECK="$DIFF_LEVEL" "${m[@]}" "$@" \
+        -DDGB_HEADER_POW_CHECK="$POW_LEVEL" -DDGB_HEADER_DIFF_CHECK="$DIFF_LEVEL" ${m[@]+"${m[@]}"} "$@" \
         -I "$CORE_DIR" \
         -I "$CORE_DIR/secp256k1/include" \
         -I "$CORE_DIR/secp256k1" \

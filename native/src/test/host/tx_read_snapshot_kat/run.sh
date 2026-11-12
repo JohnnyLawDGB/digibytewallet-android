@@ -46,7 +46,7 @@ build() { # $1 = output, $2 = bits, rest = extra flags
     local m=()
     [ "$bits" = "32" ] && m=(-m32)
     clang -w -include stdint.h -g -fsanitize=address -fno-omit-frame-pointer \
-        "${m[@]}" "$@" \
+        ${m[@]+"${m[@]}"} "$@" \
         -I "$CORE_DIR" -I "$CORE_DIR/secp256k1/include" \
         "$SCRIPT_DIR/tx_read_snapshot_kat_main.c" \
         "$CORE_DIR/BRWallet.c" \

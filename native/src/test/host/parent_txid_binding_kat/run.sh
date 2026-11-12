@@ -44,11 +44,11 @@ build_and_run() {
     # The suite and the header under test build with warnings as errors; the core sources
     # build as the app builds them.
     clang -Wall -Wextra -Werror -include stdint.h -g -fsanitize=address,undefined \
-        -fno-omit-frame-pointer "${m[@]}" \
+        -fno-omit-frame-pointer ${m[@]+"${m[@]}"} \
         -I "$BRIDGE_DIR" -I "$CORE_DIR" -I "$CORE_DIR/secp256k1/include" \
         -c "$SCRIPT_DIR/parent_txid_binding_kat_main.c" -o "$BUILD_DIR/main${bits}.o"
     clang -w -include stdint.h -g -fsanitize=address,undefined -fno-omit-frame-pointer \
-        "${m[@]}" \
+        ${m[@]+"${m[@]}"} \
         -I "$CORE_DIR" -I "$CORE_DIR/secp256k1/include" -I "$CORE_DIR/secp256k1" \
         "$BUILD_DIR/main${bits}.o" "${UNITS[@]}" -lpthread -lm \
         -o "$BUILD_DIR/parent_txid_binding_kat${bits}"

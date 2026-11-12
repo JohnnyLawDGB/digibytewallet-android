@@ -15,6 +15,9 @@
 #          here-string form never misses.
 # Exit code 0 = gate held, 1 = it did not.
 set -uo pipefail
+# Needs bash 4 or later (mapfile). Under an older bash (macOS's /bin/bash is 3.2) the script would
+# stop at it, and the EXIT trap would then report success. Refuse instead.
+[ "${BASH_VERSINFO[0]}" -ge 4 ] || { echo "GATE FAILURE: needs bash 4 or later (mapfile); this is bash $BASH_VERSION"; exit 1; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../../.." && pwd)"

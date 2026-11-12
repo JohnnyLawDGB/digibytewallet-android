@@ -66,7 +66,7 @@ build() {
     local m=()
     [ "$bits" = "32" ] && m=(-m32)
     clang -w -include stdint.h -g -fsanitize=address -fno-omit-frame-pointer \
-        "${m[@]}" -DWALLET_KAT_COUNT_REBUILD "$@" \
+        ${m[@]+"${m[@]}"} -DWALLET_KAT_COUNT_REBUILD "$@" \
         -I "$CORE_DIR" \
         -I "$CORE_DIR/secp256k1/include" \
         "$SCRIPT_DIR/coinbase_maturity_kat_main.c" \

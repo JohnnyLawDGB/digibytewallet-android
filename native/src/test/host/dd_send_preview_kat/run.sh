@@ -80,7 +80,7 @@ UNITS=("$CORE_DIR"/BRWallet.c "$CORE_DIR"/BRTransaction.c "$CORE_DIR"/BRDigiDoll
 build() {   # <out> <64|32> <unfixed 0|1>
     local out="$1" bits="$2" unfixed="$3"
     local m=(); [ "$bits" = "32" ] && m=(-m32)
-    clang -w -include stdint.h -g -fsanitize=address -fno-omit-frame-pointer "${m[@]}" \
+    clang -w -include stdint.h -g -fsanitize=address -fno-omit-frame-pointer ${m[@]+"${m[@]}"} \
         -DDIGIDOLLAR_SEND_UNFIXED="$unfixed" \
         -I "$CORE_DIR" -I "$CORE_DIR/secp256k1/include" -I "$BRIDGE_DIR" \
         "$SCRIPT_DIR/dd_send_preview_kat_main.c" "${UNITS[@]}" -lm -lpthread -o "$out"

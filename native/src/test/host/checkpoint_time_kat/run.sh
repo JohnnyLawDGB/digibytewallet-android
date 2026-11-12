@@ -21,7 +21,7 @@ grep -q 'CHECKPOINT_TIME_UNFIXED' "$BRIDGE_DIR/checkpoint_time.h" \
 build() { # <out> <bits> [-D...]
     local out="$1" bits="$2"; shift 2
     local m=(); [ "$bits" = "32" ] && m=(-m32)
-    "$CC" -w -include stdint.h -g -fsanitize=address -fno-omit-frame-pointer "${m[@]}" "$@" \
+    "$CC" -w -include stdint.h -g -fsanitize=address -fno-omit-frame-pointer ${m[@]+"${m[@]}"} "$@" \
         -I "$CORE_DIR" -I "$BRIDGE_DIR" \
         "$SCRIPT_DIR/checkpoint_time_kat_main.c" -o "$out"
 }

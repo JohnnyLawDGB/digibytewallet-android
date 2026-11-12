@@ -41,7 +41,7 @@ UNITS=("$CORE_DIR/BRBase58.c" "$CORE_DIR/BRAddress.c" "$CORE_DIR/BRKey.c" "$CORE
 build() {   # <out> <64|32> [-D...]
     local out="$1" bits="$2"; shift 2
     local m=(); [ "$bits" = "32" ] && m=(-m32)
-    "$CC" -w -include stdint.h -g -fsanitize=address -fno-omit-frame-pointer "${m[@]}" "$@" \
+    "$CC" -w -include stdint.h -g -fsanitize=address -fno-omit-frame-pointer ${m[@]+"${m[@]}"} "$@" \
         -I "$CORE_DIR" -I "$CORE_DIR/secp256k1/include" -I "$CORE_DIR/secp256k1" \
         "$SCRIPT_DIR/base58_strict_alphabet_kat_main.c" "${UNITS[@]}" -lpthread -lm -o "$out"
 }

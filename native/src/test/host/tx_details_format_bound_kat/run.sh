@@ -68,7 +68,7 @@ build() {   # <out> <64|32> [-D...]
     local out="$1" bits="$2"; shift 2
     local m=(); [ "$bits" = "32" ] && m=(-m32)
     clang -Wall -Wextra -Werror -g -fsanitize=address,undefined -fno-sanitize-recover=undefined \
-        -fno-omit-frame-pointer "${m[@]}" "$@" \
+        -fno-omit-frame-pointer ${m[@]+"${m[@]}"} "$@" \
         -I "$BRIDGE_DIR" "$SCRIPT_DIR/tx_details_format_bound_kat_main.c" -o "$out"
 }
 
