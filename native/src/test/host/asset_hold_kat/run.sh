@@ -20,8 +20,9 @@
 #               the pass cannot read is passed over; 1024 a walk records totals taken before everything
 #               under them was resolved; 2048 a held list the buffer cannot hold is shortened; 4096 a pass
 #               that cannot complete answers "complete, nothing held"; 8192 only the decoder's reading is
-#               made. Each arm fails exactly the cases
-#               CASES lists for its bit and passes every other.
+#               made; 16384 the other reading too reads a funding transaction by its first OP_RETURN;
+#               32768 two rows for one outpoint that differ are read, one of them winning. Each arm fails
+#               exactly the cases CASES lists for its bit and passes every other.
 #   shipped     -DASSET_HOLD_UNFIXED=0: every case passes, exit 0.
 # All arms under ASan + UBSan, 64-bit. The unit under test is the header, and BRWallet.c, which includes
 # it, built once per arm; the rest of the core is built once, without the seam. The arms run with
@@ -82,7 +83,7 @@ CASES=(
     walk_two_below:8,64
     walk_unreadable_funding:1,64
     walk_pass_record:1,8,16,64,128
-    walk_record_units:8,64,128
+    walk_record_units:1,4,8,64,128,256,8192,16384
     walk_cycle_proven:1,8,64,128,1024
     walk_proof:1,64,128
     replay_rows:1,16,32,64
@@ -91,15 +92,17 @@ CASES=(
     union_funding_output:1,2,8192
     union_funding_tx:1,2,8192
     union_walk:1,2,8,16,64,8192
-    union_proof:1
+    union_proof:1,16,64
     union_agree:1
+    union_two_carriers:1,4,256,16384
+    rows_disagree:1,16,64,32768
     refusal_arguments:-
     refusal_unreadable:4096
     capacity:1,16,64,2048,4096
     edges:1,16,64
     implicit_change_wallet:1,16,64,4096
     wallet_agree:-
-    sweep_decoder:1,4,8,16,32,64,128,256,512
+    sweep_decoder:1,8,16,32,64,128,256,512
     sweep_agree:1,4,8,16,32,64,128
     sweep_union:1,2,16,256,512
     sweep_must_be_excluded:1
@@ -107,7 +110,7 @@ CASES=(
 )
 ARMS=(1:decoder-dropped 2:classifier-dropped 4:unknown-free 8:walk-stops 16:replay-skipped 32:absent-held
       64:ownership-ignored 128:proof-ignored 256:first-carrier 512:input-dropped 1024:settled-ungated
-      2048:capacity-shortens 4096:refusal-empty 8192:facts-decoder-only)
+      2048:capacity-shortens 4096:refusal-empty 8192:facts-decoder-only 16384:shape-first-only 32768:duplicate-rows)
 
 # ---- the seam is real ----------------------------------------------------------------------
 if [ ! -f "$HEADER" ]; then

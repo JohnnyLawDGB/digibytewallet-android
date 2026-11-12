@@ -31,8 +31,9 @@
 //       stack and its restsOn lists, resolveInputAssetUnits, assetCarrier, assetTxShape,
 //       hasAssetPayload, the replay. The Kotlin's decoder is BRAssetDecode.h and its targetsOutput is
 //       BRAssetTargetsOutput (asset_decode_kat and asset_quantity_targets_kat hold those to the
-//       Kotlin). sweep_decoder holds the pass, with a classifier that says NO everywhere, to the model
-//       over fixed pseudo-random wallets with any scripts at all (exact: the pass is the Kotlin);
+//       Kotlin). sweep_decoder holds the decoder's reading alone (_BRAssetHoldOutputsReading), with a
+//       classifier that says NO everywhere, to the model over fixed pseudo-random wallets with any
+//       scripts at all (exact: that reading is the Kotlin), and the pass to at least the model;
 //       sweep_agree holds the pass, with the core's classifier, to the model over wallets whose scripts
 //       the two readers read alike; sweep_union holds the pass to "at least the model and at least
 //       what the classifier holds" over any scripts.
@@ -237,7 +238,7 @@ typedef struct {
 } W;
 
 static W WAL;
-static BRAssetHoldWork WORK[TMAX];
+static BRAssetHoldWork WORK[RMAX];   // the most of transactions, rows and proofs any case builds
 static BRUTXO HELD[HMAX];
 
 static void wreset(W *w)
@@ -354,22 +355,46 @@ static void freeCopy(Copy *c)
     free(c);
 }
 
-static BRAssetHoldResult pass(const W *w)
+// `readings` 0: BRAssetHoldOutputs; 1 or 2: the header's _BRAssetHoldOutputsReading, the decoder's reading
+// or the other one alone. The rows, the proofs and the work buffer are heap blocks of exactly their size
+// too (the work buffer: what BRAssetHoldBounds asks for), so a read one past any of them is seen.
+// `heldCap` 0: all of HELD.
+static BRAssetHoldResult passReadingIn(const W *w, int readings, size_t heldCap)
 {
     BRAssetHoldView v = view(w);
     BRAssetHoldResult r;
-    size_t i;
+    BRAssetHoldRow *rows = malloc((w->rowN ? w->rowN : 1) * sizeof(BRAssetHoldRow));
+    UInt256 *proven = malloc((w->provenN ? w->provenN : 1) * sizeof(UInt256));
+    BRAssetHoldWork *work;
+    size_t i, workNeeded = 0;
 
+    if (! rows || ! proven) { BROKEN = 1; memset(&r, 0, sizeof(r)); free(rows); free(proven); return r; }
     for (i = 0; i < w->n; i++) {
         COPIES[i] = w->txs[i] ? copyOf(w->txs[i]) : NULL;
         COPY_TXS[i] = COPIES[i] ? &COPIES[i]->tx : NULL;
     }
     v.txs = COPY_TXS;
     if (v.owned) v.owned = copyOwned;
-    r = BRAssetHoldOutputs(&v, WORK, N(WORK), HELD, N(HELD));
+    if (w->rowN) memcpy(rows, w->rows, w->rowN * sizeof(BRAssetHoldRow));
+    if (w->provenN) memcpy(proven, w->proven, w->provenN * sizeof(UInt256));
+    v.rows = rows;
+    v.proven = proven;
+    if (! BRAssetHoldBounds(&v, &workNeeded, NULL)) workNeeded = N(WORK);
+    work = malloc((workNeeded ? workNeeded : 1) * sizeof(BRAssetHoldWork));
+    if (! work) BROKEN = 1;
+    if (heldCap == 0 || heldCap > N(HELD)) heldCap = N(HELD);
+    r = readings ? _BRAssetHoldOutputsReading(&v, work, workNeeded, HELD, heldCap, readings)
+                 : BRAssetHoldOutputs(&v, work, workNeeded, HELD, heldCap);
     for (i = 0; i < w->n; i++) freeCopy(COPIES[i]);
+    free(work);
+    free(rows);
+    free(proven);
     return r;
 }
+
+static BRAssetHoldResult passReading(const W *w, int readings) { return passReadingIn(w, readings, 0); }
+
+static BRAssetHoldResult pass(const W *w) { return passReading(w, 0); }
 
 static int heldIn(BRAssetHoldResult r, UInt256 txHash, uint32_t n)
 {
@@ -937,6 +962,16 @@ static int sameAsModel(BRAssetHoldResult r)
     size_t i;
 
     if (r.status != BR_ASSET_HOLD_COMPLETE || r.heldCount != M_HELDN) return 0;
+    for (i = 0; i < M_HELDN; i++) if (! heldIn(r, M_HELD[i].h, M_HELD[i].n)) return 0;
+    return 1;
+}
+
+// Does the answer hold at least the model's?
+static int coversModel(BRAssetHoldResult r)
+{
+    size_t i;
+
+    if (r.status != BR_ASSET_HOLD_COMPLETE) return 0;
     for (i = 0; i < M_HELDN; i++) if (! heldIn(r, M_HELD[i].h, M_HELD[i].n)) return 0;
     return 1;
 }
@@ -1777,7 +1812,9 @@ static void walk_pass_record(void)
 // A walk records the total it resolved, units and all. A carries two carriers: the walk reads the
 // first (three units to output 0), the pass the last (ten). A's inputs are unknown and A is proven, so
 // the walk's total is three and the pass's record ten. B and C each spend A's change and are listed
-// before A: B's walk records three, C reads it, and its change is free.
+// before A: B's walk records its total and C's walk reads the record. The decoder's reading is held to
+// the model exactly. The other reading reads a funding transaction by the pass's carrier or not at all,
+// and the pass holds the union.
 static void walk_record_units(void)
 {
     Fx *a, *b, *c;
@@ -1797,10 +1834,13 @@ static void walk_record_units(void)
     wadd(&WAL, b);
     wadd(&WAL, c);
     wadd(&WAL, a);
-    r = pass(&WAL);
+    r = passReading(&WAL, 1);
     model(&WAL);
-    ck(r.status == BR_ASSET_HOLD_COMPLETE && ! heldIn(r, c->tx.txHash, 2) && sameAsModel(r),
-       "the walk's recorded total is what it resolved: C's change is free (the model agrees)");
+    ck(r.status == BR_ASSET_HOLD_COMPLETE && sameAsModel(r),
+       "the walk's recorded total is what it resolved: the decoder's reading is the model's");
+    r = pass(&WAL);
+    ck(r.status == BR_ASSET_HOLD_COMPLETE && heldIn(r, c->tx.txHash, 2) && coversModel(r),
+       "the other reading reads a funding transaction by the pass's carrier or not at all, and the pass holds the union");
 }
 
 // A cycle (only a forged txid makes one): A spends (B, 2), B spends (A, 2), both stored zero, B's
@@ -2060,6 +2100,12 @@ static void union_proof(void)
     r = pass(&WAL);
     ck(r.status == BR_ASSET_HOLD_COMPLETE && heldIn(r, t->tx.txHash, 2),
        "a proof the other reading would stand on does not release what the decoder's reading holds");
+    // and an unspent row listed twice beside it (whose outpoint sorts first) leaves it held
+    row(&WAL, tid(0x05), 1, 3, 0);
+    row(&WAL, tid(0x05), 1, 3, 0);
+    r = pass(&WAL);
+    ck(r.status == BR_ASSET_HOLD_COMPLETE && heldIn(r, t->tx.txHash, 2) && heldIn(r, tid(0x05), 1) && r.heldCount == 2,
+       "with a row listed twice: both held, once each (%zu)", r.heldCount);
 }
 
 // On ordinary transactions the two readers agree: each says YES for a named output.
@@ -2082,6 +2128,100 @@ static void union_agree(void)
     ck(heldIn(pass(&WAL), t->tx.txHash, 0), "with the classifier silent the decoder holds the named output by itself");
     // the unknown remainder, as BRAssetOutpointMustBeExcluded has it
     ck(BRAssetOutpointMustBeExcluded(DA_TRANSFER, 3, 4, 0, 0, NULL, 0) == 1, "BRAssetOutpointMustBeExcluded excludes the last output when the input units are unknown");
+}
+
+// Two carriers in a funding transaction F, whose input is unknown; S spends F's last output (a row
+// storing zero) and a row of five. The other reading reads a funding transaction by the pass's carrier
+// or not at all, and the pass holds the union. Here that reading is asked alone, with the classifier
+// silent, and its answer is held to the one the pass's carrier gives; beside it, the same wallet with
+// F's second carrier a plain OP_RETURN, as a control.
+static void union_two_carriers(void)
+{
+    static const GInst issue[1] = { { 0, 0, 0, 2, 10 } }, xferOne[1] = { { 0, 0, 0, 2, 1 } }, xferFive[1] = { { 0, 0, 0, 1, 5 } };
+    Fx *f, *x, *t;
+    BRAssetHoldResult r;
+    int twoCarriers;
+
+    for (twoCarriers = 1; twoCarriers >= 0; twoCarriers--) {
+        resetPool();
+        wreset(&WAL);
+        f = fx(0xa01);
+        outCarrier(f, 0x05, 10, issue, 1, 0);
+        if (twoCarriers) outCarrier(f, 0x15, 0, xferOne, 1, 0);
+        else out(f, "6a03aabbcc", 0);   // an OP_RETURN that is no carrier, so the outputs keep their places
+        ours(f);
+        ours(f);
+        in(f, tid(0xa02), 0);
+        x = fx(0xa03); ours(x); ours(x);
+        in(x, tid(0xa04), 0);
+        t = fx(0xa05);
+        outCarrier(t, 0x15, 0, xferFive, 1, 0);
+        ours(t);
+        ours(t);
+        in(t, f->tx.txHash, f->tx.outCount - 1); row(&WAL, f->tx.txHash, (uint32_t)f->tx.outCount - 1, 0, 1);
+        in(t, x->tx.txHash, 0); row(&WAL, x->tx.txHash, 0, 5, 1);
+        wadd(&WAL, f);
+        wadd(&WAL, x);
+        wadd(&WAL, t);
+        WAL.classifier = &NEVER;
+        r = passReading(&WAL, 2);
+        if (twoCarriers) {
+            UInt256 h[4] = { f->tx.txHash, f->tx.txHash, t->tx.txHash, t->tx.txHash };
+            uint32_t n[4] = { 2, 3, 1, 2 };
+
+            heldExactly("two carriers: the other reading reads F by the pass's carrier or not at all", r, h, n, 4);
+        }
+        else {
+            UInt256 h[2] = { f->tx.txHash, t->tx.txHash };
+            uint32_t n[2] = { 2, 1 };
+
+            heldExactly("one carrier: the other reading reads F by that carrier", r, h, n, 2);
+        }
+    }
+}
+
+// Rows for one outpoint must agree. T spends (F, 1) and sends ten to its output 0; F is not held.
+static void rows_disagree(void)
+{
+    static const int64_t qa[] = { 0, 10, 10 }, qb[] = { 10, 10, 10 };
+    static const int sa[] = { 1, 0, 1 }, sb[] = { 1, 1, 1 };
+    BRAssetHoldResult r;
+    int k;
+
+    for (k = 0; k < 2; k++) {
+        preSpendWallet();
+        row(&WAL, tid(T_FUNDING), 1, qa[k], sa[k]);   // a stale row first
+        row(&WAL, tid(T_FUNDING), 1, qb[k], sb[k]);
+        r = pass(&WAL);
+        refused(k == 0 ? "two rows for one outpoint, quantity 0 and 10" : "two rows for one outpoint, one spent and one not", r,
+                BR_ASSET_HOLD_REFUSED_ARGUMENTS);
+        WAL.rows[0] = WAL.rows[1];   // the same row twice
+        r = pass(&WAL);
+        ck(r.status == BR_ASSET_HOLD_COMPLETE && r.heldCount == 0,
+           "the same row twice is read as one: ten in, all ten to output 0 (theirs), nothing held (%s, %zu)", st(r.status), r.heldCount);
+    }
+    // the pair that disagrees is neither first in the view nor first in the sorted order
+    preSpendWallet();
+    row(&WAL, tid(0x01), 0, 4, 1);
+    row(&WAL, tid(0x02), 0, 4, 1);
+    row(&WAL, tid(T_FUNDING), 0, 0, 1);
+    row(&WAL, tid(T_FUNDING), 1, 10, 1);
+    row(&WAL, tid(0x03), 0, 4, 1);
+    row(&WAL, tid(T_FUNDING), 1, 0, 1);
+    row(&WAL, tid(0xfe), 0, 4, 1);
+    refused("two rows for one outpoint among others", pass(&WAL), BR_ASSET_HOLD_REFUSED_ARGUMENTS);
+    WAL.rows[5].quantity = 10;
+    r = pass(&WAL);
+    ck(r.status == BR_ASSET_HOLD_COMPLETE && r.heldCount == 0, "and once they agree, the pass reads them (%s, %zu)", st(r.status), r.heldCount);
+
+    // the same unspent row twice, of a transaction the wallet does not hold: held once
+    preSpendWallet();
+    row(&WAL, tid(0xa10), 4, qa[2], 0);
+    row(&WAL, tid(0xa11), 0, 3, 0);
+    row(&WAL, tid(0xa10), 4, qa[2], 0);
+    r = pass(&WAL);
+    ck(r.status == BR_ASSET_HOLD_COMPLETE && r.heldCount == 3 && heldIn(r, tid(0xa10), 4) && heldIn(r, tid(0xa11), 0),
+       "an unspent row listed twice is held once (%s, %zu)", st(r.status), r.heldCount);
 }
 
 // ---- refusals, capacity, edges ------------------------------------------------------------------
@@ -2163,6 +2303,35 @@ static void capacity(void)
        "the replay's outpoint does not fit: CAPACITY, never shortened");
     r = BRAssetHoldOutputs(&v, WORK, 3, HELD, 2);
     ck(r.status == BR_ASSET_HOLD_COMPLETE && r.heldCount == 2, "room for both");
+    WAL.rows[0].txHash = XFER->tx.txHash;   // the row now on the outpoint the pass holds
+    WAL.rows[0].n = 3;
+    v = view(&WAL);
+    r = BRAssetHoldOutputs(&v, WORK, 3, HELD, 1);
+    ck(r.status == BR_ASSET_HOLD_COMPLETE && r.heldCount == 1 && heldIn(r, XFER->tx.txHash, 3),
+       "the replay offers what the pass holds: room for one is enough (%s, %zu)", st(r.status), r.heldCount);
+    WAL.rows[0].txHash = tid(0xde);
+    WAL.rows[0].n = 1;
+    // the work buffer sorts the rows and the proofs too: one entry per row or proof when they are more
+    row(&WAL, tid(0xdf), 0, 0, 1);
+    row(&WAL, tid(0xdf), 1, 0, 1);
+    row(&WAL, tid(0xdf), 2, 0, 1);
+    v = view(&WAL);
+    r = BRAssetHoldOutputs(&v, WORK, 3, HELD, N(HELD));
+    ck(r.status == BR_ASSET_HOLD_REFUSED_CAPACITY && r.heldCount == 0 && r.workNeeded == 4 && r.heldNeeded == 12,
+       "four rows, three transactions, three work entries: CAPACITY, 4 and 12 needed (%s, %zu, %zu)", st(r.status), r.workNeeded,
+       r.heldNeeded);
+    ck(BRAssetHoldOutputs(&v, WORK, 4, HELD, N(HELD)).status == BR_ASSET_HOLD_COMPLETE, "four work entries");
+    {
+        size_t k;
+
+        for (k = 0; k < 5; k++) prove(&WAL, tid(0xe0 + (uint32_t)k));
+        v = view(&WAL);
+        r = BRAssetHoldOutputs(&v, WORK, 4, HELD, N(HELD));
+        ck(r.status == BR_ASSET_HOLD_REFUSED_CAPACITY && r.workNeeded == 5, "five proofs: five work entries needed (%s, %zu)",
+           st(r.status), r.workNeeded);
+        ck(BRAssetHoldBounds(&v, &work, &held) == 1 && work == 5 && held == 12, "BRAssetHoldBounds: the most of transactions, rows, proofs");
+        ck(BRAssetHoldOutputs(&v, WORK, 5, HELD, N(HELD)).status == BR_ASSET_HOLD_COMPLETE, "five work entries");
+    }
     ck(BRAssetHoldBounds(NULL, &work, &held) == 0 && work == 0 && held == 0, "no view: no bounds");
     resetPool();
     wreset(&WAL);
@@ -2182,7 +2351,8 @@ static void capacity(void)
         bv.txCount = 1;
         bv.rowCount = 5;
         bv.rows = WAL.rows;
-        ck(BRAssetHoldBounds(&bv, &work, &held) == 1 && work == 1 && held == SIZE_MAX, "the bound saturates at SIZE_MAX");
+        ck(BRAssetHoldBounds(&bv, &work, &held) == 1 && work == 5 && held == SIZE_MAX,
+           "the bound saturates at SIZE_MAX; five rows need five work entries");
         one[0] = NULL;
         ck(BRAssetHoldBounds(&bv, &work, &held) == 0 && work == 0 && held == 0, "a transaction that is not there: no bounds");
     }
@@ -2636,7 +2806,20 @@ static void genWallet(int any)
     for (i = 0; i < nTx; i++) wadd(&WAL, list[i]);
 }
 
-static void sweepCase(const char *what, uint64_t seed, int any, const BRAssetHoldClassifier *c, int rounds)
+// Rows for one outpoint are never listed twice in a generated wallet, so the pass never needs more room
+// than its answer: run it again with exactly that, and compare. 1 when that does NOT hold.
+static int exactRoom(BRAssetHoldResult r, int readings)
+{
+    BRAssetHoldResult again;
+
+    if (r.status != BR_ASSET_HOLD_COMPLETE || r.heldCount == 0) return 0;
+    again = passReadingIn(&WAL, readings, r.heldCount);
+    return (again.status != BR_ASSET_HOLD_COMPLETE || again.heldCount != r.heldCount) ? 1 : 0;
+}
+
+// `readings` as passReading's: 0 the pass, 1 the decoder's reading alone. With 1 the pass too must hold
+// at least the model.
+static void sweepCase(const char *what, uint64_t seed, int any, const BRAssetHoldClassifier *c, int rounds, int readings)
 {
     int round, wrong = 0, held = 0;
 
@@ -2646,19 +2829,22 @@ static void sweepCase(const char *what, uint64_t seed, int any, const BRAssetHol
 
         genWallet(any);
         WAL.classifier = c;
-        r = pass(&WAL);
+        r = passReading(&WAL, readings);
         model(&WAL);
         held += (int)r.heldCount;
         if (! sameAsModel(r) && wrong++ < 5)
-            ck(0, "%s, wallet %d: the pass (%s, %zu held) is the model (%zu held)", what, round, st(r.status), r.heldCount, M_HELDN);
+            ck(0, "%s, wallet %d: the %s (%s, %zu held) is the model (%zu held)", what, round, readings ? "decoder's reading" : "pass",
+               st(r.status), r.heldCount, M_HELDN);
+        if (readings && ! coversModel(pass(&WAL)) && wrong++ < 5) ck(0, "%s, wallet %d: the pass holds at least the model", what, round);
+        if (exactRoom(r, readings) && wrong++ < 5) ck(0, "%s, wallet %d: a held buffer of the answer's size suffices", what, round);
     }
-    ck(wrong == 0, "%s: %d wallets, the pass is the model in every one (%d not)", what, rounds, wrong);
+    ck(wrong == 0, "%s: %d wallets, the %s is the model in every one (%d not)", what, rounds, readings ? "decoder's reading" : "pass", wrong);
     ck(held > rounds / 2, "%s: the wallets held outputs (%d)", what, held);
 }
 
-static void sweep_decoder(void) { sweepCase("any scripts, the decoder alone", 0x51ULL, 1, &NEVER, 3000); }
+static void sweep_decoder(void) { sweepCase("any scripts, the decoder alone", 0x51ULL, 1, &NEVER, 3000, 1); }
 
-static void sweep_agree(void) { sweepCase("scripts both readers read alike, the core's classifier", 0x52ULL, 0, NULL, 3000); }
+static void sweep_agree(void) { sweepCase("scripts both readers read alike, the core's classifier", 0x52ULL, 0, NULL, 3000, 0); }
 
 static void sweep_union(void)
 {
@@ -2685,6 +2871,7 @@ static void sweep_union(void)
             }
         }
         if (r.heldCount > M_HELDN) extra++;
+        if (ok && exactRoom(r, 0)) ok = 0;
         if (! ok && wrong++ < 5) ck(0, "any scripts, wallet %d: the pass holds at least the model and the classifier", round);
     }
     ck(wrong == 0, "any scripts: 3000 wallets, the pass holds at least what the model and the classifier hold (%d not)", wrong);
@@ -2782,6 +2969,8 @@ static const Case CASES[] = {
     { "union_walk", union_walk },
     { "union_proof", union_proof },
     { "union_agree", union_agree },
+    { "union_two_carriers", union_two_carriers },
+    { "rows_disagree", rows_disagree },
     { "refusal_arguments", refusal_arguments },
     { "refusal_unreadable", refusal_unreadable },
     { "capacity", capacity },
