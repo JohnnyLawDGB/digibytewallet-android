@@ -492,7 +492,7 @@ static BRAssetTransferStatus coreSign(const Plan *p, const BRAssetSendOutcome *o
 }
 
 // One send both ways. want: the core's status. bridgeWant: 0 the bridge refuses too, -1 the bridge's answer is not
-// judged, -2 the bridge is not asked (the plan has no arrays to write), 2 (with want SIGNED) the same bytes.
+// judged, -2 the bridge is not asked, 2 (with want SIGNED) the same bytes.
 // Returns the core's status.
 static BRAssetTransferStatus sendBoth(const char *what, const Plan *p, const BRAssetSendOutcome *o, const char *assetId,
                                       int64_t qty, const char *recipient, int64_t approved, const BRUTXO *held, size_t nh,
