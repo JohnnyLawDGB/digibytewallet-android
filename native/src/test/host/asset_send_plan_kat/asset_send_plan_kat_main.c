@@ -1056,12 +1056,14 @@ static Stack notUnspent(const char *txid)
     return s;
 }
 
-// The plan (BRAssetPlanTransfer) over arrays of rows, with buffers that always suffice.
+// The plan (_BRAssetPlanTransfer: the planner without the gate, which only the gated BRAssetSendChoose
+// reaches in a send; called here to hold it to the Kotlin's AssetTransferPlanner) over arrays of rows,
+// with buffers that always suffice.
 static size_t AO[MAXR], DO_[MAXR];
 
 static BRAssetTransferPlan plan(const BRAssetRow *a, size_t na, const BRAssetRow *d, size_t nd, int64_t qty, int64_t rate)
 {
-    return BRAssetPlanTransfer(a, na, d, nd, qty, rate, AO, N(AO), DO_, N(DO_));
+    return _BRAssetPlanTransfer(a, na, d, nd, qty, rate, AO, N(AO), DO_, N(DO_));
 }
 
 static BRAssetSelection sel(const BRAssetRow *a, size_t na, const BRAssetRow *d, size_t nd, int64_t need, int64_t fee,
@@ -2211,8 +2213,63 @@ static void qty_length(void)
     memset(t, '0', 30); strcpy(t + 30, "1.5"); QNULL(t, 2);
     memset(t, '0', 23); strcpy(t + 23, "1.0000000"); QEQ(t, 8, 100000000);
     memset(t, '0', 24); strcpy(t + 24, "1.0000000"); QNULL(t, 8);
+    // The limit is counted after the grouping commas are dropped (a dot is typed), however many there are.
+    strcpy(t, "00,000,000,000,000,000,000,000,000,001.50");   // 9 commas: 41 typed, 32 read
+    QEQ(t, 2, 150);
+    strcpy(t, "000,000,000,000,000,000,000,000,000,001.50");  // one more leading zero: 33 read
+    QNULL(t, 2);
+    strcpy(t, "00,000,000,000,000,000,000,001.50000000");     // 7 commas: 39 typed, 32 read
+    QEQ(t, 8, 150000000);
+    strcpy(t, "000,000,000,000,000,000,000,001.50000000");
+    QNULL(t, 8);
     memset(t, '0', 1000); strcpy(t + 1000, "1");
     for (i = 0; i < N(divs); i++) QNULL(t, divs[i]);
+}
+
+// c as UTF-8 into out (room for 4 bytes): its length.
+static size_t utf8Of(uint32_t c, char *out)
+{
+    if (c < 0x80) { out[0] = (char)c; return 1; }
+    if (c < 0x800) { out[0] = (char)(0xc0 | (c >> 6)); out[1] = (char)(0x80 | (c & 0x3f)); return 2; }
+    out[0] = (char)(0xe0 | (c >> 12)); out[1] = (char)(0x80 | ((c >> 6) & 0x3f)); out[2] = (char)(0x80 | (c & 0x3f));
+    return 3;
+}
+
+// Every code point Kotlin's Char.isWhitespace takes (Character.isWhitespace or isSpaceChar), and three
+// it does not: U+180E (a format character since Unicode 6.3), U+200B and U+FEFF.
+static const uint32_t TRIMMED[] = { 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x1c, 0x1d, 0x1e, 0x1f, 0x20, 0xa0, 0x1680, 0x2000, 0x2001,
+                                    0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008, 0x2009, 0x200a, 0x2028, 0x2029,
+                                    0x202f, 0x205f, 0x3000 };
+static const uint32_t NOT_TRIMMED[] = { 0x180e, 0x200b, 0xfeff };
+
+// Each code point of the trim, before and after a digit, is trimmed; each of the others refuses the text.
+static void qty_whitespace(void)
+{
+    char t[16], h[16];
+    size_t i, n, k;
+    int64_t u;
+
+    ck(N(TRIMMED) == 28, "the trim takes 28 code points");
+    for (i = 0; i < N(TRIMMED) + N(NOT_TRIMMED); i++) {
+        uint32_t c = i < N(TRIMMED) ? TRIMMED[i] : NOT_TRIMMED[i - N(TRIMMED)];
+        int trims = i < N(TRIMMED);
+        char w[4];
+
+        n = utf8Of(c, w);
+        ck(mIsWhitespace(c) == trims, "the model's trim and this list agree on U+%04X", (unsigned)c);
+        for (k = 0; k < 2; k++) {   // leading, then trailing
+            size_t len = 0, j;
+
+            if (k == 0) { memcpy(t, w, n); len = n; t[len++] = '5'; }
+            else { t[len++] = '5'; memcpy(t + len, w, n); len += n; }
+            t[len] = '\0';
+            for (j = 0; j < len; j++) snprintf(h + 2 * j, sizeof(h) - 2 * j, "%02x", (unsigned char)t[j]);
+            u = -1;
+            if (trims) ck(BRAssetAmountParse(t, len, 0, &u) && u == 5, "%s U+%04X: %s reads 5 (%lld)", k ? "trailing" : "leading",
+                          (unsigned)c, h, (long long)u);
+            else ck(! BRAssetAmountParse(t, len, 0, &u), "%s U+%04X: %s is null", k ? "trailing" : "leading", (unsigned)c, h);
+        }
+    }
 }
 
 static void qty_divisibility(void) { QNULL("1", -1); QNULL("1", INT32_MIN); QNULL("1", 9); QNULL("0.000000001", 9); QNULL("1", 18); }
@@ -2913,9 +2970,21 @@ static void sweepGroups(void)
 
 static void sweepParse(void)
 {
-    static const char *const bits[] = { "0", "1", "5", "9", "00", ".", ",", " ", "\t", "\xc2\xa0", "\xe3\x80\x80", "\xe2\x80\xa8",
+    static const char *const base[] = { "0", "1", "5", "9", "00", ".", ",", " ", "\t", "\xc2\xa0", "\xe3\x80\x80", "\xe2\x80\xa8",
                                         "e", "-", "+", "x", "\xd9\xa5", "\x1c", "\n", "12", "345", "999999999" };
+    // The alphabet: base, then every code point of TRIMMED and NOT_TRIMMED as UTF-8.
+    static char spelled[N(TRIMMED) + N(NOT_TRIMMED)][4];
+    static const char *bits[N(base) + N(TRIMMED) + N(NOT_TRIMMED)];
     int round;
+    size_t q;
+
+    for (q = 0; q < N(base); q++) bits[q] = base[q];
+    for (q = 0; q < N(TRIMMED) + N(NOT_TRIMMED); q++) {
+        size_t n = utf8Of(q < N(TRIMMED) ? TRIMMED[q] : NOT_TRIMMED[q - N(TRIMMED)], spelled[q]);
+
+        spelled[q][n] = '\0';
+        bits[N(base) + q] = spelled[q];
+    }
 
     RNG = 0x1357924680ace0bdULL;
     for (round = 0; round < 20000; round++) {
@@ -3093,6 +3162,44 @@ static void choose_repeated_outpoint(void)
     ck(o.kind == BR_ASSET_SEND_UNCONFIRMED && m.kind == MK_UNCONFIRMED, "both: UNCONFIRMED (the second row's quantity is not the stack's)");
     ck(w->s.nAsked == 1 && ms.nAsked == 2, "the header asks once (%zu), the Kotlin twice (%zu)", w->s.nAsked, ms.nAsked);
     ck(sameMemory(&w->p, &mp, ASSET), "and both keep the same");
+}
+
+// An answer whose entries are NULL while it counts entries (C only: the Kotlin cannot write one) is a
+// platform's bug, not the indexer's word: the choice refuses it as ARGUMENTS and marks nothing, so the coin
+// is not set aside for the life of the process.
+static void choose_malformed_answer(void)
+{
+    BRAssetRow r[1], f[1];
+    BRAssetFact parents[1] = { BR_ASSET_FACT_NO };
+    BRAssetUnits mine[1] = { { ASSET, 5, 0 } };
+    BRAssetSendLookup answers[1];
+    BRAssetSendOutcome o;
+    HBuf b;
+    static const BRAssetStackLookup lookups[2] = { BR_ASSET_STACK_FOUND, BR_ASSET_STACK_NOT_UNSPENT };
+    size_t i;
+
+#define CH(n) BRAssetSendChoose(BR_SWEEP_RULE_NONE, 1, ASSET, r, 1, f, parents, 1, 5, 100000, NULL, 0, NULL, 0, answers, n, \
+                                b.marks, 1, b.work, N(b.work))
+    r[0] = srow("a", 5, NULL); f[0] = sfee("f", NULL);
+    for (i = 0; i < 2; i++) {
+        memset(b.marks, 0xff, sizeof(b.marks));
+        answers[0].txid = "a"; answers[0].vout = 0; answers[0].lookup = lookups[i]; answers[0].entries = NULL; answers[0].entryCount = 1;
+        o = CH(1);
+        ck(o.kind == BR_ASSET_SEND_NOT_PLANNED && o.plan.why == BR_ASSET_PLAN_WHY_ARGUMENTS && o.plan.status == BR_ASSET_PLAN_REFUSED,
+           "lookup %d, entries NULL, one entry counted: NOT_PLANNED, ARGUMENTS (%d, why %d)", (int)lookups[i], (int)o.kind, (int)o.plan.why);
+        ck(b.marks[0] == 0, "and nothing is marked to keep (%d): the coin is not set aside", (int)b.marks[0]);
+    }
+    answers[0].txid = "zz"; answers[0].lookup = BR_ASSET_STACK_FOUND;
+    o = CH(1);
+    ck(o.kind == BR_ASSET_SEND_NOT_PLANNED && o.plan.why == BR_ASSET_PLAN_WHY_ARGUMENTS, "so is one given for another coin");
+    answers[0].txid = "a"; answers[0].entryCount = 0;
+    o = CH(1);
+    ck(o.kind == BR_ASSET_SEND_UNCONFIRMED && b.marks[0] == BR_ASSET_SEND_MARK_NOT_YET,
+       "entries NULL and none counted is an empty stack: left out of this send only (%d, mark %d)", (int)o.kind, (int)b.marks[0]);
+    answers[0].entries = mine; answers[0].entryCount = 1;
+    o = CH(1);
+    ck(o.kind == BR_ASSET_SEND_PLANNED && b.marks[0] == BR_ASSET_SEND_MARK_VERIFIED, "and the coin, given its stack, is planned");
+#undef CH
 }
 
 static void choose_step(void)
@@ -3306,7 +3413,7 @@ static void arguments(void)
     a[0] = row("a", 0, NULL, 0, 600, 5); d[0] = row("d", 0, NULL, 0, 100000, 0);
     ck(BRAssetCoinSelect(NULL, 1, d, 1, 1, 0, 0, 0, AO, N(AO), DO_, N(DO_)).status == BR_ASSET_SELECT_REFUSED, "NULL asset rows");
     ck(BRAssetCoinSelect(a, 1, NULL, 1, 1, 0, 0, 0, AO, N(AO), DO_, N(DO_)).status == BR_ASSET_SELECT_REFUSED, "NULL plain rows");
-    ck(BRAssetPlanTransfer(NULL, 1, d, 1, 1, 0, AO, N(AO), DO_, N(DO_)).why == BR_ASSET_PLAN_WHY_ARGUMENTS, "a plan with NULL rows");
+    ck(_BRAssetPlanTransfer(NULL, 1, d, 1, 1, 0, AO, N(AO), DO_, N(DO_)).why == BR_ASSET_PLAN_WHY_ARGUMENTS, "a plan with NULL rows");
     ck(! BRAssetSourceGroups(NULL, 1, 1, g, 1, &n) && n == 0 && ! BRAssetSourceGroups(a, 1, 1, g, 1, NULL), "groups with NULLs");
     ck(BRAssetLargestSingleSource(NULL, 0) == 0 && BRAssetLargestSingleSource(NULL, 3) == 0, "no rows, no source");
     ck(! BRAssetOutpointsDistinct(NULL, 1) && BRAssetOutpointsDistinct(NULL, 0), "distinct with no rows");
@@ -3336,7 +3443,7 @@ static void capacity(void)
     ck(BRAssetCoinSelect(a, 2, d, 2, 1, 0, 0, 0, AO, 1, DO_, 2).status == BR_ASSET_SELECT_CAPACITY, "an asset order short of the rows");
     ck(BRAssetCoinSelect(a, 2, d, 2, 1, 0, 0, 0, AO, 2, DO_, 1).status == BR_ASSET_SELECT_CAPACITY, "a fee order short of the rows");
     ck(BRAssetCoinSelect(a, 2, d, 2, 1, -1, 0, 0, AO, 1, DO_, 1).status == BR_ASSET_SELECT_REFUSED, "an argument refused before capacity");
-    ck(BRAssetPlanTransfer(a, 1, d, 2, 1, 0, AO, 1, DO_, 1).status == BR_ASSET_PLAN_CAPACITY, "a plan short of room");
+    ck(_BRAssetPlanTransfer(a, 1, d, 2, 1, 0, AO, 1, DO_, 1).status == BR_ASSET_PLAN_CAPACITY, "a plan short of room");
     ck(BRAssetSendWorkLength(2, 2) == 8 && BRAssetSendWorkLength(SIZE_MAX / 2, 1) == SIZE_MAX && BRAssetSendWorkLength(1, SIZE_MAX) == SIZE_MAX,
        "the work length, and its overflow");
     o = BRAssetSendChoose(BR_SWEEP_RULE_NONE, 1, ASSET, a, 2, d, pf, 2, 1, 0, NULL, 0, NULL, 0, NULL, 0, marks, 2, work, 7);
@@ -3413,9 +3520,11 @@ static const Case CASES[] = {
     { "src_two_addresses", src_two_addresses }, { "src_groups", src_groups },
     { "qty_div0", qty_div0 }, { "qty_div2", qty_div2 }, { "qty_div8", qty_div8 }, { "qty_separators", qty_separators },
     { "qty_refused_forms", qty_refused_forms }, { "qty_zero", qty_zero }, { "qty_decimals", qty_decimals }, { "qty_empty", qty_empty },
-    { "qty_range", qty_range }, { "qty_length", qty_length }, { "qty_divisibility", qty_divisibility }, { "qty_format", qty_format },
+    { "qty_range", qty_range }, { "qty_length", qty_length }, { "qty_whitespace", qty_whitespace },
+    { "qty_divisibility", qty_divisibility }, { "qty_format", qty_format },
     { "qty_locale", qty_locale }, { "qty_roundtrip", qty_roundtrip },
     { "enc_rules", enc_rules }, { "gate_rules", gate_rules }, { "choose_prechecks", choose_prechecks }, { "choose_step", choose_step }, { "choose_repeated_outpoint", choose_repeated_outpoint },
+    { "choose_malformed_answer", choose_malformed_answer },
     { "select_order", select_order }, { "plan_rules", plan_rules }, { "overflow_rules", overflow_rules },
     { "parse_rules", parse_rules }, { "format_rules", format_rules }, { "arguments", arguments }, { "capacity", capacity },
     { "zero_structs", zero_structs }, { "constants", constants }, { "model_sweep", model_sweep },

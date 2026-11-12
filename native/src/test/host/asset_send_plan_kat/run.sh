@@ -25,7 +25,8 @@
 #               65536 a send draws from every address at once; 131072 the DGB change is the last output;
 #               262144 decimals past the divisibility are dropped; 524288 zero is a quantity; 1048576 a lone
 #               comma is grouping; 2097152 the text's length is not bounded; 4194304 an output confirmed
-#               earlier is asked again. Each arm fails exactly the cases CASES lists for it and passes every other.
+#               earlier is asked again; 8388608 an answer with entries NULL and a count is judged, and its coin
+#               set aside. Each arm fails exactly the cases CASES lists for it and passes every other.
 #   shipped     both macros 0: every case passes, exit 0.
 # All arms under ASan + UBSan, 64-bit. The headers are the units under test; nothing is linked. The arms run
 # with detect_leaks=0; then every case runs once more on the shipped arm under LeakSanitizer where the
@@ -33,6 +34,11 @@
 #
 # Gates first: each header must test its seam's VALUE (#if, never #ifdef) with an #ifndef default.
 # Then:
+#   PLAN GATE         the transfer-rule gate cannot be bypassed: every public (non-underscore) function in
+#                     BRAssetSendPlan.h that calls the planner (_BRAssetPlan, _BRAssetPlanTransfer) or answers or
+#                     writes a plan (BRAssetTransferPlan, BRAssetSendOutcome) refuses on BRAssetSendGate (or
+#                     BRAssetRuleAllowsSend) before it plans. Only TransferRuleState.NONE may move an asset
+#                     (CLAUDE.md); the gate is shown to fail on a public planner and on a choice that skips it.
 #   VECTORS GATE      the core's vectors/asset-send-plan/vectors.txt is what vectors/asset-send-plan/generate.c
 #                     writes from these headers: the shared vectors a platform's own encoder, selector or
 #                     planner is held to are current.
@@ -128,6 +134,7 @@ CASES=(
     qty_empty:-
     qty_range:-
     qty_length:s2097152
+    qty_whitespace:-
     qty_divisibility:-
     qty_format:-
     qty_locale:-
@@ -137,6 +144,7 @@ CASES=(
     choose_prechecks:-
     choose_step:s8,s4194304
     choose_repeated_outpoint:-
+    choose_malformed_answer:s2048,s8388608
     select_order:s1,s2,s4,s8
     plan_rules:e1,s16384,s32768
     overflow_rules:s1,s64
@@ -153,7 +161,7 @@ ARMS=(e1:single-push e2:no-length-cap e4:amount-truncates e8:no-exponent e16:ran
       s64:sums-wrap s128:fee-coin-any s256:parent-unknown-pays s512:judge-front-only s1024:no-answer-goes-on
       s2048:not-yet-kept s4096:rules-unknown-send s8192:approval-loose s16384:dust-change s32768:no-skip
       s65536:across-addresses s131072:change-last s262144:parse-rounds s524288:parse-zero s1048576:parse-comma-groups
-      s2097152:parse-unbounded s4194304:confirmed-asked)
+      s2097152:parse-unbounded s4194304:confirmed-asked s8388608:null-entries-judged)
 
 macro_of() {   # <e|s> -> the seam macro
     case "$1" in e) echo ASSET_ENCODE ;; s) echo ASSET_SEND_PLAN ;; esac
@@ -175,7 +183,7 @@ for fn in BRAssetBitWriterMake BRAssetBitsWrite BRAssetBitsWriteByte BRAssetBits
     fi
 done
 for fn in BRAssetFeeEstimate BRAssetCoinSelect BRAssetOutpointsDistinct BRAssetFeeWithinApproval BRAssetFeeCoinEligible \
-          BRAssetPlanTransfer BRAssetPlanInputsDistinct BRAssetSourceGroups BRAssetLargestSingleSource BRAssetSourceGroupHas \
+          _BRAssetPlanTransfer BRAssetPlanInputsDistinct BRAssetSourceGroups BRAssetLargestSingleSource BRAssetSourceGroupHas \
           BRAssetInputJudge BRAssetSendWorkLength BRAssetSendGate BRAssetSendChoose BRAssetAmountParse BRAssetAmountFormat; do
     if ! grep -Eq "static inline [a-zA-Z0-9_ ]+ \*?$fn\(" <<<"$HDR_S"; then
         echo "GATE FAILURE: $PLAN does not define $fn."; exit 1
@@ -201,6 +209,81 @@ done
 
 FAIL=0
 
+# ---- PLAN GATE -----------------------------------------------------------------------------
+# One line per function the header defines: <name> <underscore 0|1> <yields a plan 0|1> <offset of the first
+# planner call, 0 none> <offset of the first `if (! <rule gate>(`, 0 none>; or `UNPARSED <text>` for a definition
+# whose `{` and `}` are not alone at the start of their lines, which this gate cannot read (a failure).
+cat > "$BUILD_DIR/plan_gate.awk" <<'AWK'
+function report(   s, p, pre, name, ret, params, q, yields, plannerAt, gateAt) {
+    s = sig
+    sub(/^[[:space:]]*static[[:space:]]+inline[[:space:]]+/, "", s)
+    p = index(s, "(")
+    if (p == 0) { print "UNPARSED " substr(s, 1, 60); return }
+    pre = substr(s, 1, p - 1); params = substr(s, p)
+    sub(/[[:space:]]+$/, "", pre)
+    name = pre; sub(/^.*[^A-Za-z0-9_]/, "", name)
+    ret = substr(pre, 1, length(pre) - length(name))
+    yields = (ret ~ /BRAsset(TransferPlan|SendOutcome)/) ? 1 : 0
+    q = params; gsub(/const[[:space:]]+BRAsset(TransferPlan|SendOutcome)/, "", q)
+    if (q ~ /BRAsset(TransferPlan|SendOutcome)[[:space:]]*\*/) yields = 1
+    plannerAt = match(body, /(^|[^A-Za-z0-9_])_BRAssetPlan(Transfer)?[[:space:]]*\(/)
+    gateAt = match(body, /if[[:space:]]*\([[:space:]]*![[:space:]]*(BRAssetSendGate|BRAssetRuleAllowsSend)[[:space:]]*\(/)
+    print name, (substr(name, 1, 1) == "_") ? 1 : 0, yields, plannerAt, gateAt
+}
+state == 0 && /^[[:space:]]*static[[:space:]]+inline[[:space:]]/ { state = 1; sig = ""; body = "" }
+state == 1 {
+    if ($0 ~ /^\{[[:space:]]*$/) { state = 2; next }
+    if ($0 ~ /[{}]/) { print "UNPARSED " $0; state = 0; next }
+    sig = sig " " $0; next
+}
+state == 2 { if ($0 ~ /^\}/) { report(); state = 0; next } body = body " " $0; next }
+AWK
+plan_gate() {   # <header> -> prints each public function that plans or yields a plan without the gate first
+    local h="$1" rows name under yields at gate
+    strip_comments "$h" > "$BUILD_DIR/plan_gate.c"
+    rows="$(awk -f "$BUILD_DIR/plan_gate.awk" "$BUILD_DIR/plan_gate.c")"
+    while read -r name under yields at gate; do
+        [ -n "$name" ] || continue
+        if [ "$name" = UNPARSED ]; then echo "unparsed definition: $under $yields $at $gate"; continue; fi
+        [ "$under" = 1 ] && continue
+        [ "$yields" = 1 ] || [ "$at" != 0 ] || continue
+        if [ "$gate" = 0 ] || { [ "$at" != 0 ] && [ "$gate" -gt "$at" ]; }; then echo "$name"; fi
+    done <<<"$rows"
+}
+plan_public() {   # <header> -> the public functions that plan or yield a plan
+    local h="$1" rows name under yields at gate
+    strip_comments "$h" > "$BUILD_DIR/plan_gate.c"
+    rows="$(awk -f "$BUILD_DIR/plan_gate.awk" "$BUILD_DIR/plan_gate.c")"
+    while read -r name under yields at gate; do
+        [ "$name" != UNPARSED ] && [ "$under" = 0 ] && { [ "$yields" = 1 ] || [ "$at" != 0 ]; } && echo "$name"
+    done <<<"$rows"
+}
+strip_comments() {   # a C file with // and /* */ comments removed
+    sed -e 's@//.*$@@' "$1" | awk 'BEGIN{c=0} { line=$0; out="";
+        while (length(line)) {
+            if (c) { i = index(line, "*/"); if (!i) { line=""; break } line = substr(line, i+2); c=0 }
+            else { i = index(line, "/*"); if (!i) { out = out line; line=""; break }
+                   out = out substr(line, 1, i-1); line = substr(line, i+2); c=1 } }
+        print out }'
+}
+plan_bad="$(plan_gate "$PLAN")"
+plan_pub="$(plan_public "$PLAN" | tr '\n' ' ')"
+# The gate is real: it must name a public planner, and a choice whose gate is gone.
+sed -e 's/static inline BRAssetTransferPlan _BRAssetPlanTransfer(/static inline BRAssetTransferPlan BRAssetPlanTransfer(/' "$PLAN" > "$BUILD_DIR/plan_mut1.h"
+sed -e '/if (! BRAssetSendGate(ruleState, &refusal)) return/d' "$PLAN" > "$BUILD_DIR/plan_mut2.h"
+mut1="$(plan_gate "$BUILD_DIR/plan_mut1.h" | tr '\n' ' ')"
+mut2="$(plan_gate "$BUILD_DIR/plan_mut2.h" | tr '\n' ' ')"
+if [ -n "$plan_bad" ]; then
+    echo "PLAN GATE FAILED: a public function in BRAssetSendPlan.h reaches a plan without the transfer-rule gate first:"
+    echo "$plan_bad" | sed 's/^/      /'; FAIL=1
+elif [ "$plan_pub" != "BRAssetSendChoose " ]; then
+    echo "PLAN GATE FAILED: the public ways to a plan are '$plan_pub', not BRAssetSendChoose alone"; FAIL=1
+elif [ "$mut1" != "BRAssetPlanTransfer " ] || [ "$mut2" != "BRAssetSendChoose " ]; then
+    echo "PLAN GATE FAILED: the gate cannot see a bypass (public planner: '$mut1'; choice without its gate: '$mut2')"; FAIL=1
+else
+    echo "plan gate: the only public way to a plan is BRAssetSendChoose, and it asks the rule gate first (a public planner and a choice without its gate are both caught)"
+fi
+
 # ---- VECTORS GATE --------------------------------------------------------------------------
 if [ ! -f "$VEC_DIR/generate.c" ] || [ ! -f "$VEC_DIR/vectors.txt" ]; then
     echo "VECTORS GATE FAILED: $VEC_DIR/generate.c or vectors.txt is missing"; FAIL=1
@@ -219,14 +302,6 @@ else
 fi
 
 # ---- PORTABILITY GATE ----------------------------------------------------------------------
-strip_comments() {   # a C file with // and /* */ comments removed
-    sed -e 's@//.*$@@' "$1" | awk 'BEGIN{c=0} { line=$0; out="";
-        while (length(line)) {
-            if (c) { i = index(line, "*/"); if (!i) { line=""; break } line = substr(line, i+2); c=0 }
-            else { i = index(line, "/*"); if (!i) { out = out line; line=""; break }
-                   out = out substr(line, 1, i-1); line = substr(line, i+2); c=1 } }
-        print out }'
-}
 IO_RE='(^|[^A-Za-z0-9_])(time|clock|clock_gettime|gettimeofday|fopen|fread|fwrite|printf|fprintf|open|read|write|socket|malloc|calloc|realloc|free)[[:space:]]*\('
 for pair in "$ENCODE|\"BRAssetDecode.h\" <stddef.h> <stdint.h> <string.h> " \
             "$PLAN|\"BRAssetEncode.h\" \"BRAssetHoldings.h\" \"BRAssetRuleGate.h\" \"BRDustPolicy.h\" <stddef.h> <stdint.h> <string.h> "; do
@@ -254,7 +329,7 @@ int strict_tu1(void)
     memset(d, 0, sizeof(d));
     a[0].txid = "a"; a[0].satoshis = 6000; a[0].assetQuantity = 100;
     d[0].txid = "d"; d[0].satoshis = 1000000;
-    p = BRAssetPlanTransfer(a, 1, d, 1, 100, 100000, ao, 1, dor, 1);
+    p = _BRAssetPlanTransfer(a, 1, d, 1, 100, 100000, ao, 1, dor, 1);
     return p.status == BR_ASSET_PLAN_READY && p.outputCount == 4 && p.paidFeeSats == p.estimatedFeeSats && p.estimatedFeeSats == 58200;
 }
 EOF
@@ -331,14 +406,13 @@ let outcome: (BRAssetTransferPlan, BRAssetSendOutcome, BRAssetSelection) = txid.
     plain[0].satoshis = 1_000_000
     var assetOrder = [Int](repeating: 0, count: 1)
     var dgbOrder = [Int](repeating: 0, count: 1)
-    let p = BRAssetPlanTransfer(&assets, 1, &plain, 1, 100, 100_000, &assetOrder, 1, &dgbOrder, 1)
     let s = BRAssetCoinSelect(&assets, 1, &plain, 1, 100, 500, 12_000, 0, &assetOrder, 1, &dgbOrder, 1)
     var parents = [BR_ASSET_FACT_NO]
     var marks = [UInt8](repeating: 0, count: 1)
     var work = [Int](repeating: 0, count: BRAssetSendWorkLength(1, 1))
     let o = BRAssetSendChoose(BR_SWEEP_RULE_NONE, 1, "A", &assets, 1, &plain, &parents, 1, 100, 100_000, nil, 0, nil, 0, nil, 0,
                               &marks, marks.count, &work, work.count)
-    return (p, o, s)
+    return (o.plan, o, s)
 }
 let plan: BRAssetTransferPlan = outcome.0
 let firstRole: BRAssetOutputRole = plan.outputs.0.role
