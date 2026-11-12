@@ -53,7 +53,7 @@ private val buildToolFloors: List<Pair<(ModuleVersionSelector) -> Boolean, Build
         BuildToolFloor("", "33.7.2-android", "GHSA-xxph-c9ww-hj94"),
     { m: ModuleVersionSelector -> m.group == "com.google.guava" && m.name == "guava" && m.version?.endsWith("-android") != true } to
         BuildToolFloor("", "33.7.2-jre", "GHSA-xxph-c9ww-hj94"),
-    { m: ModuleVersionSelector -> m.group == "com.google.protobuf" && (m.name == "protobuf-java" || m.name == "protobuf-java-util") } to
+    { m: ModuleVersionSelector -> m.group == "com.google.protobuf" && (m.name == "protobuf-java" || m.name == "protobuf-java-util" || m.name == "protobuf-kotlin") } to
         BuildToolFloor("3.", "3.25.5", "GHSA-735f-pc8j-v9w8"),
     { m: ModuleVersionSelector -> m.group == "commons-io" && m.name == "commons-io" } to
         BuildToolFloor("2.", "2.14.0", "GHSA-78wr-2p64-hpwj"),
