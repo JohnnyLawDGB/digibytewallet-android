@@ -20,7 +20,7 @@ include(":app", ":core", ":native", ":game")
 //
 // Every library below reaches the build only through Gradle plugins and the
 // tool configurations they create, never the app: the root buildscript
-// classpath (AGP 8.7.3, KGP, KSP, Hilt), AGP's Unified Test Platform
+// classpath (AGP, KGP, KSP, Hilt, the R8 override; versions in gradle/libs.versions.toml), AGP's Unified Test Platform
 // configurations (`_internal-unified-test-platform-*`), the KSP / Hilt
 // annotation-processor classpaths, and KGP's `kotlinBouncyCastleConfiguration`
 // and `swiftExportClasspathResolvable`. The exposure is the machine that runs
@@ -36,7 +36,7 @@ include(":app", ":core", ":native", ":game")
 // versions are left alone.
 //
 // Not covered here: org.jetbrains.kotlin:kotlin-gradle-plugin (GHSA-r937-
-// wjx7-w2jp, fixed in Kotlin 2.4.20) needs a Kotlin + KSP bump, not a pin.
+// wjx7-w2jp) is fixed by the Kotlin 2.4.20 bump in libs.versions.toml, not a pin.
 // org.json:json is a direct test dependency, bumped in libs.versions.toml.
 // ---------------------------------------------------------------------------
 private data class BuildToolFloor(val line: String, val version: String, val why: String)

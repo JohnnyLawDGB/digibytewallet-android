@@ -200,11 +200,18 @@ class DgbAmountVectorsTest {
         return false
     }
 
-    /** DgbAmount.toSats before the port to BRAmountParseDGB (develop c30ae3918). */
+    /**
+     * DgbAmount.toSats before the port to BRAmountParseDGB (develop c30ae3918), as it behaved when
+     * it shipped: built with Kotlin 2.2, whose String.toBigDecimalOrNull screened the text with an
+     * ASCII-only pattern. Kotlin 2.4 accepts any Char.isDigit() digit there, so the refusal is
+     * written out here (KOTLIN-2.4); without it this "old reader" would read local digits too, and
+     * the tests below would compare the typed reader against a reader that never shipped.
+     */
     private fun bigDecimalReader(input: String): Long? {
         val maxDgb = BigDecimal.valueOf(Long.MAX_VALUE).movePointLeft(8)
         val text = DgbAmount.normalizeSeparators(input.trim()) ?: return null
         if (text.isEmpty()) return null
+        if (text.any { it.isDigit() && it !in '0'..'9' }) return null
         val value = text.toBigDecimalOrNull() ?: return null
         if (value.signum() < 0) return null
         if (value.compareTo(maxDgb) > 0) return null

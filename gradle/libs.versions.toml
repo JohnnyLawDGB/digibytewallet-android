@@ -11,11 +11,37 @@
 [versions]
 
 # --- Build tooling / plugins -------------------------------------------------
-agp = "8.7.3"
-# KSP versions are Kotlin-derived (<kotlin>-<ksp>) and MUST be bumped together
-# with `kotlin`; the Compose compiler plugin ships in the Kotlin release.
-kotlin = "2.2.21"
-ksp = "2.2.21-2.0.4"
+# AGP floor is set by KSP, not by Android: KSP 2.3.11 refuses AGP < 8.10.0
+# (MINIMUM_SUPPORTED_AGP_VERSION; 2.3.12+ refuses < 8.12.0). AGP 8.10 needs
+# Gradle 8.11.1+ (gradle/wrapper/gradle-wrapper.properties).
+agp = "8.10.1"
+# R8 (and D8, the same jar) is overridden on the root buildscript classpath
+# (build.gradle.kts), ahead of the copy AGP bundles. AGP 8.10.1 bundles R8
+# 8.10.x, which cannot parse Kotlin 2.4 @Metadata: it printed ~100 "error
+# occurred when parsing kotlin metadata" warnings per minify and shipped that
+# metadata un-rewritten (still naming pre-obfuscation members) -- harmless only
+# while nothing on the runtime classpath reads @Metadata reflectively
+# (kotlin-reflect, moshi-kotlin, ...). developer.android.com/build/kotlin-support:
+# Kotlin 2.4 needs R8 9.1.29+. 9.1.29 itself is not published on Google Maven;
+# this is the newest patch of the 9.1 line. Drop the override once AGP bundles
+# an R8 >= 9.1.29 (AGP 9.1+). Measured with it: 0 metadata warnings (was 100),
+# identical seeds.txt and kept app class names, release dex 7,496,016 ->
+# 7,185,732 bytes. The one new line, "Class file resource provider does not
+# support async parsing", is AGP 8.10's class provider predating an R8 9 API:
+# R8 falls back to sequential parsing; output is unaffected.
+r8 = "9.1.57"
+# Kotlin 2.4.20 is the first stable release with the fix for GHSA-r937-wjx7-w2jp
+# (kotlin-gradle-plugin). The Compose compiler plugin ships in the Kotlin release.
+kotlin = "2.4.20"
+# KGP 2.4.20 warns that Gradle 8.11.1 is deprecated: Kotlin 2.5.0 requires
+# Gradle 8.14.4+, so the next Kotlin minor must bump the wrapper too.
+# Since KSP 2.3.0 the version is NO LONGER Kotlin-derived (<kotlin>-<ksp>):
+# KSP2 carries its own Analysis API and works across Kotlin releases. It must
+# still be re-checked on every Kotlin bump. 2.3.10+ is required for Kotlin 2.4
+# (google/ksp#2964: Kotlin 2.4's `{group}:{project}` module names broke Hilt
+# factories for `internal` @Provides). 2.3.11 is the newest KSP that accepts
+# AGP 8.10; 2.3.13 also has a concurrency regression (google/ksp#3286).
+ksp = "2.3.11"
 detekt = "1.23.8"
 
 # --- Lockstep families -------------------------------------------------------
@@ -23,7 +49,11 @@ detekt = "1.23.8"
 # declared below WITHOUT a version on purpose.
 composeBom = "2024.12.01"
 # com.google.dagger — Gradle plugin, runtime and KSP compiler all share this.
-hilt = "2.56.2"
+# 2.56.2 SHADES kotlin-metadata-jvm 2.1 and so cannot read Kotlin 2.4 class
+# metadata; 2.57+ unshades it (raised to the Kotlin version in the root
+# build.gradle.kts). 2.58 is the last line whose Gradle plugin accepts AGP 8:
+# 2.59+ requires AGP 9 (and Gradle 9.1+).
+hilt = "2.58"
 # androidx.hilt — versioned independently of Dagger/Hilt above.
 androidxHilt = "1.2.0"
 room = "2.8.5"
@@ -60,6 +90,9 @@ androidxTestRules = "1.7.0"
 androidxTestExtJunit = "1.3.0"
 
 [libraries]
+
+# --- Build tooling on the root buildscript classpath ---------------------------
+android-tools-r8 = { module = "com.android.tools:r8", version.ref = "r8" }
 
 # --- Compose (versions supplied by the BOM — do NOT add version.ref here) ----
 androidx-compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
