@@ -7,9 +7,11 @@
 // Comparison arms (never defined in a production build; they exist only in this file):
 //   KAT_RED_KEEP_UNPROVABLE  the import does not remove a tx it registered when the height's answer is UNPROVABLE
 //   KAT_RED_NO_DUP_CHECK     the import and the confirm do not look up the wallet's existing record of the hash
-//   KAT_RED_NO_FREE_REFUSED  a tx the wallet refused is not freed: the header's only BRWalletTransactionForHash call is
-//                            the refused path's "is this object the wallet's record" test, answered yes (`tx` is the
-//                            header's local there), so the free is skipped. Seen only by the leak checker.
+//   KAT_RED_NO_FREE_REFUSED  a tx the wallet refused is not freed: BRWalletRegisterOutcomeHeld, the header's only
+//                            reading of who owns the parsed tx after its registration (REGISTER-RESULT), always answers
+//                            that the wallet holds it, so the free is skipped. Seen only by the leak checker.
+//   KAT_RED_FREE_HELD        the opposite (DEVMERGE-KAT-NITS): BRWalletRegisterOutcomeHeld always answers no, so a tx
+//                            the wallet kept is freed under it. Seen by AddressSanitizer as a use-after-free.
 #include "BRWallet.h"
 #include "BRPeerManager.h"
 
@@ -22,6 +24,9 @@
 
 #ifdef KAT_RED_NO_FREE_REFUSED
 #define BRWalletRegisterOutcomeHeld(outcome) ((void)(outcome), 1)
+#endif
+#ifdef KAT_RED_FREE_HELD
+#define BRWalletRegisterOutcomeHeld(outcome) ((void)(outcome), 0)
 #endif
 
 #include "BRServerTxImport.h"

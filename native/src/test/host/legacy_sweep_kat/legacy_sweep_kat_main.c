@@ -43,6 +43,11 @@
 //   proof         outpoints, amounts and scripts taken from coins and their BRRawTxBindingCheck proofs
 //                 (BRLegacySweepInputFromProof); a vout outside 0..UINT32_MAX, another coin's parent, an unproven
 //                 proof and out-of-range indexes are refused.
+//   fee_floor_masked, fee_dust_masked  the two rules no sweep reaches (the 1000-sat fee floor and the dust refusal
+//                 totalIn <= fee + 546, both masked by the rate floor and the 5% refusal), pinned on BRLegacySweepFee.h
+//                 compiled with those two removed (legacy_sweep_kat_fee.c): the floor at rates 0..4,901 on a lone
+//                 input (fee 1000), not above it (4,902 -> 1000, 4,907 -> 1001); the dust line at fee + 546 refused,
+//                 fee + 547 accepted, at 100,000 and 1,000,000 sat/kB.
 //   fee_rate_large a lone coin at the largest rate (1,000,000) signs and pays 204,000 satoshis, the most a lone
 //                 coin can pay; it must list more than 20 times that.
 //   fuzz          KAT_FUZZ sweeps (default 2000; KAT_FUZZ_SEED varies them) over every derivation profile and format, 1..12 inputs, random and
@@ -76,6 +81,8 @@ BRLegacySweepResult kat_core_sweep(const uint8_t *seed, size_t seedLen, const ch
 BRLegacySweepResult kat_core_sweep_null_out(const uint8_t *seed, size_t seedLen);
 int kat_core_from_proof(BRLegacySweepInput *in, const BRRawTxBindingUtxo *utxo, const BRRawTxProof *proof,
                         const BRRawTxBindingParent *parents, size_t parentCount);
+// BRLegacySweepFee.h with the rate floor and the 5% refusal removed (legacy_sweep_kat_fee.c).
+int kat_fee_masked(uint64_t totalIn, size_t inputCount, uint64_t feePerKb, size_t *estSize, uint64_t *fee);
 
 jstring JNICALL NativeBridge_buildAndSignLegacySweep(JNIEnv *env, jobject thiz, jbyteArray seedBytes, jstring hmacKey,
                                                      jintArray prefixPath, jobjectArray txidsHex, jintArray vouts,
@@ -1053,6 +1060,46 @@ int main(int argc, char **argv)
         check(b.fee.fee == 204000ull && b.tx && b.tx->outputs[0].amount == 5000000ull - 204000ull,
               "fee 204000, output 4796000");
         both_free(&b);
+    }
+    end();
+
+    // ── the masked rules: the fee floor and the dust refusal (DEVMERGE-KAT-NITS) ───────────────────────────────────
+    // On the fee header with the rate floor and the 5% refusal removed. One input: estSize 204.
+    begin("fee_floor_masked");
+    {
+        static const struct { uint64_t rate, fee; } kFloor[] = {
+            { 0, 1000 }, { 1, 1000 }, { 999, 1000 }, { 4901, 1000 },   // 204 * 4901 / 1000 = 999 -> 1000
+            { 4902, 1000 }, { 4907, 1001 }, { 100000, 20400 },                 // the floor no longer binds
+        };
+        for (size_t i = 0; i < sizeof(kFloor) / sizeof(kFloor[0]); i++) {
+            size_t est = 0; uint64_t fee = 0;
+            int v = kat_fee_masked(100000000ull, 1, kFloor[i].rate, &est, &fee);
+            char d[96];
+            snprintf(d, sizeof(d), "rate %llu: OK, estSize 204, fee %llu", (unsigned long long)kFloor[i].rate,
+                     (unsigned long long)kFloor[i].fee);
+            check(v == BR_LEGACY_SWEEP_FEE_CHECK_OK && est == 204 && fee == kFloor[i].fee, d);
+        }
+    }
+    end();
+    begin("fee_dust_masked");
+    {
+        static const struct { uint64_t rate, totalIn; int verdict; } kDust[] = {
+            { 100000, 0, BR_LEGACY_SWEEP_FEE_CHECK_DUST },
+            { 100000, 20400, BR_LEGACY_SWEEP_FEE_CHECK_DUST },        // totalIn == fee
+            { 100000, 20945, BR_LEGACY_SWEEP_FEE_CHECK_DUST },        // fee + 545
+            { 100000, 20946, BR_LEGACY_SWEEP_FEE_CHECK_DUST },        // fee + 546: the line itself is refused
+            { 100000, 20947, BR_LEGACY_SWEEP_FEE_CHECK_OK },          // fee + 547
+            { 1000000, 204546, BR_LEGACY_SWEEP_FEE_CHECK_DUST },      // fee 204,000 + 546
+            { 1000000, 204547, BR_LEGACY_SWEEP_FEE_CHECK_OK },
+        };
+        for (size_t i = 0; i < sizeof(kDust) / sizeof(kDust[0]); i++) {
+            uint64_t fee = 0;
+            int v = kat_fee_masked(kDust[i].totalIn, 1, kDust[i].rate, NULL, &fee);
+            char d[96];
+            snprintf(d, sizeof(d), "rate %llu, totalIn %llu: verdict %d", (unsigned long long)kDust[i].rate,
+                     (unsigned long long)kDust[i].totalIn, kDust[i].verdict);
+            check(v == kDust[i].verdict && fee == kDust[i].rate * 204 / 1000, d);
+        }
     }
     end();
 

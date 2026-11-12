@@ -11,9 +11,11 @@
 #          also uses), one removing the whole SWEEP-ABS-CEIL guard (BR_LEGACY_SWEEP_RED_ABS_CEIL: the core guard is
 #          load-bearing), one per refusal (zero amount, MAX_MONEY, the fee product overflow), and one for the key wipe
 #          (BR_LEGACY_SWEEP_RED_*=1, on the core's unit only). Each must fail exactly its scenarios and pass every
-#          other one, with no sanitizer report. Retired with SWEEP-ABS-CEIL: RED_FLOOR (the 1000-sat fee floor cannot
-#          bind at a rate of 100,000 or more) and RED_DUST (the 5% refusal of every sweep implies the dust bound); both
-#          rules stay in the header, unreachable.
+#          other one, with no sanitizer report. The 1000-sat fee floor cannot bind at a rate of 100,000 or more and
+#          the 5% refusal of every sweep implies the dust bound, so no sweep reaches either rule; they are pinned on
+#          the fee header compiled with those two masking rules removed (legacy_sweep_kat_fee.c, scenarios
+#          fee_floor_masked and fee_dust_masked), and RED_FLOOR, RED_DUST and RED_DUST_STRICT must fail exactly those
+#          (DEVMERGE-KAT-NITS). The fee unit takes every arm's macro, as the core's unit does.
 #   GATES  the bridge file compiled is the shipping one (copied byte for byte beside CORE_DIR, so its
 #          "../digibytewallet-core/" includes resolve to the core under test); the header is included twice in one unit
 #          and compiles clean under -Wall -Wextra -Wpedantic -Werror.
@@ -108,7 +110,9 @@ build() {
     local out="$1"; shift
     clang -w -include stdint.h "${SAN[@]}" "${INC[@]}" -Dcalloc=kat_calloc -Dmalloc=kat_malloc -Dfree=kat_free "$@" \
         -c "$SCRIPT_DIR/legacy_sweep_kat_core.c" -o "$out.core.o" || return 1
-    clang "${SAN[@]}" "$BUILD_DIR/main.o" "$out.core.o" "$BUILD_DIR/bridge.o" "${LIBO[@]}" -lm -lpthread -o "$out"
+    clang -std=c99 -Wall -Wextra -Wno-unused-parameter -Werror "${SAN[@]}" -I "$CORE_DIR" "$@" \
+        -c "$SCRIPT_DIR/legacy_sweep_kat_fee.c" -o "$out.fee.o" || return 1
+    clang "${SAN[@]}" "$BUILD_DIR/main.o" "$out.core.o" "$out.fee.o" "$BUILD_DIR/bridge.o" "${LIBO[@]}" -lm -lpthread -o "$out"
 }
 
 SAN_RE='ERROR: AddressSanitizer|ERROR: LeakSanitizer|runtime error:'
@@ -152,7 +156,7 @@ red() {
 }
 
 red BR_LEGACY_SWEEP_RED_SIZE \
-    "android_default_rate boundary_fee_ceiling boundary_fee_overflow boundary_fee_truncated boundary_rate_cap boundary_rate_floor boundary_ratio_above boundary_ratio_at boundary_ratio_rate_cap boundary_ratio_single_above boundary_ratio_single_at boundary_size fee_rate_large fuzz gate_refusal_is_bridge_side pinned_amount_guard_normal pinned_amount_guard_over_reported pinned_amount_guard_under_reported pinned_bip49_p2sh_p2wpkh pinned_foreign_taproot pinned_segwit_p2wpkh pinned_signedtx_p2pkh proof refuse_destination refuse_short_seed_signs"
+    "android_default_rate boundary_fee_ceiling boundary_fee_overflow boundary_fee_truncated boundary_rate_cap boundary_rate_floor boundary_ratio_above boundary_ratio_at boundary_ratio_rate_cap boundary_ratio_single_above boundary_ratio_single_at boundary_size fee_dust_masked fee_floor_masked fee_rate_large fuzz gate_refusal_is_bridge_side pinned_amount_guard_normal pinned_amount_guard_over_reported pinned_amount_guard_under_reported pinned_bip49_p2sh_p2wpkh pinned_foreign_taproot pinned_segwit_p2wpkh pinned_signedtx_p2pkh proof refuse_destination refuse_short_seed_signs"
 red BR_LEGACY_SWEEP_RED_RATIO \
     "boundary_ratio_at boundary_ratio_below boundary_ratio_rate_cap boundary_ratio_single_at boundary_ratio_single_below boundary_ratio_single_dust fuzz pinned_amount_guard_under_reported"
 red BR_LEGACY_SWEEP_RED_RATIO_STRICT \
@@ -164,6 +168,9 @@ red BR_LEGACY_SWEEP_RED_FEE_CAP "boundary_rate_cap fuzz refuse_fee_rate_cap"
 red BR_LEGACY_SWEEP_RED_FEE_CEILING "boundary_fee_ceiling"
 red BR_LEGACY_SWEEP_RED_ABS_CEIL \
     "boundary_fee_ceiling boundary_rate_cap boundary_rate_floor boundary_ratio_rate_cap boundary_ratio_single_at boundary_ratio_single_below boundary_ratio_single_dust fuzz refuse_zero_amount"
+red BR_LEGACY_SWEEP_RED_FLOOR "fee_floor_masked"
+red BR_LEGACY_SWEEP_RED_DUST "fee_dust_masked"
+red BR_LEGACY_SWEEP_RED_DUST_STRICT "fee_dust_masked"
 red BR_LEGACY_SWEEP_RED_ZERO_AMOUNT "fuzz refuse_zero_amount"
 red BR_LEGACY_SWEEP_RED_NO_WIPE "keys_wiped"
 red BR_LEGACY_SWEEP_RED_MAX_MONEY \
@@ -187,7 +194,7 @@ else
 fi
 
 if [ "$FAIL" -eq 0 ]; then
-    echo "PASS: legacy_sweep_kat (the core refuses what the bridge refuses and signs the same bytes on every scenario bar its MAX_MONEY refusal; twelve comparison arms red on exactly theirs, SWEEP-ABS-CEIL among them; ASan+UBSan)"
+    echo "PASS: legacy_sweep_kat (the core refuses what the bridge refuses and signs the same bytes on every scenario bar its MAX_MONEY refusal; fifteen comparison arms red on exactly theirs, SWEEP-ABS-CEIL and the masked fee floor and dust rules among them; ASan+UBSan)"
     exit 0
 fi
 echo "FAIL: legacy_sweep_kat"

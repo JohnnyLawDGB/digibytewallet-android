@@ -80,6 +80,13 @@ typedef enum {
 static inline SweepFeeVerdict sweep_fee_check(uint64_t totalIn, size_t inputCount, int64_t feePerKb,
                                               uint64_t *feeOut)
 {
+    /* 32-BIT (armeabi-v7a), stated (DEVMERGE-KAT-NITS): the arm below computes estSize in 64 bits, but
+     * BRLegacySweepFeeCheck computes it in size_t. With a 32-bit size_t an inputCount above 26,843,545
+     * ((SIZE_MAX - 10 - 34) / 160) hits its wrap check, so the shipped arm answers
+     * SWEEP_FEE_RATE_OUT_OF_RANGE with *feeOut 0 where the pre-port code answered SWEEP_FEE_ABOVE_CEILING.
+     * Both are refusals, and jni_derive.c tests only != SWEEP_FEE_OK. That many inputs cannot reach this
+     * point anyway: the bridge has already allocated a BRKey per input (about 2.8 GB of them on 32-bit)
+     * and derived each one before it asks. */
 #if SWEEP_ABS_CEIL_UNFIXED
     uint64_t estSize = (uint64_t)BR_LEGACY_SWEEP_BASE_BYTES + (uint64_t)inputCount * BR_LEGACY_SWEEP_INPUT_BYTES
                      + BR_LEGACY_SWEEP_OUTPUT_BYTES;
