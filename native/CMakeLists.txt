@@ -33,6 +33,13 @@ add_library(
         src/main/jni/digibytewallet-core/BRArray.h
         src/main/jni/digibytewallet-core/BRAssetData.c
         src/main/jni/digibytewallet-core/BRAssetData.h
+        # The DigiAsset transfer builder and signer (BRWalletBuildAssetTransfer), and BRCoinReservation.c, the table its
+        # spend gate (BRSpendGate.h) claims in. No bridge file calls either yet: they are built so the core links as it
+        # ships (native/src/test/host/asset_send_kat fails if either is dropped from this list).
+        src/main/jni/digibytewallet-core/BRAssetSend.c
+        src/main/jni/digibytewallet-core/BRAssetSend.h
+        src/main/jni/digibytewallet-core/BRCoinReservation.c
+        src/main/jni/digibytewallet-core/BRCoinReservation.h
         src/main/jni/digibytewallet-core/BRBase58.c
         src/main/jni/digibytewallet-core/BRBase58.h
         src/main/jni/digibytewallet-core/BRBech32.c

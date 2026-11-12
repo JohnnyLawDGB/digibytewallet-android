@@ -18,6 +18,7 @@
 #include "BRWalletFilterElements.h"
 #include "BRWalletOpen.h"
 #include "tx_details_format.h"
+#include "tx_rows_list.h"
 
 /* ---------- Global state definitions ---------- */
 
@@ -845,6 +846,27 @@ NativeBridge_getTransactionDetails(JNIEnv *env, jobject thiz) {
     char *buf = tx_details_format(txCount, tx_details_row_from_wallet, txs);
     for (size_t i = 0; i < txCount; i++) if (txs[i]) BRTransactionFree(txs[i]);
     free(txs);
+    if (!buf) return (*env)->NewStringUTF(env, "");
+    jstring result = (*env)->NewStringUTF(env, buf);
+    free(buf);
+    return result;
+}
+
+/* ---------- getTransactionRows ----------
+ * The activity list: the newest `limit` rows as the shared core computes them (BRTxRows.h), in its
+ * order, one "txid|amount|fee|blockHeight|shownTimestamp|sent|received|rule" line each
+ * (tx_rows_list.h). `nowSecs` is the caller's clock, the date a pending row shows. DISPLAY ONLY:
+ * crediting, asset ingestion, notification gating and the stranded-send sweep read
+ * getTransactionDetails, never this.
+ */
+jstring JNICALL
+NativeBridge_getTransactionRows(JNIEnv *env, jobject thiz, jlong nowSecs, jint limit) {
+    WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
+    (void)thiz;
+    if (!g_wallet || limit <= 0) return (*env)->NewStringUTF(env, "");
+
+    uint32_t now = (nowSecs <= 0) ? 0 : (nowSecs >= (jlong)UINT32_MAX) ? UINT32_MAX : (uint32_t)nowSecs;
+    char *buf = tx_rows_list(g_wallet, now, (size_t)limit);
     if (!buf) return (*env)->NewStringUTF(env, "");
     jstring result = (*env)->NewStringUTF(env, buf);
     free(buf);

@@ -147,8 +147,17 @@ object AppModule {
         app.aroundtheblock.wallet.core.recovery.SeedProvider { walletManager.loadBip39Seed() }
 
     @Provides @Singleton
-    fun providePriceProvider(dao: PriceCacheDao, client: OkHttpClient): PriceProvider =
-        PriceProvider(dao, okHttpFetcher(client))
+    fun providePriceProvider(
+        @ApplicationContext context: Context,
+        dao: PriceCacheDao,
+        client: OkHttpClient,
+    ): PriceProvider =
+        // Settings → Display → Show prices: off, no price request is made from anywhere.
+        PriceProvider(
+            dao,
+            okHttpFetcher(client),
+            enabled = { app.aroundtheblock.wallet.core.settings.PricePrefs.isEnabled(context) },
+        )
 
     @Provides fun provideAssetMetadataDao(db: WalletDatabase): AssetMetadataDao = db.assetMetadataDao()
     @Provides fun provideDigiIdHistoryDao(db: WalletDatabase): DigiIdHistoryDao = db.digiIdHistoryDao()

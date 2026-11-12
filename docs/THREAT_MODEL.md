@@ -240,9 +240,12 @@ Named explicitly so they don't go unfixed by being unspoken.
 ## Explicitly out of scope
 
 - **Pre-install supply-chain attacks.** A malicious APK served by a
-  compromised app-store channel is out of scope; users who install
-  from digiscope.me verify SHA-256; users who install from GitHub
-  trust GitHub's signature on the release.
+  compromised app-store channel is out of scope. Users can check an
+  install against the one release key: a sideload APK by its
+  SHA-256 in the release's `SHA256SUMS` plus its signing
+  certificate; a Google Play install (split APKs, whose hashes never
+  match `SHA256SUMS`) by its signing certificate only. See
+  [VERIFICATION.md](../VERIFICATION.md).
 - **OS-level persistence malware.** An attacker with root on the
   device can do anything; we treat the Android sandbox as part of
   the trusted base.

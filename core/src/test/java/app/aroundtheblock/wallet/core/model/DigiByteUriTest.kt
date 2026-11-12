@@ -60,6 +60,17 @@ class DigiByteUriTest {
         assertNull(u?.amount)
     }
 
+    /** BRPaymentUriParse (payment_uri_kat ambiguous_comma_amount_dropped): the address stands, the amount goes. */
+    @Test fun an_ambiguous_comma_amount_is_dropped_and_digits_are_not_mapped() {
+        for (q in listOf("amount=1,000", "amount=1%2C000", "amount=0,123", "amount=\u0661")) {
+            val u = DigiByteUri.parse("digibyte:DTest123?$q")
+            assertEquals(q, "DTest123", u?.address)
+            assertNull(q, u?.amount)
+        }
+        assertEquals(29_000_000L, DigiByteUri.parse("digibyte:DTest123?amount=0,29")?.amount)
+        assertEquals(100_050_000_000L, DigiByteUri.parse("digibyte:DTest123?amount=1,000.5")?.amount)
+    }
+
     @Test fun label_and_message_are_percent_decoded() {
         val u = DigiByteUri.parse("digibyte:DTest123?label=Coffee%20Shop&message=Order%20%231")
         assertEquals("Coffee Shop", u?.label)

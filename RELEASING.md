@@ -139,9 +139,13 @@ one signer, and the wrong package. Output, under `dist/vX.Y.Z/`:
    and push the tag. DigiByte Mobile 4.0.88 was never tagged; placing which fixes it contained
    took a search of its release notes for a reworded commit hash.
 1. **Sideload:** a release on `JohnnyLawDGB/aroundtheblock-wallet-releases`, tag `vX.Y.Z`,
-   with the APK, and the APK's SHA-256 and the signing certificate's SHA-256 **in the release
-   notes** (attaching `SHA256SUMS` as well is fine). Then download the published APK and hash
-   it — the number on the page must be the number of the file people actually get. Release
+   with the APK and `SHA256SUMS` attached, and the APK's SHA-256 and the signing certificate's
+   SHA-256 **in the release notes** (VERIFICATION.md tells users to check the APK against
+   `SHA256SUMS`, so it must be there). Then download the published APK and hash
+   it — the number on the page must be the number of the file people actually get. Users check
+   it as [VERIFICATION.md](VERIFICATION.md) says; keep that file in step if the names or the
+   published files change. The hash covers the sideload APK only: a Play install is split APKs
+   and is checked by its certificate, never by `SHA256SUMS`. Release
    notes written by hand, **with reporter credits as they are written** (§8).
 2. **Play:** the AAB to open testing, with that release's "what's new" text.
 3. **digiscope.me downloads page:** link the new release.

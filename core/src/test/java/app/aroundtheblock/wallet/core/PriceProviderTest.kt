@@ -28,8 +28,20 @@ class PriceProviderTest {
         mockDao = mockk(relaxed = true)
     }
 
-    private fun makeProvider(fetcher: HttpFetcher) =
-        PriceProvider(mockDao, fetcher, UnconfinedTestDispatcher())
+    private val now = 1_700_000_000_000L
+
+    private fun makeProvider(fetcher: HttpFetcher, enabled: () -> Boolean = { true }, nowMs: Long = now) =
+        PriceProvider(mockDao, fetcher, UnconfinedTestDispatcher(), enabled = enabled, nowMs = { nowMs })
+
+    private fun cachedAt(updatedAt: Long, source: String = "coingecko") = PriceCacheEntity(
+        currency = "USD", pricePerDgb = 0.00999, change24h = 1.1, source = source, updatedAt = updatedAt,
+    )
+
+    /** Counts what it was asked; answers with [answer]. */
+    private class CountingFetcher(private val answer: (String) -> String = { "" }) : HttpFetcher {
+        val urls = mutableListOf<String>()
+        override fun fetch(url: String): String { urls += url; return answer(url) }
+    }
 
     // ------------------------------------------------------------------
     // Scenario 1: CoinGecko succeeds
@@ -77,7 +89,8 @@ class PriceProviderTest {
     @Test
     fun `fetchPrice returns cached when both APIs fail`() = runTest {
         val fetcher = HttpFetcher { throw Exception("Network unavailable") }
-        priceProvider = makeProvider(fetcher)
+        // Half an hour after the cached price: inside the maximum age.
+        priceProvider = makeProvider(fetcher, nowMs = 1_700_000_000_000L + 30 * 60 * 1000L)
 
         val cachedEntity = PriceCacheEntity(
             currency = "USD",
@@ -131,5 +144,145 @@ class PriceProviderTest {
         assertEquals("USD", insertSlot.captured.currency)
         assertEquals("coingecko", insertSlot.captured.source)
         assertEquals(0.01234, insertSlot.captured.pricePerDgb, 0.00001)
+    }
+
+    // ------------------------------------------------------------------
+    // Owner decisions 2026-11-09 (both apps): maximum age, off switch, reuse
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `a cached price older than an hour is unavailable`() = runTest {
+        val fetcher = HttpFetcher { throw Exception("Network unavailable") }
+        coEvery { mockDao.getPrice("USD") } returns cachedAt(now)
+
+        val exactlyAnHour = makeProvider(fetcher, nowMs = now + PriceProvider.MAX_AGE_MS).fetchPrice("USD")
+        assertEquals("an hour old is still usable", "coingecko (cached)", exactlyAnHour.source)
+
+        val older = makeProvider(fetcher, nowMs = now + PriceProvider.MAX_AGE_MS + 1).fetchPrice("USD")
+        assertEquals("unavailable", older.source)
+        assertEquals(0.0, older.priceUsd, 0.0)
+        assertEquals(3_600_000L, PriceProvider.MAX_AGE_MS)
+    }
+
+    @Test
+    fun `a cached price dated in the future is ignored`() = runTest {
+        val fetcher = HttpFetcher { throw Exception("Network unavailable") }
+        coEvery { mockDao.getPrice("USD") } returns cachedAt(now + 1)
+
+        val result = makeProvider(fetcher).fetchPrice("USD")
+        assertEquals("a price from the future (the clock was set back) is not trusted", "unavailable", result.source)
+
+        val reused = makeProvider(CountingFetcher { coinGeckoJson }).currentPrice("USD")
+        assertEquals("nor reused", "coingecko", reused.source)
+        assertEquals(0.01234, reused.priceUsd, 0.00001)
+    }
+
+    @Test
+    fun `off fetches nothing, caches nothing and answers unavailable`() = runTest {
+        val fetcher = CountingFetcher { coinGeckoJson }
+        coEvery { mockDao.getPrice("USD") } returns cachedAt(now)
+        val provider = makeProvider(fetcher, enabled = { false })
+
+        val sources = listOf(
+            provider.fetchPrice("USD"),
+            provider.currentPrice("USD"),
+            provider.fetchPrice("USD", app.aroundtheblock.wallet.core.model.PriceSource.API),
+            provider.fetchPrice("USD", app.aroundtheblock.wallet.core.model.PriceSource.CACHED),
+        ).map { it.source }
+
+        assertEquals(List(4) { "unavailable" }, sources)
+        assertEquals("off: no price request at all", emptyList<String>(), fetcher.urls)
+        coVerify(exactly = 0) { mockDao.insert(any()) }
+    }
+
+    @Test
+    fun `turned off while a request is out, a fetch neither moves on nor writes the cache`() = runTest {
+        var on = true
+        val fetcher = CountingFetcher { url ->
+            on = false // the switch goes off while CoinGecko's request is out
+            if (url.contains("coingecko")) throw Exception("CoinGecko unreachable") else binanceJson
+        }
+        coEvery { mockDao.getPrice("USD") } returns cachedAt(now)
+
+        val result = makeProvider(fetcher, enabled = { on }).fetchPrice("USD")
+
+        assertEquals("unavailable", result.source)
+        assertEquals("no fall-through to Binance", 1, fetcher.urls.size)
+        coVerify(exactly = 0) { mockDao.insert(any()) }
+
+        on = true
+        val late = CountingFetcher { on = false; coinGeckoJson }
+        makeProvider(late, enabled = { on }).fetchPrice("USD")
+        coVerify(exactly = 0) { mockDao.insert(any()) }
+    }
+
+    @Test
+    fun `a price fetched within a minute is reused instead of fetched again`() = runTest {
+        val fetcher = CountingFetcher { coinGeckoJson }
+        coEvery { mockDao.getPrice("USD") } returns cachedAt(now - PriceProvider.REUSE_MS, source = "binance")
+
+        val reused = makeProvider(fetcher).currentPrice("USD")
+        assertEquals(0.00999, reused.priceUsd, 0.00001)
+        assertEquals("binance", reused.source)
+        assertEquals("a price a minute old is reused", emptyList<String>(), fetcher.urls)
+
+        val fetched = makeProvider(fetcher, nowMs = now + 1).currentPrice("USD")
+        assertEquals("older than the window: fetched again", "coingecko", fetched.source)
+        assertEquals(1, fetcher.urls.size)
+        assertEquals(60_000L, PriceProvider.REUSE_MS)
+    }
+
+    @Test
+    fun `a price held in memory goes stale after an hour`() {
+        val p = PriceData(0.01, 0.0, "coingecko", now)
+        assertTrue(PriceProvider.isFresh(p, now))
+        assertTrue(PriceProvider.isFresh(p, now + PriceProvider.MAX_AGE_MS))
+        assertFalse(PriceProvider.isFresh(p, now + PriceProvider.MAX_AGE_MS + 1))
+        assertFalse("dated in the future", PriceProvider.isFresh(p, now - 1))
+        assertFalse(PriceProvider.isFresh(PriceData(0.0, 0.0, "unavailable", now), now))
+        assertFalse(PriceProvider.isFresh(p.copy(priceUsd = 0.0), now))
+    }
+
+    @Test
+    fun `a price that is not positive and finite fails its source and the next is tried`() = runTest {
+        for (body in listOf(
+            """{"digibyte":{"usd":0}}""", """{"digibyte":{"usd":-1}}""",
+            """{"digibyte":{}}""", "not json", "",
+        )) {
+            val fetcher = HttpFetcher { url -> if (url.contains("coingecko")) body else binanceJson }
+            assertEquals(body, "binance", makeProvider(fetcher).fetchPrice("USD").source)
+        }
+
+        coEvery { mockDao.getPrice("USD") } returns null
+        for (lastPrice in listOf("0", "-0.01", "NaN", "Infinity", "abc")) {
+            val ticker = """{"lastPrice":"$lastPrice","priceChangePercent":"1"}"""
+            val fetcher = HttpFetcher { url -> if (url.contains("coingecko")) throw Exception("down") else ticker }
+            assertEquals(lastPrice, "unavailable", makeProvider(fetcher).fetchPrice("USD").source)
+        }
+        coVerify(exactly = 0) { mockDao.insert(match { it.pricePerDgb <= 0.0 || !it.pricePerDgb.isFinite() }) }
+    }
+
+    @Test
+    fun `a price cached as prices go off is cleared again`() = runTest {
+        var on = true
+        coEvery { mockDao.insert(any()) } answers { on = false } // off lands just as the row is written
+        val result = makeProvider(HttpFetcher { coinGeckoJson }, enabled = { on }).fetchPrice("USD")
+
+        coVerifyOrder {
+            mockDao.insert(any())
+            mockDao.clear()
+        }
+        assertEquals("unavailable", result.source)
+    }
+
+    @Test
+    fun `a reused price must be positive and finite`() = runTest {
+        for (bad in listOf(Double.POSITIVE_INFINITY, Double.NaN, 0.0, -0.01)) {
+            val fetcher = CountingFetcher { coinGeckoJson }
+            coEvery { mockDao.getPrice("USD") } returns cachedAt(now).copy(pricePerDgb = bad)
+            val result = makeProvider(fetcher).currentPrice("USD")
+            assertEquals("$bad is not reused", "coingecko", result.source)
+            assertEquals(1, fetcher.urls.size)
+        }
     }
 }

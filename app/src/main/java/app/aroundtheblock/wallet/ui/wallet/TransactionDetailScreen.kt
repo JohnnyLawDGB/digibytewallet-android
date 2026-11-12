@@ -238,8 +238,12 @@ private fun TransactionDetailContent(
                 DetailRow(label = stringResource(R.string.txd_timestamp), value = dateStr)
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
-                DetailRow(label = stringResource(R.string.txd_network_fee), value = "$feeFormatted DGB")
-                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                // The fee on its own line, apart from the amount (a send's amount is what the payee
+                // got). A fee the wallet cannot know has no line: never a figure, not even 0.
+                if (tx.fee != TransactionEntity.FEE_UNKNOWN) {
+                    DetailRow(label = stringResource(R.string.txd_network_fee), value = "$feeFormatted DGB")
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                }
 
                 if (tx.toAddress.isNotBlank()) {
                     DetailRow(

@@ -184,6 +184,12 @@ is read at every triage. When you change something that exists in more than one 
 every copy or delete all but one. When you finish work, push it. And before declaring something
 missing, check **the thing itself, not its container**.
 
+**An intake starts where the last one stopped (2026-11-08).** Each intake's search window opens at
+the previous intake's cut timestamp, not at a remembered date, and an intake is complete only
+when every thread and advisory in that window is matched against the private records by ID. The
+2026-11-01 intake took two reports and skipped the threads before them; some sat unanswered for
+over a week.
+
 ### Re-derive an inherited value before you use it (2026-10-10)
 
 The recurring defect on this project is not a wrong value, it is a **borrowed** one: a number,
@@ -235,6 +241,30 @@ ln -sf ../../scripts/check-worktree-target.sh .git/hooks/pre-commit   # once per
   pinned suite), so it rides the weekly schedule, not every push.
 - **Prefer `git add <explicit paths>` over `git add -A`** when a worktree is in play.
 
+### CI (`.github/workflows/ci.yml`)
+
+A push or pull-request run is four kinds of job. **`build` is the one to wait on.**
+
+- `app`: the Gradle side (guard scripts, unit tests, debug APKs; the `debug-apk` artifact).
+- `kat-plan`: lists the host KAT suites and splits them into `KAT_SHARDS` (8) lists.
+- `kat-shard N`: one job per list, in parallel. Each suite still runs through
+  `scripts/run-host-kats.sh <name>`, one at a time, with the 32-bit toolchain and LeakSanitizer.
+- `build`: the gate. Fails unless all of the above succeeded and the suites that passed are
+  exactly the planned list (`.github/kat-shards/check.sh`).
+
+What to know when touching it:
+
+- **A new suite needs no list edit.** `plan.py` takes every `*_kat` directory; one with no line
+  in `.github/kat-shards/timings.txt` is planned at 60 seconds and runs all the same. The plan
+  is compared with `scripts/run-host-kats.sh --list`, so the planner and the runner cannot
+  disagree about what a suite is without failing `kat-plan`.
+- **Timings only balance the shards.** To refresh them, replace the lines of `timings.txt` with
+  the `kat-timings` artifact of a green run's `build` job. Its summary lists the slowest suites.
+- **The scripts in `.github/kat-shards/` are copies of the core repo's**, which runs these
+  suites against a core change. `plan.py` says how the two are kept in step.
+- **Before a release the gate is still the whole sweep in one go** (`RELEASING.md` §4), and the
+  Monday scheduled run does the same, followed by `check-kat-level-pins.sh`.
+
 ### Submodule (digibytewallet-core)
 The C core is a git submodule. Use explicit GIT_DIR for submodule commits:
 ```bash
@@ -256,6 +286,8 @@ All JNI functions follow: `Java_io_digibyte_core_bridge_NativeBridge_<methodName
 - `dgb_dandelion` — `enabled` flag for Dandelion++ stem submission (default off / opt-in)
 - `dgb_dandelion_peers` — cached Dandelion-capable peer list from seeder
 - `dgb_pin_store` — EncryptedSharedPreferences for PIN hash
+- `dgb_price` — `price_fetch_enabled`, Settings → Display → Show prices (default on; off: no price request, no fiat figure, cached price dropped). Survives a wipe or restore, like the own node and the balance mask (owner decision 2026-11-09); the wipe drops only the cached price (Room)
+- `dgb_price<net>` — also `display_currency` (the `DisplayCurrency` enum name), moved out of `dgb_sync_data` so a wipe, a restore and the crash-loop breaker keep it (owner decision 2026-11-12, same on iOS). `core/settings/DisplayCurrencyPrefs` moves an old value before any path clears the sync blob
 
 ### Versioning Policy
 - `3.X.Y` — current line (at v3.10.29). `Y` = patch (every publish bumps at least the patch); `X` = minor (feature batches, e.g. 3.5→3.6→3.7).

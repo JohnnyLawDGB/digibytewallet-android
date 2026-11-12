@@ -39,6 +39,9 @@ HoldFast Wallet release and name its exact version.
 | Source code | https://github.com/JohnnyLawDGB/digibytewallet-android at the latest release tag (`develop` follows it). The `phase1-modernization` branch is frozen at v3.9.2 and out of scope. |
 | C core (submodule) | https://github.com/JohnnyLawDGB/digibytewallet-core |
 
+To confirm the build you tested is the genuine release, see [VERIFICATION.md](VERIFICATION.md):
+the APK by its `SHA256SUMS` and certificate, a Play install by its certificate only.
+
 ### DigiScope services the app uses
 
 The app signs in to and talks to DigiScope at `api.digiscope.me` (the Hub, Digi-ID sign-in,
@@ -234,7 +237,11 @@ seed** in a way not described here is new, and is assessed as new.
   can show as unspendable until a later release settles it. A report that the hold happens is known; a
   report that it can be avoided, or that it loses funds, is not.
 - **Chain trust.** Choosing between competing chains by accumulated work is a scheduled structural
-  change. (4.1.3 cross-checks the compact-filter chain against the other connected peers.)
+  change. (4.1.3 cross-checks the compact-filter chain against the other connected peers; the
+  check is being strengthened.)
+- **Sync status and restarts.** Own-node status display can lag the node's actual state, and in
+  some cases a restart needs a rescan before the full history and balance show. The coins stay on
+  chain under the user's key.
 - **Wallets holding very many small coins.** A send whose coins would not fit in one transaction
   is refused, and the message reads as an insufficient balance; "send max" is refused the same way.
   A clearer message and a way to consolidate coins are planned.
@@ -367,8 +374,8 @@ found is credited in the notes of the release that fixes it, and not before: sev
 findings are fixed but not yet released, and naming them here would disclose them.
 
 @0x1cb · 0xasuma · 0xradu · Advena · Akbarrsw · apienz · AsrHardi · Astung · Danu Fandiyana ·
-Eula Lawrence · folox · FZN research · @haikaljim9 · iblitzc0de · Jackai · Jo Arsy · Keyzo · Ki ·
-@Lord99900 (Bima maulana) · Lou · Luis_MZ · Mr Fz · Muhammad Harley · naresaelvara · oncodewa ·
+Eula Lawrence · folox · FZN research · @haikaljim9 · hdac · iblitzc0de · Jackai · Jo Arsy · Keyzo ·
+Ki · @Lord99900 (Bima maulana) · Lou · Luis_MZ · Mr Fz · Muhammad Harley · naresaelvara · oncodewa ·
 Redi Sinaga · Rensisme · Ricki Ariadi · rreiissz · sayligood · Toshit · Tsaqif · Umiroh123 ·
 VanSecQA · w4ke · xbyteid · Yudha Eka Saputra
 
@@ -414,3 +421,4 @@ not listed. Anonymity, or no answer, never affects payment.*
 - **2026-10-24 — one reporter, several addresses.** A person or team sending from several addresses
   counts as one reporter for the per-wave cap and duplicate decisions. Applied from the 2026-10-24
   intake on.
+- **2026-11-10 — known issues for 4.1.4 refreshed.**

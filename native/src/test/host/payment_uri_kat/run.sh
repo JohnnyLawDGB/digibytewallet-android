@@ -27,7 +27,7 @@ RED_CASES=(asset_without_valid_quantity_rejected non_positive_quantity_rejected
            quantity_without_asset_rejected duplicate_key_first_wins encoded_key_is_the_same_key
            duplicate_asset_quantity_first_wins blank_asset_id_is_no_asset asset_quantity_integer_rules)
 GUARD_CASES=(bare_address amount_dgb_to_sats amount_eight_decimals_exact encode_exact_and_round_trip
-             one_satoshi_plain_decimal unrepresentable_amount_dropped label_message_percent_decoded
+             one_satoshi_plain_decimal unrepresentable_amount_dropped ambiguous_comma_amount_dropped label_message_percent_decoded
              foreign_scheme_rejected blank_rejected asset_request_parsed asset_request_round_trip
              plain_request_has_no_asset_fields percent_needs_two_hex_digits percent_escape_is_ascii_hex_only
              utf8_outside_bmp_survives decoded_nul_is_kept_by_length bounded_and_nul_free_input query_shapes

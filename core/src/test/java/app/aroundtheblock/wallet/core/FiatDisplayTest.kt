@@ -17,7 +17,7 @@ import org.junit.Test
  * every rate has to come from data and every conversion needs a test that would notice.
  *
  * The other half is minor units. A yen is not a cent: ¥0.80 is not a real price, and rendering
- * two decimals on JPY, KRW, VND or IDR marks the wallet as something that does not know the
+ * two decimals on JPY, KRW or VND marks the wallet as something that does not know the
  * currency it is quoting. That is taken from `java.util.Currency` rather than a hand-kept list,
  * so a currency added later is right without anyone remembering to look it up.
  */
@@ -109,5 +109,26 @@ class FiatDisplayTest {
     @Test fun `an unknown currency code degrades instead of throwing`() {
         val out = FiatDisplay.format(1000.0, "zzz", 1.23)
         assertTrue("expected the code as a fallback label, got: $out", out.contains("ZZZ"))
+    }
+
+    // ── The rupiah keeps 2 decimals (owner decision, 2026-11-12; iOS does the same) ──────────
+
+    /** Newer Android versions' currency data give IDR no decimals; the pin wins over that answer. */
+    @Test fun `IDR keeps 2 decimals whatever the OS's currency data says`() {
+        assertEquals(2, FiatDisplay.fractionDigits("IDR", osDigits = 0))
+        assertEquals(2, FiatDisplay.fractionDigits("idr", osDigits = 0))
+        assertEquals(2, FiatDisplay.fractionDigits("IDR", osDigits = 2))
+    }
+
+    @Test fun `the pin is for IDR only`() {
+        assertEquals(0, FiatDisplay.fractionDigits("JPY", osDigits = 0))
+        assertEquals(2, FiatDisplay.fractionDigits("USD", osDigits = 2))
+        assertEquals(0, FiatDisplay.fractionDigits("KRW", osDigits = -1))
+    }
+
+    @Test fun `an IDR balance and price show 2 decimals`() {
+        // 1000 DGB at 48.55 IDR each.
+        assertEquals("IDR48,550.00", FiatDisplay.format(1000.0, "idr", 48.55).replace("\u00A0", ""))
+        assertTrue(FiatDisplay.formatUnitPrice("idr", 48.55).endsWith("48.55"))
     }
 }

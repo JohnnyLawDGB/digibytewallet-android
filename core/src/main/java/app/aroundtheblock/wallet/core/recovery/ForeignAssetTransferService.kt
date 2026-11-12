@@ -59,10 +59,8 @@ class ForeignAssetTransferService(
     /**
      * Record the outgoing transaction for durability and activity-list rendering.
      *
-     * Injected so `isSelfTransfer` is assertable. It is not a detail: the move sends to an
-     * address THIS wallet owns, so the C core categorizes it as a receive. Recording it as an
-     * ordinary send makes the activity list override that and show the user "Sent" for a
-     * transaction that increased their balance — see OutgoingTxStore.shouldApplyOutgoingOverride.
+     * Injected so `isSelfTransfer` is assertable: the move sends to an address THIS wallet owns,
+     * so the record says it is a self transfer, as the core's row reads it (a receive).
      */
     /**
      * Where progress and refusals go.

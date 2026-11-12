@@ -44,7 +44,8 @@ class SettingsViewModel @Inject constructor(
     private val walletManager: WalletManager,
     private val pinManager: PinManager,
     private val walletConfigDao: WalletConfigDao,
-    private val torManager: TorManager
+    private val torManager: TorManager,
+    private val priceProvider: app.aroundtheblock.wallet.core.PriceProvider,
 ) : ViewModel() {
 
     // ── Sync / network state ──────────────────────────────────────────────────
@@ -173,6 +174,17 @@ class SettingsViewModel @Inject constructor(
         _betaUpdatesEnabled.value = enabled
         context.getSharedPreferences("dgb_settings", Context.MODE_PRIVATE)
             .edit().putBoolean("beta_updates", enabled).apply()
+    }
+
+    // ── Show prices (Settings → Display; owner decision for both apps, 2026-11-09) ──
+    /** Off: no price request anywhere and no fiat figure anywhere. Default on. */
+    val pricesShown: StateFlow<Boolean> = app.aroundtheblock.wallet.core.settings.PricePrefs.enabled(context)
+
+    fun setPricesShown(on: Boolean) {
+        // The switch first: a fetch already out checks it before it writes the cache.
+        app.aroundtheblock.wallet.core.settings.PricePrefs.setEnabled(context, on)
+        // Off drops the cached price. Not cancelled by leaving the screen.
+        if (!on) viewModelScope.launch(kotlinx.coroutines.NonCancellable) { runCatching { priceProvider.clearCache() } }
     }
 
     // ── Network selection (dev-gated Advanced section; Task 6) ───────────────

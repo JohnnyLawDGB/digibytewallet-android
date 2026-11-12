@@ -13,4 +13,8 @@ interface PriceCacheDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(price: PriceCacheEntity)
+
+    /** Every cached price: Settings → Display → Show prices turned off. */
+    @Query("DELETE FROM price_cache")
+    suspend fun clear()
 }

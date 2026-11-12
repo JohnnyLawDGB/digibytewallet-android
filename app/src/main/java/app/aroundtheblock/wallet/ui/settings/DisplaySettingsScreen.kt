@@ -47,6 +47,7 @@ fun DisplaySettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val currencySetFmt = stringResource(R.string.dsp_currency_set)
+    val pricesShown by viewModel.pricesShown.collectAsStateWithLifecycle()
     // The SAME store the wallet reads. This screen used to write WalletConfig.fiatCurrency in
     // Room, which nothing else read — so it showed USD while the home screen showed BTC.
     val currencyContext = androidx.compose.ui.platform.LocalContext.current
@@ -186,6 +187,32 @@ fun DisplaySettingsScreen(
             // ── Price Source ─────────────────────────────────────────────
             item {
                 SettingsCategory(title = stringResource(R.string.dsp_price_source)) {
+                    // The price off switch (Mark, 2026-11-09; both apps). Off: no price request is
+                    // made and no fiat amount is shown anywhere; the cached price is dropped.
+                    SettingsRow(
+                        icon = Icons.Default.AttachMoney,
+                        iconTint = Color(0xFF4CAF50),
+                        title = stringResource(R.string.dsp_show_prices),
+                        subtitle = stringResource(
+                            if (pricesShown) R.string.dsp_show_prices_on else R.string.dsp_show_prices_off
+                        ),
+                        onClick = { viewModel.setPricesShown(!pricesShown) },
+                        trailing = {
+                            Switch(
+                                checked = pricesShown,
+                                onCheckedChange = { viewModel.setPricesShown(it) },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = DigiByteAccent
+                                )
+                            )
+                        }
+                    )
+                    HorizontalDivider(
+                        color = Color(0xFF243352),
+                        thickness = 0.5.dp,
+                        modifier = Modifier.padding(start = 56.dp)
+                    )
                     Card(
                         shape = androidx.compose.foundation.shape.RoundedCornerShape(0.dp),
                         colors = CardDefaults.cardColors(containerColor = Color.Transparent)

@@ -29,9 +29,11 @@
 - Chain-split detection (4-peer agreement, 100-block reorg alert)
 
 ### Supply Chain Attack
-- Reproducible Docker builds
-- Multi-party attestation (SHA-256 hash comparison)
-- No obfuscation (R8 shrink only) for auditability
+- One release key signs every build (Play and sideload); installs are verified by its
+  signing certificate SHA-256, and sideload APKs also by the release's `SHA256SUMS`
+  (Play installs are split APKs, checked by certificate only) — see [VERIFICATION.md](VERIFICATION.md)
+- No third-party build attestations are published; a source build cannot reproduce the published APK
+- Release builds are R8-minified and obfuscated; each release keeps its `mapping.txt` (RELEASING.md)
 - Pinned dependencies with hash verification
 - No proprietary dependencies (no Play Services, Firebase, Crashlytics)
 
@@ -51,7 +53,7 @@ A compromised Android OS can read any process memory including the C core's key 
 If an attacker has physical access to an unlocked device, they can extract keys.
 
 ### Compromised Build Environment
-If Docker itself or the base Ubuntu image is compromised, builds are compromised. Mitigated by multi-party attestation on diverse machines.
+If Docker itself or the base Ubuntu image is compromised, builds are compromised. Not mitigated by attestation: none is published. Releases are built and signed on the publisher's machine ([RELEASING.md](RELEASING.md)), and users verify the signing certificate ([VERIFICATION.md](VERIFICATION.md)).
 
 ### Malicious IME / accessibility service during phrase entry
 A user-installed keyboard or accessibility service can observe the recovery phrase and passphrase as they are typed. Bounded, not eliminated: `FLAG_SECURE` on the entry screens (no screenshots/screen-share) and a password-type IME (no learning, no suggestions) as of the 2026-08-30 follow-ups. Only a system keyboard the user trusts closes this fully; the app cannot pick the keyboard for them.

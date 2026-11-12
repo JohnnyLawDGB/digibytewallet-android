@@ -682,7 +682,7 @@ class LogRedactionSourceGateTest {
     }
 
     private val txDataSource = Regex(
-        """NativeBridge\.(getTransactionDetails|getAllTransactionHashes|getTransactionOutputsForHash|""" +
+        """NativeBridge\.(getTransactionDetails|getTransactionRows|getAllTransactionHashes|getTransactionOutputsForHash|""" +
             """getTransactionInputsForHash|getSerializedTransactionForHash|getSpendableDigiByteUtxos|dumpAllAddresses)\("""
     )
 

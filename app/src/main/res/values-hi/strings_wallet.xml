@@ -213,6 +213,7 @@
     <string name="send_switch_to_dgb">DGB पर स्विच करें</string>
     <string name="send_approx_usd">≈ $%1$s USD</string>
     <string name="send_approx_dgb">≈ %1$s DGB</string>
+    <string name="send_price_unavailable">मूल्य उपलब्ध नहीं</string>
     <string name="send_network_fee">नेटवर्क शुल्क</string>
     <string name="send_network_fee_row">नेटवर्क शुल्क</string>
     <string name="send_fee_default">डिफ़ॉल्ट</string>
@@ -478,6 +479,9 @@
     <string name="dsp_onchain_oracle">ऑन-चेन ओरैकल</string>
     <string name="dsp_auto">स्वतः</string>
     <string name="dsp_oracle_note">ऑन-चेन ओरैकल मूल्य फ़ीड के लिए मेननेट पर DigiByte v9 आवश्यक है।</string>
+    <string name="dsp_show_prices">मूल्य दिखाएँ</string>
+    <string name="dsp_show_prices_on">DGB मूल्य, CoinGecko या Binance से</string>
+    <string name="dsp_show_prices_off">बंद: कोई मूल्य अनुरोध नहीं, कोई मूल्य नहीं दिखाया जाता</string>
     <string name="did_login">Digi-ID लॉगिन</string>
     <string name="did_auth_title">Digi-ID प्रमाणीकरण</string>
     <string name="did_auth_subtitle">%1$s में लॉग इन करने के लिए प्रमाणित करें</string>
