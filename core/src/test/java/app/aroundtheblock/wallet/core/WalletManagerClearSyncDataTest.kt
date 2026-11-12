@@ -5,6 +5,7 @@ import app.aroundtheblock.wallet.core.sync.SavedBlockStore
 import app.aroundtheblock.wallet.core.sync.fakeContext
 import io.mockk.every
 import io.mockk.mockk
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -53,5 +54,19 @@ class WalletManagerClearSyncDataTest {
                 "inherit a DIFFERENT wallet's block window",
             SavedBlockStore.file(ctx).exists(),
         )
+    }
+
+    /** A create or a restore clears the sync blob; the display currency it used to hold is kept. */
+    @Test
+    fun clearSyncData_keepsTheDisplayCurrency() {
+        val ctx = fakeContext()
+        every { ctx.filesDir } returns tmp.newFolder("files")
+        val key = app.aroundtheblock.wallet.core.settings.DisplayCurrencyPrefs.KEY
+        ctx.getSharedPreferences("dgb_sync_data", Context.MODE_PRIVATE).edit().putString(key, "EUR").putBoolean("has_synced", true).commit()
+
+        walletManager(ctx).clearSyncData()
+
+        assertEquals("EUR", app.aroundtheblock.wallet.core.settings.DisplayCurrencyPrefs.read(ctx, ""))
+        assertFalse(ctx.getSharedPreferences("dgb_sync_data", Context.MODE_PRIVATE).contains("has_synced"))
     }
 }

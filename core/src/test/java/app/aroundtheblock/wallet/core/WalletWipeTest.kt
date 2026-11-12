@@ -407,6 +407,40 @@ class WalletWipeTest {
         assertTrue(d.prefs.prefsFor("dgb_settings").contains("dgb_network_testnet"))
     }
 
+    /** Owner decision, 2026-11-12: the display currency is a device setting, as Show prices is. */
+    @Test fun `a wipe keeps the display currency on both networks`() = runTest {
+        val d = Device().apply { populate() }
+        val key = app.aroundtheblock.wallet.core.settings.DisplayCurrencyPrefs.KEY
+        val name = app.aroundtheblock.wallet.core.settings.DisplayCurrencyPrefs::prefsName
+        d.prefs.prefsFor(name("")).seed(key, "EUR")
+        d.prefs.prefsFor(name("_testnet")).seed(key, "BTC")
+
+        val report = d.walletManager().wipeWallet()
+
+        assertTrue("a wipe that kept only device settings must still verify: $report", report.verified)
+        assertEquals("EUR", d.prefs.prefsFor(name("")).durable[key])
+        assertEquals("BTC", d.prefs.prefsFor(name("_testnet")).durable[key])
+    }
+
+    /**
+     * Before the move the currency lived in the sync blob the wipe clears. A wipe that comes before
+     * anything has read it (and so moved it) must move it, not clear it.
+     */
+    @Test fun `a wipe moves a currency still in the old file instead of clearing it`() = runTest {
+        val d = Device().apply { populate() }
+        val key = app.aroundtheblock.wallet.core.settings.DisplayCurrencyPrefs.KEY
+        val name = app.aroundtheblock.wallet.core.settings.DisplayCurrencyPrefs::prefsName
+        d.prefs.prefsFor("dgb_sync_data").seed(key, "JPY")
+        d.prefs.prefsFor("dgb_sync_data_testnet").seed(key, "GBP")
+
+        val report = d.walletManager().wipeWallet()
+
+        assertTrue("$report", report.verified)
+        assertEquals("JPY", d.prefs.prefsFor(name("")).durable[key])
+        assertEquals("GBP", d.prefs.prefsFor(name("_testnet")).durable[key])
+        assertTrue("the sync blob is still cleared", d.prefs.prefsFor("dgb_sync_data").all.isEmpty())
+    }
+
     @Test fun `a wipe keeps the Show prices switch but not the cached price`() = runTest {
         val d = Device().apply { populate() }
 

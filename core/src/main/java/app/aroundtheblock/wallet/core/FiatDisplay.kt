@@ -21,15 +21,29 @@ import java.util.Locale
  * ## Minor units are not decoration
  *
  * A yen is not a cent. `¥0.80` is not a price anyone would write, and quoting two decimals on
- * JPY, KRW, VND or IDR marks the wallet as not knowing the currency it is naming. The digit
- * count comes from [Currency.getDefaultFractionDigits] rather than a hand-maintained list, so a
+ * JPY, KRW or VND marks the wallet as not knowing the currency it is naming. The digit count
+ * comes from [Currency.getDefaultFractionDigits] rather than a hand-maintained list, so a
  * currency added later is correct without anyone remembering to look it up.
+ *
+ * One exception is pinned: the Indonesian rupiah shows 2 decimals ([PINNED_FRACTION_DIGITS],
+ * owner decision 2026-11-12, the same on iOS). ISO 4217 gives it 2, but the currency data on
+ * newer Android versions can give it none, and the two apps must not differ by OS version.
  */
 object FiatDisplay {
 
     /** Bitcoin is a rate the wallet displays but is not a [Currency]; it gets its own path. */
     private const val BTC = "btc"
     private const val BTC_DECIMALS = 8
+
+    /** Decimals fixed here rather than taken from the OS's currency data (see the class note). */
+    private val PINNED_FRACTION_DIGITS = mapOf("IDR" to 2)
+
+    /**
+     * The decimals [label] is shown with: a pinned value, else the OS's [osDigits] (never negative).
+     * `internal` so a test can give it the OS answer newer Android versions give for IDR.
+     */
+    internal fun fractionDigits(label: String, osDigits: Int): Int =
+        PINNED_FRACTION_DIGITS[label.uppercase(Locale.US)] ?: osDigits.coerceAtLeast(0)
 
     /**
      * @param dgb   the amount in DGB.
@@ -67,7 +81,7 @@ object FiatDisplay {
                 "${it.format(value)} $label"
             }
 
-        val digits = currency.defaultFractionDigits.coerceAtLeast(0)
+        val digits = fractionDigits(label, currency.defaultFractionDigits)
         val fmt = NumberFormat.getCurrencyInstance(Locale.US).apply {
             this.currency = currency
             minimumFractionDigits = digits
@@ -108,7 +122,7 @@ object FiatDisplay {
         }
 
         val currency = runCatching { Currency.getInstance(label) }.getOrNull()
-        val baseDigits = currency?.defaultFractionDigits?.coerceAtLeast(0) ?: 2
+        val baseDigits = currency?.let { fractionDigits(label, it.defaultFractionDigits) } ?: 2
         val digits = significantDigitsFor(rate, baseDigits)
 
         if (currency == null) {
