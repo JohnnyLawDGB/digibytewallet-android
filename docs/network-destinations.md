@@ -176,7 +176,8 @@ This section is byte-identical in `digibytewallet-android/docs/network-destinati
 | Seeder `api.digiscope.me/api/peers` | Fetched on the sync-start path when the cache is stale, before `startSync()` (Android G1) | Cached list at once, one background fetch | **Open severity-1 divergence**, tracked by digibytewallet-android#187 (Android moves the fetch to the background, as iOS) |
 | Saved peers | Restored | Not restored (absent until the push-down, iOS plan §19.3) | Absent |
 | Explorer, own-node guide, About links to DigiScope, Around The Block, digibyte.org | Same URLs | Same URLs | Same |
-| GitHub About links (source, licence, issues), bug-report page | Present | Absent | Absent |
+| GitHub About links (source, licence, issues) | Present | Absent | Absent |
+| Bug-report page (`digiscope.me/report`, Settings → Report a bug) | Present, with the device's Android release and API level | Present, with the same parameters less those two | Same page; iOS sends two parameters fewer |
 | Price (CoinGecko, Binance) | Same two requests, through Tor when it is on; 22 currencies on the price card and the balance, USD on Send; on Send a successful fetch is reused for a minute. A cached price over an hour old is not used ("Price unavailable"); Settings → Display → Show prices off: no price requests, no prices shown | Same two requests, after unlock: 22 currencies on the price card and the balance, USD on Send; on Send a successful fetch is reused for a minute. The same hour ("Price unavailable") and the same switch (Settings → Display → Show prices off: no price requests, no prices shown) | Same rules (owner decisions, 2026-11-09). Tor: absent on iOS (M10) |
 | DigiAsset indexers, IPFS gateways, DigiStamp | Present | Absent (M8) | Absent |
 | Digi-ID callbacks | Present | Absent (M6) | Absent |
