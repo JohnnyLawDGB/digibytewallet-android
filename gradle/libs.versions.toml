@@ -41,7 +41,7 @@ kotlin = "2.4.20"
 # (google/ksp#2964: Kotlin 2.4's `{group}:{project}` module names broke Hilt
 # factories for `internal` @Provides). 2.3.11 is the newest KSP that accepts
 # AGP 8.10; 2.3.13 also has a concurrency regression (google/ksp#3286).
-ksp = "2.3.11"
+ksp = "2.3.13"
 detekt = "1.23.8"
 
 # --- Lockstep families -------------------------------------------------------
