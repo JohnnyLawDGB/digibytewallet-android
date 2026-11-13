@@ -364,4 +364,35 @@ class SeedKeyBindAtCreationTest {
         assertEquals(false, h.unlockOutcome())
         h.assertRecordIntact()
     }
+    // ── loadBip39Seed: the passphrase envelope's typed key errors reach the caller ──────────────────
+    //
+    // Invariant (integration review item 4): a bound passphrase envelope that needs the device lock, or
+    // whose key is gone, makes loadBip39Seed throw the typed exception, so Recover Funds prompts or says
+    // "restore from your recovery phrase" -- never a silent null read as "unavailable".
+
+    /** A bound passphrase wallet whose seed decrypts and whose passphrase envelope then throws [e]. */
+    private fun boundPassphraseWalletThen(e: () -> Throwable): Harness {
+        val h = Harness(windowOpen = true)
+        h.prepareAsTheStepDoes(h.walletManager)
+        assertTrue(h.walletManager.createWallet(phrase, "extra words".toByteArray()))
+        assertTrue("precondition: a bound record", h.recordIsBound())
+        var calls = 0
+        every { h.ksm.decryptAuthBound(any()) } answers {
+            if (++calls > 1) throw e()
+            h.vault.decrypt(BOUND_ALIAS, firstArg())
+        }
+        return h
+    }
+
+    @Test fun `loadBip39Seed rethrows a passphrase envelope that needs the device lock`() {
+        val h = boundPassphraseWalletThen { KeystoreUserAuthRequiredException(RuntimeException("window lapsed")) }
+        val r = runCatching { h.walletManager.loadBip39Seed() }
+        assertTrue("got ${r.getOrNull() ?: r.exceptionOrNull()}", r.exceptionOrNull() is KeystoreUserAuthRequiredException)
+    }
+
+    @Test fun `loadBip39Seed rethrows a passphrase envelope whose key is gone`() {
+        val h = boundPassphraseWalletThen { KeystoreKeyInvalidatedException(RuntimeException("gone")) }
+        val r = runCatching { h.walletManager.loadBip39Seed() }
+        assertTrue("got ${r.getOrNull() ?: r.exceptionOrNull()}", r.exceptionOrNull() is KeystoreKeyInvalidatedException)
+    }
 }

@@ -1619,6 +1619,10 @@ class WalletManager @Suppress("LongParameterList") constructor(
                 }
                 else -> seed
             }
+        } catch (e: KeystoreUserAuthRequiredException) {
+            throw e // the caller prompts for the device lock and retries (RecoverFunds)
+        } catch (e: KeystoreKeyInvalidatedException) {
+            throw e // the caller says the lock was removed: restore from the phrase
         } catch (e: Exception) {
             null
         } finally {
