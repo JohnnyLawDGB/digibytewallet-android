@@ -719,6 +719,10 @@
     <string name="reconcile_unprovable_body">ノードがブロック %1$s 以前の取引を報告しましたが、このウォレットは自身のチェーンのコピーで確認できないため、追加しませんでした。そのブロックから再スキャンすると、DigiByte ネットワーク経由で確認します。</string>
     <string name="reconcile_unprovable_rescan">ブロック %1$s から再スキャン</string>
     <string name="reconcile_unprovable_confirm">もう一度タップして確定 — キャッシュを消去して再起動します</string>
+    <string name="reconcile_rebuild_body">承認数、順序、残高がまだおかしい場合、ローカルの取引キャッシュを消去し、コンパクトフィルターでチェーン全体を再スキャンします。すべての取引をオンチェーンのデータから再検出し、ブロックを記録し直します。シードとコインには影響しません。すべてチェーンから再構築されます。アプリが再起動し、スキャンはウォレットの作成時点から行われるため、完了まで時間がかかります。</string>
+    <string name="reconcile_rebuild_in_progress">再構築中 — キャッシュを消去して再起動しています…</string>
+    <string name="reconcile_rebuild_not_started">何も再構築されませんでした。再構築に必要な手順が完了しなかったため、何も消去されず、ウォレットは元のままです。もう一度お試しください。</string>
+    <string name="reconcile_rebuild_button">チェーンから完全に再構築（再スキャン）</string>
     <string name="rf_capped_body">%1$s でスキャンが上限に達した時点で、そのパスはまだ使用中でした。表示以上の資金がある可能性があります。表示されていない分もチェーン上で安全です。</string>
     <string name="reconcile_stuck_stale_cleared">、うち %1$d 件は一度も中継されていません（1 日後もネットワークにはそれらも、そのコインを使う取引もありませんでした）。そのうちの支払いが受取人に届いていた場合、まだ承認される可能性があります。再度支払う前に受取人に確認してください</string>
 </resources>

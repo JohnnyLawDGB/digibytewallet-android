@@ -37,6 +37,17 @@ class ScanAndMarketStringsTest {
         "reconcile_txs_already_in_wallet" to "Transactions already in wallet",
         "reconcile_txs_not_added" to "Transactions not added (not this wallet\\'s)",
         "reconcile_stage_comparing" to "Comparing with the wallet…",
+        "reconcile_rebuild_body" to "If confirmations, ordering, or balance still look wrong, this clears the local " +
+            "transaction cache and re-scans the whole chain with compact filters — re-detecting and block-stamping " +
+            "every transaction from on-chain data. Your seed and coins are untouched; everything is rebuilt from " +
+            "the chain. The app restarts and the rescan runs from your wallet\\'s birth, so it takes a while to finish.",
+        "reconcile_rebuild_in_progress" to "Rebuilding — clearing cache, restarting…",
+        "reconcile_rebuild_button" to "Full rebuild from chain (rescan)",
+        // the rebuild's confirm label is the rescan-from-a-height one, a single copy
+        "reconcile_unprovable_confirm" to "Tap again to confirm — clears the cache and restarts",
+        // A rebuild that stopped before clearing anything (BRChainRebuild.h's stop rules) says so.
+        "reconcile_rebuild_not_started" to "Nothing was rebuilt. A step the rebuild needs did not complete, so " +
+            "nothing was cleared and your wallet is as it was. Try again.",
     )
 
     private val marketStrings = linkedMapOf(

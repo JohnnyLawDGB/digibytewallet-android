@@ -16,12 +16,12 @@ import java.util.concurrent.ConcurrentHashMap
  *
  * A transaction cache (`saved_transactions`) written by an earlier build is discarded before the
  * wallet loads it, and the history is re-derived by the normal compact-filter scan, the same path
- * the manual "Full rebuild from chain" uses. Differences from the manual rebuild:
+ * the manual "Full rebuild from chain" uses. Both carry the scan floor down to what the old cache
+ * held ([floorFromDiscardedCache]: [KEY_FLOOR_HINT], the oldest confirmed height; [KEY_FLOOR_TIME],
+ * the oldest record time, confirmed or not, bounded by the checkpoint at or below that height), never
+ * only the wallet's birth: a bogus low floor costs a longer scan, a floor that is too high would hide
+ * history. Differences from the manual rebuild:
  *  - it runs at process start, before any service or unlock, so nothing stale survives in memory;
- *  - the scan floor is carried down to what the old cache held ([KEY_FLOOR_HINT]: the oldest
- *    confirmed height; [KEY_FLOOR_TIME]: the oldest record time, confirmed or not, bounded by the
- *    checkpoint at or below that height), never only the wallet's birth: a bogus low floor costs a
- *    longer scan, a floor that is too high would hide history;
  *  - recorded-send metadata ([OutgoingTxStore]) is kept;
  *  - it is deferred while one of the wallet's own recorded sends is not settled (the scan cannot
  *    re-learn an unconfirmed transaction), for at most [DEFER_CAP_MS] from the first deferral.
@@ -180,6 +180,26 @@ object HistoryRebuildOnUpgrade {
         return CacheSummary(count, records, minHeight, minTime)
     }
 
+    /** The floor record after a cache is discarded; [checkpointTime] is what the lookup answered. */
+    data class CacheFloor(val height: Long, val time: Long, val checkpointTime: Long) {
+        /** SET, not OR'd: it may clear a pending flag that was set (BRScanFloorFromDiscardedCache). */
+        val pending: Boolean get() = height > 0L || time > 0L
+    }
+
+    /**
+     * What a discarded cache leaves in the floor record (the core's BRScanFloorFromDiscardedCache,
+     * BRScanFloor.h): the height lowered to the cache's oldest confirmed height; the time lowered to
+     * its oldest record time and then to the time of the checkpoint at or below the resulting height
+     * (looked up only for a positive height; a lookup that throws answers 0). The one copy of the
+     * rule: the one-time rebuild's run and the manual rebuild's [floorFromCache] both use it.
+     */
+    fun floorFromDiscardedCache(state: State, summary: CacheSummary, checkpointTimeAtOrBelow: (Long) -> Long): CacheFloor {
+        val hint = lowerFloor(state.floorHint, summary.minConfirmedHeight)
+        val checkpointTime = if (hint > 0L) runCatching { checkpointTimeAtOrBelow(hint) }.getOrDefault(0L) else 0L
+        val time = lowerFloor(lowerFloor(state.floorTime, summary.minRecordTime), checkpointTime)
+        return CacheFloor(hint, time, checkpointTime)
+    }
+
     /** The lower of two optional (0 = none) floors: a floor is never raised. */
     internal fun lowerFloor(existing: Long, candidate: Long): Long = when {
         existing <= 0L -> candidate.coerceAtLeast(0L)
@@ -302,21 +322,19 @@ object HistoryRebuildOnUpgrade {
      * times say (zero, or later than their block).
      */
     private fun run(context: Context, state: State, summary: CacheSummary, checkpointTimeAtOrBelow: (Long) -> Long) {
-        val hint = lowerFloor(state.floorHint, summary.minConfirmedHeight)
-        val checkpointTime = if (hint > 0L) runCatching { checkpointTimeAtOrBelow(hint) }.getOrDefault(0L) else 0L
-        val time = lowerFloor(lowerFloor(state.floorTime, summary.minRecordTime), checkpointTime)
+        val floor = floorFromDiscardedCache(state, summary, checkpointTimeAtOrBelow)
         check(
             statePrefs(context).edit()
                 .putBoolean(KEY_IN_PROGRESS, true)
-                .putLong(KEY_FLOOR_HINT, hint)
-                .putLong(KEY_FLOOR_TIME, time)
+                .putLong(KEY_FLOOR_HINT, floor.height)
+                .putLong(KEY_FLOOR_TIME, floor.time)
                 .putBoolean(KEY_ROOM_CLEAR_PENDING, true)
-                .putBoolean(KEY_FLOOR_PENDING, hint > 0L || time > 0L)
+                .putBoolean(KEY_FLOOR_PENDING, floor.pending)
                 .commit(),
         ) { "rebuild state not durable; nothing cleared" }
         log(
             "rebuilding history from the chain: discarding ${summary.records} cached record(s), " +
-                "floor height $hint, floor time $time (checkpoint time $checkpointTime)",
+                "floor height ${floor.height}, floor time ${floor.time} (checkpoint time ${floor.checkpointTime})",
         )
         check(clearTransactionCacheForRebuild(context)) { "transaction cache clear did not land; retried next start" }
         check(
@@ -415,6 +433,41 @@ object HistoryRebuildOnUpgrade {
             .putBoolean(KEY_DONE, false)
             .putBoolean(KEY_IN_PROGRESS, true)
             .commit()
+
+    /**
+     * Undo [armRerun] for a manual rebuild that stops before it cleared anything: put `done` and
+     * `in_progress` back to what [prior] read. Returns whether the commit landed; when it did not the
+     * rerun stays armed, which only defers the rebuild to the next start (its run carries the cache's
+     * floor before it clears).
+     */
+    fun disarmRerun(context: Context, prior: State): Boolean =
+        statePrefs(context).edit()
+            .putBoolean(KEY_DONE, prior.done)
+            .putBoolean(KEY_IN_PROGRESS, prior.inProgress)
+            .commit()
+
+    /**
+     * The manual rebuild's FLOOR_FROM_CACHE step (BRChainRebuild.h), between [armRerun] and the
+     * clear: carry the current cache's floor into the record ([floorFromDiscardedCache]), so a
+     * confirmed transaction below the birth anchor is not dropped with the cache and never scanned
+     * again. Returns whether the commit landed; the rebuild stops when it did not.
+     */
+    fun floorFromCache(
+        context: Context,
+        checkpointTimeAtOrBelow: (Long) -> Long = ::nativeCheckpointTimeAtOrBelow,
+    ): Boolean {
+        val summary = summarize(decodeSavedTransactionsOrNull(syncPrefs(context).getString(KEY_SAVED_TRANSACTIONS, null)))
+        val floor = floorFromDiscardedCache(readState(context), summary, checkpointTimeAtOrBelow)
+        val landed = statePrefs(context).edit()
+            .putLong(KEY_FLOOR_HINT, floor.height)
+            .putLong(KEY_FLOOR_TIME, floor.time)
+            .putBoolean(KEY_FLOOR_PENDING, floor.pending)
+            .commit()
+        if (landed) {
+            log("manual rebuild: ${summary.records} cached record(s) leave floor height ${floor.height}, floor time ${floor.time}")
+        }
+        return landed
+    }
 
     /**
      * After a run, clear this network's Room `transactions` table once. It backs DigiAsset history,

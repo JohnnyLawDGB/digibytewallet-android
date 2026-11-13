@@ -709,6 +709,10 @@
     <string name="reconcile_unprovable_body">Le nœud a signalé des transactions du bloc %1$s ou antérieures que ce portefeuille ne peut pas vérifier avec sa propre copie de la chaîne : elles n’ont donc pas été ajoutées. Un nouveau scan depuis ce bloc les vérifie via le réseau DigiByte.</string>
     <string name="reconcile_unprovable_rescan">Rescanner depuis le bloc %1$s</string>
     <string name="reconcile_unprovable_confirm">Touchez à nouveau pour confirmer : vide le cache et redémarre</string>
+    <string name="reconcile_rebuild_body">Si les confirmations, l’ordre ou le solde semblent toujours faux, ceci vide le cache local des transactions et réanalyse toute la chaîne avec des filtres compacts, en redétectant chaque transaction et en lui attribuant son bloc à partir des données de la chaîne. Votre phrase de récupération et vos fonds ne sont pas touchés ; tout est reconstruit depuis la chaîne. L’application redémarre et l’analyse part de la création de votre portefeuille, ce qui prend un certain temps.</string>
+    <string name="reconcile_rebuild_in_progress">Reconstruction : vidage du cache, redémarrage…</string>
+    <string name="reconcile_rebuild_not_started">Rien n’a été reconstruit. Une étape nécessaire n’a pas abouti : rien n’a été effacé et votre portefeuille est inchangé. Réessayez.</string>
+    <string name="reconcile_rebuild_button">Reconstruction complète depuis la chaîne (réanalyse)</string>
     <string name="rf_capped_body">Le scan a atteint sa limite sur %1$s alors que ce chemin était encore utilisé : il peut donc y avoir plus de fonds que ce qui est affiché. Ce qui n’est pas affiché reste en sécurité sur la chaîne.</string>
     <string name="reconcile_stuck_stale_cleared">, dont %1$d jamais relayées (après un jour, le réseau n’avait ni elles ni rien qui dépense leurs pièces). Si l’un de ces paiements a bien atteint son destinataire, il peut encore être confirmé : vérifiez auprès de lui avant de payer à nouveau</string>
 </resources>

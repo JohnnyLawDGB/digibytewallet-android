@@ -64,11 +64,13 @@ class WalletManagerRescanClearsCfLedgerTest {
         keyStoreManager = mockk(relaxed = true),
         utxoManager = mockk(relaxed = true),
         dataEraser = mockk(relaxed = true),
-        // Keep NativeBridge's System.loadLibrary out of this JVM test. The native
-        // calls inside rebuildFromChainRescan() are themselves runCatching-wrapped,
-        // so they degrade to no-ops here without changing the file/pref side effects
-        // under test.
+        // Keep NativeBridge's System.loadLibrary out of this JVM test. Stopping sync is
+        // a step the clears depend on (a failure stops the rebuild), so it is injected; the
+        // other native call inside rebuildFromChainRescan() (the birth height) is
+        // runCatching-wrapped and degrades to "unknown" here without changing the file/pref
+        // side effects under test.
         quiesceNative = { },
+        stopSyncForRebuild = { },
     )
 
     @Test

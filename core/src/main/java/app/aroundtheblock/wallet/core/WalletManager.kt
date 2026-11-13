@@ -152,6 +152,8 @@ class WalletManager @Suppress("LongParameterList") constructor(
     // when invoked.
     private val releaseDatabaseKey: () -> Boolean =
         { app.aroundtheblock.wallet.core.db.DatabaseKeyProvisioner.forContext(context).releaseLegacyWrap() },
+    // The rebuild's STOP_SYNC step, injectable for the same reason as the above.
+    private val stopSyncForRebuild: () -> Unit = { NativeBridge.stopSync() },
 ) {
     // Sessions running for the wallet in this process (the sync service), stopped by every wipe
     // before it erases anything. See [WalletSessionStop].
@@ -700,26 +702,53 @@ class WalletManager @Suppress("LongParameterList") constructor(
     /**
      * Full rebuild from chain. Discards the local transaction cache, the filter-header
      * chain, and the saved block headers, and floors the compact-filter scan at the
-     * wallet's birth so EVERY transaction is re-detected and block-stamped against the
-     * real chain on the next launch. This cures a corrupted tx graph (phantom chained
-     * sends, missing block heights that break confirmation + ordering, phantom coins)
-     * without touching the SEED or derived addresses — the wallet is reconstructed
-     * entirely from on-chain data. Clearing saved_blocks alongside the filter chain
-     * avoids the "in-memory chain too shallow" wedge (the header chain must span the
-     * rescan range for the CF driver to resolve filter stop-hashes). The caller MUST
-     * restart the app afterward so the wallet reloads clean and the rescan begins.
+     * wallet's birth (or lower: the floor the cache leaves) so EVERY transaction is
+     * re-detected and block-stamped against the real chain on the next launch. This cures
+     * a corrupted tx graph (phantom chained sends, missing block heights that break
+     * confirmation + ordering, phantom coins) without touching the SEED or derived
+     * addresses — the wallet is reconstructed entirely from on-chain data. Clearing
+     * saved_blocks alongside the filter chain avoids the "in-memory chain too shallow"
+     * wedge (the header chain must span the rescan range for the CF driver to resolve
+     * filter stop-hashes).
+     *
+     * The steps, their order and the stop rules are the shared core's (BRChainRebuild.h,
+     * which the iOS executor follows too): STOP_SYNC, ARM_RERUN, FLOOR_FROM_CACHE, the
+     * clears, CLEAR_OUTGOING_STORE, SET_FLOOR_AT_BIRTH. The first three are the steps the
+     * clears depend on (BRChainRebuildContinuesAfterFailure 0): when one fails the rebuild
+     * stops before anything is cleared and returns false; the caller must then NOT restart
+     * and tells the user nothing was rebuilt. Once the clears start every later step runs
+     * whatever fails, and the result is true: the caller MUST restart the app so the wallet
+     * reloads clean and the rescan begins.
      */
-    fun rebuildFromChainRescan() {
-        // Stop native sync FIRST so the peer manager can't re-persist saved_blocks /
+    fun rebuildFromChainRescan(): Boolean {
+        // STOP_SYNC first, so the peer manager can't re-persist saved_blocks /
         // saved_transactions after we clear them (its final persist, if any, runs
-        // before the clear below and is therefore overwritten).
-        runCatching { NativeBridge.stopSync() }
-        // Arm the one-time rebuild runner BEFORE clearing (done unset, in progress, floors kept).
-        // A coalesced writer can still put a cache back between the clear below and the
-        // process exit; the runner then clears it again at the next start before anything
-        // loads it, and only then stamps done.
+        // before the clear below and is therefore overwritten). A live session that did
+        // not stop could write the stores back over the clears: stop here.
+        val stopped = runCatching { stopSyncForRebuild() }
+        if (stopped.isFailure) {
+            logRebuildStopped("stopSync", "the rerun was not armed", stopped.exceptionOrNull())
+            return false
+        }
+        // ARM_RERUN before clearing (done unset, in progress, floors kept). A coalesced writer
+        // can still put a cache back between the clear below and the process exit; the runner
+        // then clears it again at the next start before anything loads it, and only then stamps
+        // done. Without it nothing would repeat a clear that did not land: stop here. A commit
+        // that returns false has still put the armed values in memory, where the next commit to
+        // the file in this process would write them to disk: disarm on this path too.
+        val prior = HistoryRebuildOnUpgrade.readState(context)
         if (!HistoryRebuildOnUpgrade.armRerun(context)) {
-            runCatching { android.util.Log.w(HistoryRebuildOnUpgrade.TAG, "manual rebuild: arming the rerun did not land") }
+            logRebuildStopped("armRerun", disarmedNote(HistoryRebuildOnUpgrade.disarmRerun(context, prior)))
+            return false
+        }
+        // FLOOR_FROM_CACHE before the cache goes: its oldest confirmed height and record time
+        // into the floor record, so a confirmed transaction below the birth anchor is scanned
+        // again. If that does not land the cache's floor would be lost with it: stop, and put
+        // the rerun back as it was (if that does not land either, the rerun stays armed, which
+        // only defers the rebuild to the next start: its run carries the floor before it clears).
+        if (!HistoryRebuildOnUpgrade.floorFromCache(context)) {
+            logRebuildStopped("floorFromCache", disarmedNote(HistoryRebuildOnUpgrade.disarmRerun(context, prior)))
+            return false
         }
         // NOTE: synchronous (commit), NOT apply(). The caller kills the process
         // (Runtime.exit) immediately after this returns to force a clean reload; an
@@ -736,25 +765,55 @@ class WalletManager @Suppress("LongParameterList") constructor(
         // re-scanned and stamped (SyncService reads cf_birth_height on sync start).
         // If the birth height is unknown, REMOVE the pref rather than writing 0 —
         // 0 would floor the scan at genesis (~23M blocks). SyncService then falls back
-        // to the wallet's birth checkpoint on its own (savedTip is now 0).
+        // to the wallet's birth checkpoint on its own (savedTip is now 0). The floor
+        // record carries anything lower (the cache's floor above) into it at sync start.
         val birth = runCatching { NativeBridge.getWalletBirthCheckpointHeight() }.getOrDefault(0L)
         val toPersist = cfBirthHeightToPersist(birth)
         context.getSharedPreferences("dgb_settings", Context.MODE_PRIVATE).edit().apply {
             if (toPersist != null) putLong("cf_birth_height", toPersist) else remove("cf_birth_height")
         }.commit()
+        return true
     }
 
     /**
-     * [rebuildFromChainRescan] with the scan floor carried down to [height] first, so the rescan
-     * reaches a block a reconcile reported but the wallet could not check (4.1.3 row 1). The caller
-     * restarts the app afterward, as for the plain rebuild.
+     * [rebuildFromChainRescan] with the scan floor carried down to [height] first (LOWER_FLOOR_TO),
+     * so the rescan reaches a block a reconcile reported but the wallet could not check (4.1.3
+     * row 1). When the floor does not land the rescan would not reach that block: nothing is done
+     * and the result is false. Otherwise the result is the rebuild's, and on true the caller
+     * restarts the app, as for the plain rebuild.
      */
-    fun rebuildFromChainRescanFrom(height: Long) {
+    fun rebuildFromChainRescanFrom(height: Long): Boolean {
         if (!HistoryRebuildOnUpgrade.lowerFloorTo(context, height)) {
-            runCatching { android.util.Log.w(HistoryRebuildOnUpgrade.TAG, "rescan from $height: lowering the floor did not land") }
+            // The record's values may still be in memory (a commit that returns false keeps them
+            // there); they only ever lower the floor, so a later write of them costs a longer scan.
+            logRebuildStopped(
+                "lowerFloorTo($height)",
+                "the rerun was not armed; the lowered floor may stay in the record (floor height " +
+                    "${HistoryRebuildOnUpgrade.floorHint(context)}, pending ${HistoryRebuildOnUpgrade.floorPending(context)})",
+            )
+            return false
         }
-        rebuildFromChainRescan()
+        return rebuildFromChainRescan().also { rebuilt ->
+            if (!rebuilt) runCatching {
+                android.util.Log.w(
+                    HistoryRebuildOnUpgrade.TAG,
+                    "rescan from $height: the floor was lowered (floor height ${HistoryRebuildOnUpgrade.floorHint(context)}) " +
+                        "and stays in the record; the next sync start carries it into the stored floor",
+                )
+            }
+        }
     }
+
+    /** The log line of a rebuild that stopped before it cleared anything (BRChainRebuild.h's stop rules). */
+    private fun logRebuildStopped(step: String, rerun: String, cause: Throwable? = null) {
+        runCatching {
+            android.util.Log.w(HistoryRebuildOnUpgrade.TAG, "manual rebuild stopped at $step: nothing cleared; $rerun", cause)
+        }
+    }
+
+    private fun disarmedNote(disarmed: Boolean): String =
+        if (disarmed) "the rerun was put back as it was"
+        else "the rerun is STILL ARMED (the disarm did not land either): the next start runs the one-time rebuild"
 
     /**
      * The wallet's DigiDollar receive address (TD… testnet / DD… mainnet). Null if locked.

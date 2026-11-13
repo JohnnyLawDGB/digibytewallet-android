@@ -719,6 +719,10 @@
     <string name="reconcile_unprovable_body">Nút đã báo các giao dịch từ khối %1$s trở về trước mà ví này không thể kiểm tra bằng bản sao chuỗi của chính nó, nên chúng không được thêm. Quét lại từ khối đó sẽ kiểm tra chúng qua mạng DigiByte.</string>
     <string name="reconcile_unprovable_rescan">Quét lại từ khối %1$s</string>
     <string name="reconcile_unprovable_confirm">Chạm lần nữa để xác nhận — xóa bộ nhớ đệm và khởi động lại</string>
+    <string name="reconcile_rebuild_body">Nếu số xác nhận, thứ tự hoặc số dư vẫn có vẻ sai, thao tác này xóa bộ nhớ đệm giao dịch cục bộ và quét lại toàn bộ chuỗi bằng bộ lọc rút gọn — phát hiện lại và gắn khối cho mọi giao dịch từ dữ liệu trên chuỗi. Seed và tiền của bạn không bị ảnh hưởng; mọi thứ được dựng lại từ chuỗi. Ứng dụng sẽ khởi động lại và quá trình quét chạy từ lúc ví được tạo, nên sẽ mất một lúc.</string>
+    <string name="reconcile_rebuild_in_progress">Đang dựng lại — xóa bộ nhớ đệm, khởi động lại…</string>
+    <string name="reconcile_rebuild_not_started">Chưa có gì được dựng lại. Một bước cần thiết chưa hoàn tất, nên không có gì bị xóa và ví của bạn vẫn như cũ. Hãy thử lại.</string>
+    <string name="reconcile_rebuild_button">Dựng lại toàn bộ từ chuỗi (quét lại)</string>
     <string name="rf_capped_body">Quá trình quét đã dừng ở giới hạn trên %1$s khi đường dẫn đó vẫn đang được dùng, nên có thể còn nhiều tiền hơn số hiển thị. Phần không hiển thị vẫn an toàn trên chuỗi.</string>
     <string name="reconcile_stuck_stale_cleared">, trong đó %1$d giao dịch chưa từng được chuyển tiếp (sau một ngày mạng không có chúng, cũng không có giao dịch nào tiêu số coin của chúng). Nếu một khoản thanh toán trong số đó đã đến người nhận, nó vẫn có thể được xác nhận: hãy hỏi người nhận trước khi trả lại</string>
 </resources>

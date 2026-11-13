@@ -19,7 +19,8 @@
 //             whose header anchor (BRRecoveryBirthCheckpointHeight) is at or below that height
 //   order_*   BRChainRebuild.h against the order of the calls in Android's source: WalletManager.kt
 //             (argv[2]), HistoryRebuildOnUpgrade.kt (argv[3]), ReconcileScreen.kt (argv[4]),
-//             SyncService.kt (argv[5]); and the rebuild has no early return or throw
+//             SyncService.kt (argv[5]); and the rebuild has no early return or throw after its
+//             first clear (before it, the steps the clears depend on stop it)
 //   vectors_* every line of the core's vectors/scan-floor/vectors.txt (argv[1]) agrees with the
 //             model (run.sh separately checks the file is the generator's current output)
 //
@@ -1019,7 +1020,7 @@ static void order_matches_android_source(const char *wmPath, const char *hrPath,
     CHECK(wm && hr && rs);
     if (wm && hr && rs) {
         const char *wmEnd, *fromEnd, *clrEnd;
-        const char *body = span(wm, "fun rebuildFromChainRescan() {", "fun rebuildFromChainRescanFrom(", &wmEnd);
+        const char *body = span(wm, "fun rebuildFromChainRescan(): Boolean {", "fun rebuildFromChainRescanFrom(", &wmEnd);
         const char *from = span(wm, "fun rebuildFromChainRescanFrom(", "\n    }\n", &fromEnd);
         const char *clr = span(hr, "fun clearTransactionCacheForRebuild(", "\n}\n", &clrEnd);
         CHECK(body && from && clr);
@@ -1028,8 +1029,9 @@ static void order_matches_android_source(const char *wmPath, const char *hrPath,
             // (major, minor): the call's place in rebuildFromChainRescan, and inside the shared clear
             long key[BR_CHAIN_REBUILD_STEP_KINDS][2];
             const char *tok[BR_CHAIN_REBUILD_STEP_KINDS] = { 0 };
-            tok[BR_CHAIN_REBUILD_STOP_SYNC] = "NativeBridge.stopSync()";
+            tok[BR_CHAIN_REBUILD_STOP_SYNC] = "stopSyncForRebuild()";
             tok[BR_CHAIN_REBUILD_ARM_RERUN] = "HistoryRebuildOnUpgrade.armRerun(context)";
+            tok[BR_CHAIN_REBUILD_FLOOR_FROM_CACHE] = "HistoryRebuildOnUpgrade.floorFromCache(context)";
             tok[BR_CHAIN_REBUILD_CLEAR_OUTGOING_STORE] = "OutgoingTxStore(context).clearAll()";
             tok[BR_CHAIN_REBUILD_SET_FLOOR_AT_BIRTH] = "cfBirthHeightToPersist(birth)";
             const char *ctok[BR_CHAIN_REBUILD_STEP_KINDS] = { 0 };
@@ -1052,13 +1054,10 @@ static void order_matches_android_source(const char *wmPath, const char *hrPath,
             key[BR_CHAIN_REBUILD_RELOAD][0] = LONG_MAX; key[BR_CHAIN_REBUILD_RELOAD][1] = 0;
             key[BR_CHAIN_REBUILD_LOWER_FLOOR_TO][0] = -2; key[BR_CHAIN_REBUILD_LOWER_FLOOR_TO][1] = 0;
 
-            // FLOOR_FROM_CACHE has no call in Android's source yet: its adoption PR adds the step and
-            // its token here. Until then the order is checked without it.
-            printf("  floorFromCache: not in Android's source yet; order checked without it\n");
+            // Every step of the header, FLOOR_FROM_CACHE included, has its call in Android's source.
             for (int fromHeight = 0; fromHeight <= 1; fromHeight++) {
                 int seq[BR_CHAIN_REBUILD_STEP_KINDS], m = 0;
-                for (int i = 0; i < BRChainRebuildStepCount(fromHeight); i++)
-                    if (BRChainRebuildStepAt(fromHeight, i) != BR_CHAIN_REBUILD_FLOOR_FROM_CACHE) seq[m++] = BRChainRebuildStepAt(fromHeight, i);
+                for (int i = 0; i < BRChainRebuildStepCount(fromHeight); i++) seq[m++] = BRChainRebuildStepAt(fromHeight, i);
                 for (int i = 1; i < m; i++) {
                     int a = seq[i - 1], b = seq[i];
                     int inOrder = key[a][0] < key[b][0] || (key[a][0] == key[b][0] && key[a][1] < key[b][1]);
@@ -1124,7 +1123,8 @@ static void order_reload_matches_android_source(const char *wmPath, const char *
 
 // Once the first clear has run, rebuildFromChainRescan and rebuildFromChainRescanFrom run to the
 // end: no return, throw, check, require, error or !! (outside comments and strings) after the first
-// clear call, so every later step still runs. Before it, an early stop is allowed (the steps the
+// clear call, so every later step still runs. The one exception is the rebuild's last statement,
+// `return true` (the rebuild ran), which no step follows. Before it, an early stop is allowed (the steps the
 // clears depend on stop the rebuild; BRChainRebuildContinuesAfterFailure). The first clear call is
 // clearTransactionCacheForRebuild in the rebuild, and the call to the rebuild in the "from" variant.
 static void stripCommentsAndStrings(char *b, size_t n)
@@ -1159,7 +1159,7 @@ static void order_rebuild_has_no_early_exit(const char *wmPath)
     CHECK(wm != NULL);
     if (wm) {
         stripCommentsAndStrings(wm, strlen(wm));
-        const char *names[] = { "fun rebuildFromChainRescan() {", "fun rebuildFromChainRescanFrom(height: Long) {" };
+        const char *names[] = { "fun rebuildFromChainRescan(): Boolean {", "fun rebuildFromChainRescanFrom(height: Long): Boolean {" };
         const char *firstClear[] = { "clearTransactionCacheForRebuild(context)", "rebuildFromChainRescan()" };
         for (int f = 0; f < 2; f++) {
             const char *e;
@@ -1169,6 +1169,15 @@ static void order_rebuild_has_no_early_exit(const char *wmPath)
             const char *from = strstr(b + strlen(names[f]), firstClear[f]);
             CHECK(from != NULL && from < e);
             if (! from || from >= e) continue;
+            // the final `return true`, followed by nothing but the closing brace's whitespace
+            for (const char *p = e; p > from; p--) {
+                if (strncmp(p - 1, "return true", 11) == 0 && p - 1 + 11 <= e) {
+                    const char *q = p - 1 + 11;
+                    while (q < e && isspace((unsigned char)*q)) q++;
+                    if (q == e) e = p - 1;
+                    break;
+                }
+            }
             static const char *exits[] = { "return", "throw", "check(", "require(", "error(", "!!" };
             for (size_t i = 0; i < sizeof(exits) / sizeof(*exits); i++) {
                 int found = hasWord(from, e, exits[i]);

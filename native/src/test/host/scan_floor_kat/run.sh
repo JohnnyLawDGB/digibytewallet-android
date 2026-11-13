@@ -7,8 +7,8 @@
 # Includes the bridge's checkpoint_time.h, which the core's lookup is compared against on the real
 # checkpoint tables, and reads WalletManager.kt, HistoryRebuildOnUpgrade.kt, ReconcileScreen.kt and
 # SyncService.kt from this checkout to hold the rebuild and reload order to the order of the calls.
-# FLOOR_FROM_CACHE has no call in Android yet; Android's adoption PR adds it (and its token in the
-# main file). Built with -Wall -Wextra -Werror; only -Wno-unused-parameter, for BRChainParams.h.
+# Every step, FLOOR_FROM_CACHE included, has its call in Android's source (its token is in the main
+# file). Built with -Wall -Wextra -Werror; only -Wno-unused-parameter, for BRChainParams.h.
 #
 #   RED    one comparison arm per seam. Each arm's RED cases MUST fail and every other case pass:
 #            -DSCAN_FLOOR_RAISE_RED       a floor that is raised instead of lowered
@@ -132,7 +132,7 @@ red_arm SAVED_TRANSACTIONS_FLOOR_SENTINEL_RED kt_summarize_all_unconfirmed_gives
 red_arm CHAIN_REBUILD_ORDER_RED kt_rebuild_arms_the_rerun_and_keeps_the_floor_time edge_rebuild_invariants edge_failure_rules \
     order_matches_android_source vectors_match_the_model
 red_arm CHAIN_REBUILD_FLOOR_RED kt_rebuild_arms_the_rerun_and_keeps_the_floor_time edge_failure_rules \
-    prop_rebuild_reaches_a_cached_tx_below_the_birth_anchor vectors_match_the_model
+    order_matches_android_source prop_rebuild_reaches_a_cached_tx_below_the_birth_anchor vectors_match_the_model
 
 echo "--- SHIPPED ARM: every case MUST pass, ALL PASS, exit 0, no sanitizer report ---"
 build "$BUILD_DIR/green" || { echo "GATE FAILURE: shipped arm did not compile."; exit 1; }
