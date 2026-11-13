@@ -540,6 +540,7 @@
     <string name="sec_autolock_30m">30 dakika</string>
     <string name="sec_autolock_custom">Özel</string>
     <string name="sec_pin_changed">PIN başarıyla değiştirildi</string>
+    <string name="sec_pin_change_failed">Yeni PIN kaydedilemedi. Eski PIN\'iniz hâlâ geçerli.</string>
     <string name="sec_pins_mismatch">PIN\'ler eşleşmiyor</string>
     <string name="sec_biometric_required">Biyometrik kimlik doğrulama gerekli</string>
     <string name="did_logged_in">Artık %1$s hesabına giriş yaptınız</string>

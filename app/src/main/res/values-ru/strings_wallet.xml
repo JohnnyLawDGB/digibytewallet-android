@@ -546,6 +546,7 @@
     <string name="sec_autolock_30m">30 минут</string>
     <string name="sec_autolock_custom">Своё значение</string>
     <string name="sec_pin_changed">PIN-код успешно изменён</string>
+    <string name="sec_pin_change_failed">Не удалось сохранить новый PIN-код. Старый PIN-код по-прежнему действует.</string>
     <string name="sec_pins_mismatch">PIN-коды не совпадают</string>
     <string name="sec_biometric_required">Требуется биометрическая аутентификация</string>
     <string name="did_logged_in">Вы вошли на %1$s</string>

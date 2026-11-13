@@ -537,6 +537,7 @@
     <string name="sec_autolock_30m">30 phút</string>
     <string name="sec_autolock_custom">Tùy chỉnh</string>
     <string name="sec_pin_changed">Đã đổi mã PIN thành công</string>
+    <string name="sec_pin_change_failed">Không thể lưu mã PIN mới. Mã PIN cũ của bạn vẫn còn hiệu lực.</string>
     <string name="sec_pins_mismatch">Mã PIN không khớp</string>
     <string name="sec_biometric_required">Cần xác thực sinh trắc học</string>
     <string name="did_logged_in">Bạn đã đăng nhập vào %1$s</string>

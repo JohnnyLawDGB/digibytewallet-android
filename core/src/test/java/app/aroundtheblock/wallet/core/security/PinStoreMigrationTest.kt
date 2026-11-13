@@ -48,9 +48,13 @@ class PinStoreMigrationTest {
     private class SoftwareCipher(var key: SecretKey = newKey()) : PinStoreCipher {
         var sealFails = false
         var sealFailsTimes = 0
+        /** Seals that still land before every later one fails (storage filling up); -1 = no limit. */
+        var sealsLeft = -1
         var openTampers = false
         override fun seal(plain: ByteArray): ByteArray {
             if (sealFails) throw GeneralSecurityException("stand-in: the key could not be used")
+            if (sealsLeft == 0) throw GeneralSecurityException("stand-in: ENOSPC")
+            if (sealsLeft > 0) sealsLeft--
             if (sealFailsTimes > 0) { sealFailsTimes--; throw GeneralSecurityException("stand-in: a passing Keystore fault") }
             return KeystorePinStoreCipher.sealWith(key, plain)
         }
@@ -197,6 +201,63 @@ class PinStoreMigrationTest {
     }
 
     // ── a write or a clear that does not land (review item 2: fail closed) ─────
+
+    /** The hash, counting how many entries were actually compared. */
+    private class CountingHash : Argon2idHash {
+        var calls = 0
+        private val inner = Hash()
+        override fun hash(pin: ByteArray, salt: ByteArray): ByteArray { calls++; return inner.hash(pin, salt) }
+    }
+
+    /** A PIN, wipe-after-N on, and nine wrong entries (each cooldown let run out). */
+    private fun nineWrongWithWipeAfterN(cipher: SoftwareCipher, hash: CountingHash): PinManager {
+        val mgr = PinManager(open(cipher, FakeLegacy().apply { present = false }), hash, clock)
+        mgr.setPin(pin)
+        mgr.setWipeAfterN(true)
+        repeat(PinManager.WIPE_THRESHOLD - 1) {
+            assertTrue(mgr.verifyPin("00000$it") is PinVerifyResult.Wrong)
+            clock.sinceBoot += PinManager.MAX_COOLDOWN_MS
+        }
+        return mgr
+    }
+
+    @Test fun `PIN-STORE storage failing every write after nine wrong entries never allows a tenth compare`() {
+        // Re-review item 1: wipe-after-N on, 9 wrong, then the storage fills (ENOSPC).
+        val cipher = SoftwareCipher()
+        val hash = CountingHash()
+        val mgr = nineWrongWithWipeAfterN(cipher, hash)
+        cipher.sealFails = true
+        val compared = hash.calls
+        repeat(20) {
+            val r = mgr.verifyPin(if (it == 7) pin else "11111$it")
+            assertSame("entry $it with nothing able to persist: $r", PinVerifyResult.Unavailable, r)
+            clock.sinceBoot += PinManager.MAX_COOLDOWN_MS
+        }
+        assertEquals("an entry was compared while its failure could not be written", compared, hash.calls)
+    }
+
+    @Test fun `PIN-STORE a wipe whose owed flag could not be written stays owed in this process`() {
+        val cipher = SoftwareCipher()
+        val mgr = nineWrongWithWipeAfterN(cipher, CountingHash())
+        assertEquals("the last cooldown has run out (and its clear has landed)", 0L, mgr.currentLockout())
+        cipher.sealsLeft = 1 // the tenth entry's count lands, the owed-wipe flag after it does not
+        assertSame(PinVerifyResult.ShouldWipe, mgr.verifyPin("999999"))
+        assertEquals("precondition: the flag is not on disk", null, FilePinStore.read(target, cipher)["pin_wipe_pending"])
+        assertTrue("the unlock screen would take another PIN", mgr.isWipePending())
+        runCatching { mgr.clearWipePending() }
+        assertTrue("a release that did not land released the owed wipe", mgr.isWipePending())
+        cipher.sealFails = false; cipher.sealsLeft = -1
+        mgr.clearWipePending()
+        assertFalse(mgr.isWipePending())
+    }
+
+    @Test fun `PIN-STORE a right PIN at the wipe entry is never wiped`() {
+        val cipher = SoftwareCipher()
+        val mgr = nineWrongWithWipeAfterN(cipher, CountingHash())
+        assertEquals("the wipe entry's count is on disk before its compare", PinManager.WIPE_THRESHOLD - 1, FilePinStore.read(target, cipher)["pin_fail_count"])
+        assertSame(PinVerifyResult.Success, mgr.verifyPin(pin))
+        assertFalse(mgr.isWipePending())
+    }
 
     @Test fun `PIN-STORE a failure count that cannot persist is never compared`() {
         val cipher = SoftwareCipher()
@@ -360,6 +421,18 @@ class PinStoreMigrationTest {
         val reopened = manager(open(cipher, FakeLegacy().apply { present = false }))
         assertTrue("migrated to disk", reopened.verifyPin("999999") is PinVerifyResult.Success)
         assertTrue(reopened.verifyPin(pin) is PinVerifyResult.Wrong)
+    }
+
+    @Test fun `PIN-STORE a file with no recorded digest beside an old store wins, and the old store is deleted`() {
+        // Re-review item 2: a file written before the digest existed records none; that absence is no
+        // evidence the old store is newer.
+        val cipher = SoftwareCipher()
+        manager(open(cipher, FakeLegacy().apply { present = false })).setPin(pin) // a file, no digest
+        val legacy = FakeLegacy()
+        manager(legacy.open()).setPin("999999")
+        val mgr = manager(open(cipher, legacy))
+        assertSame("the file's PIN", PinVerifyResult.Success, mgr.verifyPin(pin))
+        assertFalse("the old store went", legacy.present)
     }
 
     @Test fun `PIN-STORE an old store beside the file that cannot be opened is kept and the file serves`() {

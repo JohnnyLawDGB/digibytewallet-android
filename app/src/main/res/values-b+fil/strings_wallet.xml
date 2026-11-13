@@ -540,6 +540,7 @@
     <string name="sec_autolock_30m">30 minuto</string>
     <string name="sec_autolock_custom">Custom</string>
     <string name="sec_pin_changed">Matagumpay na nabago ang PIN</string>
+    <string name="sec_pin_change_failed">Hindi na-save ang bagong PIN. Aktibo pa rin ang luma mong PIN.</string>
     <string name="sec_pins_mismatch">Hindi tugma ang mga PIN</string>
     <string name="sec_biometric_required">Kailangan ng biometric authentication</string>
     <string name="did_logged_in">Naka-log in ka na sa %1$s</string>

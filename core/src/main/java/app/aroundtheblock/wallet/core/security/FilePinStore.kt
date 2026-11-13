@@ -328,11 +328,12 @@ internal interface LegacyPinStore {
  *
  * An old store found beside the file (PIN-STORE review item 1) is one of two things, told apart by
  * the digest of the old store's entries that the migration records in the file ([KEY_MIGRATED_FROM]):
- *  - UNCHANGED since that migration (its digest is the recorded one): a delete that did not land. The
+ *  - UNCHANGED since that migration (its digest is the recorded one), or a file that records no digest
+ *    (written before the digest existed; its absence is no evidence): a delete that did not land. The
  *    file is the newer copy, since only the file was written since; the old store is deleted again
  *    and never served. Re-reading it instead would hand back the counters as they were at the
  *    migration, at every launch for as long as the delete keeps failing: free PIN attempts.
- *  - CHANGED (or the file records no migration): only an older build writes the old store, so this
+ *  - CHANGED (a recorded digest that does not match): only an older build writes the old store, so this
  *    is a downgrade, and what the user did there -- a new PIN, its own counters -- is the newer copy,
  *    as for [app.aroundtheblock.wallet.core.sync.DurableFile.LegacyKey]. It is migrated again over the
  *    file. Its counters are the ones that older build enforced for that PIN; the file's are for a
@@ -372,7 +373,9 @@ internal object PinStoreMigration {
             return store
         }
         val unchanged = try {
-            store.getString(KEY_MIGRATED_FROM)?.let { it == digestOf(snapshotOf(old)) } ?: false
+            // No recorded digest: a file from a build before the digest. That is no evidence the old
+            // store is newer, so it is read as a delete that did not land, as that build did.
+            store.getString(KEY_MIGRATED_FROM)?.let { it == digestOf(snapshotOf(old)) } ?: true
         } catch (t: Throwable) {
             android.util.Log.w(TAG, "PIN-STORE: an old store beside the file cannot be read (${t.javaClass.simpleName}); the file serves, the old store is kept")
             return store

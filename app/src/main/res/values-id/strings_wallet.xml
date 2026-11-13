@@ -537,6 +537,7 @@
     <string name="sec_autolock_30m">30 menit</string>
     <string name="sec_autolock_custom">Kustom</string>
     <string name="sec_pin_changed">PIN berhasil diubah</string>
+    <string name="sec_pin_change_failed">PIN baru tidak dapat disimpan. PIN lama Anda masih aktif.</string>
     <string name="sec_pins_mismatch">PIN tidak cocok</string>
     <string name="sec_biometric_required">Autentikasi biometrik diperlukan</string>
     <string name="did_logged_in">Anda kini masuk ke %1$s</string>

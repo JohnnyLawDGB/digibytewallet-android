@@ -33,3 +33,11 @@ class PinStoreSourceGateTest {
         assertFalse("EncryptedSharedPreferences.create outside the legacy reader", outside.contains("EncryptedSharedPreferences.create("))
     }
 }
+
+/** Re-review item 4: verifyPin's count read, its write and the compare are one step. */
+class PinVerifySynchronizedTest {
+    @Test fun `verifyPin is synchronized`() {
+        val m = PinManager::class.java.getMethod("verifyPin", String::class.java)
+        assertTrue("two entries could be compared against one count", java.lang.reflect.Modifier.isSynchronized(m.modifiers))
+    }
+}

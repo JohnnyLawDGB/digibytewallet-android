@@ -537,6 +537,7 @@
     <string name="sec_autolock_30m">30 分</string>
     <string name="sec_autolock_custom">カスタム</string>
     <string name="sec_pin_changed">PIN を変更しました</string>
+    <string name="sec_pin_change_failed">新しい PIN を保存できませんでした。以前の PIN が引き続き有効です。</string>
     <string name="sec_pins_mismatch">PIN が一致しません</string>
     <string name="sec_biometric_required">生体認証が必要です</string>
     <string name="did_logged_in">%1$s にログインしました</string>

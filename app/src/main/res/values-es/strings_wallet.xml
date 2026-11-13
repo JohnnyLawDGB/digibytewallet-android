@@ -545,6 +545,7 @@
     <string name="sec_autolock_30m">30 minutos</string>
     <string name="sec_autolock_custom">Personalizado</string>
     <string name="sec_pin_changed">PIN cambiado correctamente</string>
+    <string name="sec_pin_change_failed">No se pudo guardar el nuevo PIN. Tu PIN anterior sigue activo.</string>
     <string name="sec_pins_mismatch">Los PIN no coinciden</string>
     <string name="sec_biometric_required">Se requiere autenticación biométrica</string>
     <string name="did_logged_in">Ahora has iniciado sesión en %1$s</string>

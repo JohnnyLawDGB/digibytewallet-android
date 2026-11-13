@@ -548,6 +548,7 @@
     <string name="sec_autolock_30m">30 Minuten</string>
     <string name="sec_autolock_custom">Benutzerdefiniert</string>
     <string name="sec_pin_changed">PIN erfolgreich geändert</string>
+    <string name="sec_pin_change_failed">Die neue PIN konnte nicht gespeichert werden. Deine alte PIN gilt weiterhin.</string>
     <string name="sec_pins_mismatch">PINs stimmen nicht überein</string>
     <string name="sec_biometric_required">Biometrische Authentifizierung erforderlich</string>
     <string name="did_logged_in">Sie sind jetzt bei %1$s angemeldet</string>

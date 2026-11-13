@@ -58,6 +58,7 @@ fun SecuritySettingsScreen(
 ) {
     val appResources = androidx.compose.ui.platform.LocalContext.current.resources
     val pinChangedMsg = stringResource(R.string.sec_pin_changed)
+    val pinChangeFailedMsg = stringResource(R.string.sec_pin_change_failed)
     val pinsMismatchMsg = stringResource(R.string.sec_pins_mismatch)
     val bioRequiredMsg = stringResource(R.string.sec_biometric_required)
     // Hoisted: used inside click/callback lambdas, which are not composable.
@@ -355,9 +356,13 @@ fun SecuritySettingsScreen(
                             pinError = null
                             if (pinInput.length == SEC_PIN_LENGTH) {
                                 if (pinInput == newPinFirst) {
-                                    viewModel.changePin(pinInput)
+                                    val newPin = pinInput
                                     resetDialogState()
-                                    snackMessage = pinChangedMsg
+                                    scope.launch {
+                                        // Success only once the new PIN is on disk; otherwise the old one still opens.
+                                        val landed = viewModel.changePin(newPin)
+                                        snackMessage = if (landed) pinChangedMsg else pinChangeFailedMsg
+                                    }
                                 } else {
                                     pinError = pinsMismatchMsg
                                     pinInput = ""

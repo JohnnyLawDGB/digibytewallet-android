@@ -511,9 +511,12 @@ class PinRateLimitTest {
             stoppedAt(stopAt, store) { restartedOver(it, c).verifyPin(wrong) }
             val count = store.getInt("pin_fail_count", -1)
             val owed = restartedOver(store, c).isWipePending()
+            // The wipe entry's count lands before its compare and the owed wipe after a mismatch, so a stop
+            // leaves it not counted, or counted (with the owed wipe, or before it): never owed uncounted, and
+            // a counted entry is never compared again without a new write (re-review item 1).
             assertTrue(
                 "stopped at write $stopAt: $count failures counted, wipe owed $owed",
-                (count == PinManager.WIPE_THRESHOLD - 1 && !owed) || (count == PinManager.WIPE_THRESHOLD && owed),
+                (count == PinManager.WIPE_THRESHOLD - 1 && !owed) || count == PinManager.WIPE_THRESHOLD,
             )
         }
     }

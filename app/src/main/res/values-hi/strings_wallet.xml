@@ -540,6 +540,7 @@
     <string name="sec_autolock_30m">30 मिनट</string>
     <string name="sec_autolock_custom">कस्टम</string>
     <string name="sec_pin_changed">PIN सफलतापूर्वक बदला गया</string>
+    <string name="sec_pin_change_failed">नया PIN सहेजा नहीं जा सका। आपका पुराना PIN अभी भी सक्रिय है।</string>
     <string name="sec_pins_mismatch">PIN मेल नहीं खाते</string>
     <string name="sec_biometric_required">बायोमेट्रिक प्रमाणीकरण आवश्यक</string>
     <string name="did_logged_in">आप अब %1$s में लॉग इन हैं</string>

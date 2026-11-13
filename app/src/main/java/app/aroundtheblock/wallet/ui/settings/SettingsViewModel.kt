@@ -391,13 +391,12 @@ class SettingsViewModel @Inject constructor(
      *  unlock screen does — a brute-forcer can't bypass the limit via Settings. */
     fun verifyPin(pin: String): PinVerifyResult = pinManager.verifyPin(pin)
 
-    fun changePin(newPin: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            // A write that did not land keeps the old PIN (PinStoreWriteException); never a crash.
-            runCatching { pinManager.setPin(newPin) }.onFailure {
-                android.util.Log.e("SettingsViewModel", "PIN change did not persist (${it.javaClass.simpleName}); the old PIN stays")
-            }
-        }
+    /** Sets [newPin]. True only when it landed on disk; false leaves the old PIN active (a
+     *  PinStoreWriteException, or a store that cannot be used), and the screen says so. */
+    suspend fun changePin(newPin: String): Boolean = withContext(Dispatchers.IO) {
+        runCatching { pinManager.setPin(newPin) }.onFailure {
+            android.util.Log.e("SettingsViewModel", "PIN change did not persist (${it.javaClass.simpleName}); the old PIN stays")
+        }.isSuccess
     }
 
     // ── Wipe-after-N (destructive, opt-in, default OFF) ───────────────────────

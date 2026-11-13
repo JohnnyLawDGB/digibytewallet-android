@@ -529,6 +529,7 @@
     <string name="sec_autolock_30m">30 minutes</string>
     <string name="sec_autolock_custom">Personnalisé</string>
     <string name="sec_pin_changed">Code PIN modifié avec succès</string>
+    <string name="sec_pin_change_failed">Le nouveau code PIN n’a pas pu être enregistré. Votre ancien code PIN reste actif.</string>
     <string name="sec_pins_mismatch">Les codes PIN ne correspondent pas</string>
     <string name="sec_biometric_required">Authentification biométrique requise</string>
     <string name="did_logged_in">Vous êtes maintenant connecté à %1$s</string>

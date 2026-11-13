@@ -537,6 +537,7 @@
     <string name="sec_autolock_30m">30 分钟</string>
     <string name="sec_autolock_custom">自定义</string>
     <string name="sec_pin_changed">PIN 码修改成功</string>
+    <string name="sec_pin_change_failed">无法保存新的 PIN 码。您原来的 PIN 码仍然有效。</string>
     <string name="sec_pins_mismatch">PIN 码不一致</string>
     <string name="sec_biometric_required">需要生物识别认证</string>
     <string name="did_logged_in">您已登录 %1$s</string>

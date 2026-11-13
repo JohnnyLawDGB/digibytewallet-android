@@ -376,7 +376,8 @@ class PinManager internal constructor(
      *  gone): the caller must not treat the PIN as cleared ([app.aroundtheblock.wallet.core.WalletManager.wipeThenReleasePin]
      *  reports the wipe as not verified, and it is finished at the next launch). */
     fun clearPin() {
-        store.clear()
+        store.clear() // throws when it did not land: the latch stays
+        wipeOwedInProcess = false
     }
 
     // ── Verification + rate-limit ─────────────────────────────────────────────
@@ -402,12 +403,19 @@ class PinManager internal constructor(
      * compare leaves the entry counted as a failure (fail closed). A hasher that cannot run puts every
      * key it touched back exactly as it was (best effort; left counted if that write fails).
      *
-     * The one exception is the entry that would reach wipe-after-N: its mismatch is a wipe whether or
-     * not anything persists, so it is compared first and its count and owed wipe are one write after
-     * (a count at the threshold always has its owed wipe; a right PIN there is never wiped by a stop).
+     * The entry that reaches wipe-after-N is no exception: its count is written before the compare
+     * too, WITHOUT the owed-wipe flag, so a right PIN stopped mid-compare is never wiped, and a store
+     * that cannot take that write gets no compare (Unavailable). The owed wipe is written after a
+     * mismatch; if that write fails, [isWipePending] still answers true in this process (an in-process
+     * latch) until [clearWipePending] lands, so the unlock screen keeps holding for the wipe rather
+     * than taking another PIN.
+     *
+     * Synchronized: the count read, its write and the compare are one step, so two entries racing
+     * (the unlock screen and a spend dialog, say) cannot both be compared against one count.
      *
      * The wall clock decides nothing here: setting it neither ends, lengthens nor starts a cooldown.
      */
+    @Synchronized
     fun verifyPin(pin: String): PinVerifyResult {
         // 1. Cooldown check — runs BEFORE the compare; leaks nothing about the PIN.
         val left = cooldownLeftMs()
@@ -415,12 +423,12 @@ class PinManager internal constructor(
             return PinVerifyResult.LockedOut(clock.wallMs() + left)
         }
 
-        // 2. The failure this entry would be, on disk before the compare (not for the wipe entry).
+        // 2. The failure this entry would be, on disk before the compare.
         val count = store.getInt(KEY_FAIL_COUNT, 0) + 1
         val wipes = isWipeAfterNEnabled() && count >= WIPE_THRESHOLD
         val cooldown = if (wipes) 0L else cooldownMsForFailCount(count)
         val undo = undoOf(KEY_FAIL_COUNT, KEY_COOLDOWN_LEFT_MS, KEY_COOLDOWN_MEASURED_AT, KEY_COOLDOWN_BOOT)
-        if (!wipes) {
+        run {
             val failure = PinStoreEdit().putInt(KEY_FAIL_COUNT, count)
             if (cooldown > 0L) failure.withCooldown(cooldown, clock.sinceBootMs(), clock.bootCount())
             try {
@@ -443,24 +451,23 @@ class PinManager internal constructor(
             }
             PinCheck.UNAVAILABLE -> {
                 // Nothing was checked, so nothing is counted: what step 2 wrote goes back as it was.
-                if (!wipes) {
-                    try { store.commit(undo) } catch (e: PinStoreWriteException) {
-                        android.util.Log.e("PinManager", "the count of an unchecked PIN could not be put back; it stays counted")
-                    }
+                try { store.commit(undo) } catch (e: PinStoreWriteException) {
+                    android.util.Log.e("PinManager", "the count of an unchecked PIN could not be put back; it stays counted")
                 }
                 return PinVerifyResult.Unavailable
             }
             PinCheck.MISMATCH -> Unit
         }
 
-        // 4. Failure — already counted, with its cooldown; the wipe entry's count and owed wipe now.
+        // 4. Failure — already counted, with its cooldown.
         if (wipes) {
-            // One write, a backstop so a kill between here and the caller's wipe still completes the
-            // wipe on next launch. Not landed: the caller wipes anyway (fail closed).
+            // The owed wipe: a backstop so a kill between here and the caller's wipe still completes the
+            // wipe on next launch. The latch holds it in this process whether or not the write lands.
+            wipeOwedInProcess = true
             try {
-                store.commit(PinStoreEdit().putInt(KEY_FAIL_COUNT, count).putBoolean(KEY_WIPE_PENDING, true))
+                store.putBoolean(KEY_WIPE_PENDING, true)
             } catch (e: PinStoreWriteException) {
-                android.util.Log.e("PinManager", "the owed wipe did not persist; the wipe goes ahead")
+                android.util.Log.e("PinManager", "the owed wipe did not persist; held in this process, the wipe goes ahead")
             }
             return PinVerifyResult.ShouldWipe
         }
@@ -593,7 +600,11 @@ class PinManager internal constructor(
 
     /** True if [verifyPin] returned [PinVerifyResult.ShouldWipe] but the caller's
      *  wipe has not yet completed (set atomically, honored at startup). */
-    fun isWipePending(): Boolean = store.getBoolean(KEY_WIPE_PENDING, false)
+    fun isWipePending(): Boolean = wipeOwedInProcess || store.getBoolean(KEY_WIPE_PENDING, false)
+
+    /** Set by a [PinVerifyResult.ShouldWipe]; cleared only by a [clearWipePending] or [clearPin] that
+     *  landed. Keeps a wipe owed in this process when its flag could not be written. */
+    @Volatile private var wipeOwedInProcess = false
 
     /**
      * Whether a wipe is owed, as launch asks it before any screen exists (4.1.2 row 23). A store
@@ -626,7 +637,8 @@ class PinManager internal constructor(
      *  [clearPin] also clears it — this is for the startup path that wipes the
      *  wallet but recreates a fresh pin store.) */
     fun clearWipePending() {
-        store.remove(KEY_WIPE_PENDING)
+        store.remove(KEY_WIPE_PENDING) // throws when it did not land: the latch stays
+        wipeOwedInProcess = false
     }
 
     // ── Hashing (unchanged crypto) ────────────────────────────────────────────
