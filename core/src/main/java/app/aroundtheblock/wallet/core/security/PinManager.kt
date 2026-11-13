@@ -53,7 +53,8 @@ sealed interface PinVerifyResult {
 }
 
 /**
- * Minimal key/value abstraction over the `dgb_pin_store` EncryptedSharedPreferences.
+ * Minimal key/value abstraction over the PIN store: the sealed file [FilePinStore] (PIN-STORE), or the
+ * old `dgb_pin_store` EncryptedSharedPreferences for a session whose migration could not be done.
  *
  * Extracting this seam keeps the rate-limit state machine PURE-JVM unit-testable
  * (no Robolectric / AndroidX Security in the test path — the core module has
@@ -174,8 +175,8 @@ internal class DeviceClock(private val resolver: ContentResolver?) : PinClock {
 }
 
 /**
- * The PIN store when `dgb_pin_store` cannot be opened (4.1.2 row 23): a Keystore or keyset fault made
- * EncryptedSharedPreferences.create throw inside the Hilt-built [PinManager], so the activity died at
+ * The PIN store when it cannot be opened (4.1.2 row 23; PIN-STORE: also a sealed file that is there and
+ * cannot be read): a Keystore or keyset fault made EncryptedSharedPreferences.create throw inside the Hilt-built [PinManager], so the activity died at
  * injection on every launch. Every operation refuses -- it is never read as "no PIN", which would let
  * anyone holding the phone set a new one -- and the store on disk is left exactly as it is (deleting
  * it would clear `pin_wipe_pending` and turn the fault into a PIN reset).
@@ -196,46 +197,67 @@ internal object UnavailablePinStore : PinStore {
     override fun commit(edit: PinStoreEdit) = refuse()
 }
 
-/** Production [PinStore] backed by the hardware-keyed `dgb_pin_store`
- *  EncryptedSharedPreferences. Writes use `commit()` (synchronous) so the
- *  rate-limit counters are durable against a force-stop between attempts —
- *  an async `apply()` could be dropped by a process kill, resetting the count. */
-private class EncryptedPrefsPinStore(context: Context) : PinStore {
-    private val prefs: SharedPreferences
+/**
+ * The OLD PIN store, the `dgb_pin_store` EncryptedSharedPreferences (androidx.security-crypto, an alpha
+ * library). PIN-STORE: it is no longer the store. [PinStoreMigration] reads it once, copies it into the
+ * sealed file and deletes it; it serves a session only when that migration could not be done, and is
+ * then tried again at the next launch. Writes use `commit()` (synchronous), as they always did.
+ */
+internal class LegacyEncryptedPrefsPinStore(private val context: Context) : LegacyPinStore {
 
-    init {
-        val masterKey = MasterKey.Builder(context)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
-        prefs = EncryptedSharedPreferences.create(
-            context,
-            "dgb_pin_store",
-            masterKey,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-        )
+    override fun exists(): Boolean {
+        val dir = java.io.File(context.applicationInfo.dataDir, "shared_prefs")
+        return java.io.File(dir, "$NAME.xml").exists() || java.io.File(dir, "$NAME.xml.bak").exists()
     }
 
-    override fun getInt(key: String, def: Int): Int = prefs.getInt(key, def)
-    override fun getLong(key: String, def: Long): Long = prefs.getLong(key, def)
-    override fun getString(key: String): String? = prefs.getString(key, null)
-    override fun getBoolean(key: String, def: Boolean): Boolean = prefs.getBoolean(key, def)
-    override fun contains(key: String): Boolean = prefs.contains(key)
-    override fun putInt(key: String, value: Int) { prefs.edit().putInt(key, value).commit() }
-    override fun putLong(key: String, value: Long) { prefs.edit().putLong(key, value).commit() }
-    override fun putString(key: String, value: String) { prefs.edit().putString(key, value).commit() }
-    override fun putBoolean(key: String, value: Boolean) { prefs.edit().putBoolean(key, value).commit() }
-    override fun remove(key: String) { prefs.edit().remove(key).commit() }
-    override fun clear() { prefs.edit().clear().commit() }
+    override fun open(): LegacyPinStore.Opened = Opened(context)
 
-    override fun commit(edit: PinStoreEdit) {
-        val editor = prefs.edit()
-        edit.removals.forEach { editor.remove(it) }
-        edit.ints.forEach { (key, value) -> editor.putInt(key, value) }
-        edit.longs.forEach { (key, value) -> editor.putLong(key, value) }
-        edit.booleans.forEach { (key, value) -> editor.putBoolean(key, value) }
-        edit.strings.forEach { (key, value) -> editor.putString(key, value) }
-        editor.commit()
+    override fun delete(): Boolean = context.deleteSharedPreferences(NAME) || !exists()
+
+    private class Opened(context: Context) : LegacyPinStore.Opened {
+        private val prefs: SharedPreferences
+
+        init {
+            val masterKey = MasterKey.Builder(context)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
+            prefs = EncryptedSharedPreferences.create(
+                context,
+                NAME,
+                masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            )
+        }
+
+        // EncryptedSharedPreferences.getAll() leaves out its own keyset entries.
+        override fun all(): Map<String, Any?> = prefs.all
+
+        override fun getInt(key: String, def: Int): Int = prefs.getInt(key, def)
+        override fun getLong(key: String, def: Long): Long = prefs.getLong(key, def)
+        override fun getString(key: String): String? = prefs.getString(key, null)
+        override fun getBoolean(key: String, def: Boolean): Boolean = prefs.getBoolean(key, def)
+        override fun contains(key: String): Boolean = prefs.contains(key)
+        override fun putInt(key: String, value: Int) { prefs.edit().putInt(key, value).commit() }
+        override fun putLong(key: String, value: Long) { prefs.edit().putLong(key, value).commit() }
+        override fun putString(key: String, value: String) { prefs.edit().putString(key, value).commit() }
+        override fun putBoolean(key: String, value: Boolean) { prefs.edit().putBoolean(key, value).commit() }
+        override fun remove(key: String) { prefs.edit().remove(key).commit() }
+        override fun clear() { prefs.edit().clear().commit() }
+
+        override fun commit(edit: PinStoreEdit) {
+            val editor = prefs.edit()
+            edit.removals.forEach { editor.remove(it) }
+            edit.ints.forEach { (key, value) -> editor.putInt(key, value) }
+            edit.longs.forEach { (key, value) -> editor.putLong(key, value) }
+            edit.booleans.forEach { (key, value) -> editor.putBoolean(key, value) }
+            edit.strings.forEach { (key, value) -> editor.putString(key, value) }
+            editor.commit()
+        }
+    }
+
+    private companion object {
+        const val NAME = "dgb_pin_store"
     }
 }
 
@@ -268,9 +290,11 @@ class PinManager internal constructor(
     private val clock: PinClock = DeviceClock(resolver = null),
 ) {
 
-    /** Production constructor used by Hilt — backs the store with EncryptedSharedPreferences. A store
-     *  that cannot be opened becomes [UnavailablePinStore] rather than a crash at injection. */
-    constructor(context: Context) : this(openStore { EncryptedPrefsPinStore(context) }, clock = DeviceClock(context.contentResolver))
+    /** Production constructor used by Hilt — the sealed PIN store file (PIN-STORE), migrated from the old
+     *  EncryptedSharedPreferences on first open. A store that cannot be opened -- the file there and
+     *  unreadable, or the old store failing to open -- becomes [UnavailablePinStore] rather than a crash
+     *  at injection, and never "no PIN". */
+    constructor(context: Context) : this(openStore { PinStoreMigration.open(context) }, clock = DeviceClock(context.contentResolver))
 
     /** False when the PIN store could not be opened: nothing can be checked, so nothing is unlocked
      *  and no new PIN can be set. The app shows the PIN-store-unavailable screen instead. */

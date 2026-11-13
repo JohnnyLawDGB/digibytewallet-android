@@ -285,7 +285,7 @@ All JNI functions follow: `Java_io_digibyte_core_bridge_NativeBridge_<methodName
 - `dgb_bloom_peers` — cached bloom peer list from seeder API
 - `dgb_dandelion` — `enabled` flag for Dandelion++ stem submission (default off / opt-in)
 - `dgb_dandelion_peers` — cached Dandelion-capable peer list from seeder
-- `dgb_pin_store` — EncryptedSharedPreferences for PIN hash
+- `dgb_pin_store` — the OLD EncryptedSharedPreferences PIN store (androidx.security-crypto alpha); since PIN-STORE it is read once, migrated into `noBackupFilesDir/dgb_pin_store.bin` (AES-256-GCM under Keystore alias `dgb_pin_store_key`, `PinStoreMigration` in `core/security/FilePinStore.kt`) and deleted. The Hub JWT (`dgb_hub_session`, `HubTokenStore`) still uses EncryptedSharedPreferences
 - `dgb_price` — `price_fetch_enabled`, Settings → Display → Show prices (default on; off: no price request, no fiat figure, cached price dropped). Survives a wipe or restore, like the own node and the balance mask (owner decision 2026-11-09); the wipe drops only the cached price (Room)
 - `dgb_price<net>` — also `display_currency` (the `DisplayCurrency` enum name), moved out of `dgb_sync_data` so a wipe, a restore and the crash-loop breaker keep it (owner decision 2026-11-12, same on iOS). `core/settings/DisplayCurrencyPrefs` moves an old value before any path clears the sync blob
 
