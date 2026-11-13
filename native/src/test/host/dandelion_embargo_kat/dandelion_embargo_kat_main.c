@@ -2,17 +2,19 @@
 // draw, the fluff decision at the deadline (on whichever manager is current), the re-arm wait,
 // which embargoes are pending, and the stranded-send sweep's spare of a pending one.
 //
-// Every expectation but the re-arm wait's is fixed outside the header: the delay vectors file is
-// Android's arithmetic computed by vectors/dandelion-embargo/generate.py, the boundary sweep below
-// recomputes Android's expression in this file's own double arithmetic, and the rest are literals
-// carried from DandelionBroadcastPolicyTest.kt (digibytewallet-android v4.1.3) or from
-// Broadcaster.kt, jni_transaction.c and SyncService.kt's behaviour, cited at each case.
+// Every expectation but the wall-clock deadline's and the re-arm wait's is fixed outside the
+// header: the delay vectors file is Android's arithmetic computed by
+// vectors/dandelion-embargo/generate.py, the boundary sweep below recomputes Android's expression
+// in this file's own double arithmetic, and the rest are literals carried from
+// DandelionBroadcastPolicyTest.kt (digibytewallet-android v4.1.3) or from Broadcaster.kt,
+// jni_transaction.c and SyncService.kt's behaviour, cited at each case.
 //
-// The re-arm wait (BRDandelionEmbargoRemainingMs: rearm_wait, rearm_clock_set_back_is_capped and
-// the "past due" check in deadline_step_after_a_teardown) has no Android counterpart: Android's
-// timer is one coroutine delay() that is never asked again (Broadcaster.kt armEmbargo). Those
-// cases test the header's own rule, for a platform whose timers are suspended with the app (iOS):
-// a wait asked again never exceeds the window, and one already due runs at once.
+// The wall-clock deadline and the re-arm wait (BRDandelionEmbargoDeadlineMs and
+// BRDandelionEmbargoRemainingMs: deadline_ms, rearm_wait, rearm_clock_set_back_is_capped, and the
+// deadline and "past due" checks in deadline_step_after_a_teardown) have no Android counterpart:
+// Android keeps no deadline, only one coroutine delay() that is never asked again (Broadcaster.kt
+// armEmbargo). Those cases test the header's own rule, for a platform whose timers are suspended
+// with the app (iOS): a wait asked again never exceeds the window, and one already due runs at once.
 //
 //   argv[1]  path of vectors/dandelion-embargo/vectors.txt
 //
