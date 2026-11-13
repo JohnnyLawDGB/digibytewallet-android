@@ -70,4 +70,12 @@ class OwnPromptStopLockGateTest {
         val plain = body(src(biometric), "suspend fun authenticate(")
         assertTrue(!plain.contains("OwnCredentialPromptExemption"))
     }
+
+    @Test fun `seed-view biometric gate's negative button reads Cancel`() {
+        val text = src(security)
+        val call = text.substring(text.indexOf("val result = biometricAuth.authenticate("))
+            .substringBefore(")\n")
+        assertTrue(call, call.contains("negativeButtonText = cancelLabel"))
+        assertTrue(text.contains("val cancelLabel = stringResource(R.string.common_cancel)"))
+    }
 }

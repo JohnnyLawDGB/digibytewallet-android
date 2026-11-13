@@ -64,6 +64,8 @@ fun SecuritySettingsScreen(
     val wipeEnabledMsg = stringResource(R.string.sec_wipe_after_enabled, PinManager.WIPE_THRESHOLD)
     val authViewPhraseMsg = stringResource(R.string.sec_auth_view_phrase)
     val appName = stringResource(R.string.app_name_display)
+    // SEED-VIEW-AUTH: the seed-view biometric gate's negative button cancels; it says so.
+    val cancelLabel = stringResource(R.string.common_cancel)
     val incorrectPinMsg = stringResource(R.string.sec_incorrect_pin)
     val context = LocalContext.current
     val activity = context as? FragmentActivity
@@ -415,7 +417,8 @@ fun SecuritySettingsScreen(
                                                 val result = biometricAuth.authenticate(
                                                     activity,
                                                     title = appName,
-                                                    subtitle = authViewPhraseMsg
+                                                    subtitle = authViewPhraseMsg,
+                                                    negativeButtonText = cancelLabel
                                                 )
                                                 if (result is BiometricResult.Success) {
                                                     SeedViewGate.grant()
