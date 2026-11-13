@@ -25,6 +25,20 @@
 //       never-requested band. The park may only move the cursor back (guard: a cursor above the
 //       checkpoint still parks at it).
 //
+//   (d) ABANDONED AT START (CF-ABANDONED-AT-START).  A band the ledger carries at or below its own
+//       start (abandonedBelow <= start, left by a re-Init at or inside the band: the cfheaders
+//       floor snap, the floor re-anchor, and a re-Init strictly inside the band, which is the
+//       corroborated rebuild's and the arming call's geometry) can never be retired by this ledger:
+//       a ledger never scans below its start, and BRCFScanLedgerRetireAbandonedTo refuses any
+//       floor below it. Only a re-Init below the band (the rescan) clears it. The backfill must
+//       therefore ask for nothing on its behalf; it used to send a getheaders on every tick, for
+//       ever. Guards (every arm): such a band is never retired, even with headers resident below
+//       it (the banner stays honest); a band ABOVE the start is still backfilled and retired.
+//       And a resident floor BELOW the start is clamped to the start before Retire (which refuses
+//       a sub-start floor): the band is retired to the start, every height of it resident, and the
+//       backfill then idles; it used to re-send getheaders on every tick (guard: a floor above the
+//       start still retires only down to that floor).
+//
 // Approach: #include BRPeer.c (private BRPeerContext, to mark a synthetic peer Connected) and
 // BRPeerManager.c (file statics) into this unit, the same pattern as cf_checkpoint_neverbrick_kat.
 // No sockets: BRPeerNew peers have socket -1, so every send no-ops.
@@ -40,6 +54,7 @@
 #include <stdlib.h>
 #include <pthread.h>
 
+#define BRPEER_HEADERS_KAT 1   // per-peer getheaders counter, for the (d) backfill cases
 #define _dummyThreadCleanup _dummyThreadCleanup_brpeer
 #include "BRPeer.c"
 #undef _dummyThreadCleanup
@@ -426,6 +441,196 @@ static void case_park_still_moves_back(void)
     parkFxFree(&f);
 }
 
+// ===================================================================================== (d) ====
+
+#define BACKFILL_TICKS 5u
+
+static size_t getheadersSent(BRPeer *p) { return ((BRPeerContext *)p)->katGetheadersCount; }
+
+// Runs BACKFILL_TICKS backfill steps (the lock must NOT be held) and returns the heights retired.
+static uint32_t backfillTicks(BRPeerManager *m)
+{
+    uint32_t retired = 0;
+    for (uint32_t i = 0; i < BACKFILL_TICKS; i++) retired += BRPeerManagerBackfillAbandonedBandStep(m);
+    return retired;
+}
+
+// Makes headers resident for [BAND_FLOOR - n .. BAND_FLOOR - 1], linked under the fixture's bottom
+// block, so the resident block floor drops to BAND_FLOOR - n.
+static void residentBelowBand(BRPeerManager *m, uint32_t n)
+{
+    MGR_LOCK(m);
+    UInt256 want = u256_tag(BAND_FLOOR - 1, 77);   // what the bottom block's prevBlock points at
+    for (uint32_t i = 1; i <= n; i++) {
+        uint32_t h = BAND_FLOOR - i;
+        UInt256 prev = (i == n) ? u256_tag(h - 1, 78) : u256_tag(h - 1, 77);
+        BRMerkleBlock *b = mkBlock(h, want, prev, 1700000000u - 15u * i);
+        BRSetAdd(m->blocks, b);
+        want = prev;
+    }
+    m->floorMemoValid = 0;
+    check(_BRPeerManagerBlockFloor(m) == BAND_FLOOR - n, "setup: headers are resident below the band");
+    MGR_UNLOCK(m);
+}
+
+// The three entry points that leave a band at or below the ledger's start. Each returns with the
+// lock RELEASED and the ledger in the carried state.
+enum { AT_START_SNAP, AT_START_REANCHOR, AT_START_INSIDE };
+
+static void atStartFxInit(BandFx *f, int entry)
+{
+    bandFxInit(f, /*withChain=*/entry == AT_START_REANCHOR);   // lock HELD, band [BAND_START .. BAND_FLOOR-1]
+    BRPeerManager *m = f->m;
+    if (entry == AT_START_SNAP) {
+        _BRPeerManagerRequestNextCFHeaders(m, f->p, /*isConvoyAdvance=*/0);
+    } else if (entry == AT_START_REANCHOR) {
+        check(_BRPeerManagerReanchorAtFloorLocked(m, /*force=*/1) == 1, "setup: the floor re-anchor ran");
+    } else {
+        _BRPeerManagerReinitCFLedgerLocked(m, BAND_FLOOR - 1000);   // strictly inside the band
+    }
+    uint32_t start = BRCFScanLedgerStartHeight(&m->cfLedger);
+    uint32_t below = m->cfLedger.abandonedBelow;
+    MGR_UNLOCK(m);
+    check(below > 0 && below <= start, "setup: the band is carried at or below the ledger's start");
+    ((BRPeerContext *)f->p)->katGetheadersCount = 0;
+}
+
+static void atStartIdle(int entry, const char *inv)
+{
+    BandFx f; atStartFxInit(&f, entry);
+    uint32_t before = BRPeerManagerAbandonedBelow(f.m);
+    uint32_t retired = backfillTicks(f.m);
+    check(retired == 0 && BRPeerManagerAbandonedBelow(f.m) == before,
+          "the carried band is not retired (its heights were never scanned)");
+    printf("  info: %zu getheaders over %u backfill ticks\n", getheadersSent(f.p), BACKFILL_TICKS);
+    check(getheadersSent(f.p) == 0, inv);
+    bandFxFree(&f);
+}
+
+static void case_backfill_idle_after_floor_snap(void)
+{
+    atStartIdle(AT_START_SNAP,
+                "floor snap: the backfill sends no getheaders for a band this ledger can never retire");
+}
+
+static void case_backfill_idle_after_floor_reanchor(void)
+{
+    atStartIdle(AT_START_REANCHOR,
+                "floor re-anchor: the backfill sends no getheaders for a band this ledger can never retire");
+}
+
+static void case_backfill_idle_after_inside_reinit(void)
+{
+    atStartIdle(AT_START_INSIDE,
+                "re-Init inside a band: the backfill sends no getheaders for a band this ledger can never retire");
+}
+
+// GUARD (every arm): with headers resident below a carried band, the band is still not retired.
+// Those heights lie below the ledger's start and were never scanned; retiring them would tell the
+// app they had been. The carried state is written directly (abandonedBelow == start, as the snap,
+// the re-anchor and an inside re-Init leave it, and abandonedBelow < start, as the reorg rebuild can),
+// so the guard holds in arms that compile the carry itself out.
+static void case_backfill_never_retires_band_at_start(void)
+{
+    uint32_t bands[2] = { BAND_FLOOR, BAND_FLOOR - 1000 };
+    for (int i = 0; i < 2; i++) {
+        BandFx f; bandFxInit(&f, /*withChain=*/0);   // lock HELD
+        BRCFScanLedgerInit(&f.m->cfLedger, BAND_FLOOR);
+        f.m->cfLedger.abandonedBelow = bands[i];
+        MGR_UNLOCK(f.m);
+        residentBelowBand(f.m, 1500);
+        uint32_t retired = backfillTicks(f.m);
+        check(retired == 0 && BRPeerManagerAbandonedBelow(f.m) == bands[i],
+              "a band at or below the ledger's start is never retired, even with headers resident below it");
+        bandFxFree(&f);
+    }
+}
+
+// GUARD (every arm): a band ABOVE the ledger's start is still backfilled (one getheaders per tick
+// while no header helps) and retired down to the resident floor once headers arrive.
+static void case_backfill_band_above_start_still_retires(void)
+{
+    BandFx f; bandFxInit(&f, /*withChain=*/0);
+    uint32_t start = BRCFScanLedgerStartHeight(&f.m->cfLedger);
+    MGR_UNLOCK(f.m);
+    check(start == BAND_START && f.m->cfLedger.abandonedBelow == BAND_FLOOR, "setup: the band sits above the start");
+    ((BRPeerContext *)f.p)->katGetheadersCount = 0;
+    uint32_t retired = backfillTicks(f.m);
+    check(retired == 0 && getheadersSent(f.p) == BACKFILL_TICKS,
+          "a band above the start is chased with one getheaders per tick");
+    residentBelowBand(f.m, 10);
+    retired = BRPeerManagerBackfillAbandonedBandStep(f.m);
+    check(retired == 10 && BRPeerManagerAbandonedBelow(f.m) == BAND_FLOOR - 10,
+          "a band above the start is retired down to the resident floor, and no further");
+    check(BRCFScanLedgerLowestNeededHeight(&f.m->cfLedger) == BAND_FLOOR - 10,
+          "the retired heights are requested again (they are scanned, not assumed)");
+    bandFxFree(&f);
+}
+
+// The ledger re-anchored just under the resident floor (start = BAND_FLOOR - 5) with a band
+// [start .. BAND_FLOOR-1] surfaced on it. Returns with the lock RELEASED.
+static void startBetweenFxInit(BandFx *f)
+{
+    bandFxInit(f, /*withChain=*/0);   // lock HELD
+    BRPeerManager *m = f->m;
+    BRCFScanLedgerInit(&m->cfLedger, BAND_FLOOR - 5);
+    _BRPeerManagerSurfaceUnscannableLocked(m, BAND_FLOOR - 5, BAND_FLOOR, "kat: band above a mid-floor start");
+    check(m->cfLedger.abandonedBelow == BAND_FLOOR && BRCFScanLedgerStartHeight(&m->cfLedger) == BAND_FLOOR - 5,
+          "setup: a band [start .. BAND_FLOOR-1] sits just above the ledger's start");
+    MGR_UNLOCK(m);
+    ((BRPeerContext *)f->p)->katGetheadersCount = 0;
+}
+
+// RED (CF_RETIRE_FLOOR_CLAMP_UNFIXED): headers come back below the ledger's start (floor
+// BAND_FLOOR - 10 < start). The band is retired down to the start, every height of it resident,
+// and the backfill then idles; unclamped, Retire refused the sub-start floor on every tick.
+static void case_backfill_retires_to_start_when_floor_below_start(void)
+{
+    BandFx f; startBetweenFxInit(&f);
+    residentBelowBand(f.m, 10);
+    uint32_t retired = backfillTicks(f.m);
+    uint32_t start = BRCFScanLedgerStartHeight(&f.m->cfLedger);
+    printf("  info: retired %u, %zu getheaders over %u backfill ticks\n", retired, getheadersSent(f.p), BACKFILL_TICKS);
+    check(retired == 5 && BRPeerManagerAbandonedBelow(f.m) == start,
+          "floor below start: the band is retired down to the ledger's start, never below it");
+    check(BRCFScanLedgerLowestNeededHeight(&f.m->cfLedger) == start,
+          "the retired heights are requested again from the start (scanned, not assumed)");
+    check(getheadersSent(f.p) == 0, "once at the start, the backfill sends no getheaders");
+    bandFxFree(&f);
+}
+
+// GUARD (every arm): headers resident only part-way down the band (floor BAND_FLOOR - 3, above the
+// start). The band is retired exactly to that floor; the heights under it, whose headers are not
+// resident, stay condemned.
+static void case_backfill_retire_stops_at_resident_floor(void)
+{
+    BandFx f; startBetweenFxInit(&f);
+    residentBelowBand(f.m, 3);
+    uint32_t retired = BRPeerManagerBackfillAbandonedBandStep(f.m);
+    check(retired == 3 && BRPeerManagerAbandonedBelow(f.m) == BAND_FLOOR - 3,
+          "a band is retired only down to the resident header floor, not to the start");
+    bandFxFree(&f);
+}
+
+// GUARD (every arm): the fork-log quieting is scoped to a live backfill. A run sets
+// cfBackfillQuietBelow to its target; a re-Init below the band (the rescan) zeroes it, so a real
+// fork below the old target logs "chain fork reached height" again.
+static void case_backfill_quiet_below_resets(void)
+{
+    BandFx f; bandFxInit(&f, /*withChain=*/0);
+    MGR_UNLOCK(f.m);
+    BRPeerManagerBackfillAbandonedBandStep(f.m);
+    check(f.m->cfBackfillQuietBelow == BAND_FLOOR, "a backfill run quiets fork logs below its target");
+    MGR_LOCK(f.m);
+    _BRPeerManagerReinitCFLedgerLocked(f.m, BAND_START);   // a rescan from the band's low edge
+    uint32_t q = f.m->cfBackfillQuietBelow;
+    MGR_UNLOCK(f.m);
+    check(q == 0, "a re-Init below the band ends the quieting (real forks below the old target log again)");
+    BRPeerManagerBackfillAbandonedBandStep(f.m);
+    check(f.m->cfBackfillQuietBelow == 0 && f.m->cfBackfillTarget == 0, "with no band, no backfill state is left");
+    bandFxFree(&f);
+}
+
 typedef struct { const char *name; void (*fn)(void); } Case;
 static const Case CASES[] = {
     { "floor_memo_relayed_stub_replace",       case_floor_memo_relayed_stub_replace },
@@ -437,6 +642,14 @@ static const Case CASES[] = {
     { "park_never_jumps_past_requested",       case_park_never_jumps_past_requested },
     { "park_lagging_stops_at_chain_start",     case_park_lagging_stops_at_chain_start },
     { "park_still_moves_back",                 case_park_still_moves_back },
+    { "backfill_idle_after_floor_snap",        case_backfill_idle_after_floor_snap },
+    { "backfill_idle_after_floor_reanchor",    case_backfill_idle_after_floor_reanchor },
+    { "backfill_idle_after_inside_reinit",     case_backfill_idle_after_inside_reinit },
+    { "backfill_never_retires_band_at_start",  case_backfill_never_retires_band_at_start },
+    { "backfill_band_above_start_still_retires", case_backfill_band_above_start_still_retires },
+    { "backfill_retires_to_start_when_floor_below_start", case_backfill_retires_to_start_when_floor_below_start },
+    { "backfill_retire_stops_at_resident_floor", case_backfill_retire_stops_at_resident_floor },
+    { "backfill_quiet_below_resets",           case_backfill_quiet_below_resets },
 };
 
 int main(int argc, char **argv)
