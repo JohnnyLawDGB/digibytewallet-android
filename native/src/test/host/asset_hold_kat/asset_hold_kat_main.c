@@ -38,9 +38,8 @@
 //       scripts at all (exact: that reading is the Kotlin), and the pass to at least the model;
 //       sweep_agree holds the pass, with the core's classifier, to the model over wallets whose scripts
 //       the two readers read alike; sweep_union holds the pass to "at least the model and at least
-//       what the classifier holds" over any scripts. Where THE PROOF GUARD (BRAssetHold.h, the other
-//       reading) keeps a proof unread, the pass holds more than the Kotlin by design, and sweep_agree asks
-//       only at least the model there.
+//       what the classifier holds" over any scripts. THE PROOF GUARD (BRAssetHold.h, both readings) is
+//       the Kotlin's inputUnitsOrRemainderProof, ported as mInputUnitsOrRemainderProof, so these are exact.
 //    4. AGAINST THE EARLIER READING. one_rule_holds_no_less compares the shipped pass with the pass as it
 //       was before ASSET-HOLD-ONE-RULE (run.sh's fourth unit) over pseudo-random wallets.
 //
@@ -73,6 +72,11 @@ int asset_hold_kat_seams_off(const BRAssetHoldView *v, const BRAssetHoldClassifi
 // before ASSET-HOLD-ONE-RULE, the header reading the carrier itself and no proof guard. one_rule_holds_no_less compares the shipped pass with it.
 BRAssetHoldResult asset_hold_kat_second_rule(const BRAssetHoldView *v, BRAssetHoldWork *work, size_t workCap, BRUTXO *held,
                                              size_t heldCap);
+
+// A comparison arm of this file's own, not the header's: one_rule_holds_no_less exempts a release per
+// WALLET (any earlier-unread transaction in it) instead of per outpoint. one_rule_exemption_per_outpoint
+// must fail it.
+#define ASSET_HOLD_RED_KAT_EXEMPTION_PER_WALLET 262144
 
 static int FAILED = 0;
 
@@ -661,6 +665,32 @@ static OL mProven(UInt256 h, const MHeader *header)
     return none();
 }
 
+// inputUnitsOrRemainderProof(resolved, inputs, rowQuantity, proofUnits) (AssetManager.kt, ASSET-PROOF-GUARD-KT):
+//   if (resolved != null) return resolved
+//   val proven = proofUnits() ?: return null
+//   if (inputs == null) return null
+//   known = sum of rowQuantity(txid, vout) over inputs, rows <= 0 and missing skipped; Math.addExact
+//   overflow -> null
+//   return if (known == 0L || known == proven) proven else null
+// `inputs` NULL is the Kotlin's null list (an input that could not be read).
+static OL mInputUnitsOrRemainderProof(OL resolved, const MInput *inputs, size_t n, UInt256 h, const MHeader *header)
+{
+    OL proven, q;
+    int64_t known = 0;
+    size_t i;
+
+    if (resolved.has) return resolved;
+    proven = mProven(h, header);
+    if (! proven.has) return none();
+    if (! inputs) return none();
+    for (i = 0; i < n; i++) {
+        q = mRow(inputs[i].h, inputs[i].v);
+        if (! q.has || q.v <= 0) continue;
+        if (! _BRAssetAddUnits(known, q.v, &known)) return none();
+    }
+    return (known == 0 || known == proven.v) ? proven : none();
+}
+
 // A map String -> Long? (and a set, with `v` unused)
 typedef struct { UInt256 h; OL v; } MEnt;
 typedef struct { MEnt e[TMAX]; size_t n; } MMap;
@@ -820,7 +850,7 @@ static OL mInputTotalOf(UInt256 h)
     if (! mShape(h, &tx)) return none();
     if (! mInputsOf(h, inputs, &n)) return none();
     r = mResolveInputAssetUnits(inputs, n, MWALK.isAssetTx, mAnswerFromTotals, 0);
-    return r.has ? r : mProven(h, &tx.header);
+    return mInputUnitsOrRemainderProof(r, inputs, n, h, &tx.header);   // inputTotalOf
 }
 
 static void mResolveTotals(UInt256 root)
@@ -928,8 +958,10 @@ static void mPreSpendPass(const W *w)
             inputs[k].h = tx->inputs[k].txHash;
             inputs[k].v = tx->inputs[k].index;
         }
+        // inputUnitsOrRemainderProof(resolved = if (inputs.any { it == null }) null else ...,
+        //                           inputs = if (inputs.any { it == null }) null else readInputs, ...)
         inputUnits = anyNull ? none() : mResolveInputAssetUnits(inputs, tx->inCount, mPassIsAssetTx, mPassRowIsTargeted, 1);
-        if (! inputUnits.has) inputUnits = mProven(tx->txHash, &header);
+        inputUnits = mInputUnitsOrRemainderProof(inputUnits, anyNull ? NULL : inputs, tx->inCount, tx->txHash, &header);
         mapPut(&M_THIS_PASS, tx->txHash, inputUnits);
 
         hasFirst = mFirstNonOpReturn(tx, &first);
@@ -970,7 +1002,9 @@ static int mResolveRowTargets(UInt256 h, uint32_t vout)   // -1 null
         n++;
     }
     inputUnits = mResolveInputAssetUnits(inputs, n, mReplayIsAssetTx, mReplayRowIsTargeted, 1);
-    if (! inputUnits.has) inputUnits = mProven(h, &header);
+    // everyInputRead = lines != null && replayInputs.size == lines.size;
+    // inputUnitsOrRemainderProof(resolved, inputs = if (everyInputRead) replayInputs else null, ...)
+    inputUnits = mInputUnitsOrRemainderProof(inputUnits, (n == tx->inCount) ? inputs : NULL, n, h, &header);
     return mTargets(&header, (int32_t)vout, hasFirst, first, inputUnits, (int32_t)tx->outCount);
 }
 
@@ -1836,10 +1870,14 @@ static void walk_pass_record(void)
 
     resetPool();
     wreset(&WAL);
-    p = fx(0xa6); ours(p);
+    // T's total is unknown -- its input from P has no row and P carries a payload -- and T is proven. Every
+    // input of T is read and its known rows (ten) are what it assigns, so the proof is read
+    // (inputUnitsOrRemainderProof); an input that could not be read (an index past INT32_MAX, which this
+    // case used before ASSET-PROOF-GUARD-KT) would now leave the total unknown.
+    p = fx(0xa6); ours(p); out(p, TRANSFER_TEN_TO_OUTPUT_ZERO, 0); in(p, tid(0xad), 0);
     t = fx(0xa7); theirs(t); out(t, TRANSFER_TEN_TO_OUTPUT_ZERO, 0); theirs(t);
     in(t, tid(0xa8), 0); row(&WAL, tid(0xa8), 0, 10, 1);
-    in(t, p->tx.txHash, 0x80000000u);
+    in(t, p->tx.txHash, 0);
     prove(&WAL, t->tx.txHash);
     u = fx(0xa9); theirs(u); out(u, TRANSFER_TEN_TO_OUTPUT_ZERO, 0); ours(u);
     in(u, t->tx.txHash, 2); row(&WAL, t->tx.txHash, 2, 0, 1);
@@ -1854,8 +1892,17 @@ static void walk_pass_record(void)
     row(&WAL, u->tx.txHash, 2, 0, 0);
     r = pass(&WAL);
     model(&WAL);
+    // Every input of T is read, so the replay's walk reads T's proof as the pass did (before, T's input past
+    // INT32_MAX left the replay's walk with no total and held the row).
+    ck(r.status == BR_ASSET_HOLD_COMPLETE && ! heldIn(r, u->tx.txHash, 2) && sameAsModel(r),
+       "the replay's walk reads T's proof too: the row on the spender's change is free (the model agrees)");
+    // GUARD: with an input of T that cannot be read, the proof is read nowhere and the row is held.
+    in(t, p->tx.txHash, 0x80000000u);
+    r = pass(&WAL);
+    model(&WAL);
     ck(r.status == BR_ASSET_HOLD_COMPLETE && heldIn(r, u->tx.txHash, 2) && sameAsModel(r),
-       "the replay's own record has no total for it: the row on the spender's change is held (the model agrees)");
+       "an input of T that cannot be read: the proof is not read, the row on the spender's change is held (the model agrees)");
+    t->tx.inCount--;
 
     // one further: V spends U's change and is listed before U; the walk for V finds T recorded
     {
@@ -2943,39 +2990,12 @@ static int exactRoom(BRAssetHoldResult r, int readings)
     return (again.status != BR_ASSET_HOLD_COMPLETE || again.heldCount != r.heldCount) ? 1 : 0;
 }
 
-// Does THE PROOF GUARD (BRAssetHold.h) keep a proof unread anywhere in WAL: a proven transaction with a
-// carrier whose inputs' rows storing more than zero sum to neither zero nor what its instructions assign?
-// The pass then holds more than the Kotlin (the model) by design, and only at least the model is asked.
-static int proofGuarded(void)
-{
-    size_t i, k, r;
-
-    MW_WALLET = &WAL;
-    for (i = 0; i < WAL.provenN; i++) {
-        const BRTransaction *tx = mOutputsOf(WAL.proven[i]);
-        MHeader h;
-        int64_t assigned = 0, known = 0;
-
-        if (! tx || ! mAssetCarrier(tx, &h) ||
-            ! BRAssetAssignedUnits(h.h.operation, h.insts, h.h.instructionCount, &assigned)) continue;
-        for (k = 0; k < tx->inCount; k++) {
-            for (r = 0; r < WAL.rowN; r++) {
-                if (WAL.rows[r].n != tx->inputs[k].index || ! UInt256Eq(WAL.rows[r].txHash, tx->inputs[k].txHash)) continue;
-                if (WAL.rows[r].quantity > 0 && ! _BRAssetAddUnits(known, WAL.rows[r].quantity, &known)) return 1;
-                break;
-            }
-        }
-        if (known != 0 && known != assigned) return 1;
-    }
-    return 0;
-}
-
 // `readings` as passReading's: 0 the pass, 1 the decoder's reading alone. With 1 the pass too must hold
-// at least the model. With 0, a wallet where THE PROOF GUARD keeps a proof unread is held to at least the
-// model, every other to the model exactly.
+// at least the model. With 0 the pass is the model exactly: THE PROOF GUARD is the Kotlin's
+// inputUnitsOrRemainderProof in both, so the C pass and the Kotlin agree.
 static void sweepCase(const char *what, uint64_t seed, int any, const BRAssetHoldClassifier *c, int rounds, int readings)
 {
-    int round, wrong = 0, held = 0, guarded = 0;
+    int round, wrong = 0, held = 0;
 
     RNG = seed;
     for (round = 0; round < rounds; round++) {
@@ -2986,18 +3006,14 @@ static void sweepCase(const char *what, uint64_t seed, int any, const BRAssetHol
         r = passReading(&WAL, readings);
         model(&WAL);
         held += (int)r.heldCount;
-        if (! readings && proofGuarded()) {
-            guarded++;
-            if (! coversModel(r) && wrong++ < 5) ck(0, "%s, wallet %d: a proof the guard keeps unread: the pass holds at least the model", what, round);
-        }
-        else if (! sameAsModel(r) && wrong++ < 5)
+        if (! sameAsModel(r) && wrong++ < 5)
             ck(0, "%s, wallet %d: the %s (%s, %zu held) is the model (%zu held)", what, round, readings ? "decoder's reading" : "pass",
                st(r.status), r.heldCount, M_HELDN);
         if (readings && ! coversModel(pass(&WAL)) && wrong++ < 5) ck(0, "%s, wallet %d: the pass holds at least the model", what, round);
         if (exactRoom(r, readings) && wrong++ < 5) ck(0, "%s, wallet %d: a held buffer of the answer's size suffices", what, round);
     }
     ck(wrong == 0, "%s: %d wallets, the %s is the model in every one (%d not)", what, rounds, readings ? "decoder's reading" : "pass", wrong);
-    ck(held > rounds / 2, "%s: the wallets held outputs (%d; %d with a proof the guard keeps unread)", what, held, guarded);
+    ck(held > rounds / 2, "%s: the wallets held outputs (%d)", what, held);
 }
 
 static void sweep_decoder(void) { sweepCase("any scripts, the decoder alone", 0x51ULL, 1, &NEVER, 3000, 1); }
@@ -3087,7 +3103,8 @@ static void sweep_must_be_excluded(void)
 // and counted the input as carrying nothing). T spends that output and a row of ten, transfers nothing, and
 // its remainder is proven zero. The ten known units are a remainder whatever the proof says: T's last
 // output is held. The earlier reading held it because it knew a total of ten; the one rule's unknown total
-// must not let the proof release it. The decoder's reading alone is the Kotlin's (the model).
+// must not let the proof release it. The decoder's reading alone guards the proof too, as the Kotlin does
+// (ASSET-PROOF-GUARD-KT), and is the model's answer.
 static void prespend_proof_known_units(void)
 {
     Fx *f, *t;
@@ -3119,7 +3136,8 @@ static void prespend_proof_known_units(void)
     r = passReading(&WAL, 1);
     WAL.classifier = NULL;
     model(&WAL);
-    ck(sameAsModel(r) && ! heldIn(r, t->tx.txHash, 2), "the decoder's reading alone reads the proof, as the Kotlin does");
+    ck(sameAsModel(r) && heldIn(r, t->tx.txHash, 2),
+       "the decoder's reading alone guards the proof too, as the Kotlin's inputUnitsOrRemainderProof does: held, the model's answer");
     // GUARD: the guard reads the proof when the known units are what the instructions assign (none here).
     WAL.rows[0].quantity = 0;
     r = pass(&WAL);
@@ -3225,7 +3243,11 @@ static OneRule oneRuleCompare(int rounds, int plant, int report)
         }
         for (i = 0; i < was.heldCount; i++) {
             if (i != dropped && heldIn(now, oldHeld[i].hash, oldHeld[i].n)) continue;
+#if (ASSET_HOLD_UNFIXED & ASSET_HOLD_RED_KAT_EXEMPTION_PER_WALLET)
+            if (earlierUnread()) { releasedHere++; continue; }   // the per-wallet exemption r1 replaced
+#else
             if (ancestryEarlierUnread(oldHeld[i].hash)) { releasedHere++; continue; }
+#endif
             if (fewerHere++ == 0 && o.fewer < 5 && report)
                 ck(0, "wallet %d: the earlier reading held (%02x.., %u) and the one rule does not (%zu held before, %zu now)",
                    round, oldHeld[i].hash.u8[0], oldHeld[i].n, was.heldCount, now.heldCount);

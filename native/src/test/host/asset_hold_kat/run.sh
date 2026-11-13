@@ -21,16 +21,18 @@
 #               the pass cannot read is passed over; 1024 a walk records totals taken before everything
 #               under them was resolved; 2048 a held list the buffer cannot hold is shortened; 4096 a pass
 #               that cannot complete answers "complete, nothing held"; 8192 only the decoder's reading is
-#               made; 16384 the other reading reads a remainder proof without the proof guard; 32768
+#               made; 16384 a remainder proof is read whatever the inputs' rows sum to; 32768
 #               two rows for one outpoint that differ are read, one of them winning; 65536 a build
-#               without ASSET_HOLD_TEST_SEAMS honours the test seams. Each arm fails exactly the cases CASES
+#               without ASSET_HOLD_TEST_SEAMS honours the test seams; 131072 a remainder proof is read
+#               although an input could not be read; 262144 (this suite's own, asset_hold_kat_main.c)
+#               one_rule_holds_no_less exempts a release per wallet, not per outpoint. Each arm fails exactly the cases CASES
 #               lists for its bit and passes every other.
 #   shipped     -DASSET_HOLD_UNFIXED=0: every case passes, exit 0.
 # All arms under ASan + UBSan, 64-bit. The unit under test is the header, and BRWallet.c, which includes
 # it, built once per arm with -DASSET_HOLD_TEST_SEAMS=1 (the view's classifier and a single reading are
 # test seams); a third unit, seamoff.c, is built per arm WITHOUT it, as what ships (only the arm's 65536
 # bit reaches it), and seams_off holds it to refusing both. A fourth unit, secondrule.c, is built per arm
-# without the seams and with the arm's bits plus 256 and 16384: the pass as it was before the one carrier
+# without the seams and with the arm's bits plus 256, 16384 and 131072: the pass as it was before the one carrier
 # rule (its own carrier reading, no proof guard), which
 # one_rule_holds_no_less holds the shipped pass to holding no fewer outputs than. The rest of the core is built once, without
 # the seams. The strict, portability and Swift gates build without ASSET_HOLD_TEST_SEAMS. The arms run with
@@ -90,7 +92,7 @@ CASES=(
     walk_zero_rows:1,8,64
     walk_two_below:8,64
     walk_unreadable_funding:1,64
-    walk_pass_record:1,8,16,64,128
+    walk_pass_record:1,8,64,128
     walk_record_units:1,8,64,128
     walk_cycle_proven:1,8,64,128,1024
     walk_proof:1,64,128
@@ -110,20 +112,20 @@ CASES=(
     edges:1,16,64,256
     implicit_change_wallet:1,16,64,4096
     wallet_agree:-
-    sweep_decoder:1,8,16,32,64,128,256,512
-    sweep_agree:1,16,32,64,128
-    sweep_union:1,16,256,512
+    sweep_decoder:1,16,32,64,128,256,512,16384,131072
+    sweep_agree:1,8,16,32,64,128,16384
+    sweep_union:1,16,256,512,16384,131072
     sweep_must_be_excluded:1
-    prespend_proof_known_units:1,128,256,8192,16384
+    prespend_proof_known_units:1,128,16384
     one_rule_holds_no_less:1,8192,16384
-    one_rule_exemption_per_outpoint:8192
+    one_rule_exemption_per_outpoint:8192,262144
     second_unit:-
     seams_off:65536
 )
 ARMS=(1:decoder-dropped 2:classifier-dropped 4:unknown-free 8:walk-stops 16:replay-skipped 32:absent-held
       64:ownership-ignored 128:proof-ignored 256:second-rule 512:input-dropped 1024:settled-ungated
       2048:capacity-shortens 4096:refusal-empty 8192:facts-decoder-only 16384:proof-unguarded 32768:duplicate-rows
-      65536:seams-open)
+      65536:seams-open 131072:proof-unread-input 262144:kat-exemption-per-wallet)
 
 # ---- the seam is real ----------------------------------------------------------------------
 if [ ! -f "$HEADER" ]; then
@@ -152,9 +154,11 @@ if ! grep -Eq '^[[:space:]]*#[[:space:]]*ifndef[[:space:]]+ASSET_HOLD_UNFIXED' <
    grep -Eq '^[[:space:]]*#[[:space:]]*ifdef[[:space:]]+ASSET_HOLD_UNFIXED' <<<"$HDR"; then
     echo "GATE FAILURE: $HEADER selects an arm by the macro's PRESENCE, or gives it no default of 0."; exit 1
 fi
-for arm in "${ARMS[@]}"; do   # every arm's bit is one the header reads
-    if ! grep -Eq "^[[:space:]]*#[[:space:]]*define[[:space:]]+ASSET_HOLD_RED_[A-Z0-9_]+[[:space:]]+${arm%%:*}[[:space:]]*$" <<<"$HDR"; then
-        echo "GATE FAILURE: $HEADER names no ASSET_HOLD_RED_* seam of value ${arm%%:*}; that arm would be the shipped code."; exit 1
+KATSRC="$(cat "$SCRIPT_DIR/asset_hold_kat_main.c")"
+for arm in "${ARMS[@]}"; do   # every arm's bit is one the header reads (ASSET_HOLD_RED_KAT_*: one this suite's own file reads)
+    if ! grep -Eq "^[[:space:]]*#[[:space:]]*define[[:space:]]+ASSET_HOLD_RED_[A-Z0-9_]+[[:space:]]+${arm%%:*}[[:space:]]*$" <<<"$HDR" &&
+       ! grep -Eq "^[[:space:]]*#[[:space:]]*define[[:space:]]+ASSET_HOLD_RED_KAT_[A-Z0-9_]+[[:space:]]+${arm%%:*}[[:space:]]*$" <<<"$KATSRC"; then
+        echo "GATE FAILURE: neither $HEADER nor the suite names an ASSET_HOLD_RED_* seam of value ${arm%%:*}; that arm would be the shipped code."; exit 1
     fi
 done
 
@@ -357,8 +361,8 @@ int asset_hold_kat_seams_off(const BRAssetHoldView *v, const BRAssetHoldClassifi
 }
 EOF
 
-# The fourth unit: the pass before ASSET-HOLD-ONE-RULE (256, the second carrier reading; 16384, no proof
-# guard), no seams.
+# The fourth unit: the pass before ASSET-HOLD-ONE-RULE (256, the second carrier reading; 16384 and 131072,
+# no proof guard), no seams.
 cat > "$BUILD_DIR/secondrule.c" <<'EOF'
 #include "BRAssetHold.h"
 BRAssetHoldResult asset_hold_kat_second_rule(const BRAssetHoldView *v, BRAssetHoldWork *work, size_t workCap, BRUTXO *held,
@@ -373,7 +377,7 @@ EOF
 build() {   # <out> <ASSET_HOLD_UNFIXED bits>
     "$CC" -w -std=c99 -include stdint.h "${SAN[@]}" -DASSET_HOLD_UNFIXED="$(( $2 & 65536 ))" "${INC[@]}" \
         -c "$BUILD_DIR/seamoff.c" -o "$1.seamoff.o" &&
-    "$CC" -w -std=c99 -include stdint.h "${SAN[@]}" -DASSET_HOLD_UNFIXED="$(( $2 | 256 | 16384 ))" "${INC[@]}" \
+    "$CC" -w -std=c99 -include stdint.h "${SAN[@]}" -DASSET_HOLD_UNFIXED="$(( $2 | 256 | 16384 | 131072 ))" "${INC[@]}" \
         -c "$BUILD_DIR/secondrule.c" -o "$1.secondrule.o" &&
     "$CC" -w -std=c99 -include stdint.h "${SAN[@]}" -DASSET_HOLD_TEST_SEAMS=1 -DASSET_HOLD_UNFIXED="$2" "${INC[@]}" \
         "$SCRIPT_DIR/asset_hold_kat_main.c" "$BUILD_DIR/tu2.c" "$CORE_DIR/BRWallet.c" "$1.seamoff.o" "$1.secondrule.o" "${CORE_OBJS[@]}" \
