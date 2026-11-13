@@ -744,4 +744,15 @@
     <string name="reconcile_rebuild_button">Vollständiger Neuaufbau aus der Blockchain (Rescan)</string>
     <string name="rf_capped_body">Der Scan hat auf %1$s sein Limit erreicht, während dieser Pfad noch genutzt wurde. Dort kann also mehr Guthaben liegen als angezeigt. Was nicht angezeigt wird, bleibt sicher auf der Blockchain.</string>
     <string name="reconcile_stuck_stale_cleared">, davon %1$d nie weitergeleitet (nach einem Tag kannte das Netzwerk weder sie noch etwas, das ihre Coins ausgibt). Falls eine dieser Zahlungen den Empfänger doch erreicht hat, kann sie noch bestätigt werden: Frage beim Empfänger nach, bevor du erneut zahlst</string>
+    <!-- KS-BIND: seed key bound to the device lock -->
+    <string name="ksb_prompt_subtitle">Bestätigen Sie Ihre Displaysperre einmal, damit der Wallet-Schlüssel daran gebunden werden kann</string>
+    <string name="ksb_notice_title">Dieses Telefon hat keine Displaysperre</string>
+    <string name="ksb_notice_body">Ihre Wallet ist auf diesem Telefon verschlüsselt, ihr Schlüssel kann aber nicht an eine Displaysperre gebunden werden, weil dieses Telefon keine hat. Dann steht nur die Wallet-PIN zwischen der App und Ihrem Guthaben. Legen Sie in den Android-Einstellungen eine PIN, ein Muster oder ein Passwort fest: Die Wallet bindet ihren Schlüssel daran, wenn die App das nächste Mal startet und die Wallet öffnet. Die Sicherheitseinstellungen zeigen, ob der Schlüssel gebunden ist.</string>
+    <string name="ksb_notice_ok">Verstanden</string>
+    <string name="sec_seed_key">Wallet-Schlüssel</string>
+    <string name="sec_seed_key_bound">An die Displaysperre dieses Telefons gebunden</string>
+    <string name="sec_seed_key_pending">Noch nicht gebunden: wird an Ihre Displaysperre gebunden, wenn die App das nächste Mal startet und die Wallet öffnet</string>
+    <string name="sec_seed_key_no_lock">Nicht gebunden: Dieses Telefon hat keine Displaysperre. Legen Sie in den Android-Einstellungen eine fest.</string>
+    <string name="sec_seed_key_lock_removed">Die Displaysperre wurde entfernt, nachdem diese Wallet eingerichtet wurde, daher öffnet ihr Schlüssel nicht mehr, auch nicht mit einer neuen Sperre. Solange die Wallet noch offen ist: Prüfen Sie, ob Ihre Wiederherstellungsphrase notiert ist, oder verschieben Sie Ihr Guthaben jetzt. Beim nächsten Start der App braucht die Wallet ihre Wiederherstellungsphrase.</string>
+    <string name="sec_seed_key_cannot_bind">Nicht gebunden: Ein Schlüssel aus einer früheren Displaysperre funktioniert nicht mehr, daher kann der Schlüssel dieser Wallet in dieser Installation nicht gebunden werden. Wenn Sie die Wallet löschen und mit ihrer Wiederherstellungsphrase wiederherstellen, wird er gebunden.</string>
 </resources>

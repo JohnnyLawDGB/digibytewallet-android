@@ -92,6 +92,14 @@ fun SecuritySettingsScreen(
     val currentTimeout by viewModel.autoLockTimeout.collectAsStateWithLifecycle()
     val wipeAfterNEnabled by viewModel.wipeAfterNEnabled.collectAsStateWithLifecycle()
 
+    // KS-BIND: whether the seed key is bound to the device lock. Read once per visit, off the main
+    // thread (it asks the KeyguardManager and the record store); null until it answers.
+    val seedKeyStatus by produceState<app.aroundtheblock.wallet.core.security.SeedKeyStatus?>(null) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { walletManager.seedKeyStatus() }.getOrNull()
+        }
+    }
+
     val wipeResult by viewModel.wipeResult.collectAsStateWithLifecycle()
     LaunchedEffect(wipeResult) {
         if (wipeResult is WipeResult.Success) {
@@ -246,6 +254,16 @@ fun SecuritySettingsScreen(
                         subtitle = stringResource(R.string.sec_view_phrase_sub),
                         onClick = { activeDialog = SecurityDialog.ViewSeedWarning }
                     )
+                    seedKeyStatusSubtitle(seedKeyStatus)?.let { (bound, subtitle) ->
+                        SettingsRowDivider()
+                        SettingsRow(
+                            icon = if (bound) Icons.Default.Lock else Icons.Default.LockOpen,
+                            iconTint = if (bound) DigiByteAccent else Color(0xFFFFAA00),
+                            title = stringResource(R.string.sec_seed_key),
+                            subtitle = stringResource(subtitle),
+                            onClick = null,
+                        )
+                    }
                 }
             }
 
@@ -582,3 +600,20 @@ fun SecuritySettingsScreen(
         }
     }
 }
+
+/**
+ * KS-BIND: the Security-settings status line for the seed key — whether it is bound to the device
+ * lock — as (bound, subtitle). Null when there is nothing to say (no wallet, not yet read, or the
+ * key could not be asked: UNCHECKED).
+ */
+internal fun seedKeyStatusSubtitle(status: app.aroundtheblock.wallet.core.security.SeedKeyStatus?): Pair<Boolean, Int>? =
+    when (status) {
+        app.aroundtheblock.wallet.core.security.SeedKeyStatus.BOUND -> true to R.string.sec_seed_key_bound
+        app.aroundtheblock.wallet.core.security.SeedKeyStatus.PENDING -> false to R.string.sec_seed_key_pending
+        app.aroundtheblock.wallet.core.security.SeedKeyStatus.NO_LOCK_SCREEN -> false to R.string.sec_seed_key_no_lock
+        app.aroundtheblock.wallet.core.security.SeedKeyStatus.LOCK_REMOVED -> false to R.string.sec_seed_key_lock_removed
+        app.aroundtheblock.wallet.core.security.SeedKeyStatus.CANNOT_BIND -> false to R.string.sec_seed_key_cannot_bind
+        // UNCHECKED: the key could not be asked this visit; no evidence either way, so no line.
+        app.aroundtheblock.wallet.core.security.SeedKeyStatus.UNCHECKED,
+        app.aroundtheblock.wallet.core.security.SeedKeyStatus.NO_WALLET, null -> null
+    }

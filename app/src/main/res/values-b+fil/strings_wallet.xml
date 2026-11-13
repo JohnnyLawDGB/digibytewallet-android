@@ -736,4 +736,15 @@
     <string name="reconcile_rebuild_button">Buong muling pagbuo mula sa chain (muling pag-scan)</string>
     <string name="rf_capped_body">Huminto ang scan sa limitasyon nito sa %1$s habang ginagamit pa ang path na iyon, kaya maaaring mas marami ang pondo roon kaysa sa ipinapakita. Ligtas pa rin sa chain ang hindi naipakita.</string>
     <string name="reconcile_stuck_stale_cleared">, %1$d sa mga ito ang hindi kailanman na-relay (pagkalipas ng isang araw, wala sa network ang mga ito o anumang gumagastos sa kanilang coin). Kung naabot ng isa sa mga bayad na iyon ang tatanggap, maaari pa rin itong makumpirma: kumpirmahin muna sa kanila bago magbayad ulit</string>
+    <!-- KS-BIND: seed key bound to the device lock -->
+    <string name="ksb_prompt_subtitle">Kumpirmahin nang isang beses ang screen lock mo para maitali rito ang susi ng wallet</string>
+    <string name="ksb_notice_title">Walang screen lock ang teleponong ito</string>
+    <string name="ksb_notice_body">Naka-encrypt ang wallet mo sa teleponong ito, pero hindi maitatali ang susi nito sa screen lock dahil wala nito ang teleponong ito. Kaya ang wallet PIN lang ang nasa pagitan ng app at ng pondo mo. Magtakda ng PIN, pattern o password sa mga setting ng Android: itatali ng wallet ang susi nito roon sa susunod na pagbukas ng app at ng wallet. Makikita sa mga setting ng seguridad kung nakatali na ang susi.</string>
+    <string name="ksb_notice_ok">Naiintindihan ko</string>
+    <string name="sec_seed_key">Susi ng wallet</string>
+    <string name="sec_seed_key_bound">Nakatali sa screen lock ng teleponong ito</string>
+    <string name="sec_seed_key_pending">Hindi pa nakatali: itatali ito sa screen lock mo sa susunod na pagbukas ng app at ng wallet</string>
+    <string name="sec_seed_key_no_lock">Hindi nakatali: walang screen lock ang teleponong ito. Magtakda nito sa mga setting ng Android.</string>
+    <string name="sec_seed_key_lock_removed">Inalis ang screen lock matapos i-set up ang wallet na ito, kaya hindi na bumubukas ang susi nito, kahit may bagong lock. Habang bukas pa ang wallet, tiyaking nakasulat ang recovery phrase mo, o ilipat na ngayon ang pondo mo: sa susunod na pagbukas ng app, kakailanganin ng wallet ang recovery phrase nito.</string>
+    <string name="sec_seed_key_cannot_bind">Hindi nakatali: hindi na gumagana ang susing naiwan mula sa dating screen lock, kaya hindi maitatali ang susi ng wallet na ito sa install na ito. Natatali ito kapag binura ang wallet at ibinalik mula sa recovery phrase nito.</string>
 </resources>

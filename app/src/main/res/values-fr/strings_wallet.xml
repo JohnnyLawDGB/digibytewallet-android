@@ -721,4 +721,15 @@
     <string name="reconcile_rebuild_button">Reconstruction complète depuis la chaîne (réanalyse)</string>
     <string name="rf_capped_body">Le scan a atteint sa limite sur %1$s alors que ce chemin était encore utilisé : il peut donc y avoir plus de fonds que ce qui est affiché. Ce qui n’est pas affiché reste en sécurité sur la chaîne.</string>
     <string name="reconcile_stuck_stale_cleared">, dont %1$d jamais relayées (après un jour, le réseau n’avait ni elles ni rien qui dépense leurs pièces). Si l’un de ces paiements a bien atteint son destinataire, il peut encore être confirmé : vérifiez auprès de lui avant de payer à nouveau</string>
+    <!-- KS-BIND: seed key bound to the device lock -->
+    <string name="ksb_prompt_subtitle">Confirmez une fois votre verrouillage d’écran pour que la clé du portefeuille puisse y être liée</string>
+    <string name="ksb_notice_title">Ce téléphone n’a pas de verrouillage d’écran</string>
+    <string name="ksb_notice_body">Votre portefeuille est chiffré sur ce téléphone, mais sa clé ne peut pas être liée à un verrouillage d’écran, car ce téléphone n’en a pas. Seul le code PIN du portefeuille se trouve alors entre l’application et vos fonds. Définissez un code, un schéma ou un mot de passe dans les paramètres Android : le portefeuille y liera sa clé la prochaine fois que l’application démarrera et ouvrira le portefeuille. Les paramètres de sécurité indiquent si la clé est liée.</string>
+    <string name="ksb_notice_ok">J’ai compris</string>
+    <string name="sec_seed_key">Clé du portefeuille</string>
+    <string name="sec_seed_key_bound">Liée au verrouillage d’écran de ce téléphone</string>
+    <string name="sec_seed_key_pending">Pas encore liée : elle sera liée à votre verrouillage d’écran la prochaine fois que l’application démarrera et ouvrira le portefeuille</string>
+    <string name="sec_seed_key_no_lock">Non liée : ce téléphone n’a pas de verrouillage d’écran. Définissez-en un dans les paramètres Android.</string>
+    <string name="sec_seed_key_lock_removed">Le verrouillage d’écran a été supprimé après la configuration de ce portefeuille, sa clé ne s’ouvre donc plus, même avec un nouveau verrouillage. Tant que le portefeuille est encore ouvert, vérifiez que votre phrase de récupération est notée, ou déplacez vos fonds maintenant : au prochain démarrage de l’application, le portefeuille aura besoin de sa phrase de récupération.</string>
+    <string name="sec_seed_key_cannot_bind">Non liée : une clé issue d’un ancien verrouillage d’écran ne fonctionne plus, la clé de ce portefeuille ne peut donc pas être liée sur cette installation. Effacer le portefeuille et le restaurer avec sa phrase de récupération la lie.</string>
 </resources>
