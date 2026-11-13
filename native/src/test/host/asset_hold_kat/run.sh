@@ -116,6 +116,7 @@ CASES=(
     sweep_must_be_excluded:1
     prespend_proof_known_units:1,128,256,8192,16384
     one_rule_holds_no_less:1,8192,16384
+    one_rule_exemption_per_outpoint:8192
     second_unit:-
     seams_off:65536
 )

@@ -3131,27 +3131,58 @@ static void prespend_proof_known_units(void)
 // output that is not nulldata, unclassifiable payloads, the encrypted-key shape) and with scripts both
 // readers read alike, the shipped pass is compared with the pass as it was, the header reading the carrier
 // by its own earlier rule (the fourth unit). Wherever that one completes, the shipped pass either refuses
-// (the spend is refused: never fewer outputs) or holds every outpoint it held -- except in a wallet where
-// the earlier reading could not read a transaction by its carrier (earlierUnread): an OP_RETURN that is
+// (the spend is refused: never fewer outputs) or holds every outpoint it held -- except an outpoint resting
+// on a transaction the earlier reading could not read by its carrier (earlierUnreadTx): an OP_RETURN that is
 // neither nulldata nor tagged before the carrier. The earlier walk read such a transaction by that first
 // OP_RETURN, found no payload and had no answer; the one rule reads its carrier, as DigiAsset Core does
 // (it reads only nulldata outputs), and can show an output the earlier reading held carries nothing. Those
-// wallets are counted, not failed. Not blind: some wallet must hold strictly more under the one rule.
-// Does WAL hold a transaction the earlier reading could not read by its carrier: one whose carrier under the
+// releases are counted, not failed -- per outpoint: only an outpoint whose own input ancestry contains such a
+// transaction (ancestryEarlierUnread) is exempt. Not blind: some wallet must hold strictly more under the
+// one rule, and the earlier reading must complete somewhere.
+// Is tx a transaction the earlier reading could not read by its carrier: one whose carrier under the
 // one rule (DA_TX_CARRIER) is not its first OP_RETURN, which the earlier walk read it by (in the other
 // reading: or not at all)? There the earlier reading had no answer where the one rule has one, and may
 // have held an output the one rule shows carries nothing.
+static int earlierUnreadTx(const BRTransaction *tx)
+{
+    size_t j, idx;
+
+    if (BRTxAssetCarrier(tx, &idx) != DA_TX_CARRIER) return 0;
+    for (j = 0; j < tx->outCount; j++) if (tx->outputs[j].scriptLen > 0 && tx->outputs[j].script[0] == 0x6a) break;
+    return j != idx;
+}
+
+// Does the input ancestry of outpoint (h, n) -- its transaction and, through inputs, every transaction of
+// WAL it rests on -- contain an earlier-unread transaction? Only such an outpoint's release is exempt.
+static int ancestryEarlierUnread(UInt256 h)
+{
+    const BRTransaction *queue[TMAX];
+    size_t qn = 0, qi, i, k;
+
+    for (i = 0; i < WAL.n; i++) if (UInt256Eq(WAL.txs[i]->txHash, h)) { queue[qn++] = WAL.txs[i]; break; }
+    for (qi = 0; qi < qn; qi++) {
+        const BRTransaction *tx = queue[qi];
+
+        if (earlierUnreadTx(tx)) return 1;
+        for (k = 0; k < tx->inCount; k++) {
+            for (i = 0; i < WAL.n; i++) {
+                size_t q;
+                int seen = 0;
+
+                if (! UInt256Eq(WAL.txs[i]->txHash, tx->inputs[k].txHash)) continue;
+                for (q = 0; q < qn; q++) if (queue[q] == WAL.txs[i]) seen = 1;
+                if (! seen && qn < TMAX) queue[qn++] = WAL.txs[i];
+            }
+        }
+    }
+    return 0;
+}
+
 static int earlierUnread(void)
 {
-    size_t i, j, idx;
+    size_t i;
 
-    for (i = 0; i < WAL.n; i++) {
-        const BRTransaction *tx = WAL.txs[i];
-
-        if (BRTxAssetCarrier(tx, &idx) != DA_TX_CARRIER) continue;
-        for (j = 0; j < tx->outCount; j++) if (tx->outputs[j].scriptLen > 0 && tx->outputs[j].script[0] == 0x6a) break;
-        if (j != idx) return 1;
-    }
+    for (i = 0; i < WAL.n; i++) if (earlierUnreadTx(WAL.txs[i])) return 1;
     return 0;
 }
 
@@ -3159,44 +3190,74 @@ static int earlierUnread(void)
 #define ROUNDS_ONE_RULE 6000
 #endif
 
-static void one_rule_holds_no_less(void)
+typedef struct { int fewer, more, refusedNow, compared, released, planted; } OneRule;
+
+// The comparison behind one_rule_holds_no_less. `plant`: in the first wallet that has an earlier-unread
+// transaction and an outpoint both passes hold whose ancestry has none, that outpoint is taken out of the
+// shipped answer -- an under-hold unrelated to the exemption, which must be counted as fewer.
+static OneRule oneRuleCompare(int rounds, int plant, int report)
 {
     static BRUTXO oldHeld[HMAX];
     static BRAssetHoldWork oldWork[RMAX];
-    int round, fewer = 0, more = 0, refusedNow = 0, compared = 0, released = 0;
+    OneRule o;
+    int round;
 
+    memset(&o, 0, sizeof(o));
     RNG = 0x55ULL;
-    for (round = 0; round < ROUNDS_ONE_RULE; round++) {
+    for (round = 0; round < rounds; round++) {
         BRAssetHoldView v;
         BRAssetHoldResult was, now;
-        size_t i, k;
-        int covers = 1;
+        size_t i, dropped = (size_t)-1;
+        int fewerHere = 0, releasedHere = 0;
 
         genWallet(round % 3 != 0);
         v = view(&WAL);
         was = asset_hold_kat_second_rule(&v, oldWork, N(oldWork), oldHeld, N(oldHeld));
         now = pass(&WAL);
         if (was.status != BR_ASSET_HOLD_COMPLETE) continue;
-        compared++;
-        if (now.status != BR_ASSET_HOLD_COMPLETE) { refusedNow++; continue; }
-        for (i = 0; i < was.heldCount; i++) if (! heldIn(now, oldHeld[i].hash, oldHeld[i].n)) covers = 0;
-        if (! covers && earlierUnread()) { released++; continue; }
-        if (! covers) {
-            if (fewer++ < 5) {
-                for (i = 0; i < was.heldCount && heldIn(now, oldHeld[i].hash, oldHeld[i].n); i++);
+        o.compared++;
+        if (now.status != BR_ASSET_HOLD_COMPLETE) { o.refusedNow++; continue; }
+        if (plant && ! o.planted && earlierUnread()) {
+            for (i = 0; i < was.heldCount; i++) {
+                if (heldIn(now, oldHeld[i].hash, oldHeld[i].n) && ! ancestryEarlierUnread(oldHeld[i].hash)) { dropped = i; break; }
+            }
+            if (dropped != (size_t)-1) o.planted = 1;
+        }
+        for (i = 0; i < was.heldCount; i++) {
+            if (i != dropped && heldIn(now, oldHeld[i].hash, oldHeld[i].n)) continue;
+            if (ancestryEarlierUnread(oldHeld[i].hash)) { releasedHere++; continue; }
+            if (fewerHere++ == 0 && o.fewer < 5 && report)
                 ck(0, "wallet %d: the earlier reading held (%02x.., %u) and the one rule does not (%zu held before, %zu now)",
                    round, oldHeld[i].hash.u8[0], oldHeld[i].n, was.heldCount, now.heldCount);
-            }
-            continue;
         }
-        k = now.heldCount;
-        if (k > was.heldCount) more++;
+        if (fewerHere) o.fewer++;
+        else if (releasedHere) o.released++;
+        else if (now.heldCount > was.heldCount) o.more++;
     }
-    ck(fewer == 0, "%d wallets both passes completed or the one rule refused: the one rule never holds fewer outputs (%d fewer; "
-       "%d where the earlier reading could not read a carrier past a non-nulldata OP_RETURN and the one rule releases an output)",
-       compared, fewer, released);
-    ck(more > 0, "the one rule holds strictly more in %d wallets (%d refused where the earlier reading completed): not blind",
-       more, refusedNow);
+    return o;
+}
+
+// Figures quoted for this case come from a recorded run at the rounds and seed (0x55) they name.
+static void one_rule_holds_no_less(void)
+{
+    OneRule o = oneRuleCompare(ROUNDS_ONE_RULE, 0, 1);
+
+    ck(o.compared > 0, "the earlier reading completed in %d of %d wallets: the comparison is not vacuous", o.compared, ROUNDS_ONE_RULE);
+    ck(o.fewer == 0, "%d wallets both passes completed or the one rule refused: the one rule never holds fewer outputs (%d fewer; "
+       "%d where every released outpoint rests on a transaction the earlier reading could not read past a non-nulldata OP_RETURN)",
+       o.compared, o.fewer, o.released);
+    ck(o.more > 0, "the one rule holds strictly more in %d wallets (%d refused where the earlier reading completed): not blind",
+       o.more, o.refusedNow);
+}
+
+// The exemption is per outpoint: an under-hold planted in a wallet that HAS an earlier-unread transaction,
+// on an outpoint whose ancestry has none, is counted as fewer, not exempted.
+static void one_rule_exemption_per_outpoint(void)
+{
+    OneRule o = oneRuleCompare(ROUNDS_ONE_RULE, 1, 0);
+
+    ck(o.planted, "an unrelated under-hold was planted in a wallet with an earlier-unread transaction");
+    ck(o.fewer >= 1, "the planted under-hold is counted as fewer (%d), not exempted", o.fewer);
 }
 
 static void second_unit(void)
@@ -3284,6 +3345,7 @@ static const Case CASES[] = {
     { "sweep_must_be_excluded", sweep_must_be_excluded },
     { "prespend_proof_known_units", prespend_proof_known_units },
     { "one_rule_holds_no_less", one_rule_holds_no_less },
+    { "one_rule_exemption_per_outpoint", one_rule_exemption_per_outpoint },
     { "second_unit", second_unit },
     { "seams_off", seams_off },
 };
