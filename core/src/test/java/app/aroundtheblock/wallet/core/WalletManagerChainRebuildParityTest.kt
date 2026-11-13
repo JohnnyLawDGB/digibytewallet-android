@@ -176,6 +176,24 @@ class WalletManagerChainRebuildParityTest {
         assertFalse("a true abort takes in-progress off", s.inProgress)
     }
 
+    /**
+     * SharedPreferences keeps a failed commit's values in memory, so the cache's floor that
+     * floorFromCache could not write would reach disk with the disarm's commit unless the disarm
+     * writes the prior floor back too. "Nothing was rebuilt" means the record is as it was.
+     */
+    @Test fun aFloorFromCacheThatDoesNotLand_leavesTheRecordsFloorAsItWas() {
+        val c = ctx(failKey = HistoryRebuildOnUpgrade.KEY_FLOOR_HINT)
+        seed(c)
+        val prior = HistoryRebuildOnUpgrade.readState(c)
+        val priorPending = HistoryRebuildOnUpgrade.floorPending(c)
+
+        assertFalse(walletManager(c).rebuildFromChainRescan())
+
+        assertEquals("the cache's floor must not stay in the record", prior.floorHint, HistoryRebuildOnUpgrade.floorHint(c))
+        assertEquals(prior.floorTime, HistoryRebuildOnUpgrade.floorTime(c))
+        assertEquals(priorPending, HistoryRebuildOnUpgrade.floorPending(c))
+    }
+
     @Test fun aLowerFloorToThatDoesNotLand_stopsTheRescanFromAHeight_nothingClearedNothingArmed() {
         val c = ctx(failKey = HistoryRebuildOnUpgrade.KEY_FLOOR_HINT)
         seed(c)
