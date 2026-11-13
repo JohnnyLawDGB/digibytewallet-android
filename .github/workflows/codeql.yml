@@ -80,8 +80,11 @@ jobs:
           build-mode: manual
           queries: security-extended
 
+      # --no-build-cache: CodeQL sees only what is compiled under its tracer. A PR that changes no
+      # source (docs only) otherwise restores every compile FROM-CACHE and the analysis fails with
+      # "could not process any code written in Java/Kotlin".
       - name: Build (traced)
-        run: ./gradlew :app:assembleMainnetSideloadDebug
+        run: ./gradlew --no-build-cache :app:assembleMainnetSideloadDebug
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4

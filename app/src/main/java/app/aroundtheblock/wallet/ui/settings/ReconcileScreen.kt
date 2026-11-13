@@ -344,21 +344,19 @@ fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
                 fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
             )
             Text(
-                "If confirmations, ordering, or balance still look wrong, this clears the local " +
-                    "transaction cache and re-scans the whole chain with compact filters — re-detecting " +
-                    "and block-stamping every transaction from on-chain data. Your seed and coins are " +
-                    "untouched; everything is rebuilt from the chain. The app restarts and the rescan " +
-                    "runs from your wallet's birth, so it takes a while to finish.",
+                stringResource(R.string.reconcile_rebuild_body),
                 color = Color(0xFFB0BEC5),
                 fontSize = 13.sp,
             )
             var armRebuild by remember { mutableStateOf(false) }
             var rebuilding by remember { mutableStateOf(false) }
+            var rebuildNotStarted by remember { mutableStateOf(false) }
             OutlinedButton(
                 enabled = !rebuilding,
                 onClick = {
                     if (!armRebuild) {
                         armRebuild = true
+                        rebuildNotStarted = false
                     } else {
                         // Run the native teardown OFF the main thread. rebuildFromChainRescan()
                         // calls NativeBridge.stopSync(), which blocks on the peer lock; on a
@@ -368,7 +366,16 @@ fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
                         // thread once the clear completes.
                         rebuilding = true
                         scope.launch {
-                            withContext(Dispatchers.IO) { walletManager.rebuildFromChainRescan() }
+                            val rebuilt = withContext(Dispatchers.IO) { walletManager.rebuildFromChainRescan() }
+                            if (!rebuilt) {
+                                // A step the clears depend on failed (BRChainRebuild.h): nothing
+                                // was cleared, so there is nothing to restart into. Say so.
+                                rebuilding = false
+                                armRebuild = false
+                                rebuildNotStarted = true
+                                requestSyncResumeNearTip(context)
+                                return@launch
+                            }
                             val li = context.packageManager.getLaunchIntentForPackage(context.packageName)
                             li?.addFlags(
                                 android.content.Intent.FLAG_ACTIVITY_NEW_TASK or
@@ -389,11 +396,14 @@ fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
             ) {
                 Text(
                     when {
-                        rebuilding -> "Rebuilding — clearing cache, restarting…"
-                        armRebuild -> "Tap again to confirm — clears cache & restarts"
-                        else       -> "Full rebuild from chain (rescan)"
+                        rebuilding -> stringResource(R.string.reconcile_rebuild_in_progress)
+                        armRebuild -> stringResource(R.string.reconcile_unprovable_confirm)
+                        else       -> stringResource(R.string.reconcile_rebuild_button)
                     }
                 )
+            }
+            if (rebuildNotStarted) {
+                Text(stringResource(R.string.reconcile_rebuild_not_started), color = Color(0xFFFF8A80), fontSize = 13.sp)
             }
 
             when (val s = state) {
@@ -524,6 +534,7 @@ fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
                             val height = NumberFormat.getIntegerInstance(Locale.US).format(s.unprovableFromHeight)
                             var armRescanFrom by remember { mutableStateOf(false) }
                             var rescanningFrom by remember { mutableStateOf(false) }
+                            var rescanFromNotStarted by remember { mutableStateOf(false) }
                             Spacer(Modifier.height(12.dp))
                             Text(
                                 stringResource(R.string.reconcile_unprovable_body, height),
@@ -536,12 +547,21 @@ fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
                                 onClick = {
                                     if (!armRescanFrom) {
                                         armRescanFrom = true
+                                        rescanFromNotStarted = false
                                     } else {
                                         // Off the main thread, then restart: as for the full rebuild below.
                                         rescanningFrom = true
                                         scope.launch {
-                                            withContext(Dispatchers.IO) {
+                                            val rebuilt = withContext(Dispatchers.IO) {
                                                 walletManager.rebuildFromChainRescanFrom(s.unprovableFromHeight)
+                                            }
+                                            if (!rebuilt) {
+                                                // Stopped before anything was cleared: no restart.
+                                                rescanningFrom = false
+                                                armRescanFrom = false
+                                                rescanFromNotStarted = true
+                                                requestSyncResumeNearTip(context)
+                                                return@launch
                                             }
                                             val li = context.packageManager.getLaunchIntentForPackage(context.packageName)
                                             li?.addFlags(
@@ -560,6 +580,9 @@ fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
                                     if (armRescanFrom) stringResource(R.string.reconcile_unprovable_confirm)
                                     else stringResource(R.string.reconcile_unprovable_rescan, height)
                                 )
+                            }
+                            if (rescanFromNotStarted) {
+                                Text(stringResource(R.string.reconcile_rebuild_not_started), color = Color(0xFFFF8A80), fontSize = 13.sp)
                             }
                         }
                     }
@@ -605,5 +628,22 @@ private fun ResultRow(label: String, value: String, emphasize: Boolean = false) 
             fontWeight = if (emphasize) FontWeight.SemiBold else FontWeight.Normal,
             fontSize = 13.sp
         )
+    }
+}
+
+/**
+ * A rebuild that stopped before clearing anything may already have stopped sync: hand the manager
+ * to SyncService's reload-first rebuild (recreatePeerManagerResumingNearTip, the same request as the
+ * main screen's pull-to-refresh) so the wallet reconnects near its tip instead of sitting
+ * disconnected until the keepalive notices. Best effort: a refused foreground start only leaves
+ * that recovery to the keepalive.
+ */
+private fun requestSyncResumeNearTip(context: android.content.Context) {
+    try {
+        val intent = android.content.Intent(context, app.aroundtheblock.wallet.service.SyncService::class.java)
+            .setAction(app.aroundtheblock.wallet.service.SyncService.ACTION_RECREATE_NEAR_TIP)
+        androidx.core.content.ContextCompat.startForegroundService(context, intent)
+    } catch (t: Throwable) {
+        android.util.Log.w("ReconcileScreen", "rebuild stopped: the sync resume request was not delivered", t)
     }
 }

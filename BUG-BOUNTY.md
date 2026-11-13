@@ -2,8 +2,8 @@
 
 **Effective:** 2026-05-03
 **Maximum reward:** 100,000 DGB
-**Bounty target:** **HoldFast Wallet 4.1.3** (`app.aroundtheblock.wallet`), from its release date.
-4.1.2 stays in scope for **14 days** after that date under the overlap rule below. Before you
+**Bounty target:** **HoldFast Wallet 4.1.3** (`app.aroundtheblock.wallet`), released 2026-11-03 (UTC).
+4.1.2 stays in scope until the end of **2026-11-17 UTC** (14 days, under the overlap rule below). Before you
 start, read "Known issues being addressed for 4.1.4"
 below: those are already on our list.
 
@@ -415,7 +415,7 @@ not listed. Anonymity, or no answer, never affects payment.*
   known-issues list now names what is being addressed for 4.1.2.
 - **4.1.2 — target moved.** Bounty target HoldFast Wallet 4.1.2 (4.1.1 overlaps for 14 days). What
   4.1.2 fixed is off the known-issues list, which now names what is being addressed for 4.1.3.
-- **4.1.3 — target moved.** Bounty target HoldFast Wallet 4.1.3 (4.1.2 overlaps for 14 days). What
+- **4.1.3 — target moved (2026-11-03).** Bounty target HoldFast Wallet 4.1.3 (4.1.2 overlaps until 2026-11-17). What
   4.1.3 fixed (server confirmation status, the remaining Tor case, transaction details in release
   logs) is off the known-issues list, which now names what is being addressed for 4.1.4.
 - **2026-10-24 — one reporter, several addresses.** A person or team sending from several addresses

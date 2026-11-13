@@ -35,6 +35,7 @@ class WalletManagerHistoryRebuildTest {
         utxoManager = mockk(relaxed = true),
         dataEraser = mockk(relaxed = true),
         quiesceNative = { },
+        stopSyncForRebuild = { },
     )
 
     private fun ctx(): Context {
