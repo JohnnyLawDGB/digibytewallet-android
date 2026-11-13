@@ -54,7 +54,7 @@ ARMS=(CF_FLOOR_MEMO_UNFIXED CF_BAND_KEPT_UNFIXED CF_PARK_CONTIG_UNFIXED CF_PARK_
       CF_RETIRE_FLOOR_CLAMP_UNFIXED)
 GUARD_CASES=(band_not_carried_below_or_absent park_still_moves_back rebuild_rescans_disputed_range
              backfill_never_retires_band_at_start backfill_band_above_start_still_retires
-             backfill_retire_stops_at_resident_floor)
+             backfill_retire_stops_at_resident_floor backfill_quiet_below_resets)
 
 # The invariant line each red case must fail on in its arm (a fixed-string prefix of the check).
 declare -A INV=(

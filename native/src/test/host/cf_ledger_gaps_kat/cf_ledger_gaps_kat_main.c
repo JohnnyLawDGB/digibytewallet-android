@@ -612,6 +612,25 @@ static void case_backfill_retire_stops_at_resident_floor(void)
     bandFxFree(&f);
 }
 
+// GUARD (every arm): the fork-log quieting is scoped to a live backfill. A run sets
+// cfBackfillQuietBelow to its target; a re-Init below the band (the rescan) zeroes it, so a real
+// fork below the old target logs "chain fork reached height" again.
+static void case_backfill_quiet_below_resets(void)
+{
+    BandFx f; bandFxInit(&f, /*withChain=*/0);
+    MGR_UNLOCK(f.m);
+    BRPeerManagerBackfillAbandonedBandStep(f.m);
+    check(f.m->cfBackfillQuietBelow == BAND_FLOOR, "a backfill run quiets fork logs below its target");
+    MGR_LOCK(f.m);
+    _BRPeerManagerReinitCFLedgerLocked(f.m, BAND_START);   // a rescan from the band's low edge
+    uint32_t q = f.m->cfBackfillQuietBelow;
+    MGR_UNLOCK(f.m);
+    check(q == 0, "a re-Init below the band ends the quieting (real forks below the old target log again)");
+    BRPeerManagerBackfillAbandonedBandStep(f.m);
+    check(f.m->cfBackfillQuietBelow == 0 && f.m->cfBackfillTarget == 0, "with no band, no backfill state is left");
+    bandFxFree(&f);
+}
+
 typedef struct { const char *name; void (*fn)(void); } Case;
 static const Case CASES[] = {
     { "floor_memo_relayed_stub_replace",       case_floor_memo_relayed_stub_replace },
@@ -630,6 +649,7 @@ static const Case CASES[] = {
     { "backfill_band_above_start_still_retires", case_backfill_band_above_start_still_retires },
     { "backfill_retires_to_start_when_floor_below_start", case_backfill_retires_to_start_when_floor_below_start },
     { "backfill_retire_stops_at_resident_floor", case_backfill_retire_stops_at_resident_floor },
+    { "backfill_quiet_below_resets",           case_backfill_quiet_below_resets },
 };
 
 int main(int argc, char **argv)
