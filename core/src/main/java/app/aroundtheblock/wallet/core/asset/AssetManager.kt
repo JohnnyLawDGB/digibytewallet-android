@@ -200,6 +200,34 @@ internal suspend fun resolveInputAssetUnits(
 }
 
 /**
+ * ASSET-PROOF-GUARD-KT. The input total every hold path reads: [resolved] (the answer of
+ * [resolveInputAssetUnits]) when it is known; otherwise what a stored remainder proof says
+ * ([proofUnits]: the instructions' assigned total, null without a proof) — but a proof is never
+ * trusted against the wallet's own rows. It is read only when the known positive rows of [inputs]
+ * sum to 0 or exactly to that total. Any other sum, or one that does not fit a count, leaves the
+ * total unknown, and the hold rule holds the last output.
+ *
+ * The one copy: the pass in front of a spend, the targeting walk, detection and the startup
+ * replay all read a proof through this, so they agree. Mirrors the C core's ASSET-HOLD-ONE-RULE.
+ */
+internal suspend fun inputUnitsOrRemainderProof(
+    resolved: Long?,
+    inputs: List<Pair<String, Int>>,
+    rowQuantity: suspend (String, Int) -> Long?,
+    proofUnits: () -> Long?,
+): Long? {
+    if (resolved != null) return resolved
+    val proven = proofUnits() ?: return null
+    var known = 0L
+    for ((txid, vout) in inputs) {
+        val stored = rowQuantity(txid, vout) ?: continue
+        if (stored <= 0L) continue
+        known = try { Math.addExact(known, stored) } catch (e: ArithmeticException) { return null }
+    }
+    return if (known == 0L || known == proven) proven else null
+}
+
+/**
  * What one input of a transfer carried, as far as the wallet can vouch for it, or null when it
  * cannot ([AssetCredit]):
  *  - the wallet's own row, BACKED or VERIFIED → that row's asset and quantity (nothing for zero);
@@ -468,12 +496,18 @@ private class TargetingWalk(
     private suspend fun inputTotalOf(txid: String): Long? {
         val tx = shape(txid) ?: return null
         val inputs = inputsOf(txid, tx) ?: return null
-        return resolveInputAssetUnits(
+        val rowOf: suspend (String, Int) -> Long? = { funding, vout -> row(funding, vout) }
+        return inputUnitsOrRemainderProof(
+            resolved = resolveInputAssetUnits(
+                inputs = inputs,
+                rowQuantity = rowOf,
+                isAssetTx = isAssetTx,
+                rowIsTargeted = { funding, vout -> answerFromTotals(funding, vout) },
+            ),
             inputs = inputs,
-            rowQuantity = { funding, vout -> row(funding, vout) },
-            isAssetTx = isAssetTx,
-            rowIsTargeted = { funding, vout -> answerFromTotals(funding, vout) },
-        ) ?: provenInputUnits(txid, tx.header)
+            rowQuantity = rowOf,
+            proofUnits = { provenInputUnits(txid, tx.header) },
+        )
     }
 
     /** The targeting answer for one output, from the payload and the totals already resolved. */
@@ -1250,15 +1284,20 @@ class AssetManager(
             val prevVout = p.getOrNull(1)?.toIntOrNull()
             if (prevVout == null || p[0].length != 64 || prevVout < 0) null else p[0] to prevVout
         }
-        val inputUnits = resolveInputAssetUnits(
+        val inputUnits = detectedInputUnits(
+            txHashHex = txHashHex,
+            header = header,
             inputs = parsedInputs.filterNotNull(),
-            rowQuantity = { txid, vout -> utxoDao.getAssetUtxoAt(txid, vout)?.assetQuantity },
-            isAssetTx = { txid -> txHasAssetPayload(txid) },
-            rowIsTargeted = { txid, vout ->
-                inputRowIsTargeted(txid, vout, ::heldOutputLines, ::heldInputLines) { txHasAssetPayload(it) }
-            },
-            unresolved = zeroRowInputs,
-        ) ?: provenInputUnits(txHashHex, header)
+            resolved = resolveInputAssetUnits(
+                inputs = parsedInputs.filterNotNull(),
+                rowQuantity = { txid, vout -> utxoDao.getAssetUtxoAt(txid, vout)?.assetQuantity },
+                isAssetTx = { txid -> txHasAssetPayload(txid) },
+                rowIsTargeted = { txid, vout ->
+                    inputRowIsTargeted(txid, vout, ::heldOutputLines, ::heldInputLines) { txHasAssetPayload(it) }
+                },
+                unresolved = zeroRowInputs,
+            ),
+        )
         val outputCount = outputLines.size
 
         // Ownership gate. `outputs` comes from getTransactionOutputsForHash,
@@ -2177,15 +2216,22 @@ class AssetManager(
                 val isAssetTx: suspend (String) -> Boolean? =
                     { txid -> if (txid in plainTxs) false else hasAssetPayload(outputsOf(txid)) }
                 val zeroRowInputs = ZeroRowInputs()
-                val inputUnits = (if (inputs.any { it == null }) null else resolveInputAssetUnits(
-                    inputs = inputs.filterNotNull(),
-                    rowQuantity = { txid, vout -> utxoDao.getAssetUtxoAt(txid, vout)?.assetQuantity },
-                    isAssetTx = isAssetTx,
-                    rowIsTargeted = { txid, vout ->
-                        inputRowIsTargeted(txid, vout, outputsOf, inputsOf, inputUnitsThisPass, isAssetTx)
-                    },
-                    unresolved = zeroRowInputs,
-                )) ?: provenInputUnits(txHash, header)
+                val readInputs = inputs.filterNotNull()
+                val rowOf: suspend (String, Int) -> Long? = { txid, vout -> utxoDao.getAssetUtxoAt(txid, vout)?.assetQuantity }
+                val inputUnits = inputUnitsOrRemainderProof(
+                    resolved = if (inputs.any { it == null }) null else resolveInputAssetUnits(
+                        inputs = readInputs,
+                        rowQuantity = rowOf,
+                        isAssetTx = isAssetTx,
+                        rowIsTargeted = { txid, vout ->
+                            inputRowIsTargeted(txid, vout, outputsOf, inputsOf, inputUnitsThisPass, isAssetTx)
+                        },
+                        unresolved = zeroRowInputs,
+                    ),
+                    inputs = readInputs,
+                    rowQuantity = rowOf,
+                    proofUnits = { provenInputUnits(txHash, header) },
+                )
                 inputUnitsThisPass[txHash] = inputUnits
 
                 // The same ownership rule detection applies: with an owned set, only what is ours;
@@ -2739,15 +2785,18 @@ class AssetManager(
         val isAssetTx: suspend (String) -> Boolean? =
             { txid -> hasAssetPayload(runCatching { outputsOf(txid) }.getOrNull()) }
         val zeroRowInputs = ZeroRowInputs()
-        val inputUnits = try {
+        val rowOf: suspend (String, Int) -> Long? = { txid, v -> utxoDao.getAssetUtxoAt(txid, v)?.assetQuantity }
+        var replayInputs: List<Pair<String, Int>> = emptyList()
+        val resolved = try {
+            replayInputs = (inputsOf(txHashHex) ?: emptyArray())
+                .mapNotNull { line ->
+                    val p = line?.split("|", limit = 2) ?: return@mapNotNull null
+                    val prevVout = p.getOrNull(1)?.toIntOrNull() ?: return@mapNotNull null
+                    if (p[0].length != 64 || prevVout < 0) null else p[0] to prevVout
+                }
             resolveInputAssetUnits(
-                inputs = (inputsOf(txHashHex) ?: emptyArray())
-                    .mapNotNull { line ->
-                        val p = line?.split("|", limit = 2) ?: return@mapNotNull null
-                        val prevVout = p.getOrNull(1)?.toIntOrNull() ?: return@mapNotNull null
-                        if (p[0].length != 64 || prevVout < 0) null else p[0] to prevVout
-                    },
-                rowQuantity = { txid, v -> utxoDao.getAssetUtxoAt(txid, v)?.assetQuantity },
+                inputs = replayInputs,
+                rowQuantity = rowOf,
                 isAssetTx = isAssetTx,
                 rowIsTargeted = { txid, v ->
                     inputRowIsTargeted(
@@ -2764,12 +2813,42 @@ class AssetManager(
             throw e
         } catch (e: Exception) {
             null
-        } ?: provenInputUnits(txHashHex, header)
+        }
+        // A row that cannot be read while checking the proof against the rows is no answer: held.
+        val inputUnits = try {
+            inputUnitsOrRemainderProof(
+                resolved = resolved,
+                inputs = replayInputs,
+                rowQuantity = rowOf,
+                proofUnits = { provenInputUnits(txHashHex, header) },
+            )
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
         if (heldOnlyForZeroRows(header, vout, firstNonOpReturn, outputLines.size, zeroRowInputs)) {
             heldForZeroRows?.addAll(zeroRowInputs.rows)
         }
         return AssetTxQuantity.targetsOutput(header, vout, firstNonOpReturn, inputUnits, outputLines.size)
     }
+
+    /**
+     * Detection's input total for [txHashHex]: [resolved] (its [resolveInputAssetUnits] answer),
+     * else what a stored remainder proof says, read through [inputUnitsOrRemainderProof] against
+     * the wallet's rows. Touches no bridge, so it runs on the JVM.
+     */
+    internal suspend fun detectedInputUnits(
+        txHashHex: String,
+        header: DecodedAssetHeader,
+        inputs: List<Pair<String, Int>>,
+        resolved: Long?,
+    ): Long? = inputUnitsOrRemainderProof(
+        resolved = resolved,
+        inputs = inputs,
+        rowQuantity = { txid, vout -> utxoDao.getAssetUtxoAt(txid, vout)?.assetQuantity },
+        proofUnits = { provenInputUnits(txHashHex, header) },
+    )
 
     /** Distinct txids the wallet tracks an asset output for (spent + unspent) —
      *  used by the activity list to label a transaction row as DigiAsset. */
