@@ -18,6 +18,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.io.File
 
 /**
  * ASSET-PROOF-GUARD-KT. A stored remainder proof is never trusted against the wallet's own rows: it
@@ -108,7 +109,37 @@ class AssetRemainderProofGuardTest {
         assertFalse(t to 2 in held)
     }
 
+    @Test fun `pre-spend - known units equal to the assigned total, both above zero - proof read, released`() = runTest {
+        // t2: a transfer of 10 to output 1 | ours (named) | ours (last). Inputs f:7 (unknown) and e4:0 = 10.
+        val t2 = id("e5")
+        wallet.remove(t)
+        wallet[t2] = arrayOf("0|0|6a0644410315010a", "1|6000|$ours", "2|6000|$ours")
+        inputs[t2] = arrayOf("$f|7", "$e4|0")
+        setRow(10L)
+        manager(InMemoryRemainderProofStore().apply { markProven(t2) }).pass()
+        assertTrue(t2 to 1 in held)
+        assertFalse("rows say 10 entered, the instructions assign 10: the proof agrees; held=$held", t2 to 2 in held)
+    }
+
+    @Test fun `pre-spend - an input line that cannot be read - proof not read, held`() = runTest {
+        inputs[t] = arrayOf("$f|7", "not-an-outpoint")
+        manager(proven()).pass()
+        assertTrue(t to 2 in held)
+    }
+
     // ── The startup replay ────────────────────────────────────────────────
+
+    @Test fun `replay - an input list whose read throws - proof not read, held`() = runTest {
+        val mgr = manager(proven())
+        assertEquals(true, mgr.resolveRowTargetsImpl(t, 2, { wallet[it] },
+            { if (it == t) throw IllegalStateException("unreadable") else inputs[it] }, walletLoaded = { true }))
+    }
+
+    @Test fun `replay - an input line that cannot be read - proof not read, held`() = runTest {
+        inputs[t] = arrayOf("$f|7", "not-an-outpoint")
+        val mgr = manager(proven())
+        assertEquals(true, mgr.resolveRowTargetsImpl(t, 2, { wallet[it] }, { inputs[it] }, walletLoaded = { true }))
+    }
 
     @Test fun `replay - a contradicted proof does not drop the last output from the hold`() = runTest {
         setRow(10L)
@@ -152,6 +183,31 @@ class AssetRemainderProofGuardTest {
         assertEquals(0L, manager(proven()).detected())
     }
 
+    @Test fun `detection - inputs not all read - no total, so nothing extra is credited`() = runTest {
+        assertNull(manager(proven()).detectedInputUnits(txHashHex = t, header = tHeader, inputs = null, resolved = null))
+    }
+
+    @Test fun `detection - a row that cannot be read while checking the proof - no total`() = runTest {
+        coEvery { utxoDao.getAssetUtxoAt(e4, 0) } throws IllegalStateException("db")
+        assertNull(manager(proven()).detectedInputUnits(txHashHex = t, header = tHeader, inputs = listOf(f to 7, e4 to 0), resolved = null))
+    }
+
+    /** Source gate: every proof is read through the helper, and detection's total comes from its seam. */
+    @Test fun `source - provenInputUnits is called only inside a helper's proofUnits lambda`() {
+        val source = listOf("", "../", "../../")
+            .map { File(it + "core/src/main/java/app/aroundtheblock/wallet/core/asset/AssetManager.kt") }
+            .first { it.exists() }.readText()
+        val calls = Regex("""provenInputUnits\(""").findAll(source).map { m ->
+            source.substring(source.lastIndexOf('\n', m.range.first) + 1, source.indexOf('\n', m.range.first))
+        }.filterNot { it.contains("fun provenInputUnits(") }.toList()
+        assertEquals("the walk, pre-spend, replay and detection: $calls", 4, calls.size)
+        for (line in calls) assertTrue(line, Regex("""^\s*proofUnits = \{ provenInputUnits\(""").containsMatchIn(line))
+
+        val detection = source.substringAfter("suspend fun processIncomingAssetTx(").substringBefore("\n    }\n")
+        assertTrue(Regex("""val inputUnits = detectedInputUnits\(""").containsMatchIn(detection))
+        assertFalse(detection.contains("provenInputUnits"))
+    }
+
     // ── The targeting walk ────────────────────────────────────────────────
 
     private fun header(vararg instructions: TransferInstruction) = DecodedAssetHeader(
@@ -184,6 +240,13 @@ class AssetRemainderProofGuardTest {
         val (answer, settled) = walk(header(fixed(0, 5)), ("held" to 0) to 10L)
         assertTrue(settled.containsKey("send"))
         assertNull("the proof says 5, a row says 10: unknown", settled["send"])
+        assertEquals(true, answer)
+    }
+
+    @Test fun `walk - known rows above zero but below the assigned total make the total unknown`() = runTest {
+        val (answer, settled) = walk(header(fixed(0, 5)), ("held" to 0) to 3L)
+        assertTrue(settled.containsKey("send"))
+        assertNull("the proof says 5, a row says 3: unknown", settled["send"])
         assertEquals(true, answer)
     }
 

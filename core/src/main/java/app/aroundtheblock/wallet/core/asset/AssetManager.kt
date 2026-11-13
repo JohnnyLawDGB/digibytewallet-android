@@ -203,21 +203,23 @@ internal suspend fun resolveInputAssetUnits(
  * ASSET-PROOF-GUARD-KT. The input total every hold path reads: [resolved] (the answer of
  * [resolveInputAssetUnits]) when it is known; otherwise what a stored remainder proof says
  * ([proofUnits]: the instructions' assigned total, null without a proof) — but a proof is never
- * trusted against the wallet's own rows. It is read only when the known positive rows of [inputs]
- * sum to 0 or exactly to that total. Any other sum, or one that does not fit a count, leaves the
- * total unknown, and the hold rule holds the last output.
+ * trusted against the wallet's own rows. It is read only when every input was read ([inputs] is
+ * null when any could not be) and their known positive rows sum to 0 or exactly to that total.
+ * An unread input, any other sum, or one that does not fit a count leaves the total unknown, and
+ * the hold rule holds the last output.
  *
  * The one copy: the pass in front of a spend, the targeting walk, detection and the startup
  * replay all read a proof through this, so they agree. Mirrors the C core's ASSET-HOLD-ONE-RULE.
  */
 internal suspend fun inputUnitsOrRemainderProof(
     resolved: Long?,
-    inputs: List<Pair<String, Int>>,
+    inputs: List<Pair<String, Int>>?,
     rowQuantity: suspend (String, Int) -> Long?,
     proofUnits: () -> Long?,
 ): Long? {
     if (resolved != null) return resolved
     val proven = proofUnits() ?: return null
+    if (inputs == null) return null
     var known = 0L
     for ((txid, vout) in inputs) {
         val stored = rowQuantity(txid, vout) ?: continue
@@ -1287,7 +1289,7 @@ class AssetManager(
         val inputUnits = detectedInputUnits(
             txHashHex = txHashHex,
             header = header,
-            inputs = parsedInputs.filterNotNull(),
+            inputs = if (inputLines == null || parsedInputs.any { it == null }) null else parsedInputs.filterNotNull(),
             resolved = resolveInputAssetUnits(
                 inputs = parsedInputs.filterNotNull(),
                 rowQuantity = { txid, vout -> utxoDao.getAssetUtxoAt(txid, vout)?.assetQuantity },
@@ -2228,7 +2230,7 @@ class AssetManager(
                         },
                         unresolved = zeroRowInputs,
                     ),
-                    inputs = readInputs,
+                    inputs = if (inputs.any { it == null }) null else readInputs,
                     rowQuantity = rowOf,
                     proofUnits = { provenInputUnits(txHash, header) },
                 )
@@ -2787,13 +2789,16 @@ class AssetManager(
         val zeroRowInputs = ZeroRowInputs()
         val rowOf: suspend (String, Int) -> Long? = { txid, v -> utxoDao.getAssetUtxoAt(txid, v)?.assetQuantity }
         var replayInputs: List<Pair<String, Int>> = emptyList()
+        var everyInputRead = false   // stays false when the list is absent or its read throws
         val resolved = try {
-            replayInputs = (inputsOf(txHashHex) ?: emptyArray())
+            val lines = inputsOf(txHashHex)
+            replayInputs = (lines ?: emptyArray())
                 .mapNotNull { line ->
                     val p = line?.split("|", limit = 2) ?: return@mapNotNull null
                     val prevVout = p.getOrNull(1)?.toIntOrNull() ?: return@mapNotNull null
                     if (p[0].length != 64 || prevVout < 0) null else p[0] to prevVout
                 }
+            everyInputRead = lines != null && replayInputs.size == lines.size
             resolveInputAssetUnits(
                 inputs = replayInputs,
                 rowQuantity = rowOf,
@@ -2818,7 +2823,7 @@ class AssetManager(
         val inputUnits = try {
             inputUnitsOrRemainderProof(
                 resolved = resolved,
-                inputs = replayInputs,
+                inputs = if (everyInputRead) replayInputs else null,
                 rowQuantity = rowOf,
                 proofUnits = { provenInputUnits(txHashHex, header) },
             )
@@ -2836,19 +2841,26 @@ class AssetManager(
     /**
      * Detection's input total for [txHashHex]: [resolved] (its [resolveInputAssetUnits] answer),
      * else what a stored remainder proof says, read through [inputUnitsOrRemainderProof] against
-     * the wallet's rows. Touches no bridge, so it runs on the JVM.
+     * the wallet's rows. [inputs] is null when any input could not be read. A row that cannot be
+     * read while checking the proof is no answer: unknown. Touches no bridge, so it runs on the JVM.
      */
     internal suspend fun detectedInputUnits(
         txHashHex: String,
         header: DecodedAssetHeader,
-        inputs: List<Pair<String, Int>>,
+        inputs: List<Pair<String, Int>>?,
         resolved: Long?,
-    ): Long? = inputUnitsOrRemainderProof(
-        resolved = resolved,
-        inputs = inputs,
-        rowQuantity = { txid, vout -> utxoDao.getAssetUtxoAt(txid, vout)?.assetQuantity },
-        proofUnits = { provenInputUnits(txHashHex, header) },
-    )
+    ): Long? = try {
+        inputUnitsOrRemainderProof(
+            resolved = resolved,
+            inputs = inputs,
+            rowQuantity = { txid, vout -> utxoDao.getAssetUtxoAt(txid, vout)?.assetQuantity },
+            proofUnits = { provenInputUnits(txHashHex, header) },
+        )
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        null
+    }
 
     /** Distinct txids the wallet tracks an asset output for (spent + unspent) —
      *  used by the activity list to label a transaction row as DigiAsset. */
