@@ -251,6 +251,41 @@ class PinStoreMigrationTest {
         assertFalse(mgr.isWipePending())
     }
 
+    @Test fun `PIN-STORE past the wipe threshold a seed that will not erase still leaves the rate limit as with wipe-after-N off`() {
+        // The seed erase fails every time and the screen stands down, so the PIN is asked again; writes land.
+        val on = nineWrongWithWipeAfterN(SoftwareCipher(), CountingHash())
+        assertSame(PinVerifyResult.ShouldWipe, on.verifyPin("999999"))
+        val afterWipeEntry = on.verifyPin("999998")
+        assertTrue("the entry after a wipe that did not erase ran at full speed: $afterWipeEntry", afterWipeEntry is PinVerifyResult.LockedOut)
+
+        // The same ten entries with wipe-after-N off.
+        target.delete()
+        val off = PinManager(open(SoftwareCipher(), FakeLegacy().apply { present = false }), Hash(), clock)
+        off.setPin(pin)
+        repeat(PinManager.WIPE_THRESHOLD - 1) { off.verifyPin("00000$it"); clock.sinceBoot += PinManager.MAX_COOLDOWN_MS }
+        val tenth = off.verifyPin("999999") as PinVerifyResult.Wrong
+        assertEquals("the same cooldown either way", tenth.lockedUntil, (afterWipeEntry as PinVerifyResult.LockedOut).until)
+    }
+
+    @Test fun `PIN-STORE a fresh file records a fresh digest, so a PIN set after a downgrade is not read as a failed delete`() {
+        val cipher = SoftwareCipher()
+        manager(open(cipher, FakeLegacy().apply { present = false })).setPin(pin) // fresh install: no migration
+        val legacy = FakeLegacy() // the older build found no old store and the user set a PIN there
+        manager(legacy.open()).setPin("999999")
+        val mgr = manager(open(cipher, legacy))
+        assertSame("the PIN set on the older build", PinVerifyResult.Success, mgr.verifyPin("999999"))
+        assertFalse(legacy.present)
+    }
+
+    @Test fun `PIN-STORE an empty old store beside a fresh file is deleted`() {
+        val cipher = SoftwareCipher()
+        manager(open(cipher, FakeLegacy().apply { present = false })).setPin(pin)
+        val legacy = FakeLegacy() // present, no entries
+        val mgr = manager(open(cipher, legacy))
+        assertSame(PinVerifyResult.Success, mgr.verifyPin(pin))
+        assertFalse(legacy.present)
+    }
+
     @Test fun `PIN-STORE a right PIN at the wipe entry is never wiped`() {
         val cipher = SoftwareCipher()
         val mgr = nineWrongWithWipeAfterN(cipher, CountingHash())
@@ -427,7 +462,9 @@ class PinStoreMigrationTest {
         // Re-review item 2: a file written before the digest existed records none; that absence is no
         // evidence the old store is newer.
         val cipher = SoftwareCipher()
-        manager(open(cipher, FakeLegacy().apply { present = false })).setPin(pin) // a file, no digest
+        manager(open(cipher, FakeLegacy().apply { present = false })).setPin(pin)
+        // As a build before the digest wrote it: the same entries, no digest.
+        writeWhole(target, FilePinStore.seal(cipher, FilePinStore.read(target, cipher) - PinStoreMigration.KEY_MIGRATED_FROM))
         val legacy = FakeLegacy()
         manager(legacy.open()).setPin("999999")
         val mgr = manager(open(cipher, legacy))

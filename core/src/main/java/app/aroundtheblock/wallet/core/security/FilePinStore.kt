@@ -228,9 +228,17 @@ internal class FilePinStore private constructor(
         /** Opens [file]: its entries, or none when there is no file. THROWS when it is there and cannot be read. */
         fun open(file: File, cipher: PinStoreCipher, dirSync: DirSync = DirSync.OS, legacy: LegacyPinStore? = null): FilePinStore {
             File(file.parentFile, file.name + ".tmp").delete() // a write that stopped before its rename
-            val values = if (file.exists()) read(file, cipher) else emptyMap()
+            val values = if (file.exists()) read(file, cipher) else fresh()
             return FilePinStore(file, cipher, values, dirSync, legacy)
         }
+
+        /**
+         * A store created with no migration records the digest of an EMPTY old store, so an old store
+         * that later appears with entries (an older build, after a downgrade, where the user set a
+         * PIN) reads as changed, the newer copy, rather than as a delete that did not land.
+         */
+        internal fun fresh(): Map<String, Any> =
+            mapOf(PinStoreMigration.KEY_MIGRATED_FROM to PinStoreMigration.digestOf(emptyMap()))
 
         /** A store over entries already written to and verified in [file] (the migration's). */
         internal fun over(file: File, cipher: PinStoreCipher, values: Map<String, Any>, dirSync: DirSync = DirSync.OS, legacy: LegacyPinStore? = null) =
@@ -276,7 +284,7 @@ internal class FilePinStore private constructor(
             android.util.Log.e("PinStore", "PIN-STORE: clear did not land")
             throw PinStoreWriteException("the PIN store is still on disk after its clear")
         }
-        values = emptyMap()
+        values = fresh()
     }
 
     @Synchronized private fun get(key: String): Any? = values[key]
@@ -328,7 +336,8 @@ internal interface LegacyPinStore {
  *
  * An old store found beside the file (PIN-STORE review item 1) is one of two things, told apart by
  * the digest of the old store's entries that the migration records in the file ([KEY_MIGRATED_FROM]):
- *  - UNCHANGED since that migration (its digest is the recorded one), or a file that records no digest
+ *  - UNCHANGED since that migration (its digest is the recorded one; a file created with no migration
+ *    records the digest of an empty old store, [FilePinStore.fresh]), or a file that records no digest
  *    (written before the digest existed; its absence is no evidence): a delete that did not land. The
  *    file is the newer copy, since only the file was written since; the old store is deleted again
  *    and never served. Re-reading it instead would hand back the counters as they were at the

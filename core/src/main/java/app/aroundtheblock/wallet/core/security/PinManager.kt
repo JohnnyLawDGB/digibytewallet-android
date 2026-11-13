@@ -426,7 +426,9 @@ class PinManager internal constructor(
         // 2. The failure this entry would be, on disk before the compare.
         val count = store.getInt(KEY_FAIL_COUNT, 0) + 1
         val wipes = isWipeAfterNEnabled() && count >= WIPE_THRESHOLD
-        val cooldown = if (wipes) 0L else cooldownMsForFailCount(count)
+        // Past the wipe threshold too: a wipe that cannot erase the seed is no brake, so the rate limit
+        // is never weaker than with wipe-after-N off.
+        val cooldown = cooldownMsForFailCount(count)
         val undo = undoOf(KEY_FAIL_COUNT, KEY_COOLDOWN_LEFT_MS, KEY_COOLDOWN_MEASURED_AT, KEY_COOLDOWN_BOOT)
         run {
             val failure = PinStoreEdit().putInt(KEY_FAIL_COUNT, count)
