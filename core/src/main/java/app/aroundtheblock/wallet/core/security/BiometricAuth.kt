@@ -1,6 +1,7 @@
 package app.aroundtheblock.wallet.core.security
 
 import android.os.Build
+import android.os.SystemClock
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
@@ -65,12 +66,14 @@ class BiometricAuth {
         val executor = ContextCompat.getMainExecutor(activity)
         val callback = object : BiometricPrompt.AuthenticationCallback() {
             override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                OwnCredentialPromptExemption.end()
                 if (cont.isActive) cont.resume(BiometricResult.Success)
             }
             override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                OwnCredentialPromptExemption.end()
                 if (cont.isActive) cont.resume(BiometricResult.Error(errorCode, errString.toString()))
             }
-            override fun onAuthenticationFailed() { /* prompt retries internally */ }
+            override fun onAuthenticationFailed() { /* prompt retries internally; still up */ }
         }
         // androidx.biometric rejects BIOMETRIC_STRONG|DEVICE_CREDENTIAL on API
         // 28-29 with an IllegalArgumentException (crash-looped the Note 8 at
@@ -93,11 +96,18 @@ class BiometricAuth {
                 .setSubtitle(subtitle)
                 .setAllowedAuthenticators(authenticators)
                 .build()
+            // SEED-VIEW-AUTH: on API 26-29 the confirm screen is its own activity and stops ours;
+            // that one stop must not lock the UI under the prompt. Bounded and cleared on every path.
+            OwnCredentialPromptExemption.begin(SystemClock.elapsedRealtime())
             prompt.authenticate(info)
             // A caller cancelled (its effect left the composition): take the prompt down with it, so it
             // is not left over the next screen with nothing waiting on its answer. Main thread only.
-            cont.invokeOnCancellation { executor.execute { runCatching { prompt.cancelAuthentication() } } }
+            cont.invokeOnCancellation {
+                OwnCredentialPromptExemption.end()
+                executor.execute { runCatching { prompt.cancelAuthentication() } }
+            }
         } catch (t: Throwable) {
+            OwnCredentialPromptExemption.end()
             // A credential prompt must never be able to crash the wallet - the
             // caller treats this like any other prompt failure.
             if (cont.isActive) cont.resume(BiometricResult.Error(-1, t.message ?: "prompt failed"))
