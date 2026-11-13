@@ -29,14 +29,20 @@
 //    3. BY A MODEL. `m...` below is the Kotlin written out line for line in C: the pre-spend pass with
 //       its plain-transaction set and its per-pass record, the TargetingWalk with its maps, its Step
 //       stack and its restsOn lists, resolveInputAssetUnits, assetCarrier, assetTxShape,
-//       hasAssetPayload, the replay. The Kotlin's decoder is BRAssetDecode.h and its targetsOutput is
+//       hasAssetPayload, the replay. assetCarrier, assetTxShape and hasAssetPayload follow the one carrier
+//       rule (DigiAssetCarrierRule.verdict, written out here as mVerdict with its own nulldata test, not
+//       by calling BRTxAssetCarrier), as the Kotlin has since DA-014-REF (ASSET-HOLD-ONE-RULE). The Kotlin's decoder is BRAssetDecode.h and its targetsOutput is
 //       BRAssetTargetsOutput (asset_decode_kat and asset_quantity_targets_kat hold those to the
 //       Kotlin). sweep_decoder holds the decoder's reading alone (_BRAssetHoldOutputsReading), with a
 //       classifier that says NO everywhere, to the model over fixed pseudo-random wallets with any
 //       scripts at all (exact: that reading is the Kotlin), and the pass to at least the model;
 //       sweep_agree holds the pass, with the core's classifier, to the model over wallets whose scripts
 //       the two readers read alike; sweep_union holds the pass to "at least the model and at least
-//       what the classifier holds" over any scripts.
+//       what the classifier holds" over any scripts. Where THE PROOF GUARD (BRAssetHold.h, the other
+//       reading) keeps a proof unread, the pass holds more than the Kotlin by design, and sweep_agree asks
+//       only at least the model there.
+//    4. AGAINST THE EARLIER READING. one_rule_holds_no_less compares the shipped pass with the pass as it
+//       was before ASSET-HOLD-ONE-RULE (run.sh's fourth unit) over pseudo-random wallets.
 //
 //  One case per process: `asset_hold_kat <case>` prints PASS:/FAIL: lines and `RESULT <case> pass|fail`;
 //  `list` prints the case names. run.sh builds one binary per ASSET_HOLD_UNFIXED arm and holds each
@@ -61,6 +67,12 @@ int asset_hold_kat_tu2(void);   // run.sh's second translation unit, which inclu
 // naming `c`, then each reading alone, then both, into out[0..4]. Returns its ASSET_HOLD_TEST_SEAMS.
 int asset_hold_kat_seams_off(const BRAssetHoldView *v, const BRAssetHoldClassifier *c, BRAssetHoldWork *work, size_t workCap,
                              BRUTXO *held, size_t heldCap, BRAssetHoldResult out[5]);
+
+// run.sh's fourth translation unit, built WITHOUT ASSET_HOLD_TEST_SEAMS and with ASSET_HOLD_RED_SECOND_RULE
+// (256) and ASSET_HOLD_RED_PROOF_UNGUARDED (16384) beside the arm's own bits: BRAssetHoldOutputs as it was
+// before ASSET-HOLD-ONE-RULE, the header reading the carrier itself and no proof guard. one_rule_holds_no_less compares the shipped pass with it.
+BRAssetHoldResult asset_hold_kat_second_rule(const BRAssetHoldView *v, BRAssetHoldWork *work, size_t workCap, BRUTXO *held,
+                                             size_t heldCap);
 
 static int FAILED = 0;
 
@@ -525,25 +537,63 @@ static BRAssetScriptKind mDecode(const BRTxOutput *o, MHeader *out)
     return BRAssetDecodeInstructions(o->script, o->scriptLen, &out->h, out->insts, BR_ASSET_MAX_INSTRUCTIONS);
 }
 
-// assetCarrier(scripts): the first UNCLASSIFIABLE, else the last decoded
-static int mAssetCarrier(const BRTransaction *tx, MHeader *out)
+// DigiAssetCarrierRule.isNullData: OP_RETURN, then nothing but complete push opcodes.
+static int mIsNullData(const BRTxOutput *o)
 {
-    size_t j;
-    long last = -1;
+    const uint8_t *s = o->script;
+    size_t n = o->scriptLen, pc = 1;
+
+    if (n == 0 || s[0] != 0x6a) return 0;
+    while (pc < n) {
+        unsigned op = s[pc++];
+        uint64_t size = 0;
+
+        if (op > 0x60) return 0;
+        if (op < 0x4c) size = op;
+        else if (op == 0x4c) { if (n - pc < 1) return 0; size = s[pc]; pc += 1; }
+        else if (op == 0x4d) { if (n - pc < 2) return 0; size = (uint64_t)s[pc] | ((uint64_t)s[pc + 1] << 8); pc += 2; }
+        else if (op == 0x4e) {
+            if (n - pc < 4) return 0;
+            size = (uint64_t)s[pc] | ((uint64_t)s[pc + 1] << 8) | ((uint64_t)s[pc + 2] << 16) | ((uint64_t)s[pc + 3] << 24);
+            pc += 4;
+        }
+        if ((uint64_t)(n - pc) < size) return 0;
+        pc += (size_t)size;
+    }
+    return 1;
+}
+
+// DigiAssetCarrierRule.verdict(scripts, decoder, shape), DA-014-REF: 0 None, 1 Carrier (decoded in
+// *out), 2 Undecided. The shape is the transaction's own input count and output 0's amount.
+static int mVerdict(const BRTransaction *tx, MHeader *out)
+{
+    size_t j, tagged = 0, nullData = 0;
+    long carrier = -1;
     MHeader tmp;
 
     for (j = 0; j < tx->outCount; j++) {
-        BRAssetScriptKind k;
+        BRAssetScriptKind k = mDecode(&tx->outputs[j], &tmp);
+        int isNull = mIsNullData(&tx->outputs[j]);
 
-        if (! mIsOpReturn(&tx->outputs[j])) continue;
-        k = mDecode(&tx->outputs[j], &tmp);
-        if (k == BR_ASSET_SCRIPT_NOT_ASSET) continue;
-        if (k == BR_ASSET_SCRIPT_UNCLASSIFIABLE) { *out = tmp; return 1; }
-        last = (long)j;
+        if (isNull) nullData++;
+        if (k != BR_ASSET_SCRIPT_NOT_ASSET) {
+            tagged++;
+            if (isNull) { carrier = (long)j; *out = tmp; }
+        }
     }
+    if (tagged == 0) return 0;
+    if (tagged != 1 || nullData != 1 || carrier < 0 || out->h.kind != BR_ASSET_SCRIPT_ASSET) return 2;
+    if (carrier == 1 && tx->outCount >= 2 && tx->outCount <= 3 && tx->outputs[0].amount == 650 && tx->inCount == 1) return 2;
+    return 1;
+}
 
-    if (last < 0) return 0;
-    mDecode(&tx->outputs[last], out);
+// assetCarrier(scripts, shape): the one rule's carrier; Undecided is an UNCLASSIFIABLE header.
+static int mAssetCarrier(const BRTransaction *tx, MHeader *out)
+{
+    int v = mVerdict(tx, out);
+
+    if (v == 0) return 0;
+    if (v == 2) memset(out, 0, sizeof(*out));   // kind 0: BR_ASSET_SCRIPT_UNCLASSIFIABLE, operation DA_UNDEFINED
     return 1;
 }
 
@@ -560,33 +610,24 @@ static int mFirstNonOpReturn(const BRTransaction *tx, int32_t *first)
 static int mShape(UInt256 h, MShape *s)
 {
     const BRTransaction *tx = mOutputsOf(h);
-    long payload = -1;
-    size_t j, k;
+    size_t k;
 
     if (! tx || tx->outCount == 0) return 0;
-    for (j = 0; j < tx->outCount; j++) if (mIsOpReturn(&tx->outputs[j]) && payload < 0) payload = (long)j;
     s->hasFirst = mFirstNonOpReturn(tx, &s->first);
-    if (payload < 0) return 0;
-    if (mDecode(&tx->outputs[payload], &s->header) == BR_ASSET_SCRIPT_NOT_ASSET) return 0;
+    if (! mAssetCarrier(tx, &s->header)) return 0;   // DA-014-REF: the one carrier rule, not the first OP_RETURN
     s->outputCount = (int32_t)tx->outCount;
     s->inputsReadable = 1;
     for (k = 0; k < tx->inCount; k++) if (tx->inputs[k].index > (uint32_t)INT32_MAX) s->inputsReadable = 0;
     return 1;
 }
 
-// hasAssetPayload(outputLines): null when there is nothing to judge from
+// hasAssetPayload(outputLines): null when there is nothing to judge from; otherwise verdict != None
 static int mHasAssetPayload(const BRTransaction *tx)   // -1 null, 0, 1
 {
-    size_t j;
+    MHeader tmp;
 
     if (! tx || tx->outCount == 0) return -1;
-    for (j = 0; j < tx->outCount; j++) {
-        MHeader tmp;
-
-        if (! mIsOpReturn(&tx->outputs[j])) continue;
-        return mDecode(&tx->outputs[j], &tmp) != BR_ASSET_SCRIPT_NOT_ASSET;
-    }
-    return 0;
+    return mVerdict(tx, &tmp) != 0;
 }
 
 static int mTargets(const MHeader *h, int32_t vout, int hasFirst, int32_t first, OL units, int32_t outputCount)
@@ -1189,8 +1230,8 @@ static void prespend_not_ours(void)
 static void prespend_plain_opreturn_first(void)
 {
     Fx *f;
-    UInt256 h[1];
-    uint32_t n[1] = { 3 };
+    UInt256 h[2];
+    uint32_t n[2] = { 2, 3 };
 
     resetPool();
     wreset(&WAL);
@@ -1201,19 +1242,20 @@ static void prespend_plain_opreturn_first(void)
     ours(f);
     in(f, tid(T_FUNDING), 1);
     wadd(&WAL, f);
-    h[0] = f->tx.txHash;
-    // The decoder alone: the plain OP_RETURN does not hide the carrier.
+    h[0] = h[1] = f->tx.txHash;
+    // ASSET-HOLD-ONE-RULE: the decoder's reading takes the carrier from BRTxAssetCarrier too. Two nulldata
+    // outputs are undecided (DA-014-REF), so the decoder ALONE, with a classifier that says NO everywhere,
+    // holds every owned output (AssetPreSpendPassTest). The earlier second reading -- the last carrier
+    // decides, the plain OP_RETURN ignored -- held only output 3 here.
     WAL.classifier = &NEVER;
-    heldExactly("a plain OP_RETURN before the carrier does not hide the carrier (the decoder's reading)", passReading(&WAL, 1), h, n, 1);
+    heldExactly("a plain OP_RETURN beside the carrier is undecided, the decoder's reading alone: every owned output held",
+                passReading(&WAL, 1), h, n, 2);
+    heldExactly("and the other reading alone", passReading(&WAL, 2), h, n, 2);
     WAL.classifier = NULL;
-    // DA-014-REF: two nulldata outputs -- the reference reads neither as decided; the core's classifier
-    // holds every owned output (fail closed), and the pass holds the union.
-    {
-        UInt256 h2[2];
-        uint32_t n2[2] = { 2, 3 };
-        h2[0] = h2[1] = f->tx.txHash;
-        heldExactly("a plain OP_RETURN beside the carrier is undecided (DA-014-REF): every owned output held", pass(&WAL), h2, n2, 2);
-    }
+    ck(BRTxAssetCarrier(&f->tx, NULL) == DA_TX_UNDECIDED, "BRTxAssetCarrier reads it as undecided");
+    heldExactly("the pass, with the core's classifier", pass(&WAL), h, n, 2);
+    model(&WAL);
+    ck(sameAsModel(pass(&WAL)), "and the model (the Kotlin's one rule) agrees");
 }
 
 static void prespend_unclassifiable_beside_readable(void)
@@ -1274,8 +1316,9 @@ static void prespend_plain_pushdata2(void)
     ck(heldIn(pass(&WAL), f->tx.txHash, 0), "the same transaction with the payload tagged DA: our output is held");
 }
 
-// Two readable carriers: the last decides (as BRDigiAsset.c chooses), not the first. [the first carrier,
-// naming output 2; the second, naming output 3; ours 2, 3 and 4]; the inputs carried exactly ten.
+// Two readable carriers: undecided under the one rule (DA-014-REF), so every owned output is held, by the
+// decoder's reading alone too. [the first carrier, naming output 2; the second, naming output 3; ours 2, 3
+// and 4]; the inputs carried exactly ten. The earlier second reading let the last carrier decide (only 3).
 static void prespend_two_carriers(void)
 {
     Fx *f;
@@ -1295,8 +1338,9 @@ static void prespend_two_carriers(void)
     WAL.classifier = &NEVER;
     r = passReading(&WAL, 1);
     WAL.classifier = NULL;
-    ck(r.status == BR_ASSET_HOLD_COMPLETE && heldIn(r, f->tx.txHash, 3) && ! heldIn(r, f->tx.txHash, 2) && r.heldCount == 1,
-       "two readable carriers, the decoder's reading: the last one's output is held, the first one's is not (%zu held)", r.heldCount);
+    ck(r.status == BR_ASSET_HOLD_COMPLETE && heldIn(r, f->tx.txHash, 2) && heldIn(r, f->tx.txHash, 3) &&
+       heldIn(r, f->tx.txHash, 4) && r.heldCount == 3,
+       "two readable carriers, the decoder's reading alone: every owned output is held (%zu held)", r.heldCount);
     model(&WAL);
     ck(sameAsModel(r), "and the model agrees");
     // DA-014-REF: two tagged outputs are undecided: the classifier fails closed on every output and
@@ -1834,12 +1878,13 @@ static void walk_pass_record(void)
     }
 }
 
-// A walk records the total it resolved, units and all. A carries two carriers: the walk reads the
-// first (three units to output 0), the pass the last (ten). A's inputs are unknown and A is proven, so
-// the walk's total is three and the pass's record ten. B and C each spend A's change and are listed
-// before A: B's walk records its total and C's walk reads the record. The decoder's reading is held to
-// the model exactly. The other reading reads a funding transaction by the pass's carrier or not at all,
-// and the pass holds the union.
+// A walk records the total it resolved, units and all. A carries one carrier (three units to output 0)
+// and a change output 3; its inputs are unknown and A is proven, so its total is three and its change
+// carries nothing. B and C each spend A's change and are listed before A: B's walk records A's total and
+// C's walk reads the record. (Before ASSET-HOLD-ONE-RULE A carried two carriers, so that the walk's
+// first-OP_RETURN reading and the pass's last-carrier reading differed; under the one rule two carriers
+// are undecided and every reading takes the same carrier, so there is no such difference to record.)
+// The decoder's reading is held to the model exactly, and the pass to at least the model.
 static void walk_record_units(void)
 {
     Fx *a, *b, *c;
@@ -1847,7 +1892,7 @@ static void walk_record_units(void)
 
     resetPool();
     wreset(&WAL);
-    a = fx(0xb3); theirs(a); out(a, "6a06444101150003", 0); out(a, TRANSFER_TEN_TO_OUTPUT_ZERO, 0); theirs(a);
+    a = fx(0xb3); theirs(a); out(a, "6a06444101150003", 0); theirs(a); theirs(a);
     in(a, tid(0xb4), 0);
     prove(&WAL, a->tx.txHash);
     b = fx(0xb5); theirs(b); out(b, TRANSFER_TEN_TO_OUTPUT_ZERO, 0); theirs(b);
@@ -1859,28 +1904,20 @@ static void walk_record_units(void)
     wadd(&WAL, b);
     wadd(&WAL, c);
     wadd(&WAL, a);
+    WAL.classifier = &NEVER;
     r = passReading(&WAL, 1);
-    model(&WAL);
-    ck(r.status == BR_ASSET_HOLD_COMPLETE && sameAsModel(r),
-       "the walk's recorded total is what it resolved: the decoder's reading is the model's");
-    // DA-014-REF: the core's classifier holds A (two carriers) whole, which would hide the other
-    // reading's choice of carrier. The classifier the reading is asked about here answers as the
-    // last-carrier rule did: each carrier's named output 0 (the classifier never sees a remainder).
-    absReset();
-    ABS.yes[ABS.yesN].h = a->tx.txHash; ABS.yes[ABS.yesN++].n = 0;
-    ABS.yes[ABS.yesN].h = b->tx.txHash; ABS.yes[ABS.yesN++].n = 0;
-    ABS.yes[ABS.yesN].h = c->tx.txHash; ABS.yes[ABS.yesN++].n = 0;
-    ABS.contains[ABS.containsN++] = a->tx.txHash;
-    ABS.contains[ABS.containsN++] = b->tx.txHash;
-    ABS.contains[ABS.containsN++] = c->tx.txHash;
-    WAL.classifier = &ABSTRACT;
-    r = pass(&WAL);
     WAL.classifier = NULL;
-    ck(r.status == BR_ASSET_HOLD_COMPLETE && heldIn(r, c->tx.txHash, 2) && coversModel(r),
-       "the other reading reads a funding transaction by the pass's carrier or not at all, and the pass holds the union");
+    model(&WAL);
+    ck(r.status == BR_ASSET_HOLD_COMPLETE && ! heldIn(r, c->tx.txHash, 2) && sameAsModel(r),
+       "the walk's recorded total is what it resolved: A's change carries nothing, C's change is free, the model's answer");
     r = pass(&WAL);
-    ck(r.status == BR_ASSET_HOLD_COMPLETE && heldIn(r, c->tx.txHash, 2) && coversModel(r),
-       "with the core's classifier (DA-014-REF holds A whole): the same output is held");
+    ck(r.status == BR_ASSET_HOLD_COMPLETE && ! heldIn(r, c->tx.txHash, 2) && coversModel(r),
+       "with the core's classifier: the same, and at least the model");
+    // GUARD: without the proof A's total is unknown, its change may carry units, and C's change is held.
+    WAL.provenN = 0;
+    r = pass(&WAL);
+    ck(r.status == BR_ASSET_HOLD_COMPLETE && heldIn(r, c->tx.txHash, 2),
+       "without A's proof C's change is held: the test is not blind");
 }
 
 // A cycle (only a forged txid makes one): A spends (B, 2), B spends (A, 2), both stored zero, B's
@@ -2170,11 +2207,13 @@ static void union_agree(void)
     ck(BRAssetOutpointMustBeExcluded(DA_TRANSFER, 3, 4, 0, 0, NULL, 0) == 1, "BRAssetOutpointMustBeExcluded excludes the last output when the input units are unknown");
 }
 
-// Two carriers in a funding transaction F, whose input is unknown; S spends F's last output (a row
-// storing zero) and a row of five. The other reading reads a funding transaction by the pass's carrier
-// or not at all, and the pass holds the union. Here that reading is asked alone, with the classifier
-// silent, and its answer is held to the one the pass's carrier gives; beside it, the same wallet with
-// F's second carrier a plain OP_RETURN, as a control.
+// Two carriers in a funding transaction F, whose input is unknown; T spends F's last output (a row
+// storing zero) and a row of five. Under the one rule (ASSET-HOLD-ONE-RULE, DA-014-REF) F is undecided,
+// so the other reading, asked alone with the classifier silent, holds every owned output of F and reads
+// F's last output as targeted in T's walk. Beside it, the same wallet with F's second carrier an
+// OP_RETURN that is neither tagged nor nulldata (OP_RETURN OP_CHECKSIG), as a control: F's single
+// carrier then decides, and the outputs keep their places. (A plain nulldata OP_RETURN would be a second
+// nulldata output, undecided too.)
 static void union_two_carriers(void)
 {
     static const GInst issue[1] = { { 0, 0, 0, 2, 10 } }, xferOne[1] = { { 0, 0, 0, 2, 1 } }, xferFive[1] = { { 0, 0, 0, 1, 5 } };
@@ -2188,7 +2227,7 @@ static void union_two_carriers(void)
         f = fx(0xa01);
         outCarrier(f, 0x05, 10, issue, 1, 0);
         if (twoCarriers) outCarrier(f, 0x15, 0, xferOne, 1, 0);
-        else out(f, "6a03aabbcc", 0);   // an OP_RETURN that is no carrier, so the outputs keep their places
+        else out(f, "6aac", 0);   // an OP_RETURN that is no carrier and not nulldata, so the outputs keep their places
         ours(f);
         ours(f);
         in(f, tid(0xa02), 0);
@@ -2209,13 +2248,15 @@ static void union_two_carriers(void)
             UInt256 h[4] = { f->tx.txHash, f->tx.txHash, t->tx.txHash, t->tx.txHash };
             uint32_t n[4] = { 2, 3, 1, 2 };
 
-            heldExactly("two carriers: the other reading reads F by the pass's carrier or not at all", r, h, n, 4);
+            heldExactly("two carriers: undecided, every owned output of F held and T's remainder unknown", r, h, n, 4);
+            ck(BRTxAssetCarrier(&f->tx, NULL) == DA_TX_UNDECIDED, "BRTxAssetCarrier reads F as undecided");
         }
         else {
             UInt256 h[2] = { f->tx.txHash, t->tx.txHash };
             uint32_t n[2] = { 2, 1 };
 
             heldExactly("one carrier: the other reading reads F by that carrier", r, h, n, 2);
+            ck(BRTxAssetCarrier(&f->tx, NULL) == DA_TX_CARRIER, "BRTxAssetCarrier reads F's one carrier");
         }
     }
 }
@@ -2475,7 +2516,7 @@ static void edges(void)
     preSpendWallet();
     t = fx(0xd3);
     out(t, "6a08" "44410305" "0a" "010a" "10", 0);   // all ten to output 1
-    out(t, "6a03aabbcc", 0);
+    out(t, "6aac", 0);   // OP_RETURN, not nulldata and not tagged: the carrier stays the one nulldata output
     wadd(&WAL, t);
     row(&WAL, t->tx.txHash, 0, 0, 0);
     WAL.classifier = &NEVER;
@@ -2484,9 +2525,20 @@ static void edges(void)
     model(&WAL);
     ck(r.status == BR_ASSET_HOLD_COMPLETE && ! heldIn(r, t->tx.txHash, 0) && sameAsModel(r),
        "an issuance with no output that is not OP_RETURN: a row on output 0 is not the issuer's (the decoder's reading)");
+    ck(BRTxAssetCarrier(&t->tx, NULL) == DA_TX_CARRIER, "BRTxAssetCarrier reads its one nulldata carrier");
+    // the same with a second nulldata output: undecided (DA-014-REF), held by the decoder's reading alone too
+    t->outs[1].script = arena(5);
+    hx("6a03aabbcc", t->outs[1].script, 5);
+    t->outs[1].scriptLen = 5;
+    ck(BRTxAssetCarrier(&t->tx, NULL) == DA_TX_UNDECIDED, "with a second nulldata output BRTxAssetCarrier reads it as undecided");
+    WAL.classifier = &NEVER;
+    r = passReading(&WAL, 1);
+    WAL.classifier = NULL;
+    ck(r.status == BR_ASSET_HOLD_COMPLETE && heldIn(r, t->tx.txHash, 0),
+       "the same, two nulldata outputs: undecided, the decoder's reading alone holds the row's output");
     r = pass(&WAL);
     ck(r.status == BR_ASSET_HOLD_COMPLETE && heldIn(r, t->tx.txHash, 0),
-       "the same, two nulldata outputs: undecided (DA-014-REF), the pass holds the row's output");
+       "and the pass holds it");
 
     // an input index of exactly INT32_MAX is read: here a plain output carrying nothing
     preSpendWallet();
@@ -2801,7 +2853,12 @@ static void genWallet(int any)
         if (below(4) == 0) plainAt = any ? (size_t)below(outs + 1) : at + 1;
 
         for (j = 0; j <= outs; j++) {
-            if (j == plainAt && (any || len == 0)) out(f, "6a03aabbcc", 0);   // DA-014-REF: beside a carrier, undecided
+            if (j == plainAt && (any || len == 0)) {
+                // DA-014-REF: a nulldata OP_RETURN beside a carrier is undecided; OP_RETURN OP_CHECKSIG (an
+                // OP_RETURN that is neither nulldata nor tagged) is not, and the one rule reads past it
+                if (any && below(3) == 0) out(f, "6aac", 0);
+                else out(f, "6a03aabbcc", 0);
+            }
             if (j == at && len > 0) outBytes(f, script, len, 0);
             if (j < outs) out(f, below(3) ? OURS : THEIRS, below(3) != 0);
         }
@@ -2809,6 +2866,11 @@ static void genWallet(int any)
             script[len - 1] ^= 0x01;
             outBytes(f, script, len, 0);
         }
+        if (any && len > 0 && len < sizeof(script) && below(12) == 0) {   // a tagged output that is not nulldata
+            script[len] = 0xac;   // OP_CHECKSIG after the push: OP_RETURN, then not only pushes
+            outBytes(f, script, len + 1, 0);
+        }
+        if (any && below(10) == 0) f->outs[0].amount = 650;   // DigiAsset Core's encrypted-key output 0
         list[i] = f;
     }
 
@@ -2881,11 +2943,39 @@ static int exactRoom(BRAssetHoldResult r, int readings)
     return (again.status != BR_ASSET_HOLD_COMPLETE || again.heldCount != r.heldCount) ? 1 : 0;
 }
 
+// Does THE PROOF GUARD (BRAssetHold.h) keep a proof unread anywhere in WAL: a proven transaction with a
+// carrier whose inputs' rows storing more than zero sum to neither zero nor what its instructions assign?
+// The pass then holds more than the Kotlin (the model) by design, and only at least the model is asked.
+static int proofGuarded(void)
+{
+    size_t i, k, r;
+
+    MW_WALLET = &WAL;
+    for (i = 0; i < WAL.provenN; i++) {
+        const BRTransaction *tx = mOutputsOf(WAL.proven[i]);
+        MHeader h;
+        int64_t assigned = 0, known = 0;
+
+        if (! tx || ! mAssetCarrier(tx, &h) ||
+            ! BRAssetAssignedUnits(h.h.operation, h.insts, h.h.instructionCount, &assigned)) continue;
+        for (k = 0; k < tx->inCount; k++) {
+            for (r = 0; r < WAL.rowN; r++) {
+                if (WAL.rows[r].n != tx->inputs[k].index || ! UInt256Eq(WAL.rows[r].txHash, tx->inputs[k].txHash)) continue;
+                if (WAL.rows[r].quantity > 0 && ! _BRAssetAddUnits(known, WAL.rows[r].quantity, &known)) return 1;
+                break;
+            }
+        }
+        if (known != 0 && known != assigned) return 1;
+    }
+    return 0;
+}
+
 // `readings` as passReading's: 0 the pass, 1 the decoder's reading alone. With 1 the pass too must hold
-// at least the model.
+// at least the model. With 0, a wallet where THE PROOF GUARD keeps a proof unread is held to at least the
+// model, every other to the model exactly.
 static void sweepCase(const char *what, uint64_t seed, int any, const BRAssetHoldClassifier *c, int rounds, int readings)
 {
-    int round, wrong = 0, held = 0;
+    int round, wrong = 0, held = 0, guarded = 0;
 
     RNG = seed;
     for (round = 0; round < rounds; round++) {
@@ -2896,14 +2986,18 @@ static void sweepCase(const char *what, uint64_t seed, int any, const BRAssetHol
         r = passReading(&WAL, readings);
         model(&WAL);
         held += (int)r.heldCount;
-        if (! sameAsModel(r) && wrong++ < 5)
+        if (! readings && proofGuarded()) {
+            guarded++;
+            if (! coversModel(r) && wrong++ < 5) ck(0, "%s, wallet %d: a proof the guard keeps unread: the pass holds at least the model", what, round);
+        }
+        else if (! sameAsModel(r) && wrong++ < 5)
             ck(0, "%s, wallet %d: the %s (%s, %zu held) is the model (%zu held)", what, round, readings ? "decoder's reading" : "pass",
                st(r.status), r.heldCount, M_HELDN);
         if (readings && ! coversModel(pass(&WAL)) && wrong++ < 5) ck(0, "%s, wallet %d: the pass holds at least the model", what, round);
         if (exactRoom(r, readings) && wrong++ < 5) ck(0, "%s, wallet %d: a held buffer of the answer's size suffices", what, round);
     }
     ck(wrong == 0, "%s: %d wallets, the %s is the model in every one (%d not)", what, rounds, readings ? "decoder's reading" : "pass", wrong);
-    ck(held > rounds / 2, "%s: the wallets held outputs (%d)", what, held);
+    ck(held > rounds / 2, "%s: the wallets held outputs (%d; %d with a proof the guard keeps unread)", what, held, guarded);
 }
 
 static void sweep_decoder(void) { sweepCase("any scripts, the decoder alone", 0x51ULL, 1, &NEVER, 3000, 1); }
@@ -2986,6 +3080,184 @@ static void sweep_must_be_excluded(void)
         if (! heldIn(r, t->tx.txHash, outputCount - 1) && wrong++ < 5) ck(0, "draw %d: an output BRAssetOutpointMustBeExcluded excludes is held", draw);
     }
     ck(wrong == 0 && checked > 500, "the pass is never weaker than BRAssetOutpointMustBeExcluded (%d checked, %d not held)", checked, wrong);
+}
+
+// THE PROOF GUARD (ASSET-HOLD-ONE-RULE). F carries a plain OP_RETURN before its carrier: undecided under the
+// one rule, so a no-row input from F may carry units (the earlier reading read F's first OP_RETURN, plain,
+// and counted the input as carrying nothing). T spends that output and a row of ten, transfers nothing, and
+// its remainder is proven zero. The ten known units are a remainder whatever the proof says: T's last
+// output is held. The earlier reading held it because it knew a total of ten; the one rule's unknown total
+// must not let the proof release it. The decoder's reading alone is the Kotlin's (the model).
+static void prespend_proof_known_units(void)
+{
+    Fx *f, *t;
+    BRAssetHoldResult r;
+
+    resetPool();
+    wreset(&WAL);
+    f = fx(0xe1);
+    ours(f);
+    out(f, "6a03aabbcc", 0);
+    out(f, TRANSFER_TEN_TO_OUTPUT_ZERO, 0);
+    ours(f);
+    in(f, tid(0xe2), 0);
+    t = fx(0xe3);
+    out(t, "6a0444410315", 0);   // a transfer with no instructions
+    ours(t);
+    ours(t);
+    in(t, f->tx.txHash, 7);      // no such output, no row: what F's outputs carry decides
+    in(t, tid(0xe4), 0); row(&WAL, tid(0xe4), 0, 10, 1);
+    prove(&WAL, t->tx.txHash);
+    wadd(&WAL, f);
+    wadd(&WAL, t);
+    ck(BRTxAssetCarrier(&f->tx, NULL) == DA_TX_UNDECIDED && BRTxAssetCarrier(&t->tx, NULL) == DA_TX_CARRIER,
+       "F is undecided, T's carrier is decided");
+    r = pass(&WAL);
+    ck(r.status == BR_ASSET_HOLD_COMPLETE && heldIn(r, t->tx.txHash, 2),
+       "ten known units and a proof of no remainder: T's last output is held (%s, %zu held)", st(r.status), r.heldCount);
+    WAL.classifier = &NEVER;
+    r = passReading(&WAL, 1);
+    WAL.classifier = NULL;
+    model(&WAL);
+    ck(sameAsModel(r) && ! heldIn(r, t->tx.txHash, 2), "the decoder's reading alone reads the proof, as the Kotlin does");
+    // GUARD: the guard reads the proof when the known units are what the instructions assign (none here).
+    WAL.rows[0].quantity = 0;
+    r = pass(&WAL);
+    ck(r.status == BR_ASSET_HOLD_COMPLETE && ! heldIn(r, t->tx.txHash, 2), "with no known units the proof is read: not held");
+}
+
+// ASSET-HOLD-ONE-RULE: moving the header's carrier reading onto BRTxAssetCarrier holds no fewer outputs.
+// Over pseudo-random wallets with any scripts (two carriers, a plain OP_RETURN beside a carrier, a tagged
+// output that is not nulldata, unclassifiable payloads, the encrypted-key shape) and with scripts both
+// readers read alike, the shipped pass is compared with the pass as it was, the header reading the carrier
+// by its own earlier rule (the fourth unit). Wherever that one completes, the shipped pass either refuses
+// (the spend is refused: never fewer outputs) or holds every outpoint it held -- except an outpoint resting
+// on a transaction the earlier reading could not read by its carrier (earlierUnreadTx): an OP_RETURN that is
+// neither nulldata nor tagged before the carrier. The earlier walk read such a transaction by that first
+// OP_RETURN, found no payload and had no answer; the one rule reads its carrier, as DigiAsset Core does
+// (it reads only nulldata outputs), and can show an output the earlier reading held carries nothing. Those
+// releases are counted, not failed -- per outpoint: only an outpoint whose own input ancestry contains such a
+// transaction (ancestryEarlierUnread) is exempt. Not blind: some wallet must hold strictly more under the
+// one rule, and the earlier reading must complete somewhere.
+// Is tx a transaction the earlier reading could not read by its carrier: one whose carrier under the
+// one rule (DA_TX_CARRIER) is not its first OP_RETURN, which the earlier walk read it by (in the other
+// reading: or not at all)? There the earlier reading had no answer where the one rule has one, and may
+// have held an output the one rule shows carries nothing.
+static int earlierUnreadTx(const BRTransaction *tx)
+{
+    size_t j, idx;
+
+    if (BRTxAssetCarrier(tx, &idx) != DA_TX_CARRIER) return 0;
+    for (j = 0; j < tx->outCount; j++) if (tx->outputs[j].scriptLen > 0 && tx->outputs[j].script[0] == 0x6a) break;
+    return j != idx;
+}
+
+// Does the input ancestry of outpoint (h, n) -- its transaction and, through inputs, every transaction of
+// WAL it rests on -- contain an earlier-unread transaction? Only such an outpoint's release is exempt.
+static int ancestryEarlierUnread(UInt256 h)
+{
+    const BRTransaction *queue[TMAX];
+    size_t qn = 0, qi, i, k;
+
+    for (i = 0; i < WAL.n; i++) if (UInt256Eq(WAL.txs[i]->txHash, h)) { queue[qn++] = WAL.txs[i]; break; }
+    for (qi = 0; qi < qn; qi++) {
+        const BRTransaction *tx = queue[qi];
+
+        if (earlierUnreadTx(tx)) return 1;
+        for (k = 0; k < tx->inCount; k++) {
+            for (i = 0; i < WAL.n; i++) {
+                size_t q;
+                int seen = 0;
+
+                if (! UInt256Eq(WAL.txs[i]->txHash, tx->inputs[k].txHash)) continue;
+                for (q = 0; q < qn; q++) if (queue[q] == WAL.txs[i]) seen = 1;
+                if (! seen && qn < TMAX) queue[qn++] = WAL.txs[i];
+            }
+        }
+    }
+    return 0;
+}
+
+static int earlierUnread(void)
+{
+    size_t i;
+
+    for (i = 0; i < WAL.n; i++) if (earlierUnreadTx(WAL.txs[i])) return 1;
+    return 0;
+}
+
+#ifndef ROUNDS_ONE_RULE
+#define ROUNDS_ONE_RULE 6000
+#endif
+
+typedef struct { int fewer, more, refusedNow, compared, released, planted; } OneRule;
+
+// The comparison behind one_rule_holds_no_less. `plant`: in the first wallet that has an earlier-unread
+// transaction and an outpoint both passes hold whose ancestry has none, that outpoint is taken out of the
+// shipped answer -- an under-hold unrelated to the exemption, which must be counted as fewer.
+static OneRule oneRuleCompare(int rounds, int plant, int report)
+{
+    static BRUTXO oldHeld[HMAX];
+    static BRAssetHoldWork oldWork[RMAX];
+    OneRule o;
+    int round;
+
+    memset(&o, 0, sizeof(o));
+    RNG = 0x55ULL;
+    for (round = 0; round < rounds; round++) {
+        BRAssetHoldView v;
+        BRAssetHoldResult was, now;
+        size_t i, dropped = (size_t)-1;
+        int fewerHere = 0, releasedHere = 0;
+
+        genWallet(round % 3 != 0);
+        v = view(&WAL);
+        was = asset_hold_kat_second_rule(&v, oldWork, N(oldWork), oldHeld, N(oldHeld));
+        now = pass(&WAL);
+        if (was.status != BR_ASSET_HOLD_COMPLETE) continue;
+        o.compared++;
+        if (now.status != BR_ASSET_HOLD_COMPLETE) { o.refusedNow++; continue; }
+        if (plant && ! o.planted && earlierUnread()) {
+            for (i = 0; i < was.heldCount; i++) {
+                if (heldIn(now, oldHeld[i].hash, oldHeld[i].n) && ! ancestryEarlierUnread(oldHeld[i].hash)) { dropped = i; break; }
+            }
+            if (dropped != (size_t)-1) o.planted = 1;
+        }
+        for (i = 0; i < was.heldCount; i++) {
+            if (i != dropped && heldIn(now, oldHeld[i].hash, oldHeld[i].n)) continue;
+            if (ancestryEarlierUnread(oldHeld[i].hash)) { releasedHere++; continue; }
+            if (fewerHere++ == 0 && o.fewer < 5 && report)
+                ck(0, "wallet %d: the earlier reading held (%02x.., %u) and the one rule does not (%zu held before, %zu now)",
+                   round, oldHeld[i].hash.u8[0], oldHeld[i].n, was.heldCount, now.heldCount);
+        }
+        if (fewerHere) o.fewer++;
+        else if (releasedHere) o.released++;
+        else if (now.heldCount > was.heldCount) o.more++;
+    }
+    return o;
+}
+
+// Figures quoted for this case come from a recorded run at the rounds and seed (0x55) they name.
+static void one_rule_holds_no_less(void)
+{
+    OneRule o = oneRuleCompare(ROUNDS_ONE_RULE, 0, 1);
+
+    ck(o.compared > 0, "the earlier reading completed in %d of %d wallets: the comparison is not vacuous", o.compared, ROUNDS_ONE_RULE);
+    ck(o.fewer == 0, "%d wallets both passes completed or the one rule refused: the one rule never holds fewer outputs (%d fewer; "
+       "%d where every released outpoint rests on a transaction the earlier reading could not read past a non-nulldata OP_RETURN)",
+       o.compared, o.fewer, o.released);
+    ck(o.more > 0, "the one rule holds strictly more in %d wallets (%d refused where the earlier reading completed): not blind",
+       o.more, o.refusedNow);
+}
+
+// The exemption is per outpoint: an under-hold planted in a wallet that HAS an earlier-unread transaction,
+// on an outpoint whose ancestry has none, is counted as fewer, not exempted.
+static void one_rule_exemption_per_outpoint(void)
+{
+    OneRule o = oneRuleCompare(ROUNDS_ONE_RULE, 1, 0);
+
+    ck(o.planted, "an unrelated under-hold was planted in a wallet with an earlier-unread transaction");
+    ck(o.fewer >= 1, "the planted under-hold is counted as fewer (%d), not exempted", o.fewer);
 }
 
 static void second_unit(void)
@@ -3071,6 +3343,9 @@ static const Case CASES[] = {
     { "sweep_agree", sweep_agree },
     { "sweep_union", sweep_union },
     { "sweep_must_be_excluded", sweep_must_be_excluded },
+    { "prespend_proof_known_units", prespend_proof_known_units },
+    { "one_rule_holds_no_less", one_rule_holds_no_less },
+    { "one_rule_exemption_per_outpoint", one_rule_exemption_per_outpoint },
     { "second_unit", second_unit },
     { "seams_off", seams_off },
 };
