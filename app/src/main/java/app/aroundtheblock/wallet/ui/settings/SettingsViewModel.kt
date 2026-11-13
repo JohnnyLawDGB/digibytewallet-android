@@ -393,7 +393,10 @@ class SettingsViewModel @Inject constructor(
 
     fun changePin(newPin: String) {
         viewModelScope.launch(Dispatchers.IO) {
-            pinManager.setPin(newPin)
+            // A write that did not land keeps the old PIN (PinStoreWriteException); never a crash.
+            runCatching { pinManager.setPin(newPin) }.onFailure {
+                android.util.Log.e("SettingsViewModel", "PIN change did not persist (${it.javaClass.simpleName}); the old PIN stays")
+            }
         }
     }
 
@@ -404,8 +407,11 @@ class SettingsViewModel @Inject constructor(
     /** Enable/disable "wipe wallet after N failed PIN attempts". Enabling is gated
      *  by an explicit backup acknowledgement in the UI (irreversible on-device). */
     fun setWipeAfterN(enabled: Boolean) {
-        pinManager.setWipeAfterN(enabled)
-        _wipeAfterNEnabled.value = enabled
+        // The toggle shows what is on disk: a write that did not land leaves it as it was.
+        runCatching { pinManager.setWipeAfterN(enabled) }.onFailure {
+            android.util.Log.e("SettingsViewModel", "wipe-after-N did not persist (${it.javaClass.simpleName})")
+        }
+        _wipeAfterNEnabled.value = runCatching { pinManager.isWipeAfterNEnabled() }.getOrDefault(_wipeAfterNEnabled.value)
     }
 
     // ── Display preferences ───────────────────────────────────────────────────

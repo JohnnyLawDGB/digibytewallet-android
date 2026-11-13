@@ -144,7 +144,7 @@ class PinStoreMigrationTest {
         assertTrue("the file is in place", target.exists())
         assertEquals("the old store was deleted once", 1, legacy.deletes)
         assertFalse(legacy.present)
-        assertEquals("the file holds exactly what the old store held", before, FilePinStore.read(target, cipher))
+        assertEquals("the file holds exactly what the old store held", before, FilePinStore.read(target, cipher) - "pin_store_migrated_from")
         val mgr = manager(store)
         assertTrue(mgr.storeAvailable)
         assertTrue(mgr.hasPin())
@@ -188,12 +188,67 @@ class PinStoreMigrationTest {
         assertEquals("the old store was never opened", 0, none.opens)
     }
 
-    @Test fun `PIN-STORE clearPin empties the new store on disk`() {
+    @Test fun `PIN-STORE clearPin deletes the new store from disk`() {
         val cipher = SoftwareCipher()
         val none = FakeLegacy().apply { present = false }
         manager(open(cipher, none)).apply { setPin(pin); clearPin() }
+        assertFalse("the file is gone, not emptied", target.exists())
         assertFalse(manager(open(cipher, none)).hasPin())
-        assertTrue(FilePinStore.read(target, cipher).isEmpty())
+    }
+
+    // ── a write or a clear that does not land (review item 2: fail closed) ─────
+
+    @Test fun `PIN-STORE a failure count that cannot persist is never compared`() {
+        val cipher = SoftwareCipher()
+        val none = FakeLegacy().apply { present = false }
+        val mgr = manager(open(cipher, none))
+        mgr.setPin(pin)
+        cipher.sealFails = true
+        assertSame("a wrong PIN whose failure did not persist", PinVerifyResult.Unavailable, mgr.verifyPin("000000"))
+        assertSame("and the right one gives no signal either", PinVerifyResult.Unavailable, mgr.verifyPin(pin))
+        cipher.sealFails = false
+        assertEquals("nothing counted on disk", null, FilePinStore.read(target, cipher)["pin_fail_count"].takeIf { it != 0 })
+        assertSame(PinVerifyResult.Success, mgr.verifyPin(pin))
+    }
+
+    @Test fun `PIN-STORE a write that does not land changes nothing in memory either`() {
+        val cipher = SoftwareCipher()
+        val none = FakeLegacy().apply { present = false }
+        val mgr = manager(open(cipher, none))
+        mgr.setPin(pin)
+        cipher.sealFails = true
+        runCatching { mgr.setWipeAfterN(true) }
+        assertFalse("the session went on with a setting that is not on disk", mgr.isWipeAfterNEnabled())
+    }
+
+    @Test fun `PIN-STORE clearPin that cannot delete the file says so and keeps the PIN`() {
+        val cipher = SoftwareCipher()
+        val none = FakeLegacy().apply { present = false }
+        val mgr = manager(open(cipher, none))
+        mgr.setPin(pin)
+        val dir = target.parentFile!!
+        dir.setWritable(false)
+        try {
+            assertTrue("a clear that did not land reported success", runCatching { mgr.clearPin() }.isFailure)
+            assertTrue("the PIN is still what is on disk", mgr.hasPin())
+            assertTrue(target.exists())
+        } finally {
+            dir.setWritable(true)
+        }
+    }
+
+    @Test fun `PIN-STORE clearPin deletes an old store beside the file, and fails when it cannot`() {
+        val legacy = legacyWithPin().apply { deleteLands = false }
+        val cipher = SoftwareCipher()
+        val mgr = manager(open(cipher, legacy))
+        assertTrue("precondition: the old store is still there", legacy.present)
+        assertTrue("an old store left behind would be migrated back", runCatching { mgr.clearPin() }.isFailure)
+        assertTrue("the file stays while the old store does", target.exists())
+        legacy.deleteLands = true
+        mgr.clearPin()
+        assertFalse(legacy.present)
+        assertFalse(target.exists())
+        assertFalse(manager(open(cipher, legacy)).hasPin())
     }
 
     // ── migration failure and retry ───────────────────────────────────────────
@@ -264,22 +319,58 @@ class PinStoreMigrationTest {
         assertFalse(File(target.parentFile, target.name + ".migrating").exists())
     }
 
-    @Test fun `PIN-STORE once the new store is in place a stale old store is deleted again and never read`() {
+    // Review item 1. An old store beside the file is either a delete that did not land (unchanged since
+    // the migration: the file is newer) or a downgrade (changed: the old store is newer).
+
+    @Test fun `PIN-STORE an old store unchanged since its migration is deleted again and the file's count stands`() {
         val legacy = legacyWithPin().apply { deleteLands = false }
         val cipher = SoftwareCipher()
-        manager(open(cipher, legacy)).verifyPin("000002") // 3 failures, in the new store
+        manager(open(cipher, legacy)).verifyPin("000002") // 3 failures, in the new store only
         assertTrue("the delete did not land", legacy.present)
-        // What the old store says is not the PIN state any more: a fresh PIN and no failures there.
-        manager(legacy.open()).setPin("999999")
-        legacy.opens = 0
         legacy.deleteLands = true
 
         val mgr = manager(open(cipher, legacy))
 
-        assertEquals("the old store was not read", 0, legacy.opens)
         assertFalse("its delete was tried again", legacy.present)
-        assertTrue(mgr.verifyPin("999999") is PinVerifyResult.Wrong)
-        assertTrue("the new store's count stands", mgr.verifyPin(pin) is PinVerifyResult.LockedOut)
+        assertTrue("the count is the file's, not the 2 the old store still held", mgr.verifyPin("000003") is PinVerifyResult.Wrong)
+        assertTrue(mgr.verifyPin(pin) is PinVerifyResult.LockedOut)
+    }
+
+    @Test fun `PIN-STORE an unchanged old store whose delete keeps failing never hands back its counters`() {
+        val legacy = legacyWithPin().apply { deleteLands = false }
+        val cipher = SoftwareCipher()
+        manager(open(cipher, legacy)).apply { verifyPin("000002"); verifyPin("000003") } // 4: a cooldown
+        repeat(3) {
+            assertTrue("launch $it reset the count from the old store", manager(open(cipher, legacy)).verifyPin(pin) is PinVerifyResult.LockedOut)
+        }
+    }
+
+    @Test fun `PIN-STORE an old store changed after the migration (a downgrade) is the newer copy and is migrated again`() {
+        val legacy = legacyWithPin().apply { deleteLands = false }
+        val cipher = SoftwareCipher()
+        manager(open(cipher, legacy)).verifyPin("000002") // 3 failures, in the new store
+        // An older build ran: it reads only the old store, and the user set a new PIN there.
+        manager(legacy.open()).setPin("999999")
+        legacy.deleteLands = true
+
+        val mgr = manager(open(cipher, legacy))
+
+        assertSame("the PIN the user set last opens", PinVerifyResult.Success, mgr.verifyPin("999999"))
+        assertFalse("the old store went once migrated", legacy.present)
+        val reopened = manager(open(cipher, FakeLegacy().apply { present = false }))
+        assertTrue("migrated to disk", reopened.verifyPin("999999") is PinVerifyResult.Success)
+        assertTrue(reopened.verifyPin(pin) is PinVerifyResult.Wrong)
+    }
+
+    @Test fun `PIN-STORE an old store beside the file that cannot be opened is kept and the file serves`() {
+        val legacy = legacyWithPin().apply { deleteLands = false }
+        val cipher = SoftwareCipher()
+        manager(open(cipher, legacy)).verifyPin("000002")
+        legacy.openFails = true
+        val store = open(cipher, legacy)
+        assertTrue(store is FilePinStore)
+        assertTrue(legacy.present)
+        assertTrue(manager(store).hasPin())
     }
 
     // ── durability: the rename is on disk before the old store goes ───────────

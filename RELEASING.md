@@ -163,6 +163,9 @@ one signer, and the wrong package. Output, under `dist/vX.Y.Z/`:
    `noBackupFilesDir/dgb_pin_store.bin` and deletes the old store. A build from before it finds
    no PIN, so a staged rollback or a halted rollout re-served to a migrated user drops their PIN
    and its rate limit. Once that release is out, fix forward; never roll a user back past it.
+   If it happens anyway, re-upgrading takes the PIN store the older build wrote (it is the newer
+   copy: `PinStoreMigration` migrates an old store that changed since the migration again, and
+   deletes one that did not), so the user keeps the PIN they set there, with that build's counters.
 
 ## 8. Bounty obligations that ship with the release
 

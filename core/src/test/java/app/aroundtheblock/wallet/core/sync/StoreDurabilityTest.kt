@@ -78,6 +78,29 @@ class StoreDurabilityTest {
         }
     }
 
+    // The PIN store (core/security/FilePinStore.kt) writes through the same procedure (review item 3).
+
+    @Test fun `the PIN store write fsyncs the tmp file, renames it, then syncs the directory`() {
+        val d = tmp.newFolder()
+        val target = File(d, "dgb_pin_store.bin")
+        val events = mutableListOf<String>()
+        DurableFile.fsync = { out -> events += "fsync"; savedFsync(out) }
+        DurableFile.rename = { from, to -> events += "rename ${from.name} -> ${to.name}"; savedRename(from, to) }
+        app.aroundtheblock.wallet.core.security.writeWhole(target, byteArrayOf(1, 2, 3)) { events += "syncDir ${it.name}" }
+        assertEquals(listOf("fsync", "rename dgb_pin_store.bin.tmp -> dgb_pin_store.bin", "syncDir ${d.name}"), events)
+        assertArrayEquals(byteArrayOf(1, 2, 3), target.readBytes())
+    }
+
+    @Test fun `the PIN store write whose rename fails keeps the live file and throws`() {
+        val d = tmp.newFolder()
+        val target = File(d, "dgb_pin_store.bin").apply { writeBytes(byteArrayOf(9)) }
+        DurableFile.rename = { _, _ -> false }
+        val r = runCatching { app.aroundtheblock.wallet.core.security.writeWhole(target, byteArrayOf(1, 2, 3)) { } }
+        assertTrue("a write that did not land must throw", r.isFailure)
+        assertArrayEquals("the live copy stays", byteArrayOf(9), target.readBytes())
+        assertFalse(File(d, "dgb_pin_store.bin.tmp").exists())
+    }
+
     @Test fun `a rename that fails keeps the live file and reports failure`() {
         for (s in stores) {
             val c = ctx()

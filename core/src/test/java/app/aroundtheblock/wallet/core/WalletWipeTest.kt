@@ -4,6 +4,7 @@ import android.util.Log
 import app.aroundtheblock.wallet.core.digiscope.HubTokenStore
 import app.aroundtheblock.wallet.core.security.KeyStoreManager
 import app.aroundtheblock.wallet.core.security.PinManager
+import app.aroundtheblock.wallet.core.security.PinStore
 import app.aroundtheblock.wallet.core.settings.PricePrefs
 import app.aroundtheblock.wallet.core.sync.CfAbandonmentStore
 import app.aroundtheblock.wallet.core.sync.CfScanLedgerStore
@@ -242,6 +243,18 @@ class WalletWipeTest {
             "the owed-wipe flag is released by its own write, before the store is cleared",
             listOf("remove:pin_wipe_pending", "clear"), store.writes,
         )
+    }
+
+    @Test fun `a verified wipe whose PIN store does not clear is not verified`() = runTest {
+        // PIN-STORE review item 2: the old PIN hash and wipe-after-N would stay on disk; the wipe must
+        // be reported unfinished so the next launch runs it again.
+        val inner = trippedPinStore()
+        val store = object : PinStore by inner {
+            override fun clear() { throw java.io.IOException("stand-in: the clear did not land") }
+        }
+        val report = walletManager(eraser = RecordingEraser()).wipeThenReleasePin(PinManager(store))
+        assertTrue("the seed is gone", report.seedGone)
+        assertFalse("a wipe that left the PIN store on disk reported verified", report.verified)
     }
 
     @Test fun `a throwing quiesce leaves the PIN and its counters in place`() = runTest {

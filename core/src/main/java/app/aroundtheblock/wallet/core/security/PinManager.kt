@@ -238,12 +238,15 @@ internal class LegacyEncryptedPrefsPinStore(private val context: Context) : Lega
         override fun getString(key: String): String? = prefs.getString(key, null)
         override fun getBoolean(key: String, def: Boolean): Boolean = prefs.getBoolean(key, def)
         override fun contains(key: String): Boolean = prefs.contains(key)
-        override fun putInt(key: String, value: Int) { prefs.edit().putInt(key, value).commit() }
-        override fun putLong(key: String, value: Long) { prefs.edit().putLong(key, value).commit() }
-        override fun putString(key: String, value: String) { prefs.edit().putString(key, value).commit() }
-        override fun putBoolean(key: String, value: Boolean) { prefs.edit().putBoolean(key, value).commit() }
-        override fun remove(key: String) { prefs.edit().remove(key).commit() }
-        override fun clear() { prefs.edit().clear().commit() }
+        // A commit() that returns false did not land: thrown, as the sealed file's writes are, so the
+        // session's fail-closed paths see it (PIN-STORE review item 2).
+        private fun landed(ok: Boolean) { if (!ok) throw PinStoreWriteException("the old PIN store write did not land") }
+        override fun putInt(key: String, value: Int) = landed(prefs.edit().putInt(key, value).commit())
+        override fun putLong(key: String, value: Long) = landed(prefs.edit().putLong(key, value).commit())
+        override fun putString(key: String, value: String) = landed(prefs.edit().putString(key, value).commit())
+        override fun putBoolean(key: String, value: Boolean) = landed(prefs.edit().putBoolean(key, value).commit())
+        override fun remove(key: String) = landed(prefs.edit().remove(key).commit())
+        override fun clear() = landed(prefs.edit().clear().commit())
 
         override fun commit(edit: PinStoreEdit) {
             val editor = prefs.edit()
@@ -252,7 +255,7 @@ internal class LegacyEncryptedPrefsPinStore(private val context: Context) : Lega
             edit.longs.forEach { (key, value) -> editor.putLong(key, value) }
             edit.booleans.forEach { (key, value) -> editor.putBoolean(key, value) }
             edit.strings.forEach { (key, value) -> editor.putString(key, value) }
-            editor.commit()
+            landed(editor.commit())
         }
     }
 
@@ -368,7 +371,10 @@ class PinManager internal constructor(
     fun hasPin(): Boolean = store.contains(KEY_HASH)
 
     /** Clears the ENTIRE pin store — hash AND every rate-limit counter/flag —
-     *  atomically. Used on wallet wipe / PIN reset. */
+     *  atomically. Used on wallet wipe / PIN reset. THROWS [PinStoreWriteException] when the store is
+     *  still on disk afterwards (the sealed file deletes itself and the old store, and checks both are
+     *  gone): the caller must not treat the PIN as cleared ([app.aroundtheblock.wallet.core.WalletManager.wipeThenReleasePin]
+     *  reports the wipe as not verified, and it is finished at the next launch). */
     fun clearPin() {
         store.clear()
     }
@@ -385,9 +391,20 @@ class PinManager internal constructor(
      *  2. Compare (constant-time Argon2id/PBKDF2). A hasher that could not run has
      *     checked nothing ⇒ [PinVerifyResult.Unavailable], with every counter untouched.
      *  3. Success ⇒ reset counters ⇒ [PinVerifyResult.Success].
-     *  4. Fail ⇒ increment; if wipe-after-N && count ≥ threshold ⇒
-     *     [PinVerifyResult.ShouldWipe] (+ set wipe-pending); else start the cooldown
-     *     ⇒ [PinVerifyResult.Wrong]. The count and what it starts are one write.
+     *  4. Fail ⇒ [PinVerifyResult.ShouldWipe] (+ set wipe-pending) if wipe-after-N && count ≥
+     *     threshold; else [PinVerifyResult.Wrong] with the cooldown that count starts.
+     *
+     * PIN-STORE review item 2 — no PIN is compared before its failure is on disk. The count this entry
+     * would reach, and the cooldown it would start, are written BEFORE the compare (one write); a match
+     * then resets them. If that write does not land, nothing is compared and the result is
+     * [PinVerifyResult.Unavailable]: a store that cannot take a write gives no free guesses, in this
+     * process or across restarts, and no match/mismatch signal either. A process stopped during the
+     * compare leaves the entry counted as a failure (fail closed). A hasher that cannot run puts every
+     * key it touched back exactly as it was (best effort; left counted if that write fails).
+     *
+     * The one exception is the entry that would reach wipe-after-N: its mismatch is a wipe whether or
+     * not anything persists, so it is compared first and its count and owed wipe are one write after
+     * (a count at the threshold always has its owed wipe; a right PIN there is never wiped by a stop).
      *
      * The wall clock decides nothing here: setting it neither ends, lengthens nor starts a cooldown.
      */
@@ -398,45 +415,65 @@ class PinManager internal constructor(
             return PinVerifyResult.LockedOut(clock.wallMs() + left)
         }
 
-        // 2. Constant-time compare. A PIN the hasher could not check is not a wrong PIN: it
-        //    returns before the failure branch, so it counts toward no cooldown and no wipe.
+        // 2. The failure this entry would be, on disk before the compare (not for the wipe entry).
+        val count = store.getInt(KEY_FAIL_COUNT, 0) + 1
+        val wipes = isWipeAfterNEnabled() && count >= WIPE_THRESHOLD
+        val cooldown = if (wipes) 0L else cooldownMsForFailCount(count)
+        val undo = undoOf(KEY_FAIL_COUNT, KEY_COOLDOWN_LEFT_MS, KEY_COOLDOWN_MEASURED_AT, KEY_COOLDOWN_BOOT)
+        if (!wipes) {
+            val failure = PinStoreEdit().putInt(KEY_FAIL_COUNT, count)
+            if (cooldown > 0L) failure.withCooldown(cooldown, clock.sinceBootMs(), clock.bootCount())
+            try {
+                store.commit(failure)
+            } catch (e: PinStoreWriteException) {
+                android.util.Log.e("PinManager", "the failure count did not persist; the PIN was not checked")
+                return PinVerifyResult.Unavailable
+            }
+        }
+
+        // 3. Constant-time compare.
         when (checkPin(pin)) {
             PinCheck.MATCH -> {
-                // 3. Any valid PIN resets the limiter.
-                resetRateLimit()
+                // Any valid PIN resets the limiter. A reset that does not land leaves the count higher
+                // on disk than it is: the safe direction, and the PIN was right.
+                try { resetRateLimit() } catch (e: PinStoreWriteException) {
+                    android.util.Log.e("PinManager", "the reset after a right PIN did not persist")
+                }
                 return PinVerifyResult.Success
             }
-            PinCheck.UNAVAILABLE -> return PinVerifyResult.Unavailable
+            PinCheck.UNAVAILABLE -> {
+                // Nothing was checked, so nothing is counted: what step 2 wrote goes back as it was.
+                if (!wipes) {
+                    try { store.commit(undo) } catch (e: PinStoreWriteException) {
+                        android.util.Log.e("PinManager", "the count of an unchecked PIN could not be put back; it stays counted")
+                    }
+                }
+                return PinVerifyResult.Unavailable
+            }
             PinCheck.MISMATCH -> Unit
         }
 
-        // 4. Failure — the count and what it starts are stored in one write, so a process stopped
-        //    there leaves the failure counted with its cooldown (or owed wipe), or not counted at all.
-        val count = store.getInt(KEY_FAIL_COUNT, 0) + 1
-        val failure = PinStoreEdit().putInt(KEY_FAIL_COUNT, count)
-
-        if (isWipeAfterNEnabled() && count >= WIPE_THRESHOLD) {
-            // Persist a backstop so a kill between here and the caller's wipe still
-            // completes the wipe on next launch.
-            store.commit(failure.putBoolean(KEY_WIPE_PENDING, true))
+        // 4. Failure — already counted, with its cooldown; the wipe entry's count and owed wipe now.
+        if (wipes) {
+            // One write, a backstop so a kill between here and the caller's wipe still completes the
+            // wipe on next launch. Not landed: the caller wipes anyway (fail closed).
+            try {
+                store.commit(PinStoreEdit().putInt(KEY_FAIL_COUNT, count).putBoolean(KEY_WIPE_PENDING, true))
+            } catch (e: PinStoreWriteException) {
+                android.util.Log.e("PinManager", "the owed wipe did not persist; the wipe goes ahead")
+            }
             return PinVerifyResult.ShouldWipe
         }
-
-        val cooldown = cooldownMsForFailCount(count)
-        return if (cooldown > 0L) {
-            store.commit(failure.withCooldown(cooldown, clock.sinceBootMs(), clock.bootCount()))
-            PinVerifyResult.Wrong(count, clock.wallMs() + cooldown)
-        } else {
-            store.commit(failure)
-            PinVerifyResult.Wrong(count, null)
-        }
+        return PinVerifyResult.Wrong(count, if (cooldown > 0L) clock.wallMs() + cooldown else null)
     }
 
     /** Reset the rate-limit counters. Called on a successful PIN verify AND on a
      *  successful BIOMETRIC unlock (a valid unlock must clear any stale lockout so
      *  a legit user isn't locked out of their own PIN afterward). */
     fun onUnlockSuccess() {
-        resetRateLimit()
+        try { resetRateLimit() } catch (e: PinStoreWriteException) {
+            android.util.Log.e("PinManager", "the reset after an unlock did not persist") // count left higher: safe
+        }
     }
 
     /** When the running cooldown ends, as a wall-clock epoch-ms for the screens to count down
@@ -445,6 +482,19 @@ class PinManager internal constructor(
     fun currentLockout(): Long {
         val left = cooldownLeftMs()
         return if (left > 0L) clock.wallMs() + left else 0L
+    }
+
+    /** An edit that puts [keys] back exactly as they are now (present with this value, or absent). */
+    private fun undoOf(vararg keys: String): PinStoreEdit {
+        val edit = PinStoreEdit()
+        for (key in keys) {
+            if (!store.contains(key)) { edit.remove(key); continue }
+            when (key) {
+                KEY_FAIL_COUNT, KEY_COOLDOWN_BOOT -> edit.putInt(key, store.getInt(key, 0))
+                else -> edit.putLong(key, store.getLong(key, 0L))
+            }
+        }
+        return edit
     }
 
     private fun resetRateLimit() {
@@ -467,7 +517,8 @@ class PinManager internal constructor(
      * since boot.
      */
     private fun cooldownLeftMs(): Long {
-        carryOverWallClockCooldown()
+        val unsaved = carryOverWallClockCooldown()
+        if (unsaved > 0L) return unsaved // not persisted, still enforced
         val left = store.getLong(KEY_COOLDOWN_LEFT_MS, 0L)
         if (left <= 0L) return 0L
         val now = clock.sinceBootMs()
@@ -491,14 +542,21 @@ class PinManager internal constructor(
     /** Records [leftMs] as the time the cooldown still has to run, measured at [sinceBootMs] in boot
      *  [boot], in one write: a process stopped there leaves this measurement or the one before it. */
     private fun recordCooldown(leftMs: Long, sinceBootMs: Long, boot: Int) {
-        store.commit(PinStoreEdit().withCooldown(leftMs, sinceBootMs, boot))
+        // A measurement that does not land leaves the one before it, which reads as at least as much
+        // time left: never less cooldown. So a failure here is not a reason to refuse.
+        try { store.commit(PinStoreEdit().withCooldown(leftMs, sinceBootMs, boot)) } catch (e: PinStoreWriteException) {
+            android.util.Log.w("PinManager", "a cooldown measurement did not persist; the earlier one stands")
+        }
     }
 
     private fun PinStoreEdit.withCooldown(leftMs: Long, sinceBootMs: Long, boot: Int): PinStoreEdit =
         putLong(KEY_COOLDOWN_LEFT_MS, leftMs).putLong(KEY_COOLDOWN_MEASURED_AT, sinceBootMs).putInt(KEY_COOLDOWN_BOOT, boot)
 
     private fun clearCooldown() {
-        if (store.contains(KEY_COOLDOWN_LEFT_MS)) store.remove(KEY_COOLDOWN_LEFT_MS)
+        // Not landed: the ended cooldown is found ended again at the next reading.
+        if (store.contains(KEY_COOLDOWN_LEFT_MS)) {
+            try { store.remove(KEY_COOLDOWN_LEFT_MS) } catch (e: PinStoreWriteException) { }
+        }
     }
 
     /**
@@ -506,15 +564,23 @@ class PinManager internal constructor(
      * once, with the time the wall clock now says it has left (at most [MAX_COOLDOWN_MS]); from then
      * on it runs on the monotonic clock like any other. The wall-clock keys are removed in the same write.
      */
-    private fun carryOverWallClockCooldown() {
+    /** Returns the time left of a carried-over cooldown whose write did not land (it is still enforced), else 0. */
+    private fun carryOverWallClockCooldown(): Long {
         val until = store.getLong(KEY_WALL_LOCKOUT_UNTIL, 0L)
-        if (until <= 0L) return
+        if (until <= 0L) return 0L
         val left = (until - clock.wallMs()).coerceIn(0L, MAX_COOLDOWN_MS)
         val edit = PinStoreEdit().remove(KEY_WALL_LOCKOUT_UNTIL).remove(KEY_WALL_LAST_FAIL_AT)
         if (left > 0L && store.getLong(KEY_COOLDOWN_LEFT_MS, 0L) <= 0L) {
             edit.withCooldown(left, clock.sinceBootMs(), clock.bootCount())
         }
-        store.commit(edit)
+        // Not landed: the wall-clock keys stay and are carried over again at the next reading; until
+        // then the cooldown they hold is still enforced.
+        return try {
+            store.commit(edit)
+            0L
+        } catch (e: PinStoreWriteException) {
+            left
+        }
     }
 
     // ── Wipe-after-N toggle + backstop ────────────────────────────────────────

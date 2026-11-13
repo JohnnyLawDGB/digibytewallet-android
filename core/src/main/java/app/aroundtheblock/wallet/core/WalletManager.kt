@@ -1040,9 +1040,13 @@ class WalletManager @Suppress("LongParameterList") constructor(
                 }
             }
             if (report.verified) {
-                runCatching { pinManager.clearPin() }.onFailure {
-                    android.util.Log.e("WalletManager", "PIN store not cleared (${it.javaClass.simpleName})")
-                }
+                // PIN-STORE review item 2: a PIN store that is still on disk after its clear leaves the old
+                // PIN hash and the wipe-after-N setting behind, so the wipe is NOT verified: the caller
+                // marks the erasure owed and the next launch runs this again until the clear lands.
+                val pinCleared = runCatching { pinManager.clearPin() }.onFailure {
+                    android.util.Log.e("WalletManager", "PIN store not cleared (${it.javaClass.simpleName}); the wipe is not verified")
+                }.isSuccess
+                if (!pinCleared) return@withContext report.copy(everythingCleared = false)
             }
             report
         }

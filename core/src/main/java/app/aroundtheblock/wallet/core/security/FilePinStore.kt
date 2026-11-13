@@ -10,7 +10,6 @@ import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.File
-import java.io.FileOutputStream
 import java.io.IOException
 import java.security.GeneralSecurityException
 import java.security.KeyStore
@@ -18,6 +17,7 @@ import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
+import app.aroundtheblock.wallet.core.sync.DurableFile
 
 /*
  * PIN-STORE: the PIN hash, its salt and the rate-limit counters live in a file the app controls,
@@ -28,11 +28,16 @@ import javax.crypto.spec.GCMParameterSpec
  *    fault) THROWS at open. [PinManager.openStore] turns that into [UnavailablePinStore]: the
  *    PIN-store-unavailable screen, never "no PIN". The file is left exactly as it is.
  *  - No file at all is an empty store, as no `dgb_pin_store` prefs file was before.
- *  - Every write replaces the whole file at once (a temporary file, synced, then renamed over it): a
- *    process stopped there leaves the previous contents or the new ones, never a mix. The directory
- *    is synced after the rename too, so the rename itself is on disk before anything relies on it
- *    (above all, before the migration deletes the old store).
+ *  - Every write replaces the whole file at once, through the one durable-write procedure
+ *    ([DurableFile.write]: tmp, fsync, rename, directory sync): a process stopped there leaves the
+ *    previous contents or the new ones, never a mix, and the rename is on disk before anything relies
+ *    on it (above all, before the migration deletes the old store).
+ *  - A write that does not land THROWS [PinStoreWriteException] and changes nothing, in memory or on
+ *    disk: the caller decides, and fails closed (PIN-STORE review item 2).
  */
+
+/** A PIN-store write (or the clear) that did not land. The store is exactly as it was before it. */
+class PinStoreWriteException(message: String, cause: Throwable? = null) : IOException(message, cause)
 
 /**
  * Makes a rename in a directory durable: fsync on the directory itself. Best-effort, as it is for
@@ -184,22 +189,15 @@ internal object PinStoreCodec {
 }
 
 /**
- * Writes [bytes] to [target] in one step: a temporary file beside it, synced, then renamed over it,
- * and the directory synced so the rename is durable.
+ * Writes [bytes] to [target] in one step through [DurableFile.write], the one copy of the durable
+ * write (tmp, fsync, rename, directory sync, a failed rename never touching the live file), with the
+ * directory sync this store is given. THROWS when the write did not land; [target] is then as it was.
  */
 internal fun writeWhole(target: File, bytes: ByteArray, tmpSuffix: String = ".tmp", dirSync: DirSync = DirSync.OS) {
     val dir = target.parentFile ?: throw IOException("no directory")
     if (!dir.isDirectory && !dir.mkdirs()) throw IOException("cannot create the directory")
     val tmp = File(dir, target.name + tmpSuffix)
-    FileOutputStream(tmp).use { out ->
-        out.write(bytes)
-        out.fd.sync()
-    }
-    if (!tmp.renameTo(target)) {
-        tmp.delete()
-        throw IOException("rename did not land")
-    }
-    dirSync.sync(dir)
+    if (!DurableFile.write(target, tmp, bytes) { d -> d?.let(dirSync::sync) }) throw IOException("the write did not land")
 }
 
 /**
@@ -208,30 +206,35 @@ internal fun writeWhole(target: File, bytes: ByteArray, tmpSuffix: String = ".tm
  *
  * A write that does not land is tried once more at once (the Keystore call in [PinStoreCipher.seal]
  * can fail for a moment where the old store's in-memory keyset could not). One that still does not
- * land is logged and the change is kept in memory, as a SharedPreferences `commit()` that returned
- * false did (the old store ignored that result): the session goes on with the change, and the next
- * write that lands carries it, since each write is the whole set.
+ * land THROWS [PinStoreWriteException] and the change is NOT kept, in memory either: what this store
+ * answers is always what is on disk, so no counter runs on that did not persist. [PinManager] fails
+ * closed on it (no PIN is compared before its failure is on disk; a wipe whose PIN store did not clear
+ * is not verified).
+ *
+ * [clear] deletes the file and the old store beside it (when [legacy] is given), and checks both are
+ * gone: an empty file or an old store left behind would bring the wiped PIN back.
  */
 internal class FilePinStore private constructor(
     private val file: File,
     private val cipher: PinStoreCipher,
     initial: Map<String, Any>,
     private val dirSync: DirSync,
+    private val legacy: LegacyPinStore?,
 ) : PinStore {
 
     private var values: Map<String, Any> = initial
 
     companion object {
         /** Opens [file]: its entries, or none when there is no file. THROWS when it is there and cannot be read. */
-        fun open(file: File, cipher: PinStoreCipher, dirSync: DirSync = DirSync.OS): FilePinStore {
+        fun open(file: File, cipher: PinStoreCipher, dirSync: DirSync = DirSync.OS, legacy: LegacyPinStore? = null): FilePinStore {
             File(file.parentFile, file.name + ".tmp").delete() // a write that stopped before its rename
             val values = if (file.exists()) read(file, cipher) else emptyMap()
-            return FilePinStore(file, cipher, values, dirSync)
+            return FilePinStore(file, cipher, values, dirSync, legacy)
         }
 
         /** A store over entries already written to and verified in [file] (the migration's). */
-        internal fun over(file: File, cipher: PinStoreCipher, values: Map<String, Any>, dirSync: DirSync = DirSync.OS) =
-            FilePinStore(file, cipher, values, dirSync)
+        internal fun over(file: File, cipher: PinStoreCipher, values: Map<String, Any>, dirSync: DirSync = DirSync.OS, legacy: LegacyPinStore? = null) =
+            FilePinStore(file, cipher, values, dirSync, legacy)
 
         /** Attempts per write: the first and one immediate retry. */
         internal const val WRITE_ATTEMPTS = 2
@@ -243,17 +246,37 @@ internal class FilePinStore private constructor(
 
     @Synchronized private fun change(block: MutableMap<String, Any>.() -> Unit) {
         val next = LinkedHashMap(values).apply(block)
-        values = next
         var last: Throwable? = null
         for (attempt in 1..WRITE_ATTEMPTS) {
             try {
                 writeWhole(file, seal(cipher, next), dirSync = dirSync)
+                values = next // only what landed
                 return
             } catch (t: Throwable) {
                 last = t
             }
         }
-        android.util.Log.e("PinStore", "PIN-STORE: write not landed (${last?.javaClass?.simpleName}); kept in memory")
+        android.util.Log.e("PinStore", "PIN-STORE: write not landed (${last?.javaClass?.simpleName}); nothing changed")
+        throw PinStoreWriteException("the PIN store write did not land", last)
+    }
+
+    /**
+     * Removes the PIN store from disk: the old store first (left alone it would be migrated back at the
+     * next launch), then the file, then a directory sync, then a check that both are gone. THROWS
+     * [PinStoreWriteException] when either is still there; the entries in memory are kept then, as
+     * they are still what is on disk.
+     */
+    @Synchronized override fun clear() {
+        val oldGone = legacy?.let { l -> try { !l.exists() || l.delete() } catch (t: Throwable) { false } } ?: true
+        if (!oldGone) throw PinStoreWriteException("the old PIN store did not delete")
+        DurableFile.delete(file, File(file.parentFile, file.name + ".tmp"))
+        file.parentFile?.let { dirSync.sync(it) }
+        val old = legacy
+        if (file.exists() || (old != null && runCatching { old.exists() }.getOrDefault(true))) {
+            android.util.Log.e("PinStore", "PIN-STORE: clear did not land")
+            throw PinStoreWriteException("the PIN store is still on disk after its clear")
+        }
+        values = emptyMap()
     }
 
     @Synchronized private fun get(key: String): Any? = values[key]
@@ -268,7 +291,6 @@ internal class FilePinStore private constructor(
     override fun putString(key: String, value: String) = change { put(key, value) }
     override fun putBoolean(key: String, value: Boolean) = change { put(key, value) }
     override fun remove(key: String) = change { remove(key) }
-    override fun clear() = change { clear() }
 
     override fun commit(edit: PinStoreEdit) = change {
         edit.removals.forEach { remove(it) }
@@ -302,8 +324,20 @@ internal interface LegacyPinStore {
  * Migration: read the old store once, write the new file under a staging name, read that back and
  * compare it with what was read, and only then rename it into place and delete the old store. A
  * migration that fails at any step before the rename leaves the old store as it was, serves this
- * session from it, and is tried again at the next launch. Once the file is in place it is the
- * store; an old store still beside it is a delete that did not land, and is deleted again.
+ * session from it, and is tried again at the next launch.
+ *
+ * An old store found beside the file (PIN-STORE review item 1) is one of two things, told apart by
+ * the digest of the old store's entries that the migration records in the file ([KEY_MIGRATED_FROM]):
+ *  - UNCHANGED since that migration (its digest is the recorded one): a delete that did not land. The
+ *    file is the newer copy, since only the file was written since; the old store is deleted again
+ *    and never served. Re-reading it instead would hand back the counters as they were at the
+ *    migration, at every launch for as long as the delete keeps failing: free PIN attempts.
+ *  - CHANGED (or the file records no migration): only an older build writes the old store, so this
+ *    is a downgrade, and what the user did there -- a new PIN, its own counters -- is the newer copy,
+ *    as for [app.aroundtheblock.wallet.core.sync.DurableFile.LegacyKey]. It is migrated again over the
+ *    file. Its counters are the ones that older build enforced for that PIN; the file's are for a
+ *    PIN it no longer has. An old store that cannot be opened cannot be compared: the file serves and
+ *    the old store is kept.
  *
  * The old store is never deleted before the rename that put the new file in place is on disk: the
  * directory is synced first. Otherwise a power cut could keep the delete and lose the rename, and
@@ -311,6 +345,9 @@ internal interface LegacyPinStore {
  */
 internal object PinStoreMigration {
     const val FILE_NAME = "dgb_pin_store.bin"
+
+    /** In the file: the SHA-256 of the old store's entries it was migrated from (see the class doc). */
+    const val KEY_MIGRATED_FROM = "pin_store_migrated_from"
     private const val STAGING = ".migrating"
     private const val TAG = "PinStore"
 
@@ -318,15 +355,38 @@ internal object PinStoreMigration {
         File(target.parentFile, target.name + STAGING).delete() // a migration stopped before its rename
         File(target.parentFile, target.name + STAGING + ".tmp").delete() // ... or before its staging write's rename
         if (target.exists()) {
-            val store = FilePinStore.open(target, cipher, dirSync) // throws: unavailable, never "no PIN"
-            if (legacy.exists()) {
-                dirSync.sync(target.parentFile!!) // the file in place is durable before the old store goes
-                deleteLegacy(legacy)
-            }
+            val store = FilePinStore.open(target, cipher, dirSync, legacy) // throws: unavailable, never "no PIN"
+            return if (legacy.exists()) besideOld(store, target, cipher, legacy, dirSync) else store
+        }
+        if (!legacy.exists()) return FilePinStore.open(target, cipher, dirSync, legacy)
+        val old = legacy.open() // throws as it always could: unavailable
+        return migrateOrServeOld(old, target, cipher, legacy, dirSync)
+    }
+
+    /** The file is in place and the old store is beside it: which one is newer (see the class doc). */
+    private fun besideOld(store: FilePinStore, target: File, cipher: PinStoreCipher, legacy: LegacyPinStore, dirSync: DirSync): PinStore {
+        val old = try {
+            legacy.open()
+        } catch (t: Throwable) {
+            android.util.Log.w(TAG, "PIN-STORE: an old store beside the file cannot be opened (${t.javaClass.simpleName}); the file serves, the old store is kept")
             return store
         }
-        if (!legacy.exists()) return FilePinStore.open(target, cipher, dirSync)
-        val old = legacy.open() // throws as it always could: unavailable
+        val unchanged = try {
+            store.getString(KEY_MIGRATED_FROM)?.let { it == digestOf(snapshotOf(old)) } ?: false
+        } catch (t: Throwable) {
+            android.util.Log.w(TAG, "PIN-STORE: an old store beside the file cannot be read (${t.javaClass.simpleName}); the file serves, the old store is kept")
+            return store
+        }
+        if (unchanged) {
+            dirSync.sync(target.parentFile!!) // the file in place is durable before the old store goes
+            deleteLegacy(legacy)
+            return store
+        }
+        android.util.Log.w(TAG, "PIN-STORE: the old store changed after the migration (an older build ran); it is the newer copy and is migrated again")
+        return migrateOrServeOld(old, target, cipher, legacy, dirSync)
+    }
+
+    private fun migrateOrServeOld(old: LegacyPinStore.Opened, target: File, cipher: PinStoreCipher, legacy: LegacyPinStore, dirSync: DirSync): PinStore {
         val migrated = try {
             migrate(old, target, cipher, dirSync)
         } catch (t: Throwable) {
@@ -337,19 +397,29 @@ internal object PinStoreMigration {
         }
         // In place, verified and durable: from here the new file is the store, whatever the delete does.
         deleteLegacy(legacy)
-        return FilePinStore.over(target, cipher, migrated, dirSync)
+        return FilePinStore.over(target, cipher, migrated, dirSync, legacy)
     }
 
-    /** Copies [old] into [target], verified by reading it back. Throws, with [target] untouched, on any failure. */
-    private fun migrate(old: LegacyPinStore.Opened, target: File, cipher: PinStoreCipher, dirSync: DirSync): Map<String, Any> {
+    private fun snapshotOf(old: LegacyPinStore.Opened): Map<String, Any> {
         val snapshot = LinkedHashMap<String, Any>()
         for ((key, value) in old.all()) {
             if (value != null) snapshot[key] = value
         }
+        return snapshot
+    }
+
+    /** SHA-256 (hex) of [entries] in the codec's sorted encoding; throws on a type the codec refuses. */
+    internal fun digestOf(entries: Map<String, Any>): String =
+        java.security.MessageDigest.getInstance("SHA-256").digest(PinStoreCodec.encode(entries)).joinToString("") { "%02x".format(it) }
+
+    /** Copies [old] into [target], verified by reading it back. Throws, with [target] untouched, on any failure. */
+    private fun migrate(old: LegacyPinStore.Opened, target: File, cipher: PinStoreCipher, dirSync: DirSync): Map<String, Any> {
+        val snapshot = snapshotOf(old)
+        val written = LinkedHashMap(snapshot).apply { put(KEY_MIGRATED_FROM, digestOf(snapshot)) }
         val staging = File(target.parentFile, target.name + STAGING)
-        writeWhole(staging, FilePinStore.seal(cipher, snapshot), tmpSuffix = ".tmp", dirSync = dirSync)
+        writeWhole(staging, FilePinStore.seal(cipher, written), tmpSuffix = ".tmp", dirSync = dirSync)
         val readBack = FilePinStore.read(staging, cipher)
-        if (readBack != snapshot) throw IOException("the new store did not read back as the old one")
+        if (readBack != written) throw IOException("the new store did not read back as the old one")
         if (!staging.renameTo(target)) throw IOException("rename did not land")
         dirSync.sync(target.parentFile!!) // before the caller deletes the old store
         return readBack
