@@ -81,6 +81,7 @@ object HistoryRebuildOnUpgrade {
         val deferredSinceMs: Long = 0L,
         val floorHint: Long = 0L,
         val floorTime: Long = 0L,
+        val floorPending: Boolean = false,
     )
 
     /**
@@ -229,6 +230,7 @@ object HistoryRebuildOnUpgrade {
             deferredSinceMs = p.getLong(KEY_DEFERRED_SINCE_MS, 0L),
             floorHint = p.getLong(KEY_FLOOR_HINT, 0L),
             floorTime = p.getLong(KEY_FLOOR_TIME, 0L),
+            floorPending = p.getBoolean(KEY_FLOOR_PENDING, false),
         )
     }
 
@@ -435,15 +437,21 @@ object HistoryRebuildOnUpgrade {
             .commit()
 
     /**
-     * Undo [armRerun] for a manual rebuild that stops before it cleared anything: put `done` and
-     * `in_progress` back to what [prior] read. Returns whether the commit landed; when it did not the
-     * rerun stays armed, which only defers the rebuild to the next start (its run carries the cache's
-     * floor before it clears).
+     * Undo [armRerun] (and a [floorFromCache] that did not land) for a manual rebuild that stops before
+     * it cleared anything: put `done`, `in_progress` and the floor back to what [prior] read. The floor
+     * goes back too because SharedPreferences keeps a failed commit's values in memory, and this
+     * commit would otherwise write the cache's floor to disk after the user was told nothing changed.
+     * A floor of 0 is "none", as an absent key is. Returns whether the commit landed; when it did not
+     * the rerun stays armed, which only defers the rebuild to the next start (its run carries the
+     * cache's floor before it clears).
      */
     fun disarmRerun(context: Context, prior: State): Boolean =
         statePrefs(context).edit()
             .putBoolean(KEY_DONE, prior.done)
             .putBoolean(KEY_IN_PROGRESS, prior.inProgress)
+            .putLong(KEY_FLOOR_HINT, prior.floorHint)
+            .putLong(KEY_FLOOR_TIME, prior.floorTime)
+            .putBoolean(KEY_FLOOR_PENDING, prior.floorPending)
             .commit()
 
     /**
