@@ -1290,7 +1290,7 @@ class AssetManager(
             txHashHex = txHashHex,
             header = header,
             inputs = if (inputLines == null || parsedInputs.any { it == null }) null else parsedInputs.filterNotNull(),
-            resolved = resolveInputAssetUnits(
+            resolved = if (inputLines == null) null else resolveInputAssetUnits(
                 inputs = parsedInputs.filterNotNull(),
                 rowQuantity = { txid, vout -> utxoDao.getAssetUtxoAt(txid, vout)?.assetQuantity },
                 isAssetTx = { txid -> txHasAssetPayload(txid) },
@@ -2799,7 +2799,7 @@ class AssetManager(
                     if (p[0].length != 64 || prevVout < 0) null else p[0] to prevVout
                 }
             everyInputRead = lines != null && replayInputs.size == lines.size
-            resolveInputAssetUnits(
+            if (lines == null) null else resolveInputAssetUnits(
                 inputs = replayInputs,
                 rowQuantity = rowOf,
                 isAssetTx = isAssetTx,

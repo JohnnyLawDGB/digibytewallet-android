@@ -135,6 +135,14 @@ class AssetRemainderProofGuardTest {
             { if (it == t) throw IllegalStateException("unreadable") else inputs[it] }, walletLoaded = { true }))
     }
 
+    @Test fun `replay - an input list that comes back null - held, with or without a proof`() = runTest {
+        for (proofs in listOf(proven(), InMemoryRemainderProofStore())) {
+            val mgr = manager(proofs)
+            assertEquals(true, mgr.resolveRowTargetsImpl(t, 2, { wallet[it] },
+                { if (it == t) null else inputs[it] }, walletLoaded = { true }))
+        }
+    }
+
     @Test fun `replay - an input line that cannot be read - proof not read, held`() = runTest {
         inputs[t] = arrayOf("$f|7", "not-an-outpoint")
         val mgr = manager(proven())
@@ -206,6 +214,16 @@ class AssetRemainderProofGuardTest {
         val detection = source.substringAfter("suspend fun processIncomingAssetTx(").substringBefore("\n    }\n")
         assertTrue(Regex("""val inputUnits = detectedInputUnits\(""").containsMatchIn(detection))
         assertFalse(detection.contains("provenInputUnits"))
+    }
+
+    /** Source gate: detection cannot run on the JVM (NativeBridge), and its seam receives the rows'
+     *  answer already made — so the null-input-list rule is pinned at the call site. */
+    @Test fun `source - detection with an input list that comes back null has no total`() {
+        val source = listOf("", "../", "../../")
+            .map { File(it + "core/src/main/java/app/aroundtheblock/wallet/core/asset/AssetManager.kt") }
+            .first { it.exists() }.readText()
+        val detection = source.substringAfter("suspend fun processIncomingAssetTx(").substringBefore("\n    }\n")
+        assertTrue(Regex("""resolved = if \(inputLines == null\) null else resolveInputAssetUnits\(""").containsMatchIn(detection))
     }
 
     // ── The targeting walk ────────────────────────────────────────────────
