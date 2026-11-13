@@ -224,6 +224,8 @@ class AssetRemainderProofGuardTest {
             .first { it.exists() }.readText()
         val detection = source.substringAfter("suspend fun processIncomingAssetTx(").substringBefore("\n    }\n")
         assertTrue(Regex("""resolved = if \(inputLines == null\) null else resolveInputAssetUnits\(""").containsMatchIn(detection))
+        assertTrue("a partial or absent input list reaches the proof step as null",
+            Regex("""inputs = if \(inputLines == null \|\| parsedInputs\.any \{ it == null \}\) null else parsedInputs\.filterNotNull\(\),""").containsMatchIn(detection))
     }
 
     // ── The targeting walk ────────────────────────────────────────────────
