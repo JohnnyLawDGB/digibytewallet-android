@@ -34,6 +34,10 @@
 //       therefore ask for nothing on its behalf; it used to send a getheaders on every tick, for
 //       ever. Guards (every arm): such a band is never retired, even with headers resident below
 //       it (the banner stays honest); a band ABOVE the start is still backfilled and retired.
+//       And a resident floor BELOW the start is clamped to the start before Retire (which refuses
+//       a sub-start floor): the band is retired to the start, every height of it resident, and the
+//       backfill then idles; it used to re-send getheaders on every tick (guard: a floor above the
+//       start still retires only down to that floor).
 //
 // Approach: #include BRPeer.c (private BRPeerContext, to mark a synthetic peer Connected) and
 // BRPeerManager.c (file statics) into this unit, the same pattern as cf_checkpoint_neverbrick_kat.
@@ -563,6 +567,51 @@ static void case_backfill_band_above_start_still_retires(void)
     bandFxFree(&f);
 }
 
+// The ledger re-anchored just under the resident floor (start = BAND_FLOOR - 5) with a band
+// [start .. BAND_FLOOR-1] surfaced on it. Returns with the lock RELEASED.
+static void startBetweenFxInit(BandFx *f)
+{
+    bandFxInit(f, /*withChain=*/0);   // lock HELD
+    BRPeerManager *m = f->m;
+    BRCFScanLedgerInit(&m->cfLedger, BAND_FLOOR - 5);
+    _BRPeerManagerSurfaceUnscannableLocked(m, BAND_FLOOR - 5, BAND_FLOOR, "kat: band above a mid-floor start");
+    check(m->cfLedger.abandonedBelow == BAND_FLOOR && BRCFScanLedgerStartHeight(&m->cfLedger) == BAND_FLOOR - 5,
+          "setup: a band [start .. BAND_FLOOR-1] sits just above the ledger's start");
+    MGR_UNLOCK(m);
+    ((BRPeerContext *)f->p)->katGetheadersCount = 0;
+}
+
+// RED (CF_RETIRE_FLOOR_CLAMP_UNFIXED): headers come back below the ledger's start (floor
+// BAND_FLOOR - 10 < start). The band is retired down to the start, every height of it resident,
+// and the backfill then idles; unclamped, Retire refused the sub-start floor on every tick.
+static void case_backfill_retires_to_start_when_floor_below_start(void)
+{
+    BandFx f; startBetweenFxInit(&f);
+    residentBelowBand(f.m, 10);
+    uint32_t retired = backfillTicks(f.m);
+    uint32_t start = BRCFScanLedgerStartHeight(&f.m->cfLedger);
+    printf("  info: retired %u, %zu getheaders over %u backfill ticks\n", retired, getheadersSent(f.p), BACKFILL_TICKS);
+    check(retired == 5 && BRPeerManagerAbandonedBelow(f.m) == start,
+          "floor below start: the band is retired down to the ledger's start, never below it");
+    check(BRCFScanLedgerLowestNeededHeight(&f.m->cfLedger) == start,
+          "the retired heights are requested again from the start (scanned, not assumed)");
+    check(getheadersSent(f.p) == 0, "once at the start, the backfill sends no getheaders");
+    bandFxFree(&f);
+}
+
+// GUARD (every arm): headers resident only part-way down the band (floor BAND_FLOOR - 3, above the
+// start). The band is retired exactly to that floor; the heights under it, whose headers are not
+// resident, stay condemned.
+static void case_backfill_retire_stops_at_resident_floor(void)
+{
+    BandFx f; startBetweenFxInit(&f);
+    residentBelowBand(f.m, 3);
+    uint32_t retired = BRPeerManagerBackfillAbandonedBandStep(f.m);
+    check(retired == 3 && BRPeerManagerAbandonedBelow(f.m) == BAND_FLOOR - 3,
+          "a band is retired only down to the resident header floor, not to the start");
+    bandFxFree(&f);
+}
+
 typedef struct { const char *name; void (*fn)(void); } Case;
 static const Case CASES[] = {
     { "floor_memo_relayed_stub_replace",       case_floor_memo_relayed_stub_replace },
@@ -579,6 +628,8 @@ static const Case CASES[] = {
     { "backfill_idle_after_inside_reinit",     case_backfill_idle_after_inside_reinit },
     { "backfill_never_retires_band_at_start",  case_backfill_never_retires_band_at_start },
     { "backfill_band_above_start_still_retires", case_backfill_band_above_start_still_retires },
+    { "backfill_retires_to_start_when_floor_below_start", case_backfill_retires_to_start_when_floor_below_start },
+    { "backfill_retire_stops_at_resident_floor", case_backfill_retire_stops_at_resident_floor },
 };
 
 int main(int argc, char **argv)

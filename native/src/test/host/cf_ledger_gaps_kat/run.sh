@@ -23,6 +23,8 @@
 #                             look at the scan frontier, reading the heights between as scanned
 #   -DCF_ABANDONED_AT_START_UNFIXED  the abandoned-band backfill sends a getheaders on every tick for
 #                             a band carried at or below the ledger's start, which it can never retire
+#   -DCF_RETIRE_FLOOR_CLAMP_UNFIXED  the retire passes a resident floor below the ledger's start
+#                             unclamped, so Retire refuses it every tick and the backfill re-sends
 # RED cases must FAIL in their arm, on the line that states their invariant (INV below, not any
 # FAIL and never a setup check), and PASS in green. GUARD cases must PASS in every arm.
 # Every case, every arm: no sanitizer report. A build error is never evidence.
@@ -45,11 +47,14 @@ declare -A RED=(
     [CF_BAND_INSIDE_UNFIXED]="band_inside_reinit_keeps_lower_part rebuild_band_inside_kept"
     [CF_REBUILD_FRONTIER_UNFIXED]="rebuild_never_marks_unrequested_scanned rebuild_resumes_at_frontier_above_floor"
     [CF_ABANDONED_AT_START_UNFIXED]="backfill_idle_after_floor_snap backfill_idle_after_floor_reanchor backfill_idle_after_inside_reinit"
+    [CF_RETIRE_FLOOR_CLAMP_UNFIXED]="backfill_retires_to_start_when_floor_below_start"
 )
 ARMS=(CF_FLOOR_MEMO_UNFIXED CF_BAND_KEPT_UNFIXED CF_PARK_CONTIG_UNFIXED CF_PARK_LAG_UNFIXED
-      CF_BAND_INSIDE_UNFIXED CF_REBUILD_FRONTIER_UNFIXED CF_ABANDONED_AT_START_UNFIXED)
+      CF_BAND_INSIDE_UNFIXED CF_REBUILD_FRONTIER_UNFIXED CF_ABANDONED_AT_START_UNFIXED
+      CF_RETIRE_FLOOR_CLAMP_UNFIXED)
 GUARD_CASES=(band_not_carried_below_or_absent park_still_moves_back rebuild_rescans_disputed_range
-             backfill_never_retires_band_at_start backfill_band_above_start_still_retires)
+             backfill_never_retires_band_at_start backfill_band_above_start_still_retires
+             backfill_retire_stops_at_resident_floor)
 
 # The invariant line each red case must fail on in its arm (a fixed-string prefix of the check).
 declare -A INV=(
@@ -66,6 +71,7 @@ declare -A INV=(
     [backfill_idle_after_floor_snap]="floor snap: the backfill sends no getheaders for a band this ledger can never retire"
     [backfill_idle_after_floor_reanchor]="floor re-anchor: the backfill sends no getheaders for a band this ledger can never retire"
     [backfill_idle_after_inside_reinit]="re-Init inside a band: the backfill sends no getheaders for a band this ledger can never retire"
+    [backfill_retires_to_start_when_floor_below_start]="floor below start: the band is retired down to the ledger's start"
 )
 MAINS=(cf_ledger_gaps_kat_main.c cf_ledger_gaps_rebuild_main.c)
 BINS=(main rebuild)
@@ -109,6 +115,7 @@ seam CF_PARK_LAG_UNFIXED BRPeerManager.c
 seam CF_BAND_INSIDE_UNFIXED BRPeerManager.c
 seam CF_REBUILD_FRONTIER_UNFIXED BRPeerManager.c
 seam CF_ABANDONED_AT_START_UNFIXED BRPeerManager.c
+seam CF_RETIRE_FLOOR_CLAMP_UNFIXED BRPeerManager.c
 
 FAIL=0
 declare -A BIN_OF=()
