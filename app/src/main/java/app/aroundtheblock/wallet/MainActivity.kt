@@ -28,6 +28,7 @@ import app.aroundtheblock.wallet.core.db.dao.WalletConfigDao
 import app.aroundtheblock.wallet.core.digiscope.DigiScopeClient
 import app.aroundtheblock.wallet.core.security.BiometricAuth
 import app.aroundtheblock.wallet.core.security.KeyStoreManager
+import app.aroundtheblock.wallet.core.security.OwnCredentialPromptExemption
 import app.aroundtheblock.wallet.core.security.PinManager
 import app.aroundtheblock.wallet.core.tor.TorManager
 import app.aroundtheblock.wallet.core.tor.TorState
@@ -118,6 +119,8 @@ class MainActivity : FragmentActivity() {
         // Before anything reads the intent, and before the NavHost exists: no launching intent
         // chooses a screen (NAV-DEEPLINK).
         app.aroundtheblock.wallet.ui.navigation.NavIntentExtras.strip(intent)
+        // SEED-VIEW-AUTH: recreated (rotation) while a stop lock was deferred: re-arm its deadline.
+        if (OwnCredentialPromptExemption.isDeferred()) scheduleDeferredStopLock()
 
         // Wipe-after-N backstop: if a prior wipe-after-N was interrupted (process
         // killed between PinManager returning ShouldWipe and the wallet wipe
@@ -399,54 +402,76 @@ class MainActivity : FragmentActivity() {
         // UI-only lock — requires PIN/biometric to re-enter the app.
         // Does NOT call NativeBridge.lockSession() — the native seed stays
         // in memory so SyncService can continue syncing in the background.
-        // SEED-VIEW-AUTH: the one stop caused by our own device-credential confirm (a separate
-        // activity on API 26-29) is deferred, never forgiven: it locks at the exemption's bound
-        // unless this activity is back first, and any other stop locks now.
-        val now = android.os.SystemClock.elapsedRealtime()
-        val promptStartedAt = app.aroundtheblock.wallet.core.security.OwnCredentialPromptExemption.consumeForStop(now)
-        if (walletManager.walletState.value is WalletState.Unlocked) {
-            if (promptStartedAt == null) {
-                walletManager.lockUi()
-            } else {
-                deferredStopPromptStartedAt = promptStartedAt
-                stopLockHandler.removeCallbacks(deferredStopLock)
-                stopLockHandler.postDelayed(deferredStopLock,
-                    app.aroundtheblock.wallet.core.security.OwnCredentialPromptExemption.remainingMs(promptStartedAt, now))
-            }
-        }
-    }
-
-    /** SEED-VIEW-AUTH: prompt start of a stop whose lock was deferred; null when none is pending. */
-    private var deferredStopPromptStartedAt: Long? = null
-    private val stopLockHandler = android.os.Handler(android.os.Looper.getMainLooper())
-    private val deferredStopLock = Runnable {
-        if (deferredStopPromptStartedAt != null) {
-            deferredStopPromptStartedAt = null
-            if (walletManager.walletState.value is WalletState.Unlocked) walletManager.lockUi()
-        }
-    }
-
-    override fun onStart() {
-        super.onStart()
-        val started = deferredStopPromptStartedAt ?: return
-        deferredStopPromptStartedAt = null
-        stopLockHandler.removeCallbacks(deferredStopLock)
-        // Back past the bound (the timer may not have run under a frozen process): lock now.
-        if (app.aroundtheblock.wallet.core.security.OwnCredentialPromptExemption.lockOnStop(
-                started, android.os.SystemClock.elapsedRealtime()) &&
-            walletManager.walletState.value is WalletState.Unlocked
-        ) {
+        // SEED-VIEW-AUTH: only the stop caused by our own confirm activity is deferred
+        // (OwnCredentialPromptExemption); any other stop locks now. A deferral is resolved at the
+        // next resume, by the deadline timer, a user-leave hint or onDestroy, and keeps the UI
+        // unlocked only on proof the confirm succeeded.
+        if (OwnCredentialPromptExemption.consumeForStop(android.os.SystemClock.elapsedRealtime())) {
+            scheduleDeferredStopLock()
+        } else if (walletManager.walletState.value is WalletState.Unlocked) {
             walletManager.lockUi()
         }
     }
 
-    override fun onDestroy() {
-        // Destroyed while a stop lock was deferred: the prompt's answer can no longer return here.
-        if (deferredStopPromptStartedAt != null) {
-            deferredStopPromptStartedAt = null
-            stopLockHandler.removeCallbacks(deferredStopLock)
-            if (walletManager.walletState.value is WalletState.Unlocked) walletManager.lockUi()
+    private val stopLockHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
+    /** The deadline: still stopped when the bound runs out, so the deferred stop locks. */
+    private val deferredStopLock = Runnable {
+        if (OwnCredentialPromptExemption.resolveOnTimer()) lockUiIfUnlocked()
+    }
+
+    private fun scheduleDeferredStopLock() {
+        stopLockHandler.removeCallbacks(deferredStopLock)
+        stopLockHandler.postDelayed(deferredStopLock,
+            OwnCredentialPromptExemption.remainingMs(android.os.SystemClock.elapsedRealtime()))
+    }
+
+    private fun lockUiIfUnlocked() {
+        if (walletManager.walletState.value is WalletState.Unlocked) walletManager.lockUi()
+    }
+
+    /** Resume decision for a deferred stop; API 29 posts it, so the queued success callback runs first. */
+    private fun resolveDeferredStopOnResume() {
+        if (!OwnCredentialPromptExemption.isDeferred()) return
+        stopLockHandler.removeCallbacks(deferredStopLock)
+        val decide = Runnable {
+            if (OwnCredentialPromptExemption.resolveOnResume(android.os.SystemClock.elapsedRealtime())) lockUiIfUnlocked()
         }
+        if (OwnCredentialPromptExemption.deferredVia() == OwnCredentialPromptExemption.Via.API29_FRAMEWORK) {
+            stopLockHandler.post(decide)
+        } else {
+            decide.run()
+        }
+    }
+
+    /**
+     * API <= 28: androidx.biometric launches the confirm through here; arms only for that intent.
+     * Overrides the deprecated platform pair androidx.biometric 1.1.0 still uses (a compiler warning).
+     */
+    override fun startActivityForResult(intent: Intent, requestCode: Int, options: Bundle?) {
+        OwnCredentialPromptExemption.onActivityLaunch(
+            android.os.SystemClock.elapsedRealtime(), android.os.Build.VERSION.SDK_INT, intent.action, requestCode)
+        super.startActivityForResult(intent, requestCode, options)
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        OwnCredentialPromptExemption.onActivityResult(requestCode, resultCode)
+        super.onActivityResult(requestCode, resultCode, data)
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (OwnCredentialPromptExemption.onUserLeaveHint()) {
+            stopLockHandler.removeCallbacks(deferredStopLock)
+            lockUiIfUnlocked()
+        }
+    }
+
+    override fun onDestroy() {
+        stopLockHandler.removeCallbacks(deferredStopLock)
+        // A rotation keeps the deferral for the recreated activity (onCreate re-arms the deadline);
+        // any other destroy means the confirm's answer can no longer come back here.
+        if (!isChangingConfigurations && OwnCredentialPromptExemption.resolveOnDestroy()) lockUiIfUnlocked()
         super.onDestroy()
     }
 
@@ -470,6 +495,7 @@ class MainActivity : FragmentActivity() {
      */
     override fun onResume() {
         super.onResume()
+        resolveDeferredStopOnResume()
         // Returning to the foreground is the interaction: without this, an unlock after a
         // long background sits on a stale stamp and the very first tick locks the wallet
         // the user just opened.
