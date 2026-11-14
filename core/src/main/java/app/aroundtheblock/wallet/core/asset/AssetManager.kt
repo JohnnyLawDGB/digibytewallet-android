@@ -1666,10 +1666,10 @@ class AssetManager(
      * See [AssetProvenanceWalker] for the progress accounting and its tests.
      *
      * The walk is suspend-only, so callers decide whether to await or fire
-     * it into a background scope. When resolution succeeds, placeholder
-     * asset-ids already written into the utxos table are rewritten via
-     * [UtxoDao.replaceAssetId]. Metadata refresh is kicked off on the new
-     * real id so names/icons materialize if a CID is recoverable.
+     * it into a background scope. The caller ([issuanceWalk]) renames the
+     * placeholder rows to the answer only as [issuanceRenameAllowed] says.
+     * Metadata refresh is kicked off on the answer's id so names/icons
+     * materialize if a CID is recoverable.
      *
      * Returns the resolved asset ID, or null if the walk hit a dead end
      * (no parent tx available, max depth, unlocked issuance not yet

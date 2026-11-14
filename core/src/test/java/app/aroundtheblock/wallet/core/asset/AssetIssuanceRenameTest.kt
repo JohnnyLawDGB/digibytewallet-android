@@ -160,6 +160,7 @@ class AssetIssuanceRenameTest {
             resolve = { answerY.copy(assetId = "") },
         )
         coVerify(exactly = 0) { utxoDao.replaceAssetId(any(), any()) }
+        coVerify(exactly = 0) { txDao.updateAssetId(any(), any()) }
     }
 
     @Test fun the_walk_that_cannot_rename_runs_once_per_process() = runTest {
