@@ -130,6 +130,7 @@
 4 peer_cap_kat
 56 peer_close_ledger_kat
 10 peer_command_field_kat
+30 peer_connect_once_kat
 1 peer_dial_address_kat
 61 peer_dial_disconnect_once_kat
 59 peer_disconnect_bounded_kat
