@@ -1072,13 +1072,20 @@ NativeBridge_previewDigiDollar(JNIEnv *env, jobject thiz, jstring tdAddress, jlo
  * this wallet, and it pays exactly approvedFeeSats -- checked before signing and again after. The wallet
  * keeps its own copy (_registerWalletCopy) and the peer manager is handed the original. Returns the
  * txid, or NULL when nothing was signed (the wallet changed while the prompt was up, the session is
- * locked, or the transfer cannot be built). */
+ * locked, or the transfer cannot be built).
+ *
+ * DigiDollar sends use the Dandelion++ broadcast path. `stem` is Broadcaster's decision (the same one
+ * a DGB send gets): when set, the transfer is stem-submitted as publishTransactionStem does, and
+ * flooded if the stem finds no capable peer; when clear, it is flooded. stemmedOut[0] is the stem's
+ * result (1 stemmed: the caller arms the embargo; 0 flooded), as publishTransactionStem reports it. */
 jstring JNICALL
-NativeBridge_sendApprovedDigiDollar(JNIEnv *env, jobject thiz, jstring tdAddress, jlong cents, jlong approvedFeeSats)
+NativeBridge_sendApprovedDigiDollar(JNIEnv *env, jobject thiz, jstring tdAddress, jlong cents, jlong approvedFeeSats,
+                                    jboolean stem, jintArray stemmedOut)
 {
     (void)thiz;
     PEER_GUARD(); /* serialize g_peerManager access (v3.7.1 UAF fix); auto-releases on any return */
     if (! g_wallet || ! g_peerManager) { LOGW("sendApprovedDigiDollar: wallet/peerManager not ready"); return NULL; }
+    if (! stemmedOut || (*env)->GetArrayLength(env, stemmedOut) < 1) return NULL;
     if (! seed_is_valid()) { LOGW("sendApprovedDigiDollar: session locked (no seed)"); return NULL; }
     if (! tdAddress || cents <= 0 || approvedFeeSats <= 0) {
         LOGW("sendApprovedDigiDollar: no approved amount or fee");
@@ -1125,11 +1132,18 @@ NativeBridge_sendApprovedDigiDollar(JNIEnv *env, jobject thiz, jstring tdAddress
     coin_reservation_release(tx->txHash);   /* the wallet now holds its coins as spent */
 
     /* Non-NULL callback: see _publishResult -- NULL makes the publish invisible to the
-       cancellation path and it never leaves publishedTx. */
+       cancellation path and it never leaves publishedTx. Stem first when asked, then flood if the
+       stem did not take it -- the same order and ownership as publishTransactionStem (a stem that
+       returns 0 takes neither tx nor ctx). */
     PublishCtx *ctx = calloc(1, sizeof(*ctx));
     if (ctx) memcpy(ctx->txid, txidHex, sizeof(ctx->txid));
-    BRPeerManagerPublishTx(g_peerManager, tx, ctx, ctx ? _publishResult : NULL);   /* owns the original; do NOT free tx */
+    int stemmed = stem ? BRPeerManagerStemPublishTx(g_peerManager, tx, ctx, ctx ? _publishResult : NULL) : 0;
+    if (! stemmed) {
+        BRPeerManagerPublishTx(g_peerManager, tx, ctx, ctx ? _publishResult : NULL);   /* owns the original; do NOT free tx */
+    }
 
-    LOGD("sendApprovedDigiDollar: submitted");   /* no txid or fee (row 30, R7) */
+    jint stemmedFlag = stemmed ? 1 : 0;
+    (*env)->SetIntArrayRegion(env, stemmedOut, 0, 1, &stemmedFlag);
+    LOGD("sendApprovedDigiDollar: submitted (%s)", stemmed ? "stem" : "flood");   /* no txid or fee (row 30, R7) */
     return (*env)->NewStringUTF(env, txidHex);
 }

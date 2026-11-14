@@ -184,7 +184,7 @@ This section is byte-identical in `digibytewallet-android/docs/network-destinati
 | Hub, chat, DigiRunner (`api.digiscope.me`) | Present | Absent | Absent |
 | Reconcile / Recover funds | Present; Android also reconciles by itself after an upgrade (`PostUpgradeReconciler`) | Scan for missing funds, on the user's tap only; Recover funds absent (Stage 1) | iOS asks only on a user action (owner's rule, 2026-11-10); Recover funds absent |
 | Update check (GitHub) | Sideload flavor only | Absent (the App Store updates) | Absent |
-| Dandelion | Opt-in: a DGB send stems to one Dandelion-capable peer the seeder tags, then floods if no peer relays it back within 10 to 30 s; a DigiDollar send from the Send screen always floods | Opt-in, the same rules (core `BRDandelionEmbargo.h`) | Same. A stem that finds no capable peer at the last instant is flooded on both, with no embargo (owner decision: follow the core) |
+| Dandelion | Opt-in: DGB and DigiDollar sends use the Dandelion++ broadcast path: a send stems to one Dandelion-capable peer the seeder tags, then floods if no peer relays it back within 10 to 30 s | Opt-in, the same rules (core `BRDandelionEmbargo.h`) | Same. A stem that finds no capable peer at the last instant is flooded on both, with no embargo (owner decision: follow the core) |
 | Tor | Opt-in | Absent (M10) | Absent |
 | Local Network permission probe | None (Android has no Local Network permission) | `LocalNetworkAccess` opens a connection to the own node's address to read the permission state; sends no byte | iOS-only platform need, no Android counterpart |
 | Analytics, crash reporting | None | None | Same |

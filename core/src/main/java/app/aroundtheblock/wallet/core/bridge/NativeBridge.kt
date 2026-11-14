@@ -141,7 +141,9 @@ object NativeBridge {
      *  approved send: [cents] to that address, the rest change to this wallet, at exactly
      *  [approvedFeeSats] — checked before signing and again after. The txid, or null when nothing was
      *  signed (the wallet changed while the prompt was up, the session is locked, or it cannot be built). */
-    external fun sendApprovedDigiDollar(tdAddress: String, cents: Long, approvedFeeSats: Long): String?
+    external fun sendApprovedDigiDollar(
+        tdAddress: String, cents: Long, approvedFeeSats: Long, stem: Boolean, stemmedOut: IntArray,
+    ): String?
 
     /** What the wallet-known tx with this display (BE) txid did, for its activity row:
      *  `[kind, cents, changeCents]` — kind 0 none, 1 minted, 2 sent, 3 received, 4 to the wallet itself,

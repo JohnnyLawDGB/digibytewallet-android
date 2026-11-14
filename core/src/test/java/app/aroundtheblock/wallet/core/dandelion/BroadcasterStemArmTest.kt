@@ -37,6 +37,22 @@ class BroadcasterStemArmTest {
         override fun fluffTransaction(txid: String) { fluffCalls += txid }
     }
 
+    /** The native DigiDollar send, as the spend path hands it to [Broadcaster.sendDigiDollar]. */
+    private class FakeDigiDollarSend {
+        /** Whether the core's stem would take a DigiDollar send the bridge is asked to stem. */
+        var stemTakes: Boolean = true
+        var signs: Boolean = true
+        val calls = mutableListOf<Boolean>()   // the stem flag of each call
+        /** Fresh per test: an embargo armed by one test outlives it in the [Broadcaster] singleton. */
+        val txid: String = java.util.UUID.randomUUID().toString().replace("-", "").repeat(2)
+        fun send(stem: Boolean): StemResult? {
+            calls += stem
+            if (!signs) return null
+            return StemResult(txid, stemmed = stem && stemTakes)
+        }
+    }
+
+    private val dd = FakeDigiDollarSend()
     private val tx = byteArrayOf(1, 2, 3)
     private lateinit var fake: FakeBridge
     private lateinit var original: BroadcastBridge
@@ -90,6 +106,48 @@ class BroadcasterStemArmTest {
         assertEquals(FLOOD_TXID, Broadcaster.broadcast(tx))
         assertEquals(0, fake.stemCalls.size)
         assertEquals(1, fake.publishCalls.size)
+    }
+
+    // --- DigiDollar sends use the Dandelion++ broadcast path too ---
+
+    private fun sendDd() = Broadcaster.sendDigiDollar(dd::send)
+
+    @Test fun `a DigiDollar send with Dandelion++ on and a capable peer stems and arms the embargo`() {
+        assertEquals(dd.txid, sendDd())
+        assertEquals(listOf(true), dd.calls)
+        assertTrue(Broadcaster.isEmbargoPending(dd.txid))
+        assertEquals(0, fake.publishCalls.size)
+    }
+
+    @Test fun `a DigiDollar send with Dandelion++ off floods with no embargo`() {
+        Broadcaster.dandelionEnabled = false
+        assertEquals(dd.txid, sendDd())
+        assertEquals(listOf(false), dd.calls)
+        assertFalse(Broadcaster.isEmbargoPending(dd.txid))
+    }
+
+    @Test fun `a DigiDollar send with no capable peer floods with no embargo`() {
+        fake.hasPeer = false
+        assertEquals(dd.txid, sendDd())
+        assertEquals(listOf(false), dd.calls)
+        assertFalse(Broadcaster.isEmbargoPending(dd.txid))
+    }
+
+    @Test fun `a DigiDollar stem the bridge flooded instead returns the txid with no embargo and no second publish`() {
+        dd.stemTakes = false
+        assertEquals(dd.txid, sendDd())
+        assertEquals("one send call, the stem requested", listOf(true), dd.calls)
+        assertFalse(Broadcaster.isEmbargoPending(dd.txid))
+        assertEquals(0, fake.publishCalls.size)
+        assertEquals(0, fake.stemCalls.size)
+    }
+
+    @Test fun `a DigiDollar send that signed nothing returns null and publishes nothing`() {
+        dd.signs = false
+        assertEquals(null, sendDd())
+        assertEquals(1, dd.calls.size)
+        assertEquals(0, fake.publishCalls.size)
+        assertFalse(Broadcaster.isEmbargoPending(dd.txid))
     }
 
     private companion object {

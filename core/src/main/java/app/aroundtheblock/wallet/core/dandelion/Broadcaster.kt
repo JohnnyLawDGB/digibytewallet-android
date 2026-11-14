@@ -10,7 +10,8 @@ import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Single broadcast entry point for the wallet. Stems the tx to one Dandelion node
+ * Single broadcast entry point for the wallet (DGB sends through [broadcast], the DigiDollar
+ * send through [sendDigiDollar]). Stems the tx to one Dandelion node
  * when enabled + available, else floods (today's behavior). On a stem that really went to a
  * capable peer (not the bridge's flood fallback, see [StemResult]) it arms a random embargo: if the network hasn't relayed the tx back by the deadline it
  * self-fluffs, so a transaction is never stranded for the sake of privacy.
@@ -56,19 +57,34 @@ object Broadcaster {
     fun broadcast(signedTx: ByteArray): String? {
         if (shouldStem(dandelionEnabled, bridge.hasDandelionPeer())) {
             val result = bridge.publishTransactionStem(signedTx)
-            if (result != null) {
-                // Arm only on a real stem (core BRDandelionEmbargo.h: "armed when the stem
-                // returns 1"). stemmed=false: the capable peer dropped between the bridge's
-                // check and the stem, and the bridge has already flooded the send. An embargo
-                // there would only fluff it to every peer a second time at the deadline, and a
-                // publish below would do the same now, so return the txid as it is.
-                if (result.stemmed) armEmbargo(result.txid)
-                return result.txid
-            }
+            if (result != null) return delivered(result)
             // null: the bridge handled nothing (no capable peer connected when it checked, or
             // the tx did not parse), so publish it plainly.
         }
         return bridge.publishTransaction(signedTx)
+    }
+
+    /** Send the approved DigiDollar transfer through [send], the native sign-and-publish
+     *  ([NativeBridge.sendApprovedDigiDollar], called by the spend path that guards it), handing it
+     *  whether to stem. Returns the txid, or null when nothing was signed. */
+    fun sendDigiDollar(send: (stem: Boolean) -> StemResult?): String? {
+        // DigiDollar sends use the Dandelion++ broadcast path, decided as for a DGB send. The
+        // signed transfer stays native (its zero-value inputs do not survive serialization), so the
+        // bridge does the stem-or-flood itself and reports which it did. Off, or no capable peer:
+        // stem=false and the bridge floods, as before.
+        val stem = shouldStem(dandelionEnabled, bridge.hasDandelionPeer())
+        val result = send(stem) ?: return null
+        return delivered(result)
+    }
+
+    /** A send the bridge has registered and broadcast: arm the embargo only on a real stem (core
+     *  BRDandelionEmbargo.h: "armed when the stem returns 1"). stemmed=false means the bridge flooded
+     *  it (the capable peer dropped at the stem itself); an embargo there would only fluff it to
+     *  every peer a second time at the deadline, and publishing it again would do the same now, so
+     *  the txid is returned as it is. */
+    private fun delivered(result: StemResult): String {
+        if (result.stemmed) armEmbargo(result.txid)
+        return result.txid
     }
 
     private fun armEmbargo(txid: String) {

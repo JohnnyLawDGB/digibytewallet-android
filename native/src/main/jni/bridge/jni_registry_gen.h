@@ -153,7 +153,7 @@ jboolean JNICALL NativeBridge_restoreCfScanLedger(JNIEnv *env, jobject thiz, jby
 jboolean JNICALL NativeBridge_restoreWalletFromBytes(JNIEnv *env, jobject thiz, jbyteArray phraseBytes, jlong creationTimestamp, jbyteArray passphrase);  /* jni_wallet.c */
 jlong JNICALL NativeBridge_seederServicesParse(JNIEnv *env, jobject thiz, jstring servicesHex);  /* jni_seeder_peers.c */
 jboolean JNICALL NativeBridge_seederShouldRefresh(JNIEnv *env, jobject thiz, jlong lastFetchMs, jlong nowMs, jint cachedCount);  /* jni_seeder_peers.c */
-jstring JNICALL NativeBridge_sendApprovedDigiDollar(JNIEnv *env, jobject thiz, jstring tdAddress, jlong cents, jlong approvedFeeSats);  /* jni_transaction.c */
+jstring JNICALL NativeBridge_sendApprovedDigiDollar(JNIEnv *env, jobject thiz, jstring tdAddress, jlong cents, jlong approvedFeeSats, jboolean stem, jintArray stemmedOut);  /* jni_transaction.c */
 jbyteArray JNICALL NativeBridge_serializePeerPenalties(JNIEnv *env, jobject thiz);  /* jni_peer.c */
 void JNICALL NativeBridge_setCallbackHandler(JNIEnv *env, jobject thiz, jobject handler);  /* jni_peer.c */
 jboolean JNICALL NativeBridge_setCompactFilterChain(JNIEnv *env, jobject thiz, jbyteArray data);  /* jni_peer.c */
@@ -330,7 +330,7 @@ jboolean JNICALL NativeBridge_walletContainsAddress(JNIEnv *env, jobject thiz, j
     { "restoreWalletFromBytes", "([BJ[B)Z", (void *) NativeBridge_restoreWalletFromBytes }, \
     { "seederServicesParse", "(Ljava/lang/String;)J", (void *) NativeBridge_seederServicesParse }, \
     { "seederShouldRefresh", "(JJI)Z", (void *) NativeBridge_seederShouldRefresh }, \
-    { "sendApprovedDigiDollar", "(Ljava/lang/String;JJ)Ljava/lang/String;", (void *) NativeBridge_sendApprovedDigiDollar }, \
+    { "sendApprovedDigiDollar", "(Ljava/lang/String;JJZ[I)Ljava/lang/String;", (void *) NativeBridge_sendApprovedDigiDollar }, \
     { "serializePeerPenalties", "()[B", (void *) NativeBridge_serializePeerPenalties }, \
     { "setCallbackHandler", "(" DGB_JNI_NATIVECALLBACK_SIG ")V", (void *) NativeBridge_setCallbackHandler }, \
     { "setCompactFilterChain", "([B)Z", (void *) NativeBridge_setCompactFilterChain }, \

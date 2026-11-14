@@ -16,7 +16,8 @@
 # GATE over the real jni_transaction.c (Android headers keep it off the host): previewDigiDollar builds
 # the transfer, previews it through this header and frees it, signing, registering and publishing
 # nothing; sendApprovedDigiDollar is handed the approved fee and checks the rebuilt transfer against it
-# before signing and again after, then registers its copy and publishes; and no other bridge function
+# before signing and again after, then registers its copy and publishes it once (a flood, or a
+# Dandelion++ stem with the flood only when the stem did not take it); and no other bridge function
 # builds a DigiDollar transfer (the one-step build-sign-publish that checked nothing is gone).
 # DD_SEND_GATE_FILE=<path> points the source gate at another copy (used to show it refuses one).
 #
@@ -236,11 +237,31 @@ else
     SIGNS=($(offsets 'seed_sign_transaction[[:space:]]*\(' "$SEND"))
     REGS=($(offsets '_registerWalletCopy[[:space:]]*\(' "$SEND"))
     PUBS=($(offsets 'BRPeerManager(Publish|StemPublish)Tx[[:space:]]*\(' "$SEND"))
+    FLOODS=($(offsets 'BRPeerManagerPublishTx[[:space:]]*\(' "$SEND"))
+    STEMS=($(offsets 'BRPeerManagerStemPublishTx[[:space:]]*\(' "$SEND"))
     [ "${#BUILDS[@]}" -eq 1 ] || say "sendApprovedDigiDollar must build the transfer exactly once (found ${#BUILDS[@]})"
     [ "${#CHECKS[@]}" -eq 2 ] || say "sendApprovedDigiDollar must check exactly twice, before and after signing (found ${#CHECKS[@]})"
     [ "${#SIGNS[@]}" -eq 1 ] || say "sendApprovedDigiDollar must sign exactly once (found ${#SIGNS[@]})"
-    [ "${#REGS[@]}" -eq 1 ] && [ "${#PUBS[@]}" -eq 1 ] || say "sendApprovedDigiDollar must register its copy once and publish once (found ${#REGS[@]}, ${#PUBS[@]})"
-    if [ "${#BUILDS[@]}" -eq 1 ] && [ "${#CHECKS[@]}" -eq 2 ] && [ "${#SIGNS[@]}" -eq 1 ] && [ "${#REGS[@]}" -eq 1 ] && [ "${#PUBS[@]}" -eq 1 ]; then
+    # Published once: one flood call and at most one stem call. With a stem (DigiDollar sends use the
+    # Dandelion++ broadcast path), the stem comes first and the flood runs only when the stem did not
+    # take the transfer -- a flood after a stem that took it would publish it twice.
+    pub_once=0
+    if [ "${#FLOODS[@]}" -eq 1 ] && [ "${#STEMS[@]}" -eq 0 ]; then
+        pub_once=1
+    elif [ "${#FLOODS[@]}" -eq 1 ] && [ "${#STEMS[@]}" -eq 1 ]; then
+        STEM_VAR="$(grep -oE 'int ([A-Za-z_][A-Za-z0-9_]*) = [^;]*BRPeerManagerStemPublishTx[[:space:]]*\(' <<<"$SEND" | sed -E 's/^int ([A-Za-z_][A-Za-z0-9_]*) =.*/\1/')"
+        if [ -z "$STEM_VAR" ]; then
+            say "sendApprovedDigiDollar does not keep the stem's result"
+        elif [ "${STEMS[0]}" -gt "${FLOODS[0]}" ]; then
+            say "sendApprovedDigiDollar floods before it stems"
+        elif ! grep -Eq -- "if ?\( ?! ?$STEM_VAR ?\) ?\{? ?BRPeerManagerPublishTx[[:space:]]*\(" <<<"$SEND"; then
+            say "sendApprovedDigiDollar floods whether or not the stem took the transfer (no if (! $STEM_VAR) around the flood)"
+        else
+            pub_once=1
+        fi
+    fi
+    [ "${#REGS[@]}" -eq 1 ] && [ "$pub_once" -eq 1 ] || say "sendApprovedDigiDollar must register its copy once and publish once (found ${#REGS[@]} registrations, ${#FLOODS[@]} flood and ${#STEMS[@]} stem calls)"
+    if [ "${#BUILDS[@]}" -eq 1 ] && [ "${#CHECKS[@]}" -eq 2 ] && [ "${#SIGNS[@]}" -eq 1 ] && [ "${#REGS[@]}" -eq 1 ] && [ "$pub_once" -eq 1 ]; then
         [ "${BUILDS[0]}" -lt "${CHECKS[0]}" ] || say "the first check does not follow the build"
         [ "${CHECKS[0]}" -lt "${SIGNS[0]}" ] || say "the first check does not come before the signature"
         [ "${CHECKS[1]}" -gt "${SIGNS[0]}" ] || say "the second check does not come after the signature"
@@ -250,7 +271,7 @@ else
     REFUSE='dd_send_check[[:space:]]*\([^;]*approvedFeeSats[^;]*\)[[:space:]]*\)?[[:space:]]*!=[[:space:]]*DD_SEND_OK'
     n_refuse="$(grep -oE -- "$REFUSE" <<<"$SEND" | wc -l | tr -d ' ')"
     [ "$n_refuse" -eq 2 ] || say "each check must be handed the approved fee and refuse on a verdict other than DD_SEND_OK (found $n_refuse)"
-    [ "$gate_fail" -eq 0 ] && echo "  gate: sendApprovedDigiDollar rebuilds once, checks against the approved fee before signing, signs once, checks again, then registers its copy and publishes"
+    [ "$gate_fail" -eq 0 ] && echo "  gate: sendApprovedDigiDollar rebuilds once, checks against the approved fee before signing, signs once, checks again, then registers its copy and publishes it once"
     gate_fail=$(( before || gate_fail ))
 fi
 
