@@ -88,19 +88,19 @@ CASES=(
     rules_step:d64,d128
     inputs_read:d16,h8,h128
     outgoing_and_asks:d1,d4,d256,d512
-    issuance_walk:d32,d2048
+    issuance_walk:d32,d2048,d65536
     rename_rows:d32,d1024,h256
     facts_walk:d4096
     refusals:d16384
     capacity:-
     input_facts_direct:-
     second_unit:-
-    model_sweep:d1,d2,d4,d8,d16,d32,d64,d128,d256,d512,d2048,d8192,d32768,h128,h256
+    model_sweep:d1,d2,d4,d8,d16,d32,d64,d128,d256,d512,d2048,d8192,d32768,d65536,h128,h256
 )
 ARMS=(d1:ownership-ignored d2:opreturn-rows d4:empty-owned-none d8:settled-reallocated d16:input-dropped
       d32:placeholder-always d64:rules-unknown-free d128:rules-unasked-free d256:ask-unowned d512:ask-outgoing
       d1024:rename-any d2048:walk-once-dropped d4096:facts-uncounted d8192:claim-earlier-rule d16384:duplicate-rows
-      d32768:unclassifiable-rows h8:walk-stops h128:proof-ignored h256:first-carrier)
+      d32768:unclassifiable-rows d65536:walk-unrenamable h8:walk-stops h128:proof-ignored h256:first-carrier)
 
 macro_of() {   # <d|h> -> the seam macro
     case "$1" in d) echo ASSET_DETECT ;; h) echo ASSET_HOLD ;; esac

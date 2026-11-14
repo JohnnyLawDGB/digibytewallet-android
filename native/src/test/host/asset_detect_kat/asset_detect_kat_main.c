@@ -17,7 +17,8 @@
 //       balance read by BRAssetHeldBalances; AssetPersistOnDetectTest's protect cases and
 //       AssetZeroQuantityInputTest's detection case asked of `targeted` (protect_*). The other cases are
 //       this suite's own (which outputs get a row, the placeholder, all settled, the rules step, the
-//       walks, the rename, refusals, capacity), their expectations read off the Kotlin source.
+//       walks, refusals, capacity), their expectations read off the Kotlin source; the rename and the
+//       repeat of the issuance walk are held to BRAssetDetect.h's text (THE RENAME, THE ISSUANCE WALK).
 //       Not carried, because they have no form here: the bridge reads and their failures, the metadata
 //       fetch, the history label (transactionDao.updateAssetId, receivedBackedUnits), the persist-after-
 //       detect snapshot (AssetPersistOnDetectTest's first three), log lines, and the allocator's and the
@@ -26,8 +27,9 @@
 //       the derivation, resolveInputAssetUnits with the TargetingWalk (a fresh walk per question, as
 //       detection's calls make it), backedInputStack, nativeParentHasDataOutput, the ownership gate, all
 //       settled, transferOutputCredits / issuanceOutputCredits, AssetTxQuantity.forOutputTotal,
-//       persistDetectedAssetOutput with settledRow, the indexer condition and the walk condition. The
-//       ported pieces it calls are the ones other suites hold to the Kotlin: the decoder (asset_decode_kat),
+//       persistDetectedAssetOutput with settledRow, the indexer condition and the walk condition (its
+//       repeat as BRAssetDetect.h states it). The ported pieces it calls are the ones other suites hold
+//       to the Kotlin: the decoder (asset_decode_kat),
 //       BRAssetTargetsOutput and BRAssetAssignedUnits (asset_quantity_targets_kat), the allocator,
 //       BRAssetCreditForOutput and BRAssetMaxDeliverable (asset_allocate_kat), BRAssetIdForIssuance
 //       (asset_allocate_kat). model_sweep holds BRAssetDetect to it over fixed pseudo-random wallets, the
@@ -1397,7 +1399,13 @@ static void mDetect(const BRTransaction *tx)
         o->ask = o->credit.kind == BR_ASSET_OUTPUT_UNKNOWN && ! W.outgoing && W.ownedN != 0;
         o->bound = BRAssetMaxDeliverable(&header.h, header.insts, header.h.instructionCount, o->vout, outputCount);
     }
-    MR.walkDue = isIssuance && ((MR.anyUnresolved && strncmp(MR.placeholder, "unresolved:", 11) == 0) || ! W.walked);
+    {   // BRAssetDetect.h: after a walk this session, due again only for rows THE RENAME can rename
+        long firstOpReturn = -1;
+
+        for (j = 0; j < tx->outCount && firstOpReturn < 0; j++) if (mIsOpReturn(&tx->outputs[j])) firstOpReturn = (long)j;
+        MR.walkDue = isIssuance && ((MR.anyUnresolved && ! derived && strncmp(MR.placeholder, "unresolved:", 11) == 0 &&
+                                     firstOpReturn == carrierAt) || ! W.walked);
+    }
 }
 
 static int sameText(const char *a, const char *b) { return (! a || ! b) ? a == b : strcmp(a, b) == 0; }
@@ -2496,6 +2504,24 @@ static void issuance_walk(void)
     r = detectedRow(0);
     ck(r && r->hasId && strncmp(r->id, "unresolved:", 11) == 0, "the row carries the placeholder");
 
+    wreset();   // an unlocked issuance whose carrier is not the first OP_RETURN
+    {
+        Fx *p = fx(0x72), *f;
+
+        theirs(p); wadd(p);
+        f = fx(0x73);
+        in(f, tid(0x72), 0);
+        ours(f); out(f, PLAIN_NOTE); out(f, "6a0a" "44410305" "2016" "00" "2016" "00"); ours(f);
+        wadd(f);
+        W.walked = 0;
+        detect(&f->tx);
+        ck(DET.carrierAt == 2 && ! DET.carrierIsFirstOpReturn && DET.anyUnresolved && DET.issuanceWalkDue,
+           "not walked this session: walk (for its facts)");
+        W.walked = 1;
+        detect(&f->tx);
+        ck(DET.anyUnresolved && ! DET.issuanceWalkDue, "walked this session: not again, the rename cannot rename its rows");
+    }
+
     wreset();   // a transfer: never
     W.walked = 0;
     receive(CONTROL, ins, 1, owned, 1, 3);
@@ -2535,7 +2561,7 @@ static void rename_rows(void)
     s = BRAssetDetectRename(&DET, &named, VROWS, ROWN, got, N(got), &n);
     ck(s == BR_ASSET_HOLDINGS_OK && n == 0, "a locked issuance's derived id is never renamed");
 
-    wreset();   // a carrier that is not the first OP_RETURN: the walk read another output
+    wreset();   // a carrier that is not the first OP_RETURN: not renamed
     {
         Fx *p = fx(0x70), *f;
 
@@ -2550,7 +2576,7 @@ static void rename_rows(void)
            "the last carrier (unlocked) is read: a placeholder");
         syncView();
         s = BRAssetDetectRename(&DET, &named, VROWS, ROWN, got, N(got), &n);
-        ck(s == BR_ASSET_HOLDINGS_OK && n == 0, "its rows are not renamed by a walk that read the first OP_RETURN");
+        ck(s == BR_ASSET_HOLDINGS_OK && n == 0, "a carrier that is not the first OP_RETURN: its rows are not renamed");
     }
 
     wreset();   // a transfer is not renamed
