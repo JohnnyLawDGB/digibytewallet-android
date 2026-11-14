@@ -71,6 +71,7 @@
 132 coin_reservation_core_kat
 1 coin_reservation_kat
 61 coinbase_maturity_kat
+3 dandelion_embargo_kat
 1 dandelion_state_kat
 14 dandelion_stem_announce_kat
 60 dd_activation_floor_kat

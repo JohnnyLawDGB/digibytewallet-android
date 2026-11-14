@@ -141,7 +141,9 @@ object NativeBridge {
      *  approved send: [cents] to that address, the rest change to this wallet, at exactly
      *  [approvedFeeSats] — checked before signing and again after. The txid, or null when nothing was
      *  signed (the wallet changed while the prompt was up, the session is locked, or it cannot be built). */
-    external fun sendApprovedDigiDollar(tdAddress: String, cents: Long, approvedFeeSats: Long): String?
+    external fun sendApprovedDigiDollar(
+        tdAddress: String, cents: Long, approvedFeeSats: Long, stem: Boolean, stemmedOut: IntArray,
+    ): String?
 
     /** What the wallet-known tx with this display (BE) txid did, for its activity row:
      *  `[kind, cents, changeCents]` — kind 0 none, 1 minted, 2 sent, 3 received, 4 to the wallet itself,
@@ -161,10 +163,13 @@ object NativeBridge {
 
 
     // === Dandelion++ broadcast-origin privacy ===
-    /** Stem-submit a signed tx to one Dandelion-capable peer. Returns txid hex on a
-     *  successful stem, or null if no capable peer was available (caller floods via
-     *  [publishTransaction]). */
-    external fun publishTransactionStem(signedTx: ByteArray): String?
+    /** Stem-submit a signed tx to one Dandelion-capable peer. Returns null when it handled
+     *  nothing (no capable peer connected, or the tx did not parse): the caller floods via
+     *  [publishTransaction]. Otherwise the tx is registered and broadcast, the txid hex is
+     *  returned, and `stemmedOut[0]` is the core stem's result: 1 when it was stemmed (arm the
+     *  embargo), 0 when the capable peer dropped at the stem itself and the bridge flooded it
+     *  instead (no embargo, and no second publish). `stemmedOut` needs at least one element. */
+    external fun publishTransactionStem(signedTx: ByteArray, stemmedOut: IntArray): String?
     /** Embargo fallback: flood a previously stem-submitted tx to all peers. */
     external fun fluffTransaction(txid: String)
 
