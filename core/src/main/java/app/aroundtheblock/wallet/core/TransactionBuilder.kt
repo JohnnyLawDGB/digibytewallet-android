@@ -2,6 +2,7 @@ package app.aroundtheblock.wallet.core
 
 import app.aroundtheblock.wallet.core.bridge.NativeBridge
 import app.aroundtheblock.wallet.core.dandelion.Broadcaster
+import app.aroundtheblock.wallet.core.dandelion.StemResult
 import app.aroundtheblock.wallet.core.send.DigiDollarSend
 import app.aroundtheblock.wallet.core.send.DigiDollarSendState
 import app.aroundtheblock.wallet.core.send.DustPolicy
@@ -152,7 +153,11 @@ interface SpendNative {
         override fun previewDigiDollar(tdAddress: String, cents: Long): LongArray? =
             NativeBridge.previewDigiDollar(tdAddress, cents)
         override fun sendApprovedDigiDollar(tdAddress: String, cents: Long, approvedFeeSats: Long): String? =
-            NativeBridge.sendApprovedDigiDollar(tdAddress, cents, approvedFeeSats)
+            Broadcaster.sendDigiDollar { stem ->
+                val stemmed = IntArray(1)
+                NativeBridge.sendApprovedDigiDollar(tdAddress, cents, approvedFeeSats, stem, stemmed)
+                    ?.let { StemResult(it, stemmed[0] == 1) }
+            }
     }
 }
 
