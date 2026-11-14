@@ -256,6 +256,14 @@ else
             say "sendApprovedDigiDollar floods before it stems"
         elif ! grep -Eq -- "if ?\( ?! ?$STEM_VAR ?\) ?\{? ?BRPeerManagerPublishTx[[:space:]]*\(" <<<"$SEND"; then
             say "sendApprovedDigiDollar floods whether or not the stem took the transfer (no if (! $STEM_VAR) around the flood)"
+        elif ! grep -Eq -- "int $STEM_VAR = [A-Za-z_][A-Za-z0-9_]* \? BRPeerManagerStemPublishTx ?\([^;]*\) : 0 ?;" <<<"$SEND"; then
+            # With the stem off, the result must read "not stemmed" so the flood runs: anything but
+            # a literal 0 there can skip the flood and still return the txid.
+            say "sendApprovedDigiDollar's stem result is not '<stem> ? BRPeerManagerStemPublishTx(...) : 0' (with the stem off nothing would be published)"
+        elif [ "$(grep -oE -- "(\\<$STEM_VAR ?([-+*/%&|^]|<<|>>)?=[^=]|\\<$STEM_VAR ?(\\+\\+|--)|(\\+\\+|--) ?$STEM_VAR\\>|&$STEM_VAR\\>)" <<<"$SEND" | wc -l | tr -d ' ')" -ne 1 ]; then
+            # Its one assignment is the stem's result: a later write can turn a send the stem took
+            # into one the flood publishes again.
+            say "sendApprovedDigiDollar writes $STEM_VAR more than once (only the stem's result may be assigned to it)"
         else
             pub_once=1
         fi
@@ -267,6 +275,7 @@ else
         [ "${CHECKS[1]}" -gt "${SIGNS[0]}" ] || say "the second check does not come after the signature"
         [ "${REGS[0]}" -gt "${CHECKS[1]}" ] || say "the wallet's copy is registered before the second check"
         [ "${PUBS[0]}" -gt "${CHECKS[1]}" ] || say "the transfer is published before the second check"
+        [ "${PUBS[0]}" -gt "${REGS[0]}" ] || say "the transfer is published before the wallet's copy is registered"
     fi
     REFUSE='dd_send_check[[:space:]]*\([^;]*approvedFeeSats[^;]*\)[[:space:]]*\)?[[:space:]]*!=[[:space:]]*DD_SEND_OK'
     n_refuse="$(grep -oE -- "$REFUSE" <<<"$SEND" | wc -l | tr -d ' ')"
