@@ -648,6 +648,7 @@
     <string name="sec_autolock_30m">30 minutes</string>
     <string name="sec_autolock_custom">Custom</string>
     <string name="sec_pin_changed">PIN changed successfully</string>
+    <string name="sec_pin_change_failed">The new PIN could not be saved. Your old PIN is still active.</string>
     <string name="sec_pins_mismatch">PINs do not match</string>
     <string name="sec_biometric_required">Biometric authentication required</string>
 
@@ -874,4 +875,15 @@
     <string name="reconcile_rebuild_button">Full rebuild from chain (rescan)</string>
     <string name="rf_capped_body">The scan stopped at its limit on %1$s while that path was still in use, so there may be more funds there than shown. Anything not shown stays safe on the chain.</string>
     <string name="reconcile_stuck_stale_cleared">, %1$d of them never relayed (after a day the network had neither them nor anything spending their coins). If one of those payments did reach its recipient it can still confirm: check with them before paying again</string>
+    <!-- KS-BIND: seed key bound to the device lock -->
+    <string name="ksb_prompt_subtitle">Confirm your screen lock once so your wallet key can be tied to it</string>
+    <string name="ksb_notice_title">This phone has no screen lock</string>
+    <string name="ksb_notice_body">Your wallet is encrypted on this phone, but its key cannot be tied to a screen lock, because this phone has none. Only the wallet PIN then stands between the app and your funds. Set a PIN, pattern or password in Android settings: the wallet ties its key to it the next time the app starts and opens the wallet. Security settings shows whether the key is tied.</string>
+    <string name="ksb_notice_ok">I understand</string>
+    <string name="sec_seed_key">Wallet key</string>
+    <string name="sec_seed_key_bound">Tied to this phone’s screen lock</string>
+    <string name="sec_seed_key_pending">Not tied yet: it will be tied to your screen lock the next time the app starts and opens the wallet</string>
+    <string name="sec_seed_key_no_lock">Not tied: this phone has no screen lock. Set one in Android settings.</string>
+    <string name="sec_seed_key_lock_removed">The screen lock was removed after this wallet was set up, so its key no longer opens, even with a new lock. While the wallet is still open, check that your recovery phrase is written down, or move your funds now: the next time the app starts, the wallet will need its recovery phrase.</string>
+    <string name="sec_seed_key_cannot_bind">Not tied: a key left from an earlier screen lock no longer works, so this wallet’s key cannot be tied on this install. Wiping the wallet and restoring it from its recovery phrase ties it.</string>
 </resources>

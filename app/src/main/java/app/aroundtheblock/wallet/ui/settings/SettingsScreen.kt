@@ -320,14 +320,15 @@ fun SettingsRow(
     iconTint: Color,
     title: String,
     subtitle: String,
-    onClick: () -> Unit,
+    /** Null for a status row that only informs: it is then not announced as a button. */
+    onClick: (() -> Unit)?,
     subtitleColor: Color = Color(0xFF8899AA),
     trailing: @Composable (() -> Unit)? = null
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

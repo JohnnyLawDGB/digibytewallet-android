@@ -19,7 +19,8 @@ import java.nio.file.StandardOpenOption
  *  - At load, a missing live file next to a complete tmp is recovered ([recoverTmp]) when the format
  *    lets completeness be checked; otherwise the tmp is ignored.
  *
- * Used by [FilterHeaderStore], [SavedBlockStore], [CfScanLedgerStore] and [SavedTransactionsStore].
+ * Used by [FilterHeaderStore], [SavedBlockStore], [CfScanLedgerStore], [SavedTransactionsStore] and the
+ * PIN store (`core/security/FilePinStore.kt`, `writeWhole`).
  * Callers hold their own store lock around these calls.
  */
 object DurableFile {
@@ -37,16 +38,17 @@ object DurableFile {
 
     /**
      * Write [bytes] to [live] through [tmp]. True only when [live] now holds exactly these bytes. On
-     * any failure [live] is left as it was and [tmp] is removed.
+     * any failure [live] is left as it was and [tmp] is removed. [dirSync] makes the rename durable;
+     * a store with its own directory-sync seam (the PIN store) passes it here.
      */
-    fun write(live: File, tmp: File, bytes: ByteArray): Boolean = runCatching {
+    fun write(live: File, tmp: File, bytes: ByteArray, dirSync: (File?) -> Unit = { syncDir(it) }): Boolean = runCatching {
         FileOutputStream(tmp).use { out ->
             out.write(bytes)
             out.flush()
             fsync(out)
         }
         if (!rename(tmp, live)) error("rename failed") // never delete-then-rename: the live copy stays
-        syncDir(live.parentFile)
+        dirSync(live.parentFile)
         live.length() == bytes.size.toLong()
     }.getOrElse {
         runCatching { tmp.delete() }

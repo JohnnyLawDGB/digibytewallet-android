@@ -343,7 +343,18 @@ fun AppNavigation(
                 // "wallet already exists, skip creation" vs. "create a new wallet")
                 // can never race an in-flight restore and create a duplicate wallet.
                 var restoring by remember { mutableStateOf(lostPinRestorePending.value) }
-                if (restoring) {
+                // The wallet's key is gone (device lock removed): the record is still stored, so
+                // PinSetupScreen would only fail with pin_err_wallet. Say what recovers it instead.
+                var keyLost by rememberSaveable { mutableStateOf(false) }
+                if (keyLost) {
+                    Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+                        Text(
+                            text = stringResource(R.string.unlock_device_lock_removed),
+                            color = Color.White,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
+                } else if (restoring) {
                     LaunchedEffect(Unit) {
                         // Restore-crash bracket (see UnlockScreen's unlock path for the
                         // same pattern + rationale): BootGuard (app module) isn't importable
@@ -369,9 +380,11 @@ fun AppNavigation(
                                 android.util.Log.e("AppNavigation", "lost-PIN restore needs device auth", e)
                             }
                         } catch (e: app.aroundtheblock.wallet.core.security.KeystoreKeyInvalidatedException) {
-                            // Device lock removed — only the recovery phrase recovers this
-                            // wallet. PinSetupScreen's no-wallet branch offers exactly that.
+                            // Device lock removed — only the recovery phrase recovers this wallet.
+                            // The record is still stored, so PinSetupScreen is NOT shown (it would
+                            // report pin_err_wallet): the restore message is, as at unlock.
                             android.util.Log.e("AppNavigation", "wallet key permanently invalidated", e)
+                            keyLost = true
                         }
                         lostPinRestorePending.value = false
                         restoring = false
