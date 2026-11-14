@@ -161,10 +161,13 @@ object NativeBridge {
 
 
     // === Dandelion++ broadcast-origin privacy ===
-    /** Stem-submit a signed tx to one Dandelion-capable peer. Returns txid hex on a
-     *  successful stem, or null if no capable peer was available (caller floods via
-     *  [publishTransaction]). */
-    external fun publishTransactionStem(signedTx: ByteArray): String?
+    /** Stem-submit a signed tx to one Dandelion-capable peer. Returns null when it handled
+     *  nothing (no capable peer connected, or the tx did not parse): the caller floods via
+     *  [publishTransaction]. Otherwise the tx is registered and broadcast, the txid hex is
+     *  returned, and `stemmedOut[0]` is the core stem's result: 1 when it was stemmed (arm the
+     *  embargo), 0 when the capable peer dropped at the stem itself and the bridge flooded it
+     *  instead (no embargo, and no second publish). `stemmedOut` needs at least one element. */
+    external fun publishTransactionStem(signedTx: ByteArray, stemmedOut: IntArray): String?
     /** Embargo fallback: flood a previously stem-submitted tx to all peers. */
     external fun fluffTransaction(txid: String)
 

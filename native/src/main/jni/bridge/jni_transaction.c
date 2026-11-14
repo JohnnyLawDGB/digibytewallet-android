@@ -549,12 +549,18 @@ static UInt256 _u256FromTxidHex(const char *hex) {
     return h;
 }
 
+/* Returns NULL when it handled nothing (the caller publishes). Otherwise the tx is registered and
+ * broadcast, the txid is returned, and stemmedOut[0] is BRPeerManagerStemPublishTx's result: 1 when
+ * it was stemmed (the caller arms the embargo, BRDandelionEmbargo.h), 0 when the capable peer
+ * dropped at the stem and it was flooded here instead (no embargo, and no second publish). */
 jstring JNICALL
 NativeBridge_publishTransactionStem(JNIEnv *env, jobject thiz,
-                                                                 jbyteArray signedTx) {
+                                                                 jbyteArray signedTx,
+                                                                 jintArray stemmedOut) {
     (void)thiz;
     PEER_GUARD();
     if (!g_wallet || !g_peerManager || !signedTx) return NULL;
+    if (!stemmedOut || (*env)->GetArrayLength(env, stemmedOut) < 1) return NULL;
     /* Fast no-op when no capable peer is connected — caller floods via
        publishTransaction. Avoids parsing/registering a tx we won't stem. */
     if (!BRPeerManagerHasDandelionPeer(g_peerManager)) return NULL;
@@ -596,6 +602,8 @@ NativeBridge_publishTransactionStem(JNIEnv *env, jobject thiz,
     } else {
         LOGD("publishTransactionStem: stemmed tx %s", BRLogTxTagHex(txidHex, (char[9]){0}));
     }
+    jint stemmedFlag = stemmed ? 1 : 0;
+    (*env)->SetIntArrayRegion(env, stemmedOut, 0, 1, &stemmedFlag);
     return (*env)->NewStringUTF(env, txidHex);
 }
 
