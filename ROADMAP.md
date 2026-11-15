@@ -1,5 +1,25 @@
 # DigiByte Wallet — Roadmap
 
+> ## Update — 2026-11-15 (HoldFast Wallet 4.1.4 shipped; NEXT = 4.1.5)
+>
+> **4.1.4 shipped 2026-11-15** as a signed APK ([release](https://github.com/JohnnyLawDGB/aroundtheblock-wallet-releases/releases/tag/v4.1.4),
+> tag `v4.1.4`) and to Google Play open testing. Its fixes reached `develop` through the security
+> advisories on 2026-11-15; three advisories were published with the release. Highlights: the seed
+> key is bound to the screen lock from wallet creation (the Phase 2 Keystore item), the PIN store
+> moved off the alpha security-crypto library (no downgrade past 4.1.4), one DigiAsset carrier
+> rule everywhere (matching DigiAsset Core), DigiDollar sends via Dandelion++ when it is on, and
+> sync progress kept across restarts on long-history wallets.
+>
+> **NEXT: 4.1.5, a security and reliability train.** As before, its scope stays private until it
+> ships. The public part so far:
+>
+> - **Block and filter checkpoints refreshed.** The newest checkpoint passed 21 days, so CI on
+>   `develop` is red on `checkpoint_staleness_kat` until both tables are regenerated.
+> - Still to land from the 4.1.4 notes: the 24-word address vectors in the committed KAT set.
+>
+> **Unchanged:** the phase order below (sovereignty first). Choosing chains by accumulated work
+> is still the scheduled structural change under Phase 1.
+
 > ## Update — 2026-11-08 (true-up to HoldFast Wallet 4.1.3; NEXT = 4.1.4)
 >
 > It has been two and a half months since the last banner. The app is now **HoldFast Wallet**

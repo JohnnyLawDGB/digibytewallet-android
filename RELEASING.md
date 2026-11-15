@@ -85,6 +85,19 @@ advisory's temporary private fork.
   re-enable it in the same sitting.
 - **Do not publish an umbrella advisory to "finish" a landing** — publishing deletes its temp
   fork. Publish the per-finding advisories (§8) once the fix has shipped.
+- **Land ONE commit per fork (4.1.4).** "Merge commit from fork" copies every commit message of
+  the PR into one merge commit. A 100-commit PR (about 89 KB of messages) timed out in the web UI
+  every time; the 4.1.2 and 4.1.3 landings were one commit each and merged at once. Before opening
+  the advisory PR, build a single commit on top of the fork's `develop` whose tree is the verified
+  tree (`git commit-tree <verified>^{tree} -p <public develop tip>`) and check
+  `git diff --quiet <verified> <that commit>`.
+- **Sync first, and freeze public `develop` until landing.** Public `develop` moves while the
+  gates run; each move is another sync merge and another full KAT sweep (4.1.4 needed three:
+  #89/#90, #254/#255, then #256). Ask for a merge freeze on both repos when the landing sync starts.
+- **If the build predates the landing,** the tag still goes on the built commit (§7.0). After a
+  single-commit landing that commit is on no public branch: fetch it from the private clone into
+  the public checkout and push the tag, which publishes it and its history. Fetch only `develop`
+  there, never `--tags`: one stale local tag makes `git fetch --tags` fail.
 
 ## 4. Gates — all of them, at the release commit
 
@@ -155,6 +168,9 @@ one signer, and the wrong package. Output, under `dist/vX.Y.Z/`:
    download links, the SHA-256, and the source tag and commit. Then check the live page names the
    previous release nowhere: `curl -s https://digiscope.me/downloads/ | grep -cF 'v4.1.2'` (the
    version being replaced, written out) must print 0.
+   Also copy the APK next to the page (it links to it by a relative path), and move HoldFast's
+   own manifest, `digibyte-mobile.json` with `digibyte-mobile-latest.apk`, to this release:
+   the site's assistant reads its version from there. The app does not read either file.
    **Never repoint `digibyte-wallet-latest.apk` or `latest.json`.** The retired io.digibyte
    app's in-app updater polls them; they must keep pointing at io.digibyte 4.0.87.2.
 4. If the privacy policy changed, update its effective date where it is published.
@@ -178,6 +194,11 @@ one signer, and the wrong package. Output, under `dist/vX.Y.Z/`:
   or record in the scope file why not. Reporters are told to keep details private "until the
   fix is publicly disclosed"; shipping the fix without ever publishing the advisory leaves them
   waiting on an event that does not come.
+  GitHub publishes only an advisory that is a **draft** (a reported one in `triage` must be
+  accepted first) with an **affected product** (ecosystem `other`, package
+  `app.aroundtheblock.wallet`, vulnerable `<= previous`, patched `this release`), a description and
+  a severity. Post the reporter's comment first, since a published advisory takes no comments, and
+  use **Comment**, not the **Close with comment** button beside it, which closes the report.
 - **Tell each reporter** the fix has shipped and in which version.
 
 ## 9. After the release
