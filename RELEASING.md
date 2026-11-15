@@ -160,6 +160,10 @@ one signer, and the wrong package. Output, under `dist/vX.Y.Z/`:
    published files change. The hash covers the sideload APK only: a Play install is split APKs
    and is checked by its certificate, never by `SHA256SUMS`. Release
    notes written by hand, **with reporter credits as they are written** (§8).
+   Then a **pointer release on this repo** for the same tag, marked Latest, with no assets: title
+   "HoldFast Wallet X.Y.Z (source tag — downloads are in the releases repo)", linking the signed
+   APK, Play and digiscope.me, with the APK and certificate SHA-256. GitHub shows this repo's
+   newest release on its front page; 4.1.0 to 4.1.3 skipped it, and visitors were shown 4.0.89.
 2. **Play:** the AAB to open testing, with that release's "what's new" text.
 3. **digiscope.me downloads page:** link the new release. Every version field moves together, or
    the page sells one version under another's name (4.1.3 shipped with the 4.1.2 badge, summary
