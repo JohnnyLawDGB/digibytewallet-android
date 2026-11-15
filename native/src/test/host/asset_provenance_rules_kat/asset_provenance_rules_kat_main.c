@@ -47,6 +47,7 @@
 //  holds each arm to failing exactly its cases.
 //
 
+#define _DEFAULT_SOURCE  // strtok_r is POSIX: glibc declares it under -std=c99 only with this
 #include "BRAssetProvenance.h"
 #include "BRAssetRuleGate.h"
 #include <limits.h>
