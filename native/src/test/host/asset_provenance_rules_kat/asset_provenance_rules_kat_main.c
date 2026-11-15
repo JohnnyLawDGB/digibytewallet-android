@@ -47,7 +47,6 @@
 //  holds each arm to failing exactly its cases.
 //
 
-#define _DEFAULT_SOURCE  // strtok_r is POSIX: glibc declares it under -std=c99 only with this
 #include "BRAssetProvenance.h"
 #include "BRAssetRuleGate.h"
 #include <limits.h>
@@ -55,6 +54,21 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+// strtok_r is POSIX, not C99, and a -std=c99 build on glibc does not declare it: a C99 one.
+static char *_tok(char *s, const char *delim, char **save)
+{
+    char *end;
+
+    if (! s) s = *save;
+    s += strspn(s, delim);
+    if (*s == '\0') { *save = s; return NULL; }
+    end = s + strcspn(s, delim);
+    if (*end != '\0') *end++ = '\0';
+    *save = end;
+    return s;
+}
+
 
 int asset_provenance_rules_kat_tu2(void);   // run.sh's second translation unit, which includes the headers twice
 
@@ -1663,8 +1677,8 @@ static void hop_vectors(void)
 
         if (strncmp(line, "hop ", 4) != 0) continue;
         line[strcspn(line, "\r\n")] = '\0';
-        name = strtok_r(line + 4, " ", &save);
-        hex = strtok_r(NULL, " ", &save);
+        name = _tok(line + 4, " ", &save);
+        hex = _tok(NULL, " ", &save);
         answer = save;
         if (! name || ! hex || ! answer) { ck(0, "a hop line without its fields"); bad++; continue; }
         memset(&b, 0, sizeof(b));
