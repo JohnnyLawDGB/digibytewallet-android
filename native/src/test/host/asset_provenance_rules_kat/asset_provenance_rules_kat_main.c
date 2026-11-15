@@ -11,15 +11,19 @@
 //       AssetProvenanceWalkerTest (walker_*), AssetProvenanceTxidBindingTest (binding_*: real
 //       transactions, their ids computed by the core's BRRawTxId, the platform's fetch written out here
 //       as a small transport that takes the wallet's own copy first and an endpoint's answer only when its
-//       id is the one asked for), AssetTransferRuleGateTest (gate_*) and AssetSendRuleGateTest (send_*:
+//       id is the one asked for), AssetProvenanceCarrierRuleTest (carrier_rule_*: its hops and walks on real
+//       transactions; hop_vectors holds the header and the model to the core's vectors/asset-provenance-hop,
+//       which carries the same hops), AssetTransferRuleGateTest (gate_*) and AssetSendRuleGateTest (send_*:
 //       the platform's two store reads written out here, the verdict from the header). Where a Kotlin
 //       test reads a JSON rules object, the case passes what the platform reads from it (an answer with
 //       or without a rules object, or no answer). Cases without one of those prefixes are this suite's
 //       own: edges, refusals, capacity, and the rules the Kotlin tests reach only through other tests.
 //    2. BY A MODEL. `m...` below is the Kotlin written out line for line in C: resolve() over the same
 //       fake store and hop table the header's executor uses (the Kotlin tests' FakeStore and Counting),
-//       classifyProvenanceHopFrom with Android's getOpReturnData (jni_asset.c) and its own first-input
-//       reader (firstInputOfRawTx, readVarInt), factsForNamedAsset over tables, and the gate's stateOf.
+//       classifyProvenanceHopFrom as Android 4.1.4 has it (the carrier by DigiAssetCarrierRule.verdict over
+//       getRawTransactionOutputs' scripts and amounts, written out here from the Kotlin, never the first
+//       OP_RETURN) with its own first-input reader (firstInputOfRawTx, readVarInt), factsForNamedAsset over
+//       tables, and the gate's stateOf.
 //       The sweep_* cases hold the headers to the model over fixed pseudo-random inputs, comparing every
 //       store read and write and every hop asked for, in order, and the answers. The hop is compared on
 //       the bytes the walk is given in production: bytes that are exactly one transaction (the wallet's
@@ -943,27 +947,109 @@ static BRAssetHop hHopOfBytes(const uint8_t *raw, size_t len)
 
 // ---- the hop, as the Kotlin has it (classifyProvenanceHopFrom), line for line --------------------
 
-// NativeBridge.getOpReturnData (jni_asset.c): the first output whose script starts 0x6A, from
-// BRTransactionParseSigned; NULL for no bytes, an unparseable tx or no such output.
-static int mOpReturnOf(const uint8_t *rawTx, size_t txLen, uint8_t *out, size_t cap, size_t *outLen)
+// NativeBridge.getRawTransactionOutputs (jni_asset.c, bridge_transaction_outputs) and
+// DigiAssetCarrierRule.scriptsOfLines / amountsOfLines: every output's script and amount, in output order,
+// from BRTransactionParseSigned; 0 (Kotlin null) for no bytes, an empty body, a transaction that does not
+// parse, and one with no outputs (an empty line array is "nothing to judge from").
+#define MOUTS 16
+typedef struct { uint8_t s[TXCAP]; size_t n; uint64_t amount; } MScript;
+
+static int mOutputScripts(const uint8_t *rawTx, size_t txLen, MScript *out, size_t cap, size_t *count)
 {
     BRTransaction *tx;
     size_t i;
-    int found = 0;
+    int ok = 1;
 
-    if (! rawTx) return 0;
-    if (txLen <= 0) return 0;
+    *count = 0;
+    if (! rawTx || txLen <= 0) return 0;
     tx = BRTransactionParseSigned(rawTx, txLen);
     if (! tx) return 0;
-    for (i = 0; i < tx->outCount; i++) {
+    if (tx->outCount == 0 || tx->outCount > cap) ok = 0;
+    for (i = 0; ok && i < tx->outCount; i++) {
         const BRTxOutput *o = &tx->outputs[i];
-        if (o->scriptLen > 0 && o->script != NULL && o->script[0] == 0x6A) {
-            if (o->scriptLen <= cap) { memcpy(out, o->script, o->scriptLen); *outLen = o->scriptLen; found = 1; }
-            break;
+        if (o->scriptLen > sizeof(out[i].s)) { ok = 0; break; }
+        if (o->scriptLen) memcpy(out[i].s, o->script, o->scriptLen);
+        out[i].n = o->scriptLen;
+        out[i].amount = o->amount;
+    }
+    if (ok) *count = tx->outCount;
+    BRTransactionFree(tx);
+    return ok;
+}
+
+// DigiAssetCarrierRule.inputCountOfRawTx: -1 for Kotlin null.
+static int64_t mInputCountOfRawTx(const uint8_t *rawTx, size_t size)
+{
+    size_t p = 4, width, k;
+    uint8_t b;
+    uint64_t v = 0;
+
+    if (size < 5) return -1;
+    if (size > 6 && rawTx[4] == 0x00 && rawTx[5] == 0x01) p = 6;
+    if (p >= size) return -1;
+    b = rawTx[p];
+    width = b == 0xFD ? 2 : b == 0xFE ? 4 : b == 0xFF ? 8 : 0;
+    if (width == 0) return b;
+    if (p + width >= size) return -1;
+    for (k = width; k >= 1; k--) v = (v << 8) | rawTx[p + k];
+    return v <= (uint64_t)INT32_MAX ? (int64_t)v : -1;
+}
+
+// DigiAssetCarrierRule.isNullData
+static int mIsNullData(const uint8_t *s, size_t n)
+{
+    size_t pc = 1;
+
+    if (n == 0 || s[0] != 0x6a) return 0;
+    while (pc < n) {
+        uint8_t op = s[pc++];
+        uint64_t size;
+        if (op > 0x60) return 0;
+        if (op < 0x4c) size = op;
+        else if (op == 0x4c) { if (n - pc < 1) return 0; size = s[pc]; pc += 1; }
+        else if (op == 0x4d) { if (n - pc < 2) return 0; size = (uint64_t)s[pc] | ((uint64_t)s[pc + 1] << 8); pc += 2; }
+        else if (op == 0x4e) {
+            int k;
+            if (n - pc < 4) return 0;
+            size = 0;
+            for (k = 3; k >= 0; k--) size = (size << 8) | s[pc + (size_t)k];
+            pc += 4;
+        }
+        else size = 0;   // OP_1NEGATE, OP_RESERVED, OP_1..OP_16
+        if ((uint64_t)(n - pc) < size) return 0;
+        pc += (size_t)size;
+    }
+    return 1;
+}
+
+// DigiAssetCarrierRule.verdict over the scripts and the shape (amounts from the same lines, the input count
+// read lazily from the raw bytes). decoder.decode is BRAssetDecodeHeader (asset_decode_kat holds it to
+// DigiAssetDecoder): NOT_ASSET is null, UNCLASSIFIABLE a header of operation UNCLASSIFIABLE. Returns the
+// carrier's index, or -1 for None and Undecided alike (the hop reads both as a dead end); *header is the
+// carrier's.
+static int mCarrierVerdict(const MScript *scripts, size_t n, const uint8_t *rawTx, size_t len, BRAssetHeader *header)
+{
+    int tagged = 0, nullData = 0, carrier = -1, carrierAsset = 0;
+    size_t i;
+
+    for (i = 0; i < n; i++) {
+        BRAssetHeader h;
+        BRAssetScriptKind k = BRAssetDecodeHeader(scripts[i].s, scripts[i].n, &h);
+        int isNull = mIsNullData(scripts[i].s, scripts[i].n);
+        if (isNull) nullData++;
+        if (k != BR_ASSET_SCRIPT_NOT_ASSET) {
+            tagged++;
+            if (isNull) { carrier = (int)i; carrierAsset = (k == BR_ASSET_SCRIPT_ASSET); *header = h; }
         }
     }
-    BRTransactionFree(tx);
-    return found;
+    if (tagged == 0) return -1;
+    if (tagged != 1 || nullData != 1 || carrier < 0 || ! carrierAsset) return -1;
+    // encryptedKeyShape(carrier, scripts.size, shape)
+    if (carrier == 1 && n >= 2 && n <= 3 && scripts[0].amount == 650) {
+        int64_t inputs = mInputCountOfRawTx(rawTx, len);
+        if (inputs < 0 || inputs == 1) return -1;
+    }
+    return carrier;
 }
 
 typedef struct { uint64_t value; size_t nextOffset; } MVarInt;
@@ -1013,19 +1099,22 @@ static int mFirstInput(const uint8_t *rawTx, size_t size, char prevTxidHex[65], 
     return 1;
 }
 
+// classifyProvenanceHopFrom (Android 4.1.4): the carrier by the one carrier rule, never the first OP_RETURN.
 static BRAssetHop mHop(const uint8_t *rawTx, size_t len)
 {
-    uint8_t opReturn[TXCAP];
-    size_t opLen = 0;
+    static MScript scripts[MOUTS];
+    size_t nScripts = 0;
     BRAssetHeader header;
     char prev[65];
     int32_t vout = 0;
     BRAssetHop h;
 
     if (! rawTx) return hopKind(BR_ASSET_HOP_UNAVAILABLE);
-    if (! mOpReturnOf(rawTx, len, opReturn, sizeof(opReturn), &opLen)) return hopKind(BR_ASSET_HOP_DEAD_END);
-    // decoder.decode: null (NOT_ASSET) and UNCLASSIFIABLE are both a dead end
-    if (BRAssetDecodeHeader(opReturn, opLen, &header) != BR_ASSET_SCRIPT_ASSET) return hopKind(BR_ASSET_HOP_DEAD_END);
+    // outputScriptsOf(rawTx) ?: DeadEnd
+    if (! mOutputScripts(rawTx, len, scripts, MOUTS, &nScripts)) return hopKind(BR_ASSET_HOP_DEAD_END);
+    // (verdict as? Carrier)?.header ?: DeadEnd; an UNCLASSIFIABLE carrier is Undecided
+    memset(&header, 0, sizeof(header));
+    if (mCarrierVerdict(scripts, nScripts, rawTx, len, &header) < 0) return hopKind(BR_ASSET_HOP_DEAD_END);
 
     switch (header.operation) {
     case DA_ISSUANCE: {
@@ -1216,18 +1305,23 @@ static void hop_rules(void)
     h = hopBoth(&b, "no op_return");
     ck(h.kind == BR_ASSET_HOP_DEAD_END, "no OP_RETURN is a DEAD END");
 
-    // the FIRST OP_RETURN decides: a plain one before a carrier
+    // the ONE CARRIER RULE decides (BRTxAssetCarrier): a second nulldata output, before or after, leaves the
+    // transaction undecided, a dead end
     memset(ins, 0, sizeof(ins));
     displayToInternal(P, ins[0].prev);
     ins[0].vout = 1;
     outs[0] = outOf(P2PKH); outs[1] = outOf(PLAIN_OPRETURN); outs[2] = outOf(ISSUE_LOCKED);
     txBuild(&b, ins, 1, outs, 3, 0, 0);
     h = hopBoth(&b, "plain first");
-    ck(h.kind == BR_ASSET_HOP_DEAD_END, "the first OP_RETURN output is the one decoded: a plain one before a carrier");
+    ck(h.kind == BR_ASSET_HOP_DEAD_END, "a plain OP_RETURN before a carrier: undecided, a DEAD END");
     outs[1] = outOf(ISSUE_LOCKED); outs[2] = outOf(PLAIN_OPRETURN);
     txBuild(&b, ins, 1, outs, 3, 0, 0);
     h = hopBoth(&b, "carrier first");
-    ck(h.kind == BR_ASSET_HOP_ISSUANCE, "a carrier before a plain OP_RETURN decides");
+    ck(h.kind == BR_ASSET_HOP_DEAD_END, "a carrier before a plain OP_RETURN: undecided, a DEAD END (the first OP_RETURN does not decide)");
+    outs[1] = outOf("6aff"); outs[2] = outOf(ISSUE_LOCKED);
+    txBuild(&b, ins, 1, outs, 3, 0, 0);
+    h = hopBoth(&b, "non-nulldata first");
+    ck(h.kind == BR_ASSET_HOP_ISSUANCE, "an OP_RETURN that is not nulldata is no carrier: the carrier after it decides");
     outs[0] = outOf(""); outs[1] = outOf(TRANSFER_SCRIPT);
     txBuild(&b, ins, 1, outs, 2, 0, 0);
     h = hopBoth(&b, "empty script first");
@@ -1421,6 +1515,173 @@ static int walkBound(Transport *t, Store *st, const char *start, BRAssetResolved
 
     hWalk(st, transportHop, t, start, 0, BR_ASSET_WALK_DEFAULT_MAX_HOPS, &has, out);
     return has;
+}
+
+// ---- the one carrier rule (AssetProvenanceCarrierRuleTest) -------------------------------------
+
+// The Kotlin test's fixtures. Its transaction ids are names (5…5 the received transaction, a…a A's issuance);
+// here they are real transactions, so the received one spends A's issuance by A's real id.
+#define CR_ISSUANCE_TEN       ISSUE_LOCKED            // locked issuance, 10 units, divisibility 0
+#define CR_ISSUANCE_TWENTY_D1 "6a06444103051430"      // locked issuance, 20 units, divisibility 1
+#define CR_TRANSFER           TRANSFER_SCRIPT         // transfer, 10 units to output 0
+#define CR_PLAIN              "6a04deadbeef"
+#define CR_PAYEE              "0014" "1111111111111111111111111111111111111111"
+#define CR_C64                "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+
+typedef struct { Buf parentA, start; char parentAId[65], startId[65]; char assetAId[BR_ASSET_ID_BUFFER], startIssuanceId[BR_ASSET_ID_BUFFER]; } CarrierWorld;
+
+// A's issuance (first input c…c:1, [issuance of 10, payee]) and the received transaction (first input A:0,
+// the given output scripts, lock time 1 as the Kotlin test's tag).
+static void carrierWorld(CarrierWorld *cw, const char *const *startScripts, size_t n)
+{
+    TIn in;
+    TOut outs[4];
+    size_t i;
+
+    memset(cw, 0, sizeof(*cw));
+    memset(&in, 0, sizeof(in));
+    displayToInternal(CR_C64, in.prev); in.vout = 1;
+    outs[0] = outOf(CR_ISSUANCE_TEN); outs[1] = outOf(CR_PAYEE);
+    txBuild(&cw->parentA, &in, 1, outs, 2, 2, 0);
+    ck(txId(&cw->parentA, cw->parentAId), "A's issuance is exactly a transaction");
+    memset(&in, 0, sizeof(in));
+    displayToInternal(cw->parentAId, in.prev); in.vout = 0;
+    for (i = 0; i < n && i < N(outs); i++) outs[i] = outOf(startScripts[i]);
+    txBuild(&cw->start, &in, 1, outs, n, 1, 0);
+    ck(txId(&cw->start, cw->startId), "the received transaction is exactly a transaction");
+    BRAssetIdForIssuance(CR_C64, 1, 1, BR_ASSET_AGGREGATABLE, 0, cw->assetAId, sizeof(cw->assetAId));
+    BRAssetIdForIssuance(cw->parentAId, 0, 1, BR_ASSET_AGGREGATABLE, 0, cw->startIssuanceId, sizeof(cw->startIssuanceId));
+}
+
+// The Kotlin test's walk: resolve(startId) over an empty store, fetching only the two fixtures.
+static int carrierWalk(CarrierWorld *cw, Store *st, BRAssetResolvedFacts *out)
+{
+    Endpoint eps[2];
+    Transport t;
+
+    memset(eps, 0, sizeof(eps));
+    eps[0].forId = cw->startId; eps[0].bytes = &cw->start;
+    eps[1].forId = cw->parentAId; eps[1].bytes = &cw->parentA;
+    memset(&t, 0, sizeof(t)); t.eps = eps; t.nEps = 2;
+    memset(st, 0, sizeof(*st));
+    return walkBound(&t, st, cw->startId, out);
+}
+
+static void carrier_rule_hops(void)
+{
+    static const char *earlierTransfer[] = { CR_TRANSFER, CR_ISSUANCE_TWENTY_D1, CR_PAYEE };
+    static const char *twoIssuances[] = { CR_ISSUANCE_TEN, CR_ISSUANCE_TWENTY_D1, CR_PAYEE };
+    static const char *plainFirst[] = { CR_PLAIN, CR_ISSUANCE_TEN, CR_PAYEE };
+    static const char *plainAfter[] = { CR_ISSUANCE_TEN, CR_PLAIN, CR_PAYEE };
+    static const char *single[] = { CR_ISSUANCE_TEN, CR_PAYEE };
+    static CarrierWorld cw;
+    BRAssetHop h;
+    uint8_t s[16];
+    size_t n;
+    BRAssetHeader hd;
+
+    // the fixtures decode as described
+    n = hx(CR_ISSUANCE_TEN, s, sizeof(s));
+    ck(BRAssetDecodeHeader(s, n, &hd) == BR_ASSET_SCRIPT_ASSET && hd.totalQuantity == 10 && hd.divisibility == 0, "issuanceTen: 10 units, divisibility 0");
+    n = hx(CR_ISSUANCE_TWENTY_D1, s, sizeof(s));
+    ck(BRAssetDecodeHeader(s, n, &hd) == BR_ASSET_SCRIPT_ASSET && hd.totalQuantity == 20 && hd.divisibility == 1 && hd.locked,
+       "issuanceTwentyDiv1: 20 units, divisibility 1, locked");
+    n = hx(CR_TRANSFER, s, sizeof(s));
+    ck(BRAssetDecodeHeader(s, n, &hd) == BR_ASSET_SCRIPT_ASSET && hd.operation == DA_TRANSFER, "transfer is a TRANSFER");
+    n = hx(CR_PLAIN, s, sizeof(s));
+    ck(BRAssetDecodeHeader(s, n, &hd) == BR_ASSET_SCRIPT_NOT_ASSET, "plain is no asset");
+
+    carrierWorld(&cw, earlierTransfer, 3);
+    h = hopBoth(&cw.start, "transfer before an issuance");
+    ck(h.kind == BR_ASSET_HOP_DEAD_END, "a transfer before an issuance names nothing (two nulldata outputs: undecided)");
+    carrierWorld(&cw, twoIssuances, 3);
+    h = hopBoth(&cw.start, "two issuance carriers");
+    ck(h.kind == BR_ASSET_HOP_DEAD_END, "two issuance carriers name nothing");
+    carrierWorld(&cw, plainFirst, 3);
+    h = hopBoth(&cw.start, "plain before the carrier");
+    ck(h.kind == BR_ASSET_HOP_DEAD_END, "a plain OP_RETURN before the carrier names nothing");
+    carrierWorld(&cw, plainAfter, 3);
+    h = hopBoth(&cw.start, "plain after the carrier");
+    ck(h.kind == BR_ASSET_HOP_DEAD_END, "a plain OP_RETURN after the carrier is undecided and names nothing");
+    carrierWorld(&cw, NULL, 0);
+    h = hopBoth(&cw.start, "no outputs");
+    ck(h.kind == BR_ASSET_HOP_DEAD_END, "outputs that could not be read (none) name nothing");
+    carrierWorld(&cw, single, 2);
+    h = hopBoth(&cw.start, "single issuance");
+    ck(h.kind == BR_ASSET_HOP_ISSUANCE && strcmp(h.facts.assetId, cw.startIssuanceId) == 0,
+       "a single issuance carrier resolves, named from the received transaction's first input (%s)", h.facts.assetId);
+}
+
+static void carrier_rule_walks(void)
+{
+    static const char *earlierTransfer[] = { CR_TRANSFER, CR_ISSUANCE_TWENTY_D1, CR_PAYEE };
+    static const char *plainAfter[] = { CR_ISSUANCE_TEN, CR_PLAIN, CR_PAYEE };
+    static const char *transfer[] = { CR_TRANSFER, CR_PAYEE };
+    static CarrierWorld cw;
+    static Store st;
+    BRAssetResolvedFacts out;
+
+    carrierWorld(&cw, earlierTransfer, 3);
+    ck(! carrierWalk(&cw, &st, &out), "a transfer before an issuance: the walk names nothing (not the earlier transfer's asset)");
+    ck(! stRow(&st, cw.startId) && ! stFront(&st, cw.startId), "nothing is recorded for it");
+    carrierWorld(&cw, plainAfter, 3);
+    ck(! carrierWalk(&cw, &st, &out), "a plain OP_RETURN after the carrier: the walk names nothing");
+    ck(! stRow(&st, cw.startId), "nothing is recorded for it");
+    carrierWorld(&cw, transfer, 2);
+    ck(carrierWalk(&cw, &st, &out) && strcmp(out.assetId, cw.assetAId) == 0,
+       "a single transfer carrier walks to the parent issuance and is named A (%s)", out.assetId);
+}
+
+// The core's vectors/asset-provenance-hop/vectors.txt (HOP_VECTORS): every hop it writes down is the header's
+// and the Kotlin model's, on the same bytes.
+static void hopAnswer(const BRAssetHop *h, char *out, size_t cap)
+{
+    switch (h->kind) {
+    case BR_ASSET_HOP_DEAD_END: snprintf(out, cap, "dead-end"); break;
+    case BR_ASSET_HOP_TRANSFER: snprintf(out, cap, "transfer %s", h->parentTxid); break;
+    case BR_ASSET_HOP_ISSUANCE:
+        snprintf(out, cap, "issuance %s %lld %d %s %d %d", h->facts.assetId, (long long)h->facts.totalSupply, (int)h->facts.divisibility,
+                 h->facts.hasMetadataCid ? h->facts.metadataCid : "-", (int)h->facts.issuanceOpcode, h->facts.issuanceLocked);
+        break;
+    default: snprintf(out, cap, "unavailable"); break;
+    }
+}
+
+static void hop_vectors(void)
+{
+    const char *path = getenv("HOP_VECTORS");
+    FILE *f = path ? fopen(path, "r") : NULL;
+    static char line[1 << 16];
+    static Buf b;
+    int lines = 0, bad = 0, carrierRule = 0;
+
+    if (! f) { ck(0, "HOP_VECTORS (%s) cannot be read", path ? path : "unset"); return; }
+    while (fgets(line, sizeof(line), f)) {
+        char *name, *hex, *answer, *save = NULL, hh[600], mm[600];
+        BRAssetHop h, m;
+
+        if (strncmp(line, "hop ", 4) != 0) continue;
+        line[strcspn(line, "\r\n")] = '\0';
+        name = strtok_r(line + 4, " ", &save);
+        hex = strtok_r(NULL, " ", &save);
+        answer = save;
+        if (! name || ! hex || ! answer) { ck(0, "a hop line without its fields"); bad++; continue; }
+        memset(&b, 0, sizeof(b));
+        b.n = hx(hex, b.b, sizeof(b.b));
+        h = hHopOfBytes(b.b, b.n);
+        m = mHop(b.b, b.n);
+        hopAnswer(&h, hh, sizeof(hh));
+        hopAnswer(&m, mm, sizeof(mm));
+        lines++;
+        if (strncmp(name, "carrier_rule_", 13) == 0) carrierRule++;
+        if (strcmp(hh, answer) != 0 || strcmp(mm, answer) != 0) {
+            bad++;
+            ck(0, "%s: the file says \"%s\", the header \"%s\", the Kotlin \"%s\"", name, answer, hh, mm);
+        }
+    }
+    fclose(f);
+    ck(bad == 0 && lines >= 50 && carrierRule == 7,
+       "every hop of the core's vectors is the header's and the Kotlin's (%d lines, %d of AssetProvenanceCarrierRuleTest)", lines, carrierRule);
 }
 
 static void binding_different_tx_unavailable(void)
@@ -2311,7 +2572,8 @@ static void sweep_hop(void)
 {
     static const char *scripts[] = { ISSUE_LOCKED, TRANSFER_SCRIPT, ISSUE_UNLOCKED, ISSUE_HYBRID, ISSUE_DISPERSED, ISSUE_AGG3,
                                      ISSUE_DIV1, ISSUE_DIV7, ISSUE_OP1_CID, ISSUE_OP1_ZERO, ISSUE_OP3_RULES, ISSUE_OP4_RULES,
-                                     BURN_SCRIPT, UNCLASSIFIABLE, PLAIN_OPRETURN, P2PKH, "", "6a", "6a0244" };
+                                     BURN_SCRIPT, UNCLASSIFIABLE, PLAIN_OPRETURN, P2PKH, "", "6a", "6a0244",
+                                     "6aff", "6a76", "6a05aabb", "6a0644410115010a", "6a0644410115020a" };
     uint32_t vouts[] = { 0, 1, 2, 0x7fffffffu, 0x80000000u, 0xffffffffu, 77 };
     int i, bad = 0, exact = 0, kinds[4] = { 0, 0, 0, 0 };
     Buf b;
@@ -2333,7 +2595,8 @@ static void sweep_hop(void)
             for (j = 0; j < ins[k].sigLen; j++) ins[k].sig[j] = (uint8_t)rnd();
             if (witness) { ins[k].witItems = (k == 0) || below(2); ins[k].witLen = 1 + below(3); ins[k].wit[0] = 0x55; }
         }
-        for (k = 0; k < nOut; k++) { outs[k] = outOf(scripts[below(N(scripts))]); outs[k].amount = below(3) ? 0 : rnd() % 100000; }
+        // half the outputs plain payments, so a transaction with one carrier (the one rule's CARRIER) is common
+        for (k = 0; k < nOut; k++) { outs[k] = outOf(below(2) ? scripts[below(N(scripts))] : P2PKH); outs[k].amount = below(3) ? 0 : below(2) ? 650 : rnd() % 100000; }
         txBuild(&b, ins, nIn, outs, nOut, (uint32_t)rnd(), witness);
         if (! txId(&b, tid)) continue;   // the walk is given only bytes that are exactly a transaction
         exact++;
@@ -2445,6 +2708,9 @@ static const Case CASES[] = {
     { "hop_carriers", hop_carriers },
     { "hop_rules", hop_rules },
     { "hop_edges", hop_edges },
+    { "carrier_rule_hops", carrier_rule_hops },
+    { "carrier_rule_walks", carrier_rule_walks },
+    { "hop_vectors", hop_vectors },
     { "walk_refusals", walk_refusals },
     { "walk_hop_counts", walk_hop_counts },
     { "walk_path_rules", walk_path_rules },
