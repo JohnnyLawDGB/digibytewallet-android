@@ -6,7 +6,7 @@ Independent wallet by Around The Block LLC. Not an official DigiByte app. "DigiB
 
 HoldFast Wallet is a full Kotlin rewrite of the community DigiByte Android wallet: a **sovereignty-first** SPV wallet built on Jetpack Compose over a patched native C core. Compact-filters-only sync (BIP157/158), hardware-backed key custody, DigiDollar + Taproot, DigiAssets v2, Digi-ID authentication, and a Community Hub.
 
-> **Status:** Active development — **v4.1.3**. v4.1.3 is a reliability and security update: on phones that close idle apps aggressively the wallet no longer forgets its sync progress and re-syncs from the start, a long sync no longer crashes on Android 15, a payment is confirmed only by the wallet's own chain (a server height it cannot check is never taken; Scan for missing funds offers a rescan instead), recovering a wallet keeps looking while it finds activity, sends skip coins worth less than their own fee, logs name transactions only by a per-install tag, and Dandelion takes effect without a restart. Several items come from researchers who reported privately (credited in the release notes).
+> **Status:** Active development — **v4.1.4**. v4.1.4 is a security and reliability update: DigiDollar sends use the Dandelion++ broadcast path, the recovery-phrase screen asks for the device lock when the wallet key needs it, the PIN store moves to a durable file, and the wallet's seed key is tied to the device's screen lock from creation. Several items come from researchers who reported privately (credited in the release notes).
 
 ## Download
 

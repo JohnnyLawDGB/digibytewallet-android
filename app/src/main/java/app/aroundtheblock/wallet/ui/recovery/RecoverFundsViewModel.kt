@@ -96,6 +96,12 @@ class RecoverFundsViewModel @Inject constructor(
             val assetMoves: List<app.aroundtheblock.wallet.core.recovery.ForeignAssetTransferService.Move> = emptyList(),
             /** What happened to the wallet's DigiDollar, or null when it holds none. */
             val digiDollar: app.aroundtheblock.wallet.core.recovery.DigiDollarTransferService.Result? = null,
+            /**
+             * K1-RECOVERY: the DGB split that gives each asset its own fee was refused or failed, so
+             * no asset moved. Null when no split was needed or it went out. Carried to the screen
+             * because the reason used to be dropped here and the user was never told why.
+             */
+            val assetFanOut: app.aroundtheblock.wallet.core.recovery.ForeignAssetTransferService.FanOut? = null,
         ) : UiState()
         data class Error(val reason: String) : UiState()
 
@@ -141,6 +147,14 @@ class RecoverFundsViewModel @Inject constructor(
         // Walks the foreign transaction to its issuance and asks the proxy. Anything that does
         // not come back NONE stays on the old seed (see ForeignAssetTransferService.moveAssets).
         resolveRuleState = { txid -> assetManager.verifyTransferRulesForTx(txid) },
+        // ONE-FAMILY: a "DD" / OP_DIGIDOLLAR OP_RETURN marks a DigiDollar transaction as well as nVersion.
+        rawOutputScripts = { raw ->
+            val lines = app.aroundtheblock.wallet.core.bridge.NativeBridge.getRawTransactionOutputs(raw)
+            val scripts = lines?.map { line ->
+                line.split("|", limit = 3).getOrNull(2)?.let(app.aroundtheblock.wallet.core.recovery.DigiDollarHolding::hexBytes)
+            }
+            if (scripts == null || scripts.any { it == null }) null else scripts.filterNotNull()
+        },
     )
 
     /** Everything one recovery pass did: assets moved, DGB swept, dollars moved. */
@@ -148,6 +162,8 @@ class RecoverFundsViewModel @Inject constructor(
         val assetMoves: List<app.aroundtheblock.wallet.core.recovery.ForeignAssetTransferService.Move>,
         val swept: LegacySweepService.Result,
         val digiDollar: app.aroundtheblock.wallet.core.recovery.DigiDollarTransferService.Result?,
+        /** A split that was refused or failed ([UiState.Done.assetFanOut]); null otherwise. */
+        val assetFanOut: app.aroundtheblock.wallet.core.recovery.ForeignAssetTransferService.FanOut? = null,
     )
 
     private val _state = MutableStateFlow<UiState>(UiState.Idle)
@@ -365,7 +381,7 @@ class RecoverFundsViewModel @Inject constructor(
                             runRecovery(seed, findings, res.address, destIsSelf, isForeign = false)
                         }
                         _state.value = UiState.Done(
-                            outcome.swept.outcomes, outcome.assetMoves, outcome.digiDollar,
+                            outcome.swept.outcomes, outcome.assetMoves, outcome.digiDollar, outcome.assetFanOut,
                         )
                     } catch (e: CancellationException) {
                         throw e
@@ -462,6 +478,12 @@ class RecoverFundsViewModel @Inject constructor(
                 _state.value = UiState.Sweeping
                 return@repeat
             }
+            // Refused (not enough proven plain DGB to split) or Failed: no asset moved this round.
+            // The sweep below still runs on the plain DGB; the reason goes to the screen.
+            val fanStopped = fan.takeIf {
+                it is app.aroundtheblock.wallet.core.recovery.ForeignAssetTransferService.FanOut.Refused ||
+                    it is app.aroundtheblock.wallet.core.recovery.ForeignAssetTransferService.FanOut.Failed
+            }
 
             val exclusions = app.aroundtheblock.wallet.core.recovery.RecoverySequence.sweepExclusions(
                 moveResult.moves.map {
@@ -491,7 +513,7 @@ class RecoverFundsViewModel @Inject constructor(
                 precomputedVerdicts = verdicts,
                 destIsSelf = destIsSelf,
             )
-            return RecoveryOutcome(moveResult.moves, swept, dd)
+            return RecoveryOutcome(moveResult.moves, swept, dd, fanStopped)
         }
 
         // Both rounds asked to split, which should be impossible: after one split there is an
@@ -738,7 +760,7 @@ class RecoverFundsViewModel @Inject constructor(
                     runRecovery(derived, findings, dest.address, destIsSelf = true, isForeign = true)
                 }
                 _state.value = UiState.Done(
-                    outcome.swept.outcomes, outcome.assetMoves, outcome.digiDollar,
+                    outcome.swept.outcomes, outcome.assetMoves, outcome.digiDollar, outcome.assetFanOut,
                 )
             } catch (e: CancellationException) {
                 throw e

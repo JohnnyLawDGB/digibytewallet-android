@@ -1,7 +1,7 @@
 // Host KAT: the reconcile outpoint classifier moved into the core (BROutpointClassify.h) answers exactly
 // what the bridge answers.
 //
-// THE MOVE. NativeBridge_classifyOutpoints and NativeBridge_spendableNotListed (jni_wallet.c) put each
+// THE MOVE. NativeBridge_classifyOutpoints and NativeBridge_balanceCoinsNotListed (jni_wallet.c) put each
 // "txidHex|vout" line of a list through the wallet's own partition, and count the wallet's spendable
 // outputs the list does not name. BRWalletClassifyOutpoints and BRWalletSpendableNotListed are the same
 // rules in the core. This file compiles the bridge's own jni_wallet.c beside the core, over the host JNI
@@ -36,7 +36,7 @@
 #include "BRNetwork.h"
 
 jintArray JNICALL NativeBridge_classifyOutpoints(JNIEnv *env, jobject thiz, jobjectArray outpoints);
-jlongArray JNICALL NativeBridge_spendableNotListed(JNIEnv *env, jobject thiz, jobjectArray outpoints);
+jlongArray JNICALL NativeBridge_balanceCoinsNotListed(JNIEnv *env, jobject thiz, jobjectArray outpoints);
 
 int outpoint_classify_kat_tu2(void);
 
@@ -314,7 +314,7 @@ static int notListedBoth(BRWallet *w, const List *l, const char *what, int64_t *
 
     State s0 = w ? stateOf(w) : (State){ 0 };
     g_wallet = w;
-    HostLongArray *bridge = NativeBridge_spendableNotListed(env, NULL, &j.arr);
+    HostLongArray *bridge = NativeBridge_balanceCoinsNotListed(env, NULL, &j.arr);
     g_wallet = NULL;
     State s1 = w ? stateOf(w) : (State){ 0 };
     int ok = BRWalletSpendableNotListed(w, lines, l->n, &c, &s);
@@ -852,7 +852,7 @@ static double timeBridge(BRWallet *w, const List *l, int core)
         } else {
             g_wallet = w;
             HostIntArray *a = NativeBridge_classifyOutpoints(env, NULL, &j.arr);
-            HostLongArray *b = NativeBridge_spendableNotListed(env, NULL, &j.arr);
+            HostLongArray *b = NativeBridge_balanceCoinsNotListed(env, NULL, &j.arr);
             g_wallet = NULL;
             if (a) { free(a->v); free(a); }
             if (b) { free(b->v); free(b); }

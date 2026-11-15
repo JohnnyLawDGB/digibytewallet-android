@@ -38,6 +38,7 @@
 #include "jni_seed_buffer.h"
 #include "wallet_spend_gate.h"  /* the one wallet question these signers ask */
 #include "foreign_tx_fee_guard.h"
+#include "sweep_fee_guard.h"
 #include "BRDigiDollar.h"
 #include "BRNetwork.h"
 #include "digidollar_transfer_layout.h"
@@ -538,6 +539,9 @@ NativeBridge_buildAndSignLegacySweep(
         (*env)->DeleteLocalRef(env, scriptJ);
 
         if (txidLen != 32 || scriptLen == 0) { ok = 0; break; }
+        /* SWEEP-ABS-CEIL: an amount is positive and the total does not wrap, so the fee bounds below
+         * are taken over the total the caller listed. */
+        if (amtJ[i] <= 0 || (uint64_t)amtJ[i] > UINT64_MAX - totalIn) { ok = 0; break; }
 
         /* txid hex is big-endian display; internal is little-endian. */
         UInt256 txHash;
@@ -591,40 +595,21 @@ NativeBridge_buildAndSignLegacySweep(
         return NULL;
     }
 
-    /* Estimate tx size before fee calc: rough upper bound. P2PKH input is
-     * ~148 bytes, P2WPKH is ~105. Use 160/input as a safe upper bound.
-     * Output is ~34 bytes. Plus fixed 10 bytes of overhead. */
-    size_t estSize = 10 + (size_t)inputCount * 160 + 34;
-    uint64_t fee = ((uint64_t)estSize * (uint64_t)feePerKb) / 1000;
-    if (fee < 1000) fee = 1000; /* DGB min relay */
-
-    /* ── Amount-provenance fee-sanity guard (bug #2, fund-loss). ──
-     * The legacy P2PKH sighash does NOT commit to input amounts, so a stale or
-     * under-reported amounts[] still produces a VALID signature. The tx then
-     * spends the REAL on-chain prevout value and the unreported remainder
-     * (realValue - outAmount) is silently burned to fee by the network. We
-     * cannot verify a FOREIGN prevout on-device without fetching it, but we
-     * CAN refuse the pathological under-report: on a multi-input consolidation
-     * a legitimate total dwarfs the fee, so a computed fee that is >= 5% of the
-     * reported total (fee*20 >= totalIn) means the amounts are almost certainly
-     * stale/under-reported. Refuse rather than sign a lopsided sweep.
-     * Single-input sweeps are exempt — a lone small UTXO can legitimately have
-     * the fee be a meaningful fraction of its value (the dust check below still
-     * protects that case). fee*20 cannot overflow: fee is bounded by
-     * estSize*feePerKb. */
-    if (inputCount > 1 && totalIn <= fee * 20) {
-        LOGW("buildAndSignLegacySweep: fee-sanity guard tripped "
-             "(inputs=%d fee=%llu totalIn=%llu) — refusing under-reported sweep",
-             (int)inputCount, (unsigned long long)fee, (unsigned long long)totalIn);
-        for (jsize i = 0; i < inputCount; i++) BRKeyClean(&keys[i]);
-        free(keys);
-        BRTransactionFree(tx);
-        (*env)->ReleaseStringUTFChars(env, hmacKey, hmac);
-        seed_buffer_release(&seed);
-        return NULL;
-    }
-
-    if (totalIn <= fee + 546 /* dust */) {
+    /* ── The fee backstop (SWEEP-ABS-CEIL; see sweep_fee_guard.h). ──
+     * The legacy P2PKH sighash does NOT commit to input amounts, so a stale or under-reported
+     * amounts[] still produces a VALID signature, and the unreported remainder is paid to the miner
+     * (bug #2). Kotlin binds each parent to its txid and reads the amount from it; this is the
+     * backstop, and the same bounds apply to EVERY sweep, single-input sweeps included: the rate is
+     * within [minimum relay, 10x default], the fee is under an absolute ceiling, the fee is under 5% of
+     * the listed total (an under-report big enough to make the estimated fee a large share of what is
+     * listed is refused), and more than dust is left. An under-report smaller than that is a stated
+     * residual: only the Kotlin parent binding sees it (sweep_fee_guard.h). */
+    uint64_t fee = 0;
+    const SweepFeeVerdict sweepVerdict = sweep_fee_check(totalIn, (size_t)inputCount, (int64_t)feePerKb, &fee);
+    if (sweepVerdict != SWEEP_FEE_OK) {
+        /* K1-RECOVERY: the rule and counts, never the amounts (Android logging ships in release). */
+        LOGW("buildAndSignLegacySweep: fee backstop refused (verdict=%d inputs=%d)",
+             (int)sweepVerdict, (int)inputCount);
         for (jsize i = 0; i < inputCount; i++) BRKeyClean(&keys[i]);
         free(keys);
         BRTransactionFree(tx);
@@ -915,8 +900,7 @@ NativeBridge_buildAndSignForeignAssetTransfer(
 
     if (!ok || totalOut > totalIn) {
         if (totalOut > totalIn) {
-            LOGW("buildAndSignForeignAssetTransfer: outputs %llu exceed inputs %llu",
-                 (unsigned long long)totalOut, (unsigned long long)totalIn);
+            LOGW("buildAndSignForeignAssetTransfer: outputs exceed inputs");
         }
         for (jsize i = 0; i < inputCount; i++) BRKeyClean(&keys[i]);
         free(keys);
@@ -939,18 +923,16 @@ NativeBridge_buildAndSignForeignAssetTransfer(
         case FOREIGN_TX_FEE_OK:
             break;
         case FOREIGN_TX_FEE_TOO_LOW:
-            LOGW("buildAndSignForeignAssetTransfer: implied fee %llu below the %llu this size "
-                 "needs — would not relay",
-                 (unsigned long long)impliedFee, (unsigned long long)expectedFee);
+            LOGW("buildAndSignForeignAssetTransfer: implied fee below what this size needs — "
+                 "would not relay");
             ok = 0;
             break;
         case FOREIGN_TX_FEE_TOO_HIGH:
             /* The caller lost track of value — almost always a missing change output. Burning
              * it is silent and irreversible, so refuse rather than sign. */
-            LOGW("buildAndSignForeignAssetTransfer: implied fee %llu is over %dx the expected "
-                 "%llu — refusing to burn the difference (missing change output?)",
-                 (unsigned long long)impliedFee, FOREIGN_TX_MAX_FEE_FACTOR,
-                 (unsigned long long)expectedFee);
+            LOGW("buildAndSignForeignAssetTransfer: implied fee is over %dx the expected — "
+                 "refusing to burn the difference (missing change output?)",
+                 FOREIGN_TX_MAX_FEE_FACTOR);
             ok = 0;
             break;
         case FOREIGN_TX_FEE_OVERSPEND:
@@ -1067,8 +1049,7 @@ NativeBridge_buildAndSignForeignDigiDollarTransfer(
         return NULL;
     }
     if (!dd_cents_in_range((int64_t)cents)) {
-        LOGW("foreignDD: %lld cents is outside the consensus per-output range",
-             (long long)cents);
+        LOGW("foreignDD: the amount is outside the consensus per-output range");
         return NULL;
     }
 
@@ -1228,13 +1209,11 @@ NativeBridge_buildAndSignForeignDigiDollarTransfer(
     /* The 0.1 DGB DigiDollar fee floor is this wallet's policy, copied from DigiByte Core's own
      * DigiDollar builder (it is not a consensus rule): below it the transfer is refused here. */
     if (ok && totalOut > totalIn) {
-        LOGW("foreignDD: change %llu exceeds fee inputs %llu",
-             (unsigned long long)totalOut, (unsigned long long)totalIn);
+        LOGW("foreignDD: change exceeds fee inputs");
         ok = 0;
     }
     if (ok && (totalIn - totalOut) < DD_MIN_FEE_SATS) {
-        LOGW("foreignDD: implied fee %llu is below the %llu DigiDollar floor",
-             (unsigned long long)(totalIn - totalOut), (unsigned long long)DD_MIN_FEE_SATS);
+        LOGW("foreignDD: implied fee is below the DigiDollar floor");
         ok = 0;
     }
 

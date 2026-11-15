@@ -3,10 +3,9 @@ package app.aroundtheblock.wallet.ui.navigation
 import app.aroundtheblock.wallet.core.WalletState
 
 /**
- * Routes that belong to the onboarding / first-unlock graph. A [WalletState.Locked] wallet
- * legitimately sits underneath these (e.g. "Restore a different wallet" from the unlock
- * screen walks the onboarding graph while the on-disk wallet is still Locked), so they are
- * never re-gated to "unlock".
+ * Routes that belong to the onboarding / first-unlock graph. "unlock" and the store-unavailable
+ * screen are never re-gated; the setup routes among them are re-gated when a wallet is stored
+ * ([SETUP_ROUTES]).
  */
 private val PRE_WALLET_ROUTES = setOf(
     "onboarding", "seed_display", "seed_verify", "seed_passphrase", "mnemonic_input",
@@ -15,6 +14,17 @@ private val PRE_WALLET_ROUTES = setOf(
     // to unlock, whose PIN reads throw on that store, it crashed every launch (4.1.2 row 23).
     PIN_STORE_UNAVAILABLE_ROUTE,
 )
+
+/**
+ * The setup routes: onboarding, restore and PIN setup. Over a locked wallet that has a PIN, one is
+ * allowed only while no wallet is stored. The app opens them only with no wallet (first run, after a
+ * wipe) or with no PIN (the lost-PIN branch; a restore before its PIN is set). So a setup screen never
+ * changes the PIN or the seed of a stored wallet that is locked behind its PIN, however it was reached
+ * (NAV-DEEPLINK). A lock on the biometric opt-in that follows a new PIN therefore goes to unlock: the
+ * PIN just set opens the wallet, and biometrics can be turned on in Settings. After a restore that
+ * found funds elsewhere, that unlock lands on the wallet rather than Recover funds (Settings has it).
+ */
+private val SETUP_ROUTES = PRE_WALLET_ROUTES - setOf("unlock", PIN_STORE_UNAVAILABLE_ROUTE)
 
 /**
  * Should a [WalletState.Locked] wallet be navigated to the "unlock" route right now?
@@ -31,13 +41,21 @@ private val PRE_WALLET_ROUTES = setOf(
  *    which restores from disk; a PIN prompt there can never be satisfied.
  *  - `currentRoute == null` means the NavHost has no graph yet; the start destination is
  *    authoritative on cold start and navigating here is the "double PIN prompt".
- *  - pre-wallet routes (onboarding graph, pin_setup, unlock itself) are never re-gated.
+ *  - unlock itself and the store-unavailable screen are never re-gated; the setup routes only
+ *    when [walletStored] ([SETUP_ROUTES]) — with nothing stored there is nothing to unlock
+ *    (e.g. the owed wipe that ends with no wallet left hands over to onboarding).
  */
-fun shouldRouteToUnlock(state: WalletState, hasPin: Boolean, currentRoute: String?): Boolean {
+fun shouldRouteToUnlock(
+    state: WalletState,
+    hasPin: Boolean,
+    currentRoute: String?,
+    walletStored: Boolean,
+): Boolean {
     if (state !is WalletState.Locked) return false
     if (!hasPin) return false
     if (currentRoute == null) return false
     val base = currentRoute.substringBefore("?").substringBefore("/")
+    if (base in SETUP_ROUTES) return walletStored
     return base !in PRE_WALLET_ROUTES
 }
 

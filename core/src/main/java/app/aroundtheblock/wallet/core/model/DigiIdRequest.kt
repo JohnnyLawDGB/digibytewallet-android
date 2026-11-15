@@ -12,7 +12,19 @@ data class DigiIdRequest(
     val callbackHttpUrl: HttpUrl  // the one parse of callbackUrl: the check and the POST use it
 ) {
     companion object {
+        /**
+         * MSG-LEN: the longest Digi-ID URI taken in, in UTF-16 units. A real one is a callback URL and a
+         * nonce, a few hundred characters; the largest QR code holds 2,953 bytes. 4,096 is above both and
+         * far below the 0xffff where a signed message's length needs a longer compact size. A longer URI
+         * is refused at intake, the deep link and every other path, since all of them parse here.
+         */
+        const val MAX_URI_LENGTH = 4096
+
+        /** MSG-LEN: whether [uri] is short enough to be taken in as a Digi-ID request at all. */
+        fun withinLengthCap(uri: String): Boolean = uri.length <= MAX_URI_LENGTH
+
         fun parse(uri: String): DigiIdRequest? {
+            if (!withinLengthCap(uri)) return null
             if (!uri.startsWith("digiid://")) return null
             val withoutScheme = uri.removePrefix("digiid://")
             val parts = withoutScheme.split("?", limit = 2)

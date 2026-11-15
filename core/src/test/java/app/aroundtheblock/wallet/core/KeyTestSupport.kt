@@ -79,6 +79,7 @@ internal fun keyStoreManagerOver(vault: FakeVault, authBound: Boolean = true): K
     every { ksm.decrypt(any()) } answers { vault.decrypt(LEGACY_ALIAS, firstArg()) }
     every { ksm.createAuthBoundKey() } answers { if (authBound) { vault.createUnboundKey(BOUND_ALIAS); true } else false }
     every { ksm.hasAuthBoundKey() } answers { BOUND_ALIAS in vault.keys }
+    every { ksm.authBoundKeyExists() } answers { BOUND_ALIAS in vault.keys }
     every { ksm.encryptAuthBound(any()) } answers { vault.encrypt(BOUND_ALIAS, firstArg()) }
     every { ksm.decryptAuthBound(any()) } answers { vault.decrypt(BOUND_ALIAS, firstArg()) }
     every { ksm.deleteLegacyKey() } answers { vault.delete(LEGACY_ALIAS) }

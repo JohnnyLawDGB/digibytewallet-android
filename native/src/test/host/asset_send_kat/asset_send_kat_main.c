@@ -59,7 +59,9 @@ jboolean JNICALL NativeBridge_recoverWalletFromBytes(JNIEnv *env, jobject thiz, 
 jstring JNICALL NativeBridge_buildAndSignAssetTransferTx(JNIEnv *env, jobject thiz, jobjectArray inputTxidsHex,
                                                          jintArray inputVouts, jlongArray inputAmounts,
                                                          jobjectArray inputScriptPubKeysHex, jobjectArray outputAddresses,
-                                                         jlongArray outputAmounts, jobjectArray outputScriptsHex);
+                                                         jlongArray outputAmounts, jobjectArray outputScriptsHex,
+                                                         jstring approvedToAddress, jlong approvedRecipientSats,
+                                                         jlong planFeeSats, jlong approvedMaxFeeSats);   /* ASSET-SIGN-GATE */
 int dgb_register_natives(JNIEnv *e) { (void)e; return 0; }
 int __android_log_print(int prio, const char *tag, const char *fmt, ...)
 {
@@ -393,9 +395,10 @@ static int bridgeSign(const Plan *p, const BRAssetSendOutcome *o, const char *re
         vouts[i] = r->vout;
         amts[i] = r->satoshis;
     }
+    jlong recipSats = 0;
     for (i = 0; i < nOut; i++) {
         const BRAssetPlannedOutput *out = &pl->outputs[i];
-        if (out->role == BR_ASSET_ROLE_RECIPIENT_MARKER) { addrs[i] = hostString(recipient); oscripts[i] = hostString(""); }
+        if (out->role == BR_ASSET_ROLE_RECIPIENT_MARKER) { addrs[i] = hostString(recipient); oscripts[i] = hostString(""); recipSats = out->sats; }
         else if (out->role == BR_ASSET_ROLE_ASSET_DATA) {
             addrs[i] = hostString("");
             hexOf(pl->opReturnScript, pl->opReturnLen, hex);
@@ -411,7 +414,9 @@ static int bridgeSign(const Plan *p, const BRAssetSendOutcome *o, const char *re
         hostArray(txids, sizeof(jobject), (jsize)nIn), hostArray(vouts, sizeof(jint), (jsize)nIn),
         hostArray(amts, sizeof(jlong), (jsize)nIn), hostArray(scripts, sizeof(jobject), (jsize)nIn),
         hostArray(addrs, sizeof(jobject), (jsize)nOut), hostArray(oamts, sizeof(jlong), (jsize)nOut),
-        hostArray(oscripts, sizeof(jobject), (jsize)nOut));
+        hostArray(oscripts, sizeof(jobject), (jsize)nOut),
+        /* what the user approved: the plan's own recipient, its amount and its fee (ASSET-SIGN-GATE) */
+        hostString(recipient), recipSats, (jlong)pl->paidFeeSats, (jlong)pl->paidFeeSats);
     if (! r) return 0;
     *serLen = unhex(r->text, ser, 4096);
     return *serLen > 0;

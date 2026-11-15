@@ -540,6 +540,7 @@
     <string name="sec_autolock_30m">30 dakika</string>
     <string name="sec_autolock_custom">Özel</string>
     <string name="sec_pin_changed">PIN başarıyla değiştirildi</string>
+    <string name="sec_pin_change_failed">Yeni PIN kaydedilemedi. Eski PIN\'iniz hâlâ geçerli.</string>
     <string name="sec_pins_mismatch">PIN\'ler eşleşmiyor</string>
     <string name="sec_biometric_required">Biyometrik kimlik doğrulama gerekli</string>
     <string name="did_logged_in">Artık %1$s hesabına giriş yaptınız</string>
@@ -608,6 +609,9 @@
     <string name="send_fail_unknown">İşlem gönderilemedi.</string>
     <string name="send_fail_try_again">Tekrar dene</string>
     <string name="rf_splitting_for_assets">%1$d DigiAssets taşınmaya hazırlanıyor: her biri kendi transfer ücretini ödeyebilsin diye DGB\'niz bölünüyor. Bir onay bekleniyor, genelde bir dakikadan kısa.</string>
+    <string name="rf_fanout_short">DigiAssets\'leriniz eski cüzdanda kaldı: onları taşımak için orada ücretler için %1$s gerekiyor. DGB\'niz taşındı. Varlıkları taşımak için eski cüzdana %1$s tutarını tek bir işlemle gönderin ve Fonları kurtar\'ı yeniden çalıştırın.</string>
+    <string name="rf_fanout_unread">DigiAssets\'leriniz eski cüzdanda kaldı: onları taşımak için orada ücretler için %1$s gerekiyor. DGB\'niz taşındı; kontrol edilemeyen %2$d coin eski cüzdanda kaldı. Varlıkları taşımak için eski cüzdana %1$s tutarını tek bir işlemle gönderin ve Fonları kurtar\'ı yeniden çalıştırın.</string>
+    <string name="rf_fanout_failed">DigiAssets\'leriniz eski cüzdanda kaldı: transfer ücretleri için DGB\'yi bölen adım tamamlanamadı. DGB\'niz taşındı. Varlıklar hâlâ eski ifadede; Fonları kurtar\'ı yeniden çalıştırın, eski cüzdanın ihtiyaç duyduğu tutarı gösterecektir.</string>
     <string name="rf_nothing_moved">Hiçbir şey taşınmadı</string>
     <string name="rf_dd_fee_floor">Ağ ücreti için %1$s gerekir: bu cüzdanda %2$s var.</string>
     <string name="rf_dd_found">%1$s DigiDollar bulundu</string>
@@ -640,10 +644,10 @@
          Machine-assisted. -->
     <string name="reconcile_outputs_found">Blok zincirinde bulunan çıktılar</string>
     <string name="reconcile_found_not_compared">Blok zincirinde bulundu, karşılaştırılmadı</string>
-    <string name="reconcile_spendable">Harcanabilir</string>
-    <string name="reconcile_wallet_spendable">Cüzdanın harcanabilir bakiyesi</string>
-    <string name="reconcile_matches_wallet">Cüzdanın harcanabilir bakiyesiyle eşleşiyor.</string>
-    <string name="reconcile_does_not_match_wallet">Cüzdanın harcanabilir bakiyesiyle eşleşmiyor: aşağıya bakın.</string>
+    <string name="reconcile_in_balance">Bakiyeye dahil</string>
+    <string name="reconcile_wallet_balance">Cüzdan bakiyesi</string>
+    <string name="reconcile_matches_wallet_balance">Cüzdan bakiyesiyle eşleşiyor.</string>
+    <string name="reconcile_does_not_match_wallet_balance">Cüzdan bakiyesiyle eşleşmiyor: aşağıya bakın.</string>
     <string name="reconcile_held_asset">Bir DigiAsset için tutuluyor</string>
     <string name="reconcile_held_unknown">Tutuluyor: varlık durumu bilinmiyor</string>
     <string name="reconcile_proven_plain">Normal DGB, yeniden başlattıktan sonra harcanabilir</string>
@@ -717,6 +721,9 @@
     <string name="seedview_pass_unreadable_title">Parola okunamadı</string>
     <string name="seedview_pass_unreadable_body">Bu cüzdanın parolası şu anda okunamadı. Kurtarma kelimeleriniz tek başına bu cüzdanı geri yüklemeyebilir; bu nedenle parola onlarla birlikte gösterilebilene kadar gösterilmezler. Tekrar deneyin.</string>
     <string name="seedview_pass_retry">Yeniden dene</string>
+    <!-- SEED-VIEW-AUTH -->
+    <string name="seedview_device_lock_title">Ekran kilidinizi doğrulayın</string>
+    <string name="seedview_device_lock_body">Kurtarma ifadeniz bu telefonun ekran kilidiyle korunuyor. Göstermek için ekran kilidini PIN, desen veya şifrenizle doğrulayın.</string>
     <!-- /pkg E2-keys -->
     <string name="pinstore_title">PIN\'iniz şu anda doğrulanamıyor</string>
     <string name="pinstore_body">Telefonun güvenli anahtar deposu açılamadı, bu yüzden cüzdan kilitli kalıyor. Hiçbir şey silinmedi. Uygulamayı kapatıp yeniden açın. Bu tekrar olursa telefonu yeniden başlatın; kurtarma ifadeniz cüzdanı yine her cihazda geri yükler.</string>
@@ -730,4 +737,15 @@
     <string name="reconcile_rebuild_button">Zincirden tam yeniden oluşturma (yeniden tarama)</string>
     <string name="rf_capped_body">Tarama, %1$s yolunda bu yol hâlâ kullanılırken sınırına ulaştı; orada gösterilenden fazla bakiye olabilir. Gösterilmeyenler zincirde güvende kalır.</string>
     <string name="reconcile_stuck_stale_cleared">, bunlardan %1$d tanesi hiç iletilmedi (bir gün sonra ağda ne bunlar ne de coin\'lerini harcayan bir işlem vardı). Bu ödemelerden biri alıcısına ulaştıysa yine de onaylanabilir: yeniden ödemeden önce alıcıya danışın</string>
+    <!-- KS-BIND: seed key bound to the device lock -->
+    <string name="ksb_prompt_subtitle">Cüzdan anahtarının ekran kilidine bağlanabilmesi için ekran kilidinizi bir kez onaylayın</string>
+    <string name="ksb_notice_title">Bu telefonda ekran kilidi yok</string>
+    <string name="ksb_notice_body">Cüzdanınız bu telefonda şifreli, ancak bu telefonda ekran kilidi olmadığı için anahtarı bir ekran kilidine bağlanamıyor. Bu durumda uygulama ile fonlarınız arasında yalnızca cüzdan PIN’i durur. Android ayarlarında bir PIN, desen veya şifre belirleyin: uygulama bir sonraki başlayışında cüzdanı açtığında cüzdan anahtarı ona bağlar. Anahtarın bağlı olup olmadığını güvenlik ayarları gösterir.</string>
+    <string name="ksb_notice_ok">Anladım</string>
+    <string name="sec_seed_key">Cüzdan anahtarı</string>
+    <string name="sec_seed_key_bound">Bu telefonun ekran kilidine bağlı</string>
+    <string name="sec_seed_key_pending">Henüz bağlı değil: uygulama bir sonraki başlayışında cüzdanı açtığında ekran kilidinize bağlanacak</string>
+    <string name="sec_seed_key_no_lock">Bağlı değil: bu telefonda ekran kilidi yok. Android ayarlarından bir tane belirleyin.</string>
+    <string name="sec_seed_key_lock_removed">Bu cüzdan kurulduktan sonra ekran kilidi kaldırıldı, bu yüzden anahtarı yeni bir kilitle bile artık açılmıyor. Cüzdan hâlâ açıkken kurtarma ifadenizin yazılı olduğunu kontrol edin veya fonlarınızı şimdi taşıyın: uygulama bir sonraki başlayışında cüzdanın kurtarma ifadesine ihtiyacı olacak.</string>
+    <string name="sec_seed_key_cannot_bind">Bağlı değil: önceki bir ekran kilidinden kalan anahtar artık çalışmıyor, bu yüzden bu cüzdanın anahtarı bu kurulumda bağlanamıyor. Cüzdanı silip kurtarma ifadesinden geri yüklemek onu bağlar.</string>
 </resources>

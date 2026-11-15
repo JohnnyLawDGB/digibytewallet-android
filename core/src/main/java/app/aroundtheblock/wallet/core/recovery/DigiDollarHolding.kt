@@ -65,6 +65,101 @@ object DigiDollarHolding {
             ?.let { Outpoint(it.vout, it.scriptPubKeyHex) }
     }
 
+    /** The bytes of a hex string, or null when it is not hex. */
+    fun hexBytes(hex: String): ByteArray? {
+        if (hex.length % 2 != 0) return null
+        val out = ByteArray(hex.length / 2)
+        for (i in out.indices) {
+            val hi = Character.digit(hex[2 * i], 16)
+            val lo = Character.digit(hex[2 * i + 1], 16)
+            if (hi < 0 || lo < 0) return null
+            out[i] = ((hi shl 4) or lo).toByte()
+        }
+        return out
+    }
+
+    /**
+     * The cents the transaction's own "DD" OP_RETURN binds to output [vout], or null when that cannot be
+     * read. The reading of native BRDigiDollarOutputAmount: the first OP_RETURN whose first push is "DD",
+     * then the type push (1 MINT, 2 TRANSFER, 3 REDEEM), then minimal positive script numbers -- all of
+     * them for a TRANSFER, the first for the others -- bound in order to the zero-value `OP_1 <32>`
+     * outputs. Anything it cannot read is null, never a guess; it is used only to say how much is held.
+     */
+    fun outputCents(outputs: List<Output>, vout: Int): Long? {
+        val ordered = outputs.sortedBy { it.vout }
+        // Ordinal binding is positional: a missing or repeated vout would shift which amount binds to
+        // which output, so anything but vouts 0..n-1 is unreadable (the caller then holds more).
+        if (ordered.withIndex().any { (i, o) -> o.vout != i }) return null
+        val scripts = ordered.map { hexBytes(it.scriptPubKeyHex) ?: return null }
+        val dd = scripts.firstOrNull { isDdOpReturn(it) } ?: return null
+        val pushes = pushesOf(dd) ?: return null
+        if (pushes.size < 2) return null
+        val type = scriptNum(pushes[1])?.takeIf { pushes[1].size <= 4 }?.toInt() ?: return null
+        if (type !in 1..3) return null
+        val amounts = ArrayList<Long>()
+        for (p in pushes.drop(2)) {
+            if (p.isEmpty()) continue
+            val v = scriptNum(p) ?: return null
+            if (v <= 0L) return null
+            amounts += v
+            if (type != 2) break
+        }
+        if (amounts.isEmpty()) return null
+        var k = 0
+        for ((i, o) in ordered.withIndex()) {
+            val s = scripts[i]
+            if (s.isNotEmpty() && (s[0].toInt() and 0xFF) == 0x6a) continue
+            if (o.amountSat != 0L) continue
+            val token = s.size == 34 && s[0] == 0x51.toByte() && s[1] == 0x20.toByte()
+            if (o.vout == vout) return if (token) amounts.getOrNull(k) else null
+            if (token) k++
+        }
+        return null
+    }
+
+    private fun isDdOpReturn(s: ByteArray): Boolean {
+        if (s.size < 4 || (s[0].toInt() and 0xFF) != 0x6a) return false
+        val first = pushesOf(s, limit = 1)?.firstOrNull() ?: return false
+        return first.size == 2 && first[0] == 0x44.toByte() && first[1] == 0x44.toByte()
+    }
+
+    /** The pushes after OP_RETURN, as native _ddNextPush reads them (a non-push opcode is an empty push). */
+    private fun pushesOf(s: ByteArray, limit: Int = Int.MAX_VALUE): List<ByteArray>? {
+        val out = ArrayList<ByteArray>()
+        var pos = 1
+        while (pos < s.size && out.size < limit) {
+            val op = s[pos].toInt() and 0xFF
+            val (hdr, len) = when {
+                op == 0x00 -> 1 to 0L
+                op in 0x01..0x4b -> 1 to op.toLong()
+                op == 0x4c -> { if (pos + 2 > s.size) return null; 2 to (s[pos + 1].toLong() and 0xFF) }
+                op == 0x4d -> { if (pos + 3 > s.size) return null; 3 to ((s[pos + 1].toLong() and 0xFF) or ((s[pos + 2].toLong() and 0xFF) shl 8)) }
+                op == 0x4e -> { if (pos + 5 > s.size) return null; 5 to (0..3).fold(0L) { a, j -> a or ((s[pos + 1 + j].toLong() and 0xFF) shl (8 * j)) } }
+                else -> 1 to 0L
+            }
+            val start = pos + hdr
+            if (len > s.size - start) return null
+            out += s.copyOfRange(start, start + len.toInt())
+            pos = start + len.toInt()
+        }
+        return out
+    }
+
+    /** Minimal signed little-endian script number of at most 8 bytes, or null. */
+    private fun scriptNum(d: ByteArray): Long? {
+        if (d.size > 8) return null
+        if (d.isEmpty()) return 0L
+        val last = d[d.size - 1].toInt() and 0xFF
+        if ((last and 0x7f) == 0 && (d.size == 1 || (d[d.size - 2].toInt() and 0x80) == 0)) return null
+        var acc = 0L
+        for (i in d.indices) acc = acc or ((d[i].toLong() and 0xFF) shl (8 * i))
+        if (last and 0x80 != 0) {
+            acc = acc and (1L shl (8 * d.size - 1)).inv()
+            return -acc
+        }
+        return acc
+    }
+
     /** Whether there is anything to report. Zero cents is no dollars, not unseen dollars. */
     fun isHolding(cents: Long): Boolean = cents > 0
 

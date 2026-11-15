@@ -52,12 +52,15 @@ object DigiDollarScan {
      *                   transaction could not be read.
      * @param inputsFor  a transaction's inputs, for proving a located output already spent. Null
      *                   means unreadable, which proves nothing and drops nothing.
+     * @param versionFor a transaction's nVersion, for ONE-FAMILY's DigiDollar marker. Null means
+     *                   unknown; the "DD" OP_RETURN still marks the transaction.
      */
     suspend fun assemble(
         addresses: List<DigiDollarAddress>,
         holdingFor: suspend (DigiDollarAddress) -> DigiDollarHoldingResult?,
         outputsFor: suspend (String) -> List<DigiDollarHolding.Output>?,
         inputsFor: suspend (String) -> List<DigiDollarHolding.PrevOut>? = { emptyList() },
+        versionFor: suspend (String) -> Int? = { null },
     ): Result {
         var cents = 0L
         var unlocatable = 0L
@@ -97,13 +100,30 @@ object DigiDollarScan {
             // P2TR script against this address's key.
             val found = mutableListOf<Holding>()
             var unreadable = false
+            // ONE-FAMILY, per transaction: the still-unspent outpoints this address holds in a
+            // transaction marked both DigiDollar and DigiAsset are held from every send, this one
+            // included. They are counted (heldCount) and their cents, read from that transaction's own
+            // DD OP_RETURN, are reported as unlocatable. Nothing else of the address is affected: a
+            // spent or spend-only dual transaction locates nothing and is passed over.
+            var heldCount = 0
+            var heldCents = 0L
+            var heldUndecodable = false
             for (txid in holding.txids) {
                 val outputs = outputsFor(txid)
                 if (outputs == null) { unreadable = true; continue }
-                for (outpoint in DigiDollarHolding.locateAll(outputs, address.taprootOutputKeyHex)) {
-                    if (DigiDollarHolding.PrevOut(txid, outpoint.vout) in spent) continue
-                    found += Holding(address, txid, outpoint.vout, outpoint.scriptPubKeyHex)
+                val live = DigiDollarHolding.locateAll(outputs, address.taprootOutputKeyHex)
+                    .filter { DigiDollarHolding.PrevOut(txid, it.vout) !in spent }
+                if (live.isEmpty()) continue
+                if (isDualFamily(outputs, versionFor(txid))) {
+                    heldCount += live.size
+                    for (o in live) {
+                        val c = DigiDollarHolding.outputCents(outputs, o.vout)
+                        if (c == null || c <= 0L) heldUndecodable = true
+                        else heldCents = app.aroundtheblock.wallet.core.asset.AssetSums.add(heldCents, c)
+                    }
+                    continue
                 }
+                for (outpoint in live) found += Holding(address, txid, outpoint.vout, outpoint.scriptPubKeyHex)
             }
             // Movable only when every listed transaction was read (4.1.2 row 11, N6). The cents an
             // outpoint carries are in its transaction's OP_RETURN, not here: with one transaction
@@ -116,11 +136,31 @@ object DigiDollarScan {
             // And only when what was found is what the endpoint counts as unspent, where it says (an
             // absent count reads 0): one outpoint more or fewer means the cents found are not the
             // balance, and a transfer of the balance would spend what is not there (4.1.2 row 20).
-            val countDisagrees = holding.unspentCount > 0 && found.size != holding.unspentCount
-            if (found.isEmpty() || unreadable || countDisagrees) unlocatable += holding.cents
-            else holdings += found
+            // Held outpoints count toward the endpoint's unspent count like any other. Their cents
+            // must be decodable and no more than the balance, or nothing found can be trusted to be
+            // the rest of it: the address is then unlocatable as a whole.
+            val countDisagrees = holding.unspentCount > 0 && found.size + heldCount != holding.unspentCount
+            if (found.isEmpty() || unreadable || countDisagrees || heldUndecodable || heldCents >= holding.cents) {
+                unlocatable += holding.cents
+            } else {
+                holdings += found
+                unlocatable += heldCents
+            }
         }
 
         return Result(cents, holdings, reachable, unlocatable)
+    }
+
+    private val decoder = app.aroundtheblock.wallet.core.asset.DigiAssetDecoder()
+
+    /** ONE-FAMILY's [app.aroundtheblock.wallet.core.asset.OneFamily.isDualFamily] over these outputs and
+     *  the transaction's nVersion when known. A script that is not hex is read as held. */
+    private fun isDualFamily(outputs: List<DigiDollarHolding.Output>, version: Int?): Boolean {
+        val scripts = outputs.sortedBy { it.vout }.map { o ->
+            DigiDollarHolding.hexBytes(o.scriptPubKeyHex) ?: return true
+        }
+        return app.aroundtheblock.wallet.core.asset.OneFamily.isDualFamily(
+            scripts, decoder, version?.let(app.aroundtheblock.wallet.core.asset.OneFamily::versionMarksDigiDollar),
+        )
     }
 }

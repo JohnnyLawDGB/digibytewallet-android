@@ -384,9 +384,9 @@ static void case_txs_roundtrip(void) {
     free(txs); free(buf);
 
     buf = exact(raw, 4);
-    putLE32(buf, 10001);
+    putLE32(buf, SAVED_TRANSACTIONS_MAX_COUNT + 1);   /* TX-CKPT-CAP: the shared limit, not a literal */
     n = deserialize_saved_transactions_guarded(buf, 4, &txs);
-    check(n == 0 && txs == NULL, "F4 guard: a count above 10000 is rejected");
+    check(n == 0 && txs == NULL, "F4 guard: a count above SAVED_TRANSACTIONS_MAX_COUNT is rejected");
     free(buf);
 
     BRTransactionFree(src[0]); BRTransactionFree(src[1]);

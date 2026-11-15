@@ -1,5 +1,6 @@
 package app.aroundtheblock.wallet.core.recovery
 
+import app.aroundtheblock.wallet.core.LogTag
 import app.aroundtheblock.wallet.core.OutgoingTxStore
 import app.aroundtheblock.wallet.core.WalletTxPersister
 import app.aroundtheblock.wallet.core.bridge.NativeBridge
@@ -360,8 +361,9 @@ class LegacySweepService internal constructor(
             )
 
         val txid = broadcast(txBytes)
-        log("profile=${profile.label}: ${inputs.txids.size} input(s), ${inputs.totalIn} sat in, " +
-            "fee $feeSat sat read back from the signed transaction; txid=${txid ?: "not relayed"}")
+        // K1-RECOVERY: no input total, no fee, and the keyed tag in place of the txid.
+        log("profile=${profile.label}: ${inputs.txids.size} input(s) swept; " +
+            if (txid != null) "relayed as ${LogTag.tx(txid)}" else "not relayed")
         if (txid != null) {
             // Durability: route the sweep through the same OutgoingTxStore +
             // WalletTxPersister the normal send uses so

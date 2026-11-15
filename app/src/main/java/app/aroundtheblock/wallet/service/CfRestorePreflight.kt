@@ -1,12 +1,29 @@
 package app.aroundtheblock.wallet.service
 
+import app.aroundtheblock.wallet.core.WalletTxPersister
+import app.aroundtheblock.wallet.core.sync.SavedTransactionsCheckpoint
+
 internal enum class CfRestoreResetReason {
     MISSING_LEDGER,
     MISSING_TRANSACTION_CHECKPOINT,
     INVALID_LEDGER,
     INVALID_SAVED_BLOCKS,
     HEADER_WINDOW_MISSING,
+    /** TX-CKPT-CAP: the restored wallet holds fewer transactions than its checkpoint declares.
+     *  Android-only: [transactionCheckpointResetReason], not the core's BRCFRestorePreflight.h. */
+    TRANSACTION_CHECKPOINT_SHORT,
 }
+
+/**
+ * TX-CKPT-CAP, checked before [cfRestoreResetReason]: the stored scan frontier is only valid for a
+ * wallet that restored the history its transaction checkpoint declares. [shortRestoreRecorded] is
+ * [SavedTransactionsCheckpoint.KEY_SHORT_RESTORE], written by the restore when the reader loaded
+ * fewer records than the checkpoint declared. Resuming near the tip then would leave every older
+ * coin and record unseen until a manual rescan, so the headers, filters and ledger are rebuilt from
+ * the wallet's birth floor. No checkpoint at all is left to [cfRestoreResetReason].
+ */
+internal fun transactionCheckpointResetReason(shortRestoreRecorded: Boolean): CfRestoreResetReason? =
+    if (shortRestoreRecorded) CfRestoreResetReason.TRANSACTION_CHECKPOINT_SHORT else null
 
 internal fun cfRestoreResetReason(
     ledger: ByteArray?,
@@ -29,6 +46,14 @@ internal fun cfRestoreResetReason(
     val lowestNeeded = maxOf(state.scannedThrough + 1L, state.abandonedBelow)
     return if (lowestNeeded < blockFloor) CfRestoreResetReason.HEADER_WINDOW_MISSING else null
 }
+
+/**
+ * The transaction-checkpoint gate SyncService puts in front of every scan-ledger write and of
+ * `has_synced`: open only when the wallet's set is on disk ([WalletTxPersister.Result.WRITTEN]) or
+ * there is none to save ([WalletTxPersister.Result.EMPTY]). TX-CKPT-CAP: a set the writer refuses
+ * (above the shared limit) keeps it shut, so the frontier never moves past unsaved history.
+ */
+internal fun checkpointGateOpen(result: WalletTxPersister.Result): Boolean = result.landed
 
 /**
  * Whether it is safe to commit `has_synced = true` right now.

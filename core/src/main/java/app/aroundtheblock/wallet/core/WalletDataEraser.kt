@@ -9,6 +9,7 @@ import app.aroundtheblock.wallet.core.sync.CfAbandonmentStore
 import app.aroundtheblock.wallet.core.sync.CfScanLedgerStore
 import app.aroundtheblock.wallet.core.sync.FilterHeaderStore
 import app.aroundtheblock.wallet.core.sync.SavedBlockStore
+import app.aroundtheblock.wallet.core.sync.SavedTransactionsStore
 
 /**
  * The persistent, non-native side of a complete wallet wipe, factored behind an
@@ -237,9 +238,12 @@ class AndroidWalletDataEraser internal constructor(
         // Left behind, the next wallet would restore against a header window built
         // from a DIFFERENT wallet's chain position.
         val savedBlocks = step("saved blocks") { SavedBlockStore.deleteAllNetworks(context) }
+        // The transaction checkpoint (TX-CKPT-CAP) is a file per network too: the next wallet must not
+        // restore this one's history.
+        val savedTransactions = step("saved transactions") { SavedTransactionsStore.deleteAllNetworks(context) }
         // The abandoned-band record describes the scan of the wallet that made it.
         val abandonedBand = step("abandoned band") { CfAbandonmentStore.clearAllNetworks(context) }
-        return headerChain && scanLedger && savedBlocks && abandonedBand
+        return headerChain && scanLedger && savedBlocks && savedTransactions && abandonedBand
     }
 
     override fun eraseDatabase(): Boolean {

@@ -1,5 +1,6 @@
 package app.aroundtheblock.wallet.core.hub
 
+import app.aroundtheblock.wallet.core.LogSafe
 import app.aroundtheblock.wallet.core.digiscope.DigiScopeClient
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -153,20 +154,20 @@ class HubWebSocket(
 
         /** The server is closing: answer at once, so the connection is down now, not when the server gives up waiting. */
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-            android.util.Log.w("HubWS", "closing: $code $reason")
+            android.util.Log.w("HubWS", "closing: $code ${LogSafe.text(reason)}")
             webSocket.close(1000, null)
             end(refusal = !held())
             _connectionState.value = ConnectionState.DISCONNECTED
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-            android.util.Log.w("HubWS", "closed: $code $reason")
+            android.util.Log.w("HubWS", "closed: $code ${LogSafe.text(reason)}")
             end(refusal = !held())
             _connectionState.value = ConnectionState.DISCONNECTED
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-            android.util.Log.e("HubWS", "failure: ${t.message}, response=${response?.code}")
+            android.util.Log.e("HubWS", "failure: ${LogSafe.text(t.message)}, response=${response?.code}")
             end(refusal = !held())
             _connectionState.value = ConnectionState.DISCONNECTED
         }

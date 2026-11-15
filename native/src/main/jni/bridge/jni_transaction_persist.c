@@ -2,7 +2,8 @@
  * jni_transaction_persist.c
  *
  * JNI bridge for saving/loading wallet transactions to survive app restarts.
- * Transactions are serialized to a byte array and stored by Kotlin in SharedPreferences.
+ * Transactions are serialized to a byte array and stored by Kotlin in a file
+ * (SavedTransactionsStore, filesDir/saved_transactions<net>.bin; hex in SharedPreferences before TX-CKPT-CAP).
  * On restore, they're passed to BRWalletNew so the wallet starts with full tx history
  * and the balance is immediately spendable.
  */

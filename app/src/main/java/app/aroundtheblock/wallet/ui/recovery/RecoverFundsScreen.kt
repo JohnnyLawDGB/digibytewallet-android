@@ -199,6 +199,7 @@ fun RecoverFundsScreen(
                         outcomes = s.outcomes,
                         assetMoves = s.assetMoves,
                         digiDollar = s.digiDollar,
+                        assetFanOut = s.assetFanOut,
                     )
                     is RecoverFundsViewModel.UiState.Error ->
                         if (mode == RecoverMode.AnotherPhrase)
@@ -750,6 +751,7 @@ private fun ResultBody(
     outcomes: List<LegacySweepService.SweepOutcome>,
     assetMoves: List<app.aroundtheblock.wallet.core.recovery.ForeignAssetTransferService.Move>,
     digiDollar: app.aroundtheblock.wallet.core.recovery.DigiDollarTransferService.Result? = null,
+    assetFanOut: app.aroundtheblock.wallet.core.recovery.ForeignAssetTransferService.FanOut? = null,
 ) {
     LazyColumn(
         modifier = Modifier
@@ -800,6 +802,10 @@ private fun ResultBody(
             item { AssetMoveSection(assetMoves) }
         }
 
+        // K1-RECOVERY: the DGB split for the assets' fees was refused or failed, so no asset moved.
+        // Said in the user's language, with the shortfall, instead of nothing at all.
+        assetFanOutNotice(assetFanOut)?.let { notice -> item { AssetFanOutCard(notice) } }
+
         // Reported whenever there is anything to say — including dollars we found and could not
         // move. A recovery that empties a wallet of DGB while staying silent about its DigiDollar
         // is "no funds found" about money that exists.
@@ -820,6 +826,53 @@ private fun ResultBody(
                 )
             }
         }
+    }
+}
+
+/**
+ * Why no DigiAsset moved when the DGB split for their fees did not go out (K1-RECOVERY).
+ *
+ * [requiredSat] is the FULL amount the old wallet must hold for a later run to move the assets, not
+ * the shortfall: the same run still sweeps every plain coin to the destination (the old phrase may be
+ * compromised, so its DGB leaves at once), so afterwards the old wallet holds nothing and topping it
+ * up by the shortfall alone would be refused again.
+ */
+internal data class AssetFanOutNotice(val kind: Kind, val requiredSat: Long = 0L, val unreadCount: Int = 0) {
+    enum class Kind { SHORT_OF_DGB, COINS_UNREAD, FAILED }
+}
+
+/** The notice for [fan], or null when the split was not needed or went out. */
+internal fun assetFanOutNotice(
+    fan: app.aroundtheblock.wallet.core.recovery.ForeignAssetTransferService.FanOut?,
+): AssetFanOutNotice? = when (fan) {
+    is app.aroundtheblock.wallet.core.recovery.ForeignAssetTransferService.FanOut.Refused ->
+        if (fan.unreadInputs.isEmpty()) AssetFanOutNotice(AssetFanOutNotice.Kind.SHORT_OF_DGB, fan.requiredInOneCoinSat)
+        else AssetFanOutNotice(AssetFanOutNotice.Kind.COINS_UNREAD, fan.requiredInOneCoinSat, fan.unreadInputs.size)
+    is app.aroundtheblock.wallet.core.recovery.ForeignAssetTransferService.FanOut.Failed ->
+        AssetFanOutNotice(AssetFanOutNotice.Kind.FAILED)
+    else -> null
+}
+
+@Composable
+private fun AssetFanOutCard(notice: AssetFanOutNotice) {
+    Card(
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = CARD)
+    ) {
+        Text(
+            text = when (notice.kind) {
+                AssetFanOutNotice.Kind.SHORT_OF_DGB ->
+                    stringResource(R.string.rf_fanout_short, formatSatToDgb(notice.requiredSat))
+                AssetFanOutNotice.Kind.COINS_UNREAD ->
+                    stringResource(R.string.rf_fanout_unread, formatSatToDgb(notice.requiredSat), notice.unreadCount)
+                AssetFanOutNotice.Kind.FAILED -> stringResource(R.string.rf_fanout_failed)
+            },
+            color = AMBER,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+        )
     }
 }
 
@@ -1264,10 +1317,15 @@ private fun CredentialBody(onAskAgain: () -> Unit) {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/** Format satoshis as a DGB amount string: "0.00123456 DGB". */
-private fun formatSatToDgb(sat: Long): String {
-    val dgb = sat / 100_000_000.0
-    val formatted = "%.8f".format(dgb).trimEnd('0').trimEnd('.')
+/**
+ * Format satoshis as a DGB amount string: "0.00123456 DGB".
+ *
+ * Through [app.aroundtheblock.wallet.core.model.DgbAmount.format] (BigDecimal, no locale): the old
+ * `"%.8f".format` used the default locale, wrote "1,00000000" in a comma locale, and the trailing
+ * strip of '.' then left "1, DGB".
+ */
+internal fun formatSatToDgb(sat: Long): String {
+    val formatted = app.aroundtheblock.wallet.core.model.DgbAmount.format(sat)
     return "$formatted DGB"
 }
 

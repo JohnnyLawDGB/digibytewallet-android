@@ -23,9 +23,12 @@
 //       fetch, the history label (transactionDao.updateAssetId, receivedBackedUnits), the persist-after-
 //       detect snapshot (AssetPersistOnDetectTest's first three), log lines, and the allocator's and the
 //       decoder's own tests (asset_allocate_kat, asset_decode_kat).
-//    2. BY A MODEL. `m...` below is processIncomingAssetTx written out line for line in C: assetCarrier,
+//    2. BY A MODEL. `m...` below is processIncomingAssetTx written out line for line in C: assetCarrier
+//       under the ONE CARRIER RULE (DigiAssetCarrierRule.verdict and isNullData, DA-014-REF, written out from
+//       the Kotlin rather than taken from BRTxAssetCarrier; assetTxShape and hasAssetPayload read it too),
 //       the derivation, resolveInputAssetUnits with the TargetingWalk (a fresh walk per question, as
-//       detection's calls make it), backedInputStack, nativeParentHasDataOutput, the ownership gate, all
+//       detection's calls make it), the proof as inputUnitsOrRemainderProof lets it be read (detectedInputUnits,
+//       and the walk's inputTotalOf), backedInputStack, nativeParentHasDataOutput, the ownership gate, all
 //       settled, transferOutputCredits / issuanceOutputCredits, AssetTxQuantity.forOutputTotal,
 //       persistDetectedAssetOutput with settledRow, the indexer condition and the walk condition (its
 //       repeat as BRAssetDetect.h states it). The ported pieces it calls are the ones other suites hold
@@ -201,18 +204,21 @@ static void outBytes(Fx *f, const uint8_t *script, size_t len, uint64_t sats)
     f->tx.outCount++;
 }
 
-static void out(Fx *f, const char *hex)
+static void outSats(Fx *f, const char *hex, uint64_t sats)
 {
     uint8_t b[300];
     size_t n = hx(hex, b, sizeof(b));
 
-    outBytes(f, b, n, 600);
+    outBytes(f, b, n, sats);
 }
+
+static void out(Fx *f, const char *hex) { outSats(f, hex, 600); }
 
 #define OURS   "0014111111111111111111111111111111111111111111"
 #define OURS2  "0014333333333333333333333333333333333333333333"
 #define THEIRS "0014222222222222222222222222222222222222222222"
-#define PLAIN_NOTE "6a0568656c6c6f"                    // OP_RETURN "hello": not a carrier
+#define PLAIN_NOTE "6a0568656c6c6f"                    // OP_RETURN "hello": nulldata, not a carrier
+#define BARE_RETURN "6aff"                              // an OP_RETURN output that is not nulldata, not a carrier
 #define UNCLASSIFIABLE_PD2 "6a4d060044410215000a"       // a carrier framed with OP_PUSHDATA2
 
 static void ours(Fx *f) { out(f, OURS); }
@@ -802,25 +808,84 @@ static BRAssetScriptKind mDecode(const BRTxOutput *o, MHeader *out)   // decoder
     return BRAssetDecodeInstructions(o->script, o->scriptLen, &out->h, out->insts, BR_ASSET_MAX_INSTRUCTIONS);
 }
 
-// assetCarrier(scripts): the first UNCLASSIFIABLE, else the last decoded. Its output index, or -1.
-static long mAssetCarrier(const BRTransaction *tx, MHeader *out)
+// DigiAssetCarrierRule.isNullData: OP_RETURN followed only by complete pushes (DigiByte Core's Solver).
+static int mIsNullData(const uint8_t *s, size_t n)
 {
-    size_t j;
-    long last = -1;
+    size_t pc = 1;
+
+    if (n == 0 || s[0] != 0x6a) return 0;
+    while (pc < n) {
+        unsigned op = s[pc++];
+        uint64_t size;
+
+        if (op > 0x60) return 0;   // OP_16
+        if (op < 0x4c) size = op;
+        else if (op == 0x4c) {
+            if (n - pc < 1) return 0;
+            size = s[pc]; pc += 1;
+        }
+        else if (op == 0x4d) {
+            if (n - pc < 2) return 0;
+            size = (uint64_t)s[pc] | ((uint64_t)s[pc + 1] << 8); pc += 2;
+        }
+        else if (op == 0x4e) {
+            if (n - pc < 4) return 0;
+            size = (uint64_t)s[pc] | ((uint64_t)s[pc + 1] << 8) | ((uint64_t)s[pc + 2] << 16) | ((uint64_t)s[pc + 3] << 24);
+            pc += 4;
+        }
+        else size = 0;             // OP_1NEGATE, OP_RESERVED, OP_1..OP_16: no data
+        if ((uint64_t)(n - pc) < size) return 0;
+        pc += (size_t)size;
+    }
+    return 1;
+}
+
+#define M_NONE 0
+#define M_CARRIER 1
+#define M_UNDECIDED 2
+
+// DigiAssetCarrierRule.verdict(scripts, decoder, shape): the ONE carrier rule (DA-014-REF), written out from
+// the Kotlin, not from BRTxAssetCarrier. `shaped`: the shape is known (shapeOf(lines, inputCount)); 0 is
+// TxShape.UNKNOWN (hasAssetPayload asks without one; it reads only None against the rest). M_CARRIER: *at
+// and *out (decoder.decode of that script).
+static int mVerdict(const BRTransaction *tx, int shaped, MHeader *out, long *at)
+{
+    size_t i;
+    int tagged = 0, nullData = 0, haveHeader = 0;
+    long carrier = -1;
     MHeader tmp;
 
-    for (j = 0; j < tx->outCount; j++) {
-        BRAssetScriptKind k;
+    for (i = 0; i < tx->outCount; i++) {
+        const BRTxOutput *o = &tx->outputs[i];
+        int isNull = mIsNullData(o->script, o->scriptLen);
+        BRAssetScriptKind k = mDecode(o, &tmp);   // NOT_ASSET: decode answers null, not tagged "DA"
 
-        if (! mIsOpReturn(&tx->outputs[j])) continue;
-        k = mDecode(&tx->outputs[j], &tmp);
-        if (k == BR_ASSET_SCRIPT_NOT_ASSET) continue;
-        if (k == BR_ASSET_SCRIPT_UNCLASSIFIABLE) { *out = tmp; return (long)j; }
-        last = (long)j;
+        if (isNull) nullData++;
+        if (k != BR_ASSET_SCRIPT_NOT_ASSET) {
+            tagged++;
+            if (isNull) { carrier = (long)i; *out = tmp; haveHeader = 1; }
+        }
     }
-    if (last < 0) return -1;
-    mDecode(&tx->outputs[last], out);
-    return last;
+    if (tagged == 0) return M_NONE;
+    if (tagged != 1 || nullData != 1 || ! haveHeader || out->h.kind != BR_ASSET_SCRIPT_ASSET) return M_UNDECIDED;
+    // encryptedKeyShape(carrier, scripts.size, shape)
+    if (carrier == 1 && tx->outCount >= 2 && tx->outCount <= 3 &&
+        (! shaped || tx->outputs[0].amount == 650) && (! shaped || tx->inCount == 1)) return M_UNDECIDED;
+    *at = carrier;
+    return M_CARRIER;
+}
+
+// assetCarrier(scripts, shape) as assetCarrierOfLines calls it: the carrier's output index and its header;
+// -1 for None (null); -2 for Undecided (ByteArray(0) to DecodedAssetHeader.unclassifiable(): no output,
+// a header of kind UNCLASSIFIABLE and every other field zero).
+static long mAssetCarrier(const BRTransaction *tx, MHeader *out)
+{
+    long at = -1;
+    int v = mVerdict(tx, 1, out, &at);
+
+    if (v == M_NONE) return -1;
+    if (v == M_UNDECIDED) { memset(out, 0, sizeof(*out)); out->h.kind = BR_ASSET_SCRIPT_UNCLASSIFIABLE; return -2; }
+    return at;
 }
 
 static int mFirstNonOpReturn(const BRTransaction *tx, int32_t *first)
@@ -832,34 +897,25 @@ static int mFirstNonOpReturn(const BRTransaction *tx, int32_t *first)
     return 0;
 }
 
-static int mShape(UInt256 h, MShape *s)   // assetTxShape(heldOutputLines(funding))
+static int mShape(UInt256 h, MShape *s)   // assetTxShape(heldOutputLines(funding)): the one rule's carrier
 {
     const BRTransaction *tx = mOutputsOf(h);
-    long payload = -1;
-    size_t j;
 
     if (! tx || tx->outCount == 0) return 0;
-    for (j = 0; j < tx->outCount; j++) if (mIsOpReturn(&tx->outputs[j]) && payload < 0) payload = (long)j;
     s->hasFirst = mFirstNonOpReturn(tx, &s->first);
-    if (payload < 0) return 0;
-    if (mDecode(&tx->outputs[payload], &s->header) == BR_ASSET_SCRIPT_NOT_ASSET) return 0;
+    if (mAssetCarrier(tx, &s->header) == -1) return 0;   // assetCarrierHeader: null for None
     s->outputCount = (int32_t)tx->outCount;
     return 1;
 }
 
-static int mHasAssetPayload(UInt256 h)   // txHasAssetPayload: -1 null, 0, 1
+static int mHasAssetPayload(UInt256 h)   // txHasAssetPayload -> hasAssetPayload: -1 null, 0, 1
 {
     const BRTransaction *tx = mOutputsOf(h);
-    size_t j;
+    MHeader tmp;
+    long at;
 
     if (! tx || tx->outCount == 0) return -1;
-    for (j = 0; j < tx->outCount; j++) {
-        MHeader tmp;
-
-        if (! mIsOpReturn(&tx->outputs[j])) continue;
-        return mDecode(&tx->outputs[j], &tmp) != BR_ASSET_SCRIPT_NOT_ASSET;
-    }
-    return 0;
+    return mVerdict(tx, 0, &tmp, &at) != M_NONE;   // verdict(scripts, decoder) != Verdict.None
 }
 
 static int mParentHasDataOutput(UInt256 h)   // nativeParentHasDataOutput: -1 null, 0, 1
@@ -897,6 +953,24 @@ static OL mProven(UInt256 h, const MHeader *header)   // provenInputUnits
         }
     }
     return none();
+}
+
+// inputUnitsOrRemainderProof(resolved, inputs, rowQuantity, proofUnits = provenInputUnits) when `resolved` is
+// null: the proof, only when every input was read (inputsRead; Kotlin: inputs != null) and the inputs' rows
+// storing more than zero sum to none or to exactly the proven total.
+static OL mProofGuarded(UInt256 h, const MHeader *header, const MInput *inputs, size_t n, int inputsRead)
+{
+    OL proven = mProven(h, header), stored;
+    int64_t known = 0;
+    size_t i;
+
+    if (! proven.has || ! inputsRead) return none();
+    for (i = 0; i < n; i++) {
+        stored = mRow(inputs[i].h, inputs[i].v);
+        if (! stored.has || stored.v <= 0) continue;
+        if (__builtin_add_overflow(known, stored.v, &known)) return none();
+    }
+    return (known == 0 || known == proven.v) ? proven : none();
 }
 
 typedef struct { UInt256 h; OL v; } MEnt;
@@ -1030,7 +1104,7 @@ static OL mInputTotalOf(UInt256 h)
     if (! mShape(h, &tx)) return none();
     if (! mInputsOf(h, inputs, &n)) return none();
     r = mResolveInputAssetUnits(inputs, n, mAnswerFromTotals, 0);
-    return r.has ? r : mProven(h, &tx.header);
+    return r.has ? r : mProofGuarded(h, &tx.header, inputs, n, 1);
 }
 
 static void mResolveTotals(UInt256 root)
@@ -1164,7 +1238,8 @@ typedef struct {
 
 typedef struct {
     int isNull;                      // processIncomingAssetTx returned null before its writes
-    int unclassifiable;              // ... after holding (an unclassifiable carrier)
+    int unclassifiable;              // ... after holding (an unclassifiable carrier, or none decided)
+    long carrierAt;                  // the carrier's output index; -2 when none is decided
     int needsRules;                  // the C asks first: the ids not answered, in order
     char asks[IMAX][96];
     size_t askN;
@@ -1298,7 +1373,8 @@ static void mDetect(const BRTransaction *tx)
     hexOf(tx->txHash, txid);
     if (tx->outCount == 0) { MR.isNull = 1; return; }
     carrierAt = mAssetCarrier(tx, &header);
-    if (carrierAt < 0) { MR.isNull = 1; return; }
+    if (carrierAt == -1) { MR.isNull = 1; return; }
+    MR.carrierAt = carrierAt;
 
     if (header.h.kind == BR_ASSET_SCRIPT_ASSET && header.h.operation == DA_ISSUANCE && header.h.locked && tx->inCount > 0) {
         int32_t prevVout = (tx->inputs[0].index <= (uint32_t)INT32_MAX) ? (int32_t)tx->inputs[0].index : -1;
@@ -1320,7 +1396,7 @@ static void mDetect(const BRTransaction *tx)
         nIn++;
     }
     inputUnits = mResolveInputAssetUnits(inputs, nIn, mOutputIsTargeted, 1);
-    if (! inputUnits.has) inputUnits = mProven(tx->txHash, &header);
+    if (! inputUnits.has) inputUnits = mProofGuarded(tx->txHash, &header, inputs, nIn, ! anyNull);   // detectedInputUnits
 
     for (j = 0; j < tx->outCount; j++) {
         const BRTxOutput *o = &tx->outputs[j];
@@ -1331,7 +1407,7 @@ static void mDetect(const BRTransaction *tx)
         MR.outs[MR.n].credit.kind = BR_ASSET_OUTPUT_UNKNOWN;
         MR.n++;
     }
-    if (header.h.kind != BR_ASSET_SCRIPT_ASSET) { MR.unclassifiable = 1; return; }
+    if (header.h.kind != BR_ASSET_SCRIPT_ASSET || carrierAt < 0) { MR.unclassifiable = 1; return; }
 
     isIssuance = header.h.operation == DA_ISSUANCE;
     payloadExact = BRAssetPayloadReadsExactly(tx->outputs[carrierAt].script, tx->outputs[carrierAt].scriptLen, &header.h,
@@ -1404,7 +1480,7 @@ static void mDetect(const BRTransaction *tx)
 
         for (j = 0; j < tx->outCount && firstOpReturn < 0; j++) if (mIsOpReturn(&tx->outputs[j])) firstOpReturn = (long)j;
         MR.walkDue = isIssuance && ((MR.anyUnresolved && ! derived && strncmp(MR.placeholder, "unresolved:", 11) == 0 &&
-                                     firstOpReturn == carrierAt) || ! W.walked);
+                                     carrierAt >= 0 && firstOpReturn == carrierAt) || ! W.walked);
     }
 }
 
@@ -1430,6 +1506,9 @@ static int agreesWithModel(const char **why)
     }
     *why = "the status";
     if (DET.status != (MR.unclassifiable ? BR_ASSET_DETECT_UNCLASSIFIABLE : BR_ASSET_DETECT_DONE)) return 0;
+    *why = "the carrier";   // carrierIsFirstOpReturn: compared by position, never for an undecided carrier
+    if (MR.carrierAt < 0 ? (DET.carrierAt != (size_t)-1 || DET.carrierIsFirstOpReturn)
+                         : DET.carrierAt != (size_t)MR.carrierAt) return 0;
     *why = "the outputs that get a row";
     if (DET.outputCount != MR.n) return 0;
     for (i = 0; i < MR.n; i++) {
@@ -1900,20 +1979,27 @@ static void recv_issuance(void)   // an_issuance_credits_only_where_its_instruct
 
     for (i = 0; i < 2; i++) {
         wreset();
+        if (i == 0) {
+            // The review's bytes as written: the push is one byte short of the payload, so the byte after it
+            // (0x10) is a push the script does not complete and the output is not nulldata. The one carrier
+            // rule leaves the transaction undecided: nothing is written and both owned outputs are held. (The
+            // Kotlin test hands the decoded header to issuanceOutputCredits, below the carrier choice; the
+            // not-read-exactly path it then takes is the cut-off case at the end of this one.)
+            statusIs(review[i], issue(review[i], owned01, 2, 3), BR_ASSET_DETECT_UNCLASSIFIABLE);
+            ck(DET.outputCount == 2 && BOUTS[0].targeted && BOUTS[1].targeted &&
+               BOUTS[0].persist.action == BR_ASSET_PERSIST_NOTHING && BOUTS[1].persist.action == BR_ASSET_PERSIST_NOTHING &&
+               ! detectedRow(0) && ! detectedRow(1) && strcmp(balances(), "-") == 0,
+               "%s: not nulldata, undecided: both owned outputs held, nothing written, nothing counts", review[i]);
+            continue;
+        }
         statusIs(review[i], issue(review[i], owned01, 2, 3), BR_ASSET_DETECT_DONE);
         derivedPlaceholder(review[i]);
         r = detectedRow(0);
         ck(r && r->credit == BR_ASSET_CREDIT_BACKED && r->qty == 0, "%s: output 0 is BACKED at 0", review[i]);
         o = outAt(1);
-        if (i == 1) {
-            ck(o && holds(&o->credit, DET.placeholder, 1000000), "%s: read exactly, output 1 holds the 1000000", review[i]);
-            ck(strcmp(balances(), "-") != 0 && detectedRow(1) && detectedRow(1)->qty == 1000000 &&
-               detectedRow(1)->credit == BR_ASSET_CREDIT_BACKED, "%s: and counts", review[i]);
-        }
-        else {
-            ck(o && o->credit.kind == BR_ASSET_OUTPUT_UNKNOWN, "%s: not read exactly, output 1 waits for the indexer", review[i]);
-            ck(strcmp(balances(), "-") == 0, "%s: nothing counts", review[i]);
-        }
+        ck(o && holds(&o->credit, DET.placeholder, 1000000), "%s: read exactly, output 1 holds the 1000000", review[i]);
+        ck(strcmp(balances(), "-") != 0 && detectedRow(1) && detectedRow(1)->qty == 1000000 &&
+           detectedRow(1)->credit == BR_ASSET_CREDIT_BACKED, "%s: and counts", review[i]);
     }
 
     wreset();   // an_issuance_with_no_instruction_lands_on_the_last_output_or_nowhere
@@ -2260,14 +2346,20 @@ static void rows_outputs(void)
     W.ownedN = 2;
     f = fx(0x30);
     in(f, tid(0x31), 0);
+    out(f, OURS2); out(f, CONTROL); ours(f); theirs(f); out(f, BARE_RETURN);
+    wadd(f);
+    statusIs("an OP_RETURN that is not nulldata after the carrier", detect(&f->tx), BR_ASSET_DETECT_DONE);
+    ck(DET.outputCount == 2 && BOUTS[0].vout == 0 && BOUTS[1].vout == 2, "both owned scripts count; an OP_RETURN never does");
+    ck(DET.carrierAt == 1 && DET.carrierIsFirstOpReturn, "the carrier is output 1, the first OP_RETURN");
+    f = fx(0x32);   // the same with a plain nulldata OP_RETURN: two nulldata outputs, so undecided; the same rows
+    in(f, tid(0x31), 0);
     out(f, OURS2); out(f, CONTROL); ours(f); theirs(f); out(f, PLAIN_NOTE);
     wadd(f);
-    detect(&f->tx);
-    ck(DET.outputCount == 2 && BOUTS[0].vout == 0 && BOUTS[1].vout == 2, "both owned scripts count; a plain OP_RETURN never does");
-    ck(DET.carrierAt == 1 && DET.carrierIsFirstOpReturn, "the carrier is output 1, the first OP_RETURN");
+    statusIs("a plain OP_RETURN after the carrier", detect(&f->tx), BR_ASSET_DETECT_UNCLASSIFIABLE);
+    ck(DET.outputCount == 2 && BOUTS[0].vout == 0 && BOUTS[1].vout == 2, "undecided: the same outputs get a row");
 }
 
-static void rows_carrier(void)   // the carrier: none, a plain OP_RETURN before it, two carriers, unclassifiable beside one
+static void rows_carrier(void)   // the carrier under the one carrier rule: none, decided, undecided
 {
     Fx *f;
     BRAssetHeader h;
@@ -2281,23 +2373,50 @@ static void rows_carrier(void)   // the carrier: none, a plain OP_RETURN before 
     f = fx(0x41); wadd(f);
     statusIs("no outputs", detect(&f->tx), BR_ASSET_DETECT_NOT_ASSET);
 
-    wreset();
+    // THE ONE CARRIER RULE (BRTxAssetCarrier; Kotlin: DigiAssetCarrierRule): a carrier is decided only as the
+    // transaction's one nulldata output and its one tagged output, outside the encrypted-key shape
+    wreset();   // a plain (nulldata) OP_RETURN before the carrier: two nulldata outputs
     f = fx(0x42); in(f, tid(0x43), 0); ours(f); out(f, PLAIN_NOTE); out(f, CONTROL); theirs(f); wadd(f);
-    statusIs("a plain OP_RETURN before the carrier", detect(&f->tx), BR_ASSET_DETECT_DONE);
-    ck(DET.carrierAt == 2 && ! DET.carrierIsFirstOpReturn, "the carrier is output 2, not the first OP_RETURN");
+    statusIs("a plain OP_RETURN before the carrier", detect(&f->tx), BR_ASSET_DETECT_UNCLASSIFIABLE);
+    ck(DET.carrierAt == (size_t)-1 && ! DET.carrierIsFirstOpReturn && strcmp(targetedList(), "0") == 0 && outAt(0) &&
+       outAt(0)->persist.action == BR_ASSET_PERSIST_NOTHING, "undecided: no carrier index, the owned output held, nothing written");
+    at = 99;
+    ck(BRAssetHoldCarrierOf(&f->tx, &at, &h, NULL) == BR_ASSET_CARRIER_FOUND && at == (size_t)-1 &&
+       h.kind == BR_ASSET_SCRIPT_UNCLASSIFIABLE && h.instructionCount == 0,
+       "BRAssetHoldCarrierOf: found, unclassifiable, *at (size_t)-1");
 
-    wreset();
-    f = fx(0x44); in(f, tid(0x43), 0); ours(f); out(f, "6a0644410315000a"); out(f, "6a06444103150105"); ours(f); wadd(f);
-    detect(&f->tx);
-    ck(DET.carrierAt == 2 && outAt(0) && outAt(0)->claimed == 0 && DET.header.instructionCount == 1 && DET.insts[0].outputIndex == 1,
-       "two carriers: the last one is read (5 to output 1, nothing claimed on output 0)");
+    wreset();   // an OP_RETURN that is not nulldata before the carrier: decided, not the first OP_RETURN
+    f = fx(0x46); in(f, tid(0x43), 0); ours(f); out(f, BARE_RETURN); out(f, CONTROL); theirs(f); wadd(f);
+    statusIs("an OP_RETURN that is not nulldata before the carrier", detect(&f->tx), BR_ASSET_DETECT_DONE);
+    ck(DET.carrierAt == 2 && ! DET.carrierIsFirstOpReturn, "the carrier is output 2, not the first OP_RETURN");
     ck(BRAssetHoldCarrierOf(&f->tx, &at, &h, NULL) == BR_ASSET_CARRIER_FOUND && at == 2 && h.kind == BR_ASSET_SCRIPT_ASSET,
        "BRAssetHoldCarrierOf says the same");
 
-    wreset();
+    wreset();   // two carriers
+    f = fx(0x44); in(f, tid(0x43), 0); ours(f); out(f, "6a0644410315000a"); out(f, "6a06444103150105"); ours(f); wadd(f);
+    statusIs("two carriers", detect(&f->tx), BR_ASSET_DETECT_UNCLASSIFIABLE);
+    ck(DET.carrierAt == (size_t)-1 && strcmp(targetedList(), "0,3") == 0 && outAt(0) && outAt(0)->claimed == 0,
+       "neither is read: every owned output held, nothing claimed (%s)", targetedList());
+
+    wreset();   // an unclassifiable carrier beside a readable one
     f = fx(0x45); in(f, tid(0x43), 0); ours(f); out(f, UNCLASSIFIABLE_PD2); out(f, CONTROL); ours(f); wadd(f);
     statusIs("an unclassifiable carrier beside a readable one", detect(&f->tx), BR_ASSET_DETECT_UNCLASSIFIABLE);
-    ck(DET.carrierAt == 1 && strcmp(targetedList(), "0,3") == 0, "it decides: every owned output targeted (%s)", targetedList());
+    ck(DET.carrierAt == (size_t)-1 && strcmp(targetedList(), "0,3") == 0, "every owned output held (%s)", targetedList());
+
+    wreset();   // a lone carrier that is not nulldata: a byte after its push that is no complete push
+    f = fx(0x47); in(f, tid(0x43), 0); ours(f); out(f, "6a06444103150005ff"); ours(f); wadd(f);
+    statusIs("a lone carrier that is not nulldata", detect(&f->tx), BR_ASSET_DETECT_UNCLASSIFIABLE);
+    ck(DET.carrierAt == (size_t)-1 && strcmp(targetedList(), "0,2") == 0, "every owned output held (%s)", targetedList());
+
+    wreset();   // the encrypted-key shape: one input, three outputs, output 0 worth 650, the carrier at 1
+    f = fx(0x48); in(f, tid(0x43), 0); outSats(f, OURS, 650); out(f, CONTROL); ours(f); wadd(f);
+    statusIs("the encrypted-key shape", detect(&f->tx), BR_ASSET_DETECT_UNCLASSIFIABLE);
+    ck(DET.carrierAt == (size_t)-1 && strcmp(targetedList(), "0,2") == 0, "every owned output held (%s)", targetedList());
+    f = fx(0x49); in(f, tid(0x43), 0); out(f, OURS); out(f, CONTROL); ours(f); wadd(f);
+    statusIs("the same with output 0 at 600", detect(&f->tx), BR_ASSET_DETECT_DONE);
+    ck(DET.carrierAt == 1 && DET.carrierIsFirstOpReturn, "decided: the carrier is output 1");
+    f = fx(0x4a); in(f, tid(0x43), 0); in(f, tid(0x43), 1); outSats(f, OURS, 650); out(f, CONTROL); ours(f); wadd(f);
+    statusIs("the same at 650 with two inputs", detect(&f->tx), BR_ASSET_DETECT_DONE);
 }
 
 static void placeholder_rules(void)
@@ -2504,14 +2623,14 @@ static void issuance_walk(void)
     r = detectedRow(0);
     ck(r && r->hasId && strncmp(r->id, "unresolved:", 11) == 0, "the row carries the placeholder");
 
-    wreset();   // an unlocked issuance whose carrier is not the first OP_RETURN
+    wreset();   // an unlocked issuance whose carrier is not the first OP_RETURN (an OP_RETURN that is not nulldata is)
     {
         Fx *p = fx(0x72), *f;
 
         theirs(p); wadd(p);
         f = fx(0x73);
         in(f, tid(0x72), 0);
-        ours(f); out(f, PLAIN_NOTE); out(f, "6a0a" "44410305" "2016" "00" "2016" "00"); ours(f);
+        ours(f); out(f, BARE_RETURN); out(f, "6a0a" "44410305" "2016" "00" "2016" "00"); ours(f);
         wadd(f);
         W.walked = 0;
         detect(&f->tx);
@@ -2568,15 +2687,31 @@ static void rename_rows(void)
         theirs(p); wadd(p);
         f = fx(0x71);
         in(f, tid(0x70), 0);
-        ours(f); out(f, "6a0a" "44410305" "2016" "02" "2016" "10"); out(f, "6a0a" "44410305" "2016" "02" "2016" "00"); ours(f);
+        ours(f); out(f, BARE_RETURN); out(f, "6a0a" "44410305" "2016" "02" "2016" "00"); ours(f);
         wadd(f);
         detect(&f->tx);
         apply(0);
         ck(DET.carrierAt == 2 && ! DET.carrierIsFirstOpReturn && BRAssetIdIsUnresolved(DET.placeholder),
-           "the last carrier (unlocked) is read: a placeholder");
+           "the carrier (unlocked) after an OP_RETURN that is not nulldata: a placeholder");
         syncView();
         s = BRAssetDetectRename(&DET, &named, VROWS, ROWN, got, N(got), &n);
         ck(s == BR_ASSET_HOLDINGS_OK && n == 0, "a carrier that is not the first OP_RETURN: its rows are not renamed");
+    }
+
+    wreset();   // an undecided transaction is not renamed (two carriers; the second an unlocked issuance)
+    {
+        Fx *p = fx(0x74), *f;
+
+        theirs(p); wadd(p);
+        f = fx(0x75);
+        in(f, tid(0x74), 0);
+        ours(f); out(f, "6a0a" "44410305" "2016" "02" "2016" "10"); out(f, "6a0a" "44410305" "2016" "02" "2016" "00"); ours(f);
+        wadd(f);
+        statusIs("two carriers", detect(&f->tx), BR_ASSET_DETECT_UNCLASSIFIABLE);
+        apply(0);
+        syncView();
+        s = BRAssetDetectRename(&DET, &named, VROWS, ROWN, got, N(got), &n);
+        ck(s == BR_ASSET_HOLDINGS_OK && n == 0 && ! DET.issuanceWalkDue, "undecided: nothing renamed, no walk");
     }
 
     wreset();   // a transfer is not renamed
@@ -2848,7 +2983,7 @@ static void sweepWorld(void)
             else in(f, tid(0x950), 0x80000000u + (uint32_t)below(2));
         }
         for (j = 0; j < nOut; j++) {
-            uint64_t r = below(12);
+            uint64_t r = below(13);
 
             if (j == at) randomCarrier(f, (int)nOut);
             else if (r < 4) ours(f);
@@ -2856,7 +2991,8 @@ static void sweepWorld(void)
             else if (r < 9) theirs(f);
             else if (r == 9) out(f, PLAIN_NOTE);
             else if (r == 10) randomCarrier(f, (int)nOut);
-            else out(f, UNCLASSIFIABLE_PD2);
+            else if (r == 11) out(f, UNCLASSIFIABLE_PD2);
+            else out(f, BARE_RETURN);   // an OP_RETURN that is not nulldata: a decided carrier need not be the first
         }
         wadd(f);
     }
@@ -2912,7 +3048,7 @@ static void model_sweep(void)
     const char *why = "";
 
     RNG = 0x5eed0001ULL;
-    for (world = 0; world < 3000; world++) {
+    for (world = 0; world < 5000; world++) {   // 5000: the one carrier rule leaves more of the corpus undecided
         int pass;
 
         sweepWorld();

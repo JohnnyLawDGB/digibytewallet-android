@@ -46,7 +46,7 @@ class ScanPartitionTest {
     private val nodeRows = spendable + carriers + remainders + repeated
 
     private val codes: Map<Pair<String, Int>, Int> =
-        spendable.associate { outpointKey(it) to WalletOutpointCode.SPENDABLE } +
+        spendable.associate { outpointKey(it) to WalletOutpointCode.IN_BALANCE } +
             carriers.associate { outpointKey(it) to WalletOutpointCode.HELD } +
             remainders.associate { outpointKey(it) to WalletOutpointCode.HELD }
 
@@ -89,8 +89,8 @@ class ScanPartitionTest {
 
     @Test fun `the headline is the wallet's spendable balance and every other output has a class`() = runTest {
         val p = scan()
-        assertEquals(walletBalance, p.spendableSat)
-        assertEquals(ClassTotal(12, 329_072_900L), p.total(ScanClass.SPENDABLE))
+        assertEquals(walletBalance, p.inBalanceSat)
+        assertEquals(ClassTotal(12, 329_072_900L), p.total(ScanClass.IN_BALANCE))
         assertEquals(ClassTotal(13, 94_000L), p.total(ScanClass.HELD_ASSET))
         assertEquals(ClassTotal(9, 38_691_783L), p.total(ScanClass.HELD_UNKNOWN))
         assertEquals(ClassTotal(0, 0L), p.total(ScanClass.NOT_IN_WALLET))
@@ -109,7 +109,7 @@ class ScanPartitionTest {
             override = mapOf(outpointKey(watchedOnly) to WalletOutpointCode.NOT_CREDITED),
         )
         assertEquals(ClassTotal(2, 25_001_000L), p.total(ScanClass.NOT_IN_WALLET))
-        assertEquals(walletBalance, p.spendableSat)
+        assertEquals(walletBalance, p.inBalanceSat)
         assertFalse(p.matchesWallet)
     }
 
@@ -159,7 +159,7 @@ class ScanPartitionTest {
         assertEquals(ClassTotal(3, 3 * 6_661L), p.total(ScanClass.HELD_UNKNOWN))
         assertEquals(6, recorded.size)
         // Moving a class never changes the headline: it is still what the wallet spends today.
-        assertEquals(walletBalance, p.spendableSat)
+        assertEquals(walletBalance, p.inBalanceSat)
     }
 
     // ---- why a held output is held -----------------------------------------------------------

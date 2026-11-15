@@ -1,5 +1,6 @@
 package app.aroundtheblock.wallet.ui.util
 
+import app.aroundtheblock.wallet.core.LogSafe
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
@@ -40,7 +41,7 @@ private const val MAX_URL_LEN = 2048
  */
 fun openExternalUrl(context: Context, url: String): Boolean {
     if (!isSafeExternalUrl(url)) {
-        Log.w("ExternalUrl", "refusing to launch ${url.take(64)}: failed scheme/length filter")
+        Log.w("ExternalUrl", "refusing to launch ${LogSafe.text(url, 64)}: failed scheme/length filter")
         return false
     }
     val uri = Uri.parse(url)

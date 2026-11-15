@@ -30,7 +30,9 @@ class ForeignUtxoAssetClassifierTest {
         isAsset: (ByteArray) -> Boolean = { it.contentEquals(assetTx) },
         resolve: suspend (String) -> app.aroundtheblock.wallet.core.asset.rules.TransferRuleState =
             { app.aroundtheblock.wallet.core.asset.rules.TransferRuleState.NONE },
-    ) = ForeignUtxoAssetClassifier(fetch, isAsset, resolve)
+        // The fake bytes carry no DigiDollar OP_RETURN: scripts read, none marking DigiDollar.
+        scripts: (ByteArray) -> List<ByteArray>? = { emptyList() },
+    ) = ForeignUtxoAssetClassifier(fetch, isAsset, resolve, scripts)
 
     // ---- the straightforward answers --------------------------------------------------------
 
@@ -130,7 +132,7 @@ class ForeignUtxoAssetClassifierTest {
 
     @Test fun `without a resolver the default rule state is UNKNOWN`() = runBlocking {
         val u = utxo("eeee")
-        val v = ForeignUtxoAssetClassifier({ assetTx }, { true }).classify(listOf(u))[u]!!
+        val v = ForeignUtxoAssetClassifier({ assetTx }, { true }, rawOutputScripts = { emptyList() }).classify(listOf(u))[u]!!
         assertEquals(app.aroundtheblock.wallet.core.asset.rules.TransferRuleState.UNKNOWN, v.ruleState)
     }
 }

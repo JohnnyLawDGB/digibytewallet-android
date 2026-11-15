@@ -391,10 +391,12 @@ class SettingsViewModel @Inject constructor(
      *  unlock screen does — a brute-forcer can't bypass the limit via Settings. */
     fun verifyPin(pin: String): PinVerifyResult = pinManager.verifyPin(pin)
 
-    fun changePin(newPin: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            pinManager.setPin(newPin)
-        }
+    /** Sets [newPin]. True only when it landed on disk; false leaves the old PIN active (a
+     *  PinStoreWriteException, or a store that cannot be used), and the screen says so. */
+    suspend fun changePin(newPin: String): Boolean = withContext(Dispatchers.IO) {
+        runCatching { pinManager.setPin(newPin) }.onFailure {
+            android.util.Log.e("SettingsViewModel", "PIN change did not persist (${it.javaClass.simpleName}); the old PIN stays")
+        }.isSuccess
     }
 
     // ── Wipe-after-N (destructive, opt-in, default OFF) ───────────────────────
@@ -404,8 +406,11 @@ class SettingsViewModel @Inject constructor(
     /** Enable/disable "wipe wallet after N failed PIN attempts". Enabling is gated
      *  by an explicit backup acknowledgement in the UI (irreversible on-device). */
     fun setWipeAfterN(enabled: Boolean) {
-        pinManager.setWipeAfterN(enabled)
-        _wipeAfterNEnabled.value = enabled
+        // The toggle shows what is on disk: a write that did not land leaves it as it was.
+        runCatching { pinManager.setWipeAfterN(enabled) }.onFailure {
+            android.util.Log.e("SettingsViewModel", "wipe-after-N did not persist (${it.javaClass.simpleName})")
+        }
+        _wipeAfterNEnabled.value = runCatching { pinManager.isWipeAfterNEnabled() }.getOrDefault(_wipeAfterNEnabled.value)
     }
 
     // ── Display preferences ───────────────────────────────────────────────────

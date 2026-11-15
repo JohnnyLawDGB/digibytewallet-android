@@ -1,5 +1,7 @@
 package app.aroundtheblock.wallet.core.sync
 
+import app.aroundtheblock.wallet.core.LogSafe
+
 /**
  * The order a mid-session peer-manager recreate must run in.
  *
@@ -58,28 +60,28 @@ object RecreateSequence {
         try {
             flushPersistedState()
         } catch (t: Throwable) {
-            failures += "flush: ${t.message}"
+            failures += "flush: ${LogSafe.text(t.message)}"
         }
 
         try {
             reloaded = reloadBlocksNearTip()
         } catch (t: Throwable) {
-            failures += "reload: ${t.message}"
+            failures += "reload: ${LogSafe.text(t.message)}"
         }
         try {
             forceReconnect()
         } catch (t: Throwable) {
-            failures += "forceReconnect: ${t.message}"
+            failures += "forceReconnect: ${LogSafe.text(t.message)}"
         }
         try {
             startSync()
         } catch (t: Throwable) {
-            failures += "startSync: ${t.message}"
+            failures += "startSync: ${LogSafe.text(t.message)}"
         }
         try {
             restoreLedgerAndSnap()
         } catch (t: Throwable) {
-            failures += "restoreLedger: ${t.message}"
+            failures += "restoreLedger: ${LogSafe.text(t.message)}"
         }
 
         return Result(windowReloaded = reloaded, failures = failures)

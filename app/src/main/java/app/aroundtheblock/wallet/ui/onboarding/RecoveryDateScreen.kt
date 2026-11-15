@@ -43,6 +43,14 @@ fun RecoveryDateScreen(
     viewModel: OnboardingViewModel = hiltViewModel()
 ) {
     var selectedOption by remember { mutableStateOf<RecoveryDateOption?>(null) }
+    // KS-BIND: the restore writes the wallet record, so its start is where the seed key must be
+    // usable (see seedKeyPromptFor). No wallet is open yet, so a prompt locks nothing.
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val biometricAuth = remember { app.aroundtheblock.wallet.core.security.BiometricAuth() }
+    val ksbPromptTitle = stringResource(R.string.app_name_display)
+    val ksbPromptSubtitle = stringResource(R.string.ksb_prompt_subtitle)
+    // One restore per tap: the prompt opens a gap in which a second tap would start a second one.
+    var restoreStarting by remember { mutableStateOf(false) }
 
     Box(
         modifier = Modifier
@@ -178,7 +186,18 @@ fun RecoveryDateScreen(
                 onClick = {
                     val ts = selectedOption?.timestamp ?: fullRescan.timestamp
                     viewModel.setRecoveryTimestamp(ts)
-                    viewModel.recoverWallet { success ->
+                    if (restoreStarting) return@Button
+                    restoreStarting = true
+                    // KS-BIND: the probe, the one prompt if needed, and the restore run in the
+                    // ViewModel's scope, in one coroutine, so leaving this screen cannot orphan them.
+                    viewModel.recoverWallet(
+                        seedKeyPromptFor(
+                            biometricAuth,
+                            context as? androidx.fragment.app.FragmentActivity,
+                            ksbPromptTitle, ksbPromptSubtitle,
+                        ),
+                    ) { success ->
+                        restoreStarting = false
                         if (success) {
                             navController.navigate("pin_setup") {
                                 popUpTo("onboarding") { inclusive = true }

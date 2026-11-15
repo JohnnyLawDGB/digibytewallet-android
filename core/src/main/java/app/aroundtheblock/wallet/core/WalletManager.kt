@@ -8,14 +8,23 @@ import app.aroundtheblock.wallet.core.asset.OrphanSendPredicate
 import app.aroundtheblock.wallet.core.bridge.NativeBridge
 import app.aroundtheblock.wallet.core.model.SyncFrontierSession
 import app.aroundtheblock.wallet.core.model.SyncState
-import app.aroundtheblock.wallet.core.sync.FilterHeaderStore
 import app.aroundtheblock.wallet.core.sync.HistoryRebuildOnUpgrade
 import app.aroundtheblock.wallet.core.sync.clearTransactionCacheForRebuild
 import app.aroundtheblock.wallet.core.sync.SavedBlockStore
+import app.aroundtheblock.wallet.core.sync.SavedTransactionsCheckpoint
+import app.aroundtheblock.wallet.core.sync.SavedTransactionsStore
 import app.aroundtheblock.wallet.core.security.EncryptedData
 import app.aroundtheblock.wallet.core.security.KeyStoreManager
 import app.aroundtheblock.wallet.core.security.KeystoreKeyInvalidatedException
 import app.aroundtheblock.wallet.core.security.KeystoreUserAuthRequiredException
+import app.aroundtheblock.wallet.core.security.AuthBoundProbe
+import app.aroundtheblock.wallet.core.security.BoundKeyState
+import app.aroundtheblock.wallet.core.security.SeedKeyReadiness
+import app.aroundtheblock.wallet.core.security.SeedKeyStatus
+import app.aroundtheblock.wallet.core.security.seedKeyReadinessFor
+import app.aroundtheblock.wallet.core.security.seedKeyStatusFor
+import app.aroundtheblock.wallet.core.security.boundKeyStateOnFailure
+import app.aroundtheblock.wallet.core.security.neverOpens
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -238,9 +247,13 @@ class WalletManager @Suppress("LongParameterList") constructor(
         if (passphrase != null && (passphrase.size > Bip39Passphrase.MAX_BYTES || Bip39Passphrase.hasNul(passphrase))) return false
         val mnemonicBytes = mnemonic.toByteArray(Charsets.UTF_8)
         try {
+            // KS-BIND: sealed BEFORE the native create, so the seal follows the step's seed-key probe
+            // (prepareSeedKeyForNewRecord) with nothing slow between them. Sealed after it, a create
+            // that ran past the end of the auth window landed on the legacy key without a prompt.
+            val sealed = sealForNewRecord(mnemonicBytes, passphrase) ?: return false
             // Persist creation time so restoreFromDisk uses the right sync checkpoint — in the record.
             val created = createNative(mnemonicBytes, passphrase) &&
-                writeSeedRecord(mnemonicBytes, passphrase, System.currentTimeMillis() / 1000, ORIGIN_CREATED)
+                storeSeedRecord(sealed, mnemonicBytes, passphrase, System.currentTimeMillis() / 1000, ORIGIN_CREATED)
             if (created) {
                 _walletState.value = WalletState.Unlocked
                 clearSyncData()
@@ -273,8 +286,10 @@ class WalletManager @Suppress("LongParameterList") constructor(
             // stays consistent with the first sync.
             val creationTimeSecs =
                 if (creationTimestamp > 0L) creationTimestamp else System.currentTimeMillis() / 1000
+            // KS-BIND: sealed before the native restore's derivation, as in createWallet.
+            val sealed = sealForNewRecord(mnemonicBytes, passphrase) ?: return false
             val recovered = recoverNative(mnemonicBytes, creationTimestamp, passphrase) &&
-                writeSeedRecord(mnemonicBytes, passphrase, creationTimeSecs, ORIGIN_RESTORED)
+                storeSeedRecord(sealed, mnemonicBytes, passphrase, creationTimeSecs, ORIGIN_RESTORED)
             if (recovered) {
                 _walletState.value = WalletState.Unlocked
                 clearSyncData()
@@ -406,33 +421,62 @@ class WalletManager @Suppress("LongParameterList") constructor(
             runCatching { HistoryRebuildOnUpgrade.beforeWalletLoad(context) }
                 .onFailure { android.util.Log.w(HistoryRebuildOnUpgrade.TAG, "history rebuild check failed; retried next launch", it) }
             // A rebuild that started clearing and did not finish leaves a partial cache: do not load it.
-            val savedTxHex = if (HistoryRebuildOnUpgrade.isInProgress(context)) {
+            // TX-CKPT-CAP: the checkpoint is a file of raw bytes (SavedTransactionsStore), migrated once
+            // from the legacy dgb_sync_data hex key, so no 50 MB string is pinned in the prefs map here.
+            val rebuildInProgress = HistoryRebuildOnUpgrade.isInProgress(context)
+            val savedTx = if (rebuildInProgress) {
                 android.util.Log.w(HistoryRebuildOnUpgrade.TAG, "history rebuild in progress; not loading the transaction cache")
                 null
             } else {
-                syncPrefs.getString("saved_transactions", null)
+                runCatching { SavedTransactionsStore.load(context) }
+                    .onFailure { android.util.Log.w("WalletManager", "transaction checkpoint read failed", it) }
+                    .getOrElse { ByteArray(0) }   // present but unreadable: recorded as a short restore below
             }
-            if (savedTxHex != null) {
-                // A bad tx cache must NEVER abort the restore or block the seed load
-                // below — it's just a cache re-derivable from chain. The naive
-                // chunked(2).map { it.toInt(16) } decoder this replaces threw
-                // NumberFormatException on any non-hex byte, and that throw escaped
-                // this function's try/finally (only seedBytes is zeroed there),
-                // crashing startup on a corrupt blob. decodeSavedTransactionsOrNull
-                // validates hex first and returns null instead of throwing; the
-                // whole block is additionally wrapped so no other decode/native
-                // exception can escape either.
+            // TX-CKPT-CAP: the flag says a checkpoint of this many records landed; no file beside it means
+            // the file was lost, and the restore is short (never a near-tip resume with no history).
+            val checkpointedCount = if (syncPrefs.getBoolean("transactions_checkpointed", false)) {
+                syncPrefs.getLong(SavedTransactionsStore.KEY_COUNT, 0L)
+            } else {
+                0L
+            }
+            if (savedTx == null && !rebuildInProgress && checkpointedCount > 0L) {
+                runCatching {
+                    if (SavedTransactionsCheckpoint.recordRestore(syncPrefs, null, 0L, checkpointedCount)) {
+                        android.util.Log.w(
+                            "WalletManager",
+                            "Transaction checkpoint of $checkpointedCount records is missing: recorded a short " +
+                                "restore, the sync start rebuilds from the birth floor",
+                        )
+                    }
+                }.onFailure { android.util.Log.w("WalletManager", "short-restore record failed", it) }
+            }
+            if (savedTx != null) {
+                // A bad tx cache must NEVER abort the restore or block the seed load below — it is a
+                // cache re-derivable from chain; nothing here may throw past this block. An unreadable
+                // one (an empty array) loads nothing and is recorded as short.
+                var loaded = 0
                 try {
-                    val txBytes = decodeSavedTransactionsOrNull(savedTxHex)
-                    if (txBytes != null) {
-                        val loaded = NativeBridge.loadSerializedTransactions(txBytes)
+                    if (savedTx.size >= 4) {
+                        loaded = NativeBridge.loadSerializedTransactions(savedTx)
                         android.util.Log.i("WalletManager", "Loaded $loaded saved transactions for restore")
                     } else {
-                        android.util.Log.w("WalletManager", "Dropping corrupt saved_transactions blob (invalid hex) — continuing restore from seed")
+                        android.util.Log.w("WalletManager", "Unreadable transaction checkpoint — the restore continues without it")
                     }
                 } catch (e: Exception) {
-                    android.util.Log.w("WalletManager", "saved_transactions restore failed — dropping and continuing", e)
+                    android.util.Log.w("WalletManager", "saved transactions restore failed — dropping and continuing", e)
                 }
+                // TX-CKPT-CAP: a load short of what the checkpoint declares is recorded before the wallet
+                // is built from it, so the sync start rebuilds from the birth floor (SyncService's CF
+                // preflight) instead of resuming near the tip without that history.
+                runCatching {
+                    if (SavedTransactionsCheckpoint.recordRestore(syncPrefs, savedTx, loaded.toLong())) {
+                        android.util.Log.w(
+                            "WalletManager",
+                            "Loaded $loaded of ${SavedTransactionsCheckpoint.declaredCount(savedTx)} checkpointed " +
+                                "transactions: recorded a short restore, the sync start rebuilds from the birth floor",
+                        )
+                    }
+                }.onFailure { android.util.Log.w("WalletManager", "short-restore record failed", it) }
             }
 
             // restoreWalletFromBytes builds the wallet from the records loaded just above (the only native
@@ -996,9 +1040,13 @@ class WalletManager @Suppress("LongParameterList") constructor(
                 }
             }
             if (report.verified) {
-                runCatching { pinManager.clearPin() }.onFailure {
-                    android.util.Log.e("WalletManager", "PIN store not cleared (${it.javaClass.simpleName})")
-                }
+                // PIN-STORE review item 2: a PIN store that is still on disk after its clear leaves the old
+                // PIN hash and the wipe-after-N setting behind, so the wipe is NOT verified: the caller
+                // marks the erasure owed and the next launch runs this again until the clear lands.
+                val pinCleared = runCatching { pinManager.clearPin() }.onFailure {
+                    android.util.Log.e("WalletManager", "PIN store not cleared (${it.javaClass.simpleName}); the wipe is not verified")
+                }.isSuccess
+                if (!pinCleared) return@withContext report.copy(everythingCleared = false)
             }
             report
         }
@@ -1063,6 +1111,100 @@ class WalletManager @Suppress("LongParameterList") constructor(
      */
     private class SealedRecord(val authBound: Boolean, val seed: EncryptedData, val passphrase: EncryptedData?)
 
+    /**
+     * KS-BIND. Asked by the step that is about to write a NEW wallet record (PIN setup for a create,
+     * the restore's start for a restore): can the record be sealed under the auth-bound key right
+     * now, and if not, would one device-credential prompt make it possible?
+     *
+     * Invariant: on a device with a secure lock screen the new record is wrapped under the
+     * auth-bound key from creation. The bound key opens for SEED_KEY_AUTH_WINDOW_SECS after any
+     * device authentication, so this probes it with a throwaway encryption: an open window answers
+     * READY and the record write that follows lands bound with no prompt; a lapsed one answers
+     * NEEDS_DEVICE_CREDENTIAL and the caller prompts once, then writes.
+     *
+     * Writes nothing to the wallet record and reads no secret: a stored record (any existing
+     * wallet) is left exactly as it was. Creates the auth-bound key if it is absent, as the seal
+     * itself would. Never throws: anything unexpected is UNAVAILABLE, and the seal then falls back
+     * to the legacy key as it always has (onboarding is never blocked on binding).
+     */
+    fun prepareSeedKeyForNewRecord(): SeedKeyReadiness {
+        val secure = try { keyStoreManager.isDeviceSecure() } catch (e: Exception) { false }
+        if (!secure) {
+            android.util.Log.i("WalletManager", "KS-BIND: no secure lock screen; the new record uses the legacy key")
+            return SeedKeyReadiness.NO_LOCK_SCREEN
+        }
+        val probe = probeAuthBoundKey()
+        val readiness = seedKeyReadinessFor(deviceSecure = true, probe = probe)
+        android.util.Log.i("WalletManager", "KS-BIND: auth-bound key probe=$probe readiness=$readiness")
+        return readiness
+    }
+
+    private fun probeAuthBoundKey(): AuthBoundProbe = try {
+        if (!keyStoreManager.createAuthBoundKey()) {
+            AuthBoundProbe.UNAVAILABLE
+        } else {
+            keyStoreManager.encryptAuthBound(ByteArray(16))
+            AuthBoundProbe.READY
+        }
+    } catch (e: KeystoreUserAuthRequiredException) {
+        AuthBoundProbe.AUTH_REQUIRED
+    } catch (e: KeystoreKeyInvalidatedException) {
+        AuthBoundProbe.INVALIDATED
+    } catch (e: Exception) {
+        AuthBoundProbe.UNAVAILABLE
+    }
+
+    /**
+     * KS-BIND. Whether the stored seed is wrapped under the key bound to the device lock, for the
+     * Security-settings status line and the no-lock-screen notice. Reads no secret.
+     *
+     * The record alone is not evidence: removing the device lock invalidates the auth-bound key for
+     * good (API 31+ deletes it), and a lock set again later does not bring it back. So the key is
+     * asked too ([boundKeyState]); only a key that still opens may be reported BOUND.
+     */
+    fun seedKeyStatus(): SeedKeyStatus {
+        if (!hasSavedWallet()) return SeedKeyStatus.NO_WALLET
+        return seedKeyStatusFor(
+            hasWallet = true,
+            recordBound = seedIsAuthBound(),
+            boundKey = boundKeyState(),
+            deviceSecure = try { keyStoreManager.isDeviceSecure() } catch (e: Exception) { false },
+        )
+    }
+
+    /**
+     * KS-BIND. What the auth-bound key answers to a throwaway ENCRYPT: it encrypts (window open), or
+     * refuses with not-authenticated (window lapsed) — both mean it still opens; a permanently
+     * invalidated or absent key never will. Writes nothing and reads no secret; never prompts.
+     */
+    private fun boundKeyState(): BoundKeyState {
+        when (keyStoreManager.authBoundKeyExists()) {
+            null -> return BoundKeyState.UNKNOWN
+            false -> return BoundKeyState.ABSENT
+            true -> {}
+        }
+        return try {
+            keyStoreManager.encryptAuthBound(ByteArray(16))
+            BoundKeyState.USABLE
+        } catch (e: Exception) {
+            boundKeyStateOnFailure(e, keyStoreManager.authBoundKeyExists())
+        }
+    }
+
+    /**
+     * KS-BIND. A read under the auth-bound key failed with [e], which is not one of the typed auth
+     * exceptions. When the key is gone or permanently invalidated by the same rule the status line
+     * uses ([boundKeyStateOnFailure]), throw [KeystoreKeyInvalidatedException] so the unlock path says
+     * "lock removed: restore from your recovery phrase" rather than a generic failure. Otherwise
+     * return, and the caller keeps its retryable outcome. Nothing is deleted either way.
+     */
+    private fun throwIfBoundKeyLost(e: Exception) {
+        if (boundKeyStateOnFailure(e, keyStoreManager.authBoundKeyExists()).neverOpens) {
+            android.util.Log.w("WalletManager", "KS-BIND: auth-bound key gone or invalidated (${e::class.java.simpleName}); record kept")
+            throw KeystoreKeyInvalidatedException(e)
+        }
+    }
+
     private fun sealRecord(mnemonicBytes: ByteArray, passphrase: ByteArray?): SealedRecord {
         if (keyStoreManager.createAuthBoundKey()) {
             try {
@@ -1097,13 +1239,27 @@ class WalletManager @Suppress("LongParameterList") constructor(
      * "mnemonic"), so the two must remain the same wallet.
      */
     private fun writeSeedRecord(mnemonicBytes: ByteArray, passphrase: ByteArray?, creationTimeSecs: Long, origin: String): Boolean {
+        val sealed = sealForNewRecord(mnemonicBytes, passphrase) ?: return false
+        return storeSeedRecord(sealed, mnemonicBytes, passphrase, creationTimeSecs, origin)
+    }
+
+    /** The seal half of [writeSeedRecord]: null (logged) when nothing could seal the record. */
+    private fun sealForNewRecord(mnemonicBytes: ByteArray, passphrase: ByteArray?): SealedRecord? = try {
+        sealRecord(mnemonicBytes, passphrase?.takeIf { it.isNotEmpty() })
+    } catch (e: Exception) {
+        android.util.Log.e("WalletManager", "wallet record not sealed (${e::class.java.simpleName}); no wallet was made")
+        null
+    }
+
+    /** The store half of [writeSeedRecord], for a record [sealed] from the same [mnemonicBytes] and [passphrase]. */
+    private fun storeSeedRecord(
+        sealed: SealedRecord,
+        mnemonicBytes: ByteArray,
+        passphrase: ByteArray?,
+        creationTimeSecs: Long,
+        origin: String,
+    ): Boolean {
         val pass = passphrase?.takeIf { it.isNotEmpty() }
-        val sealed = try {
-            sealRecord(mnemonicBytes, pass)
-        } catch (e: Exception) {
-            android.util.Log.e("WalletManager", "wallet record not sealed (${e::class.java.simpleName}); no wallet was made")
-            return false
-        }
         val identity = identityOf(mnemonicBytes, pass)
         val fields = if (sealed.authBound) V2_ENVELOPE_FIELDS else LEGACY_ENVELOPE_FIELDS
         val (seedCt, seedIv) = fields
@@ -1309,6 +1465,7 @@ class WalletManager @Suppress("LongParameterList") constructor(
         } catch (e: KeystoreKeyInvalidatedException) {
             throw e
         } catch (e: Exception) {
+            if (envelope.authBound) throwIfBoundKeyLost(e)
             return StoredPassphrase.Unknown("envelope did not read (${e::class.java.simpleName})")
         }
         if (bytes.isEmpty()) return StoredPassphrase.None
@@ -1342,6 +1499,7 @@ class WalletManager @Suppress("LongParameterList") constructor(
             } catch (e: KeystoreKeyInvalidatedException) {
                 throw e
             } catch (e: Exception) {
+                throwIfBoundKeyLost(e)
                 null
             }
         }
@@ -1461,6 +1619,10 @@ class WalletManager @Suppress("LongParameterList") constructor(
                 }
                 else -> seed
             }
+        } catch (e: KeystoreUserAuthRequiredException) {
+            throw e // the caller prompts for the device lock and retries (RecoverFunds)
+        } catch (e: KeystoreKeyInvalidatedException) {
+            throw e // the caller says the lock was removed: restore from the phrase
         } catch (e: Exception) {
             null
         } finally {
@@ -1494,6 +1656,15 @@ class WalletManager @Suppress("LongParameterList") constructor(
         // seed-fingerprint-mismatch restore (restoreFromDisk) would inherit the
         // PREVIOUS wallet's saved-blocks window from disk.
         SavedBlockStore.delete(context)
+        // TX-CKPT-CAP: the transaction checkpoint moved out of dgb_sync_data too; a new wallet must
+        // not restore the previous wallet's history from it.
+        SavedTransactionsStore.delete(context)
+        // STORE-DURABILITY review: the scan ledger records which heights were evaluated for ONE wallet,
+        // so after a seed change it is the wrong wallet's record; the header chain goes with it. Deleted
+        // here, through delete() (epoch bump, tmp first), rather than left to the next start's restore
+        // preflight to find (HEADER_WINDOW_MISSING) once the block window above is gone.
+        app.aroundtheblock.wallet.core.sync.FilterHeaderStore.delete(context)
+        app.aroundtheblock.wallet.core.sync.CfScanLedgerStore.delete(context)
         // A new wallet (create, recover, seed change): every record cached from here on is
         // written by this build, so the one-time rebuild after an update has nothing to do. The
         // floor a previous wallet's rebuild recorded does not belong to this one.
@@ -1541,26 +1712,4 @@ class WalletManager @Suppress("LongParameterList") constructor(
 
     private fun hexToBytes(hex: String): ByteArray =
         hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
-}
-
-/**
- * Validate + hex-decode the `saved_transactions` restore blob for
- * [WalletManager.restoreFromDisk]. Pure and side-effect-free so it's testable
- * without constructing a [WalletManager] (which would require mocking
- * `NativeBridge`'s JNI surface).
- *
- * Reuses [FilterHeaderStore.decodeHexOrNull]'s hex-validity guard (odd length
- * or a non-hex character -> `null`) instead of the throwing
- * `chunked(2).map { it.toInt(16) }` decoder it replaces in `restoreFromDisk` —
- * that decoder threw [NumberFormatException] on any corrupt byte, and nothing
- * in `restoreFromDisk` caught it (only `finally { seedBytes.fill(0) }` ran), so
- * a corrupt tx cache crashed the whole restore instead of just being dropped.
- *
- * @return the decoded bytes, or `null` if [hex] is `null` or malformed. The
- *   caller drops a `null` result and continues restoring the wallet from the
- *   seed — the tx cache is just a cache, re-derivable from chain.
- */
-internal fun decodeSavedTransactionsOrNull(hex: String?): ByteArray? {
-    if (hex == null) return null
-    return FilterHeaderStore.decodeHexOrNull(hex)
 }

@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import app.aroundtheblock.wallet.core.WalletManager
+import app.aroundtheblock.wallet.core.prepareSeedKeyThenPrompt
 import app.aroundtheblock.wallet.core.bridge.NativeBridge
 import app.aroundtheblock.wallet.core.security.PinManager
 import kotlinx.coroutines.CancellationException
@@ -185,13 +186,25 @@ class OnboardingViewModel @Inject constructor(
         _passphraseVerdict
 
     /** Create wallet from generated mnemonic. Clears mnemonic from memory when done. */
-    fun createWallet(onResult: (Boolean) -> Unit) {
+    fun createWallet(onResult: (Boolean) -> Unit) = createWallet(seedKeyPrompt = null, onResult = onResult)
+
+    /**
+     * As [createWallet], with the KS-BIND seed-key step first: [prepareSeedKeyThenPrompt] probes the
+     * auth-bound key and, when the auth window has lapsed, runs [seedKeyPrompt] once and awaits it.
+     * Both run here, in [viewModelScope], in ONE coroutine with the write: a screen that leaves
+     * composition while the prompt is up (activity recreated, navigated away) cancels nothing, so the
+     * PIN it already saved is never left without the wallet record it was saved for.
+     */
+    fun createWallet(seedKeyPrompt: (suspend () -> Unit)?, onResult: (Boolean) -> Unit) {
         val phrase = _mnemonic.joinToString(" ")
         // This create's own copy: clearing the screen's copy (onCleared) never changes the bytes a
         // create in progress is using, and this one is zeroed however the create ends.
         val pass = _passphrase?.copyOf()
         viewModelScope.launch {
             _uiState.value = OnboardingUiState.Loading
+            if (seedKeyPrompt != null) {
+                prepareSeedKeyThenPrompt(prepare = { walletManager.prepareSeedKeyForNewRecord() }, prompt = seedKeyPrompt)
+            }
             val success = try {
                 withContext(Dispatchers.Default) {
                     // Do NOT clearPin here — PinSetupScreen calls setPin() right
@@ -217,13 +230,19 @@ class OnboardingViewModel @Inject constructor(
     }
 
     /** Recover wallet from entered mnemonic and chosen timestamp. */
-    fun recoverWallet(onResult: (Boolean) -> Unit) {
+    fun recoverWallet(onResult: (Boolean) -> Unit) = recoverWallet(seedKeyPrompt = null, onResult = onResult)
+
+    /** As [recoverWallet], with the KS-BIND seed-key step first, in the same coroutine (see [createWallet]). */
+    fun recoverWallet(seedKeyPrompt: (suspend () -> Unit)?, onResult: (Boolean) -> Unit) {
         val phrase = _mnemonic.joinToString(" ")
         val ts = _recoveryTimestamp
         // This restore's own copy, as in createWallet.
         val pass = _passphrase?.copyOf()
         viewModelScope.launch {
             _uiState.value = OnboardingUiState.Loading
+            if (seedKeyPrompt != null) {
+                prepareSeedKeyThenPrompt(prepare = { walletManager.prepareSeedKeyForNewRecord() }, prompt = seedKeyPrompt)
+            }
 
             // NOTE: no depth gate here. Restores are accepted at ANY depth — the
             // paced convoy bounds the memory of an arbitrarily deep CF scan, so

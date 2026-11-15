@@ -22,8 +22,10 @@
 #               16384 two rows for one outpoint that differ in credit or id are read; 32768 a carrier that
 #               cannot be classified writes UNCHECKED rows. h<bit>: -DASSET_HOLD_UNFIXED=<bit> (BRAssetHold.h,
 #               the pieces detection reads through it): 8 a funding transaction's remainder is never walked
-#               back; 128 a remainder proof is not read; 256 a transaction's carrier is its first carrier
-#               output. Each arm fails exactly the cases CASES lists for it and passes every other.
+#               back; 128 a remainder proof is not read; 256 (ASSET_HOLD_RED_SECOND_RULE) the carrier is read
+#               by the header's own rule from before the ONE CARRIER RULE (the first unclassifiable OP_RETURN
+#               carrier, else the last carrier), not by BRTxAssetCarrier. Each arm fails exactly the cases CASES
+#               lists for it and passes every other.
 #   shipped     both macros 0: every case passes, exit 0.
 # All arms under ASan + UBSan, 64-bit. The units under test are the headers; the core sources they call
 # (BRDigiAsset.c's classifier, BRCrypto.c, BRBase58.c, and what those need) are built once, without seams. The
@@ -77,19 +79,19 @@ CASES=(
     recv_skip:-
     recv_indexer_names:-
     recv_mixed:-
-    recv_issuance:d32
+    recv_issuance:d32,d32768,h256
     recv_offline_and_retries:d1,d8
     arith_receive:d1,d128,d32768
     protect_targets:d32768
-    rows_outputs:d1,d2,d4
-    rows_carrier:d32768,h256
+    rows_outputs:d1,d2,d4,d32768,h256
+    rows_carrier:d1,d32768,h256
     placeholder_rules:d32
     all_settled:d8
     rules_step:d64,d128
     inputs_read:d16,h8,h128
     outgoing_and_asks:d1,d4,d256,d512
     issuance_walk:d32,d2048,d65536
-    rename_rows:d32,d1024,h256
+    rename_rows:d32,d1024,d32768,h256
     facts_walk:d4096
     refusals:d16384
     capacity:-
@@ -100,7 +102,7 @@ CASES=(
 ARMS=(d1:ownership-ignored d2:opreturn-rows d4:empty-owned-none d8:settled-reallocated d16:input-dropped
       d32:placeholder-always d64:rules-unknown-free d128:rules-unasked-free d256:ask-unowned d512:ask-outgoing
       d1024:rename-any d2048:walk-once-dropped d4096:facts-uncounted d8192:claim-earlier-rule d16384:duplicate-rows
-      d32768:unclassifiable-rows d65536:walk-unrenamable h8:walk-stops h128:proof-ignored h256:first-carrier)
+      d32768:unclassifiable-rows d65536:walk-unrenamable h8:walk-stops h128:proof-ignored h256:second-rule)
 
 macro_of() {   # <d|h> -> the seam macro
     case "$1" in d) echo ASSET_DETECT ;; h) echo ASSET_HOLD ;; esac

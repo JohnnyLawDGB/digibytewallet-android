@@ -9,6 +9,7 @@ import app.aroundtheblock.wallet.core.sync.ChainTipStore
 import app.aroundtheblock.wallet.core.sync.FilterHeaderStore
 import app.aroundtheblock.wallet.core.sync.HistoryRebuildOnUpgrade
 import app.aroundtheblock.wallet.core.sync.SavedBlockStore
+import app.aroundtheblock.wallet.core.sync.SavedTransactionsStore
 
 /**
  * Recovers from corruption — WITHOUT ever touching the wallet seed (`dgb_wallet_seed`)
@@ -76,16 +77,20 @@ object StaleDataWiper {
         // .clear() above never touches it.
         SavedBlockStore.delete(context)
         val savedBlocks = gone { SavedBlockStore.file(context) }
+        // The transaction checkpoint (`saved_transactions<net>.bin`, TX-CKPT-CAP) is file-backed as
+        // well; a corrupt one is exactly what this breaker exists to clear.
+        val savedTransactions = runCatching { SavedTransactionsStore.delete(context) }.getOrDefault(false) &&
+            gone { SavedTransactionsStore.file(context) }
         // ChainTipStore's persisted value went out with the dgb_sync_data .clear() above, but its
         // in-memory mirror did not — and this runs from BootGuard on a crash-loop recovery, in a
         // process that keeps running afterwards. Left stale, the mirror would be re-persisted on
         // the next UI poll and quietly undo the wipe.
         ChainTipStore.invalidateCache()
 
-        val landed = syncData && peerCache && filterState && savedBlocks
+        val landed = syncData && peerCache && filterState && savedBlocks && savedTransactions
         if (!landed) {
             android.util.Log.e("StaleDataWiper", "Sync state not fully cleared (sync=$syncData peers=$peerCache " +
-                "filter=$filterState blocks=$savedBlocks); a start that dies again runs this again")
+                "filter=$filterState blocks=$savedBlocks txs=$savedTransactions); a start that dies again runs this again")
         }
         return landed
     }

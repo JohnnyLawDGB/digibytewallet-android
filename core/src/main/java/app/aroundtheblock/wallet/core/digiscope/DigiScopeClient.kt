@@ -1,6 +1,7 @@
 package app.aroundtheblock.wallet.core.digiscope
 
 import android.content.Context
+import app.aroundtheblock.wallet.core.LogSafe
 import app.aroundtheblock.wallet.core.hub.ChatMessage
 import app.aroundtheblock.wallet.core.hub.DigiRunnerStats
 import app.aroundtheblock.wallet.core.hub.LeaderboardEntry
@@ -20,6 +21,18 @@ data class DigiScopeProfile(
     val address: String,
     val tipBalance: Long
 )
+
+/** The runId of a DigiRunner run as the server issues it: 32 lower-case hex characters. */
+internal object DigiRunnerRunId {
+    private val FORM = Regex("^[0-9a-f]{32}$")
+
+    /** The runId in the run endpoint's answer, or null when there is none of that form. */
+    fun parse(answer: String): String? = try {
+        (JSONObject(answer).opt("runId") as? String)?.takeIf { FORM.matches(it) }
+    } catch (e: org.json.JSONException) {
+        null
+    }
+}
 
 class DigiScopeClient(
     baseClient: OkHttpClient,
@@ -142,7 +155,8 @@ class DigiScopeClient(
             android.util.Log.i("DigiScope", "quickLogin: token=${if (token != null) "received" else "null"}")
             token != null
         } catch (e: Exception) {
-            android.util.Log.e("DigiScope", "quickLogin: exception: ${e.message}", e)
+            // ASSET-LOG-CRLF: not the throwable -- the challenge parse would quote the server body in its trace.
+            android.util.Log.e("DigiScope", "quickLogin: exception: ${e::class.java.simpleName}: ${LogSafe.text(e.message)}")
             false
         }
     }
@@ -333,20 +347,49 @@ class DigiScopeClient(
 
     // ── DigiRunner Leaderboard ────────────────────────────────────────────────
 
-    suspend fun submitDigiRunnerScore(score: Int, distance: Int, coins: Int, livesRemaining: Int): Boolean =
+    /**
+     * Start a DigiRunner run on the server (POST /hub/digirunner/run, answered 201 {"runId"}) and
+     * return its runId, which the score of that run is submitted with (DIGIRUNNER-RUNID). Null when
+     * signed out, offline, refused, or the server predates runs: the game plays on and the score is
+     * submitted without one. The runId and the answer are never logged.
+     */
+    suspend fun startDigiRunnerRun(): String? = withContext(Dispatchers.IO) {
+        val token = jwtToken ?: return@withContext null
+        try {
+            val request = Request.Builder()
+                .url("$BASE_URL/hub/digirunner/run")
+                .header("Authorization", "Bearer $token")
+                .post("{}".toRequestBody("application/json".toMediaType()))
+                .build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    android.util.Log.w("DigiScope", "startRun: HTTP ${response.code}")
+                    return@withContext null
+                }
+                val text = BoundedBody.text(response.body, SMALL_BODY_BYTES) ?: return@withContext null
+                DigiRunnerRunId.parse(text)
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("DigiScope", "startRun failed: ${e.javaClass.simpleName}")
+            null
+        }
+    }
+
+    suspend fun submitDigiRunnerScore(score: Int, distance: Int, coins: Int, livesRemaining: Int, runId: String? = null): Boolean =
         withContext(Dispatchers.IO) {
             val token = jwtToken
             if (token == null) {
                 android.util.Log.e("DigiScope", "submitScore: no token")
                 return@withContext false
             }
-            android.util.Log.d("DigiScope", "submitScore: score=$score distance=$distance coins=$coins lives=$livesRemaining expected=${distance/100 + coins*5}")
+            android.util.Log.d("DigiScope", "submitScore: score=$score distance=$distance coins=$coins lives=$livesRemaining expected=${distance/100 + coins*5} run=${runId != null}")
             try {
                 val json = JSONObject().apply {
                     put("score", score)
                     put("distance", distance)
                     put("coins", coins)
                     put("livesRemaining", livesRemaining)
+                    if (runId != null) put("runId", runId)
                 }
                 val body = json.toString().toRequestBody("application/json".toMediaType())
                 val request = Request.Builder()
@@ -356,11 +399,11 @@ class DigiScopeClient(
                     .build()
                 client.newCall(request).execute().use { response ->
                     val respBody = BoundedBody.text(response.body, SMALL_BODY_BYTES)
-                    android.util.Log.d("DigiScope", "submitScore: ${response.code} — $respBody")
+                    android.util.Log.d("DigiScope", "submitScore: ${response.code} — ${LogSafe.text(respBody)}")
                     response.isSuccessful
                 }
             } catch (e: Exception) {
-                android.util.Log.e("DigiScope", "submitScore exception: ${e.message}")
+                android.util.Log.e("DigiScope", "submitScore exception: ${LogSafe.text(e.message)}")
                 false
             }
         }

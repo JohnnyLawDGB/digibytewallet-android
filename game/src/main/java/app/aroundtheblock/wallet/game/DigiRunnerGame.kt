@@ -188,6 +188,8 @@ private fun maybeSpawnObstacles(state: GameState): GameState {
  * DigiRunner — a side-scrolling runner mini-game that plays during blockchain sync.
  *
  * @param syncProgress 0.0..1.0 — controls scroll speed (faster as sync progresses)
+ * @param onRunStart called once as each run starts: the first one, and every "Play Again". The host
+ *   asks the server for that run's runId here (DIGIRUNNER-RUNID); the game never waits for it.
  */
 @Composable
 fun DigiRunnerGame(
@@ -195,11 +197,20 @@ fun DigiRunnerGame(
     standalone: Boolean = false,
     onScoreSubmit: ((score: Int, distance: Int, coins: Int, livesRemaining: Int) -> Unit)? = null,
     onShowLeaderboard: (() -> Unit)? = null,
+    onRunStart: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var gameState by remember { mutableStateOf(generateInitialState()) }
     var lastFrameTime by remember { mutableLongStateOf(0L) }
     val textMeasurer = rememberTextMeasurer()
+    val currentOnRunStart by rememberUpdatedState(onRunStart)
+
+    // The first run starts with the game; each "Play Again" starts the next one.
+    LaunchedEffect(Unit) { currentOnRunStart?.invoke() }
+    fun playAgain() {
+        gameState = generateInitialState()
+        currentOnRunStart?.invoke()
+    }
 
     // ── Game loop ─────────────────────────────────────────────────────────────
     LaunchedEffect(Unit) {
@@ -281,7 +292,7 @@ fun DigiRunnerGame(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Button(
-                    onClick = { gameState = generateInitialState() },
+                    onClick = { playAgain() },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0066CC))
                 ) {
                     Text("Play Again", color = Color.White)

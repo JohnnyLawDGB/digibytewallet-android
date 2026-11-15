@@ -295,6 +295,12 @@ static void test_no_veto_above_top_checkpoint(void)
     manager->lastBlock = floorBlock;
 
     BRPeer *peer = BRPeerNew(BRMainNetParams.magicNumber);
+    // G5-QUORUM: above the top checkpoint a lone peer's word no longer re-anchors, except for
+    // the user's own node in exclusive mode -- so this control runs as that node, the one
+    // lone-peer re-anchor left above the table (cf_lone_peer_quorum_kat covers the rest).
+    peer->address.u8[15] = 0x42;
+    peer->port = 12024;
+    BRPeerManagerSetPinnedPeer(manager, peer->address, peer->port, /*exclusive=*/1);
 
     // Anchor strictly ABOVE the top pinned checkpoint (read from the real
     // table, not hand-typed, so a future checkpoint-table regen can't

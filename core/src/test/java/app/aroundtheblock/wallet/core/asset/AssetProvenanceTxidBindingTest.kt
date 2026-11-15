@@ -159,7 +159,7 @@ class AssetProvenanceTxidBindingTest {
                         client = client,
                     )
                 },
-                opReturnOf = { raw -> parsed += hex(raw); opReturnOfFixture[hex(raw)] },
+                outputScriptsOf = { raw -> parsed += hex(raw); opReturnOfFixture[hex(raw)]?.let { listOf(it) } },
                 deriveIssuanceAssetId = { prevTxid, prevVout, _, _ -> "La-" + prevTxid.take(8) + ":" + prevVout },
             )
         },

@@ -16,7 +16,7 @@ Full Kotlin rewrite of the DigiByte Android SPV wallet. Jetpack Compose UI, C na
 > Since 2026-10-26 an independent agent review plus green CI stand in for Mark's review of a PR
 > into `develop` (core, Android, iOS). Releases, force-pushes, security decisions and private
 > advisories stay his. That file is the one copy of the rule; do not restate it here.
-**Version:** v4.1.3 (versionCode 40103)  _(source of truth: `app/build.gradle.kts` `versionName`/`versionCode` — bump there on release and mirror here)_
+**Version:** v4.1.4 (versionCode 40104)  _(source of truth: `app/build.gradle.kts` `versionName`/`versionCode` — bump there on release and mirror here)_
 **Test devices:** Samsung SM-N950U (Galaxy Note 8, Android 9, API 28); Galaxy S25 Ultra (Android 15, API 35) for 16 KB page-size / modern-API coverage
 
 ## Module Structure
@@ -58,6 +58,7 @@ adb install -r app/build/outputs/apk/mainnet/debug/app-mainnet-debug.apk
 ### Seed Security (CRITICAL-2/3 Remediated)
 - Seed encrypted with AES-256-GCM via Android Keystore (hardware-backed)
 - **The seed key is bound to device authentication wherever the device allows it (shipped v4.0.77).** `KeyStoreManager` wraps the seed under a second, auth-bound key (alias suffix `_v2`): `setUserAuthenticationRequired(true)` with a `SEED_KEY_AUTH_WINDOW_SECS` = 300 s window — `setUserAuthenticationParameters(DEVICE_CREDENTIAL | BIOMETRIC_STRONG)` on API 30+, validity-duration on API 26–29. The whole policy is one pure function, `seedKeyBindingFor(apiLevel, deviceSecure)` in `SeedKeyBinding.kt`, because the first attempt crashed three ways (API 28 encrypt-before-auth, API 33 keygen with no lock screen, API 35 auth-state inconsistency). A device with **no secure lock screen** gets `SeedKeyBinding.NONE` and keeps the unbound key. Outside the window callers get `KeystoreUserAuthRequiredException` — prompt and retry, never a crash; removing the lock screen invalidates the key for good (`KeystoreKeyInvalidatedException` → restore from the phrase). The app's own PIN lock is enforced on top. Spec: `docs/specs/keystore-auth-binding.md`
+- **KS-BIND: a new create or restore is bound from creation**, not only by the later unlock-time migration. The record-writing step (PIN setup for a create, the restore's start for a restore) hands `OnboardingViewModel` a prompt, and the ViewModel runs `prepareSeedKeyThenPrompt` (core, one copy) and the write in one `viewModelScope` coroutine: a probe of the `_v2` key, and ONE device-credential prompt only if the 300 s window has lapsed; anything else falls back to the legacy key, never blocking onboarding. The record is sealed before the native create/restore, right after the probe. Security settings shows a "Wallet key" status line (`seedKeyStatusFor`), which asks the KEY as well as the record, so a bound record whose key no longer opens reads LOCK_REMOVED, and one whose key cannot be asked shows nothing (UNCHECKED), never BOUND. A device with no lock screen gets a one-time notice. Spec: the KS-BIND section of `docs/specs/keystore-auth-binding.md`
 - `loadSeed()` returns `ByteArray` (not String) — on the load/restore/sign path the mnemonic never becomes an immutable JVM heap object. Scope is that path only: generation (`generateMnemonic` returns a `jstring`), onboarding display and the seed-view screen still hold Strings — recorded as AUDIT-SUMMARY P2
 - `createWalletFromBytes` / `recoverWalletFromBytes` JNI accept `jbyteArray` with `secure_zero()` on C stack
 - `g_seed` is `static` to `jni_wallet.c` — accessor API (`seed_sign_transaction`, `seed_derive_key`) prevents direct access from other compilation units
@@ -278,14 +279,14 @@ All JNI functions follow: `Java_io_digibyte_core_bridge_NativeBridge_<methodName
 
 ### SharedPreferences Keys
 - `dgb_wallet_seed` — encrypted mnemonic + IV + seed fingerprint
-- `dgb_sync_data` — saved blocks (hex), saved peers (hex), has_synced flag, last_balance, saved_transactions. NOTE: the compact-filter header chain moved OUT of this prefs blob to a plain file `filesDir/saved_filter_headers<net>.bin` in v3.10.29 (`core/…/sync/FilterHeaderStore.kt`) — a hex String here was pinned in the SharedPreferences in-memory map and re-grown on every cfheaders batch (a 512MB heap leak that OOM-looped long-history wallets so they never fully synced).
+- `dgb_sync_data` — saved peers (hex), has_synced flag, last_balance, transactions_checkpointed + saved_transactions_count. NOTE: the compact-filter header chain moved OUT of this prefs blob to a plain file `filesDir/saved_filter_headers<net>.bin` in v3.10.29 (`core/…/sync/FilterHeaderStore.kt`) — a hex String here was pinned in the SharedPreferences in-memory map and re-grown on every cfheaders batch (a 512MB heap leak that OOM-looped long-history wallets so they never fully synced). The transaction checkpoint (`saved_transactions`) moved OUT too, to `filesDir/saved_transactions<net>.bin` (`core/…/sync/SavedTransactionsStore.kt`, TX-CKPT-CAP) — at the 100,000-record limit its hex reached ~50 MB pinned in the same map; the legacy key is migrated once and removed only after the file lands, and `saved_transactions_count` beside `transactions_checkpointed` lets a restore tell a lost file from an empty wallet.
 - `dgb_settings` — `sync_mode` (legacy key, now ignored — sync is always compact-filters-only; see `syncModeFor`), `cf_birth_height` (compact-filter scan floor)
 - `dgb_digiscope` — JWT session token for Hub
 - `dgb_db_key` — encrypted DB passphrase
 - `dgb_bloom_peers` — cached bloom peer list from seeder API
 - `dgb_dandelion` — `enabled` flag for Dandelion++ stem submission (default off / opt-in)
 - `dgb_dandelion_peers` — cached Dandelion-capable peer list from seeder
-- `dgb_pin_store` — EncryptedSharedPreferences for PIN hash
+- `dgb_pin_store` — the OLD EncryptedSharedPreferences PIN store (androidx.security-crypto alpha); since PIN-STORE it is read once, migrated into `noBackupFilesDir/dgb_pin_store.bin` (AES-256-GCM under Keystore alias `dgb_pin_store_key`, `PinStoreMigration` in `core/security/FilePinStore.kt`) and deleted. The Hub JWT (`dgb_hub_session`, `HubTokenStore`) still uses EncryptedSharedPreferences
 - `dgb_price` — `price_fetch_enabled`, Settings → Display → Show prices (default on; off: no price request, no fiat figure, cached price dropped). Survives a wipe or restore, like the own node and the balance mask (owner decision 2026-11-09); the wipe drops only the cached price (Room)
 - `dgb_price<net>` — also `display_currency` (the `DisplayCurrency` enum name), moved out of `dgb_sync_data` so a wipe, a restore and the crash-loop breaker keep it (owner decision 2026-11-12, same on iOS). `core/settings/DisplayCurrencyPrefs` moves an old value before any path clears the sync blob
 
