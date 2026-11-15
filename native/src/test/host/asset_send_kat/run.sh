@@ -249,6 +249,8 @@ red 8192  prespent       "conflicted_spent_funding spent_before_sign"
 red 16384 gate           "gate_claims"
 red 32768 duplicate      "duplicate_input"
 red 65536 rules          "rule_state fuzz"
+red 131072 one-family    "one_family_input"
+red 262144 sign-gate     "no_memory sign_failed sign_gate_input"
 
 # ---- MUTANTS -----------------------------------------------------------------------------------------------------
 # Each `if (` of BRAssetSend.c in turn is made never to fire: its whole condition C becomes `0 && (C)`. A line the
@@ -332,7 +334,7 @@ fi
 echo "  [leaks] $leak_note"
 
 if [ "$FAIL" -eq 0 ]; then
-    arms_note="seventeen comparison arms red on exactly theirs"
+    arms_note="nineteen comparison arms red on exactly theirs"
     [ "$ARMS" = "0" ] && arms_note="comparison arms skipped (KAT_ARMS=0)"
     echo "PASS: asset_send_kat (bridge and core sign the same bytes wherever both sign; $arms_note; $mutant_note; ASan+UBSan; portability; leaks: $leak_note)"
     exit 0

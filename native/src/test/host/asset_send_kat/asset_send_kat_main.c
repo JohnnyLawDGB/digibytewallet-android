@@ -23,6 +23,11 @@
 //                    BRSweepRuleState does not define): refused before anything else is read.
 //   conflicted_*     asset_conflicted_send_kat's wallet (a stuck send replaced by a re-send): its assertions on
 //                    BRWalletOutpointAssetState, then a send from each outpoint it names.
+//   one_family_input an asset row naming an output of a transaction marked both DigiDollar and DigiAsset:
+//                    OTHER_FAMILY (15a), and the bridge refuses it too (tx_inputs_one_family_ok).
+//   sign_gate_input  an asset row naming an unconfirmed coin someone else sent: NOT_APPROVED with
+//                    BR_ASSET_SIGN_COIN_NOT_WALLETS (15b), and the bridge refuses it too (asset_sign_check);
+//                    once confirmed it is a coin selection would spend, and both sign the same bytes.
 //   shape_*, bounds_*, duplicate_input, carrier_*, fee_mismatch, held_*, fee_coin_*, record_*, spent_*,
 //   gate_*, sign_failed, no_memory, not_planned, arguments: every check of BRAssetSend.h, each status.
 //   keys_wiped       checked after EVERY core call in every scenario too: no block the core's unit frees holds
@@ -49,6 +54,7 @@
 #include "BRBIP32Sequence.h"
 #include "BRAddress.h"
 #include "BRCoinReservation.h"
+#include "BRDigiDollar.h"       // DD_VERSION_MARKER, DD_TYPE_TRANSFER
 #include "coin_reservation.h"   // the bridge's table
 
 // ---- the bridge -----------------------------------------------------------------------------------------------
@@ -188,7 +194,8 @@ static const char *statusName(BRAssetTransferStatus s)
     static const char *n[] = { "SIGNED", "BAD_ARGUMENT", "NOT_PLANNED", "BAD_SEED", "NO_MEMORY", "PLAN_SHAPE",
         "WRONG_ASSET", "BAD_INPUT", "DUPLICATE_INPUT", "BAD_RECIPIENT", "CARRIER_MISMATCH", "UNITS_MISPLACED",
         "FEE_MISMATCH", "FEE_NOT_APPROVED", "INPUT_SPENT", "INPUT_CONFLICTED", "INPUT_UNKNOWN", "INPUT_MISMATCH",
-        "INPUT_HELD", "FEE_COIN_NOT_PLAIN", "SIGN_FAILED", "GATE_REFUSED", "RULE_STATE" };
+        "INPUT_HELD", "FEE_COIN_NOT_PLAIN", "SIGN_FAILED", "GATE_REFUSED", "RULE_STATE", "OTHER_FAMILY", "NOT_APPROVED",
+        "SIGNED_NOT_APPROVED" };
     return ((unsigned)s < sizeof(n) / sizeof(*n)) ? n[s] : "?";
 }
 
@@ -227,11 +234,13 @@ static void finalizeTxHash(BRTransaction *tx)
 // A receive: one foreign input, outputs out[0, count) to the scripts given, and, when carrierQty is above 0,
 // a transfer carrier last that names output 0 with carrierQty units. Registered in the wallet (confirmed when
 // asked); its hash is kept for cleanup().
-static UInt256 fund(const uint8_t *const spk[], const size_t spkLen[], const uint64_t amt[], size_t count,
-                    int64_t carrierQty, int confirmed)
+// fundAs: the same, at nVersion `version` (0: BRTransactionNew's).
+static UInt256 fundAs(uint32_t version, const uint8_t *const spk[], const size_t spkLen[], const uint64_t amt[],
+                      size_t count, int64_t carrierQty, int confirmed)
 {
     static const uint8_t kEmpty[1] = { 0 };
     BRTransaction *tx = BRTransactionNew();
+    if (version) tx->version = version;
     UInt256 prev;
     memset(prev.u8, 0, 32);
     uint32_t t = g_tag++;
@@ -255,6 +264,12 @@ static UInt256 fund(const uint8_t *const spk[], const size_t spkLen[], const uin
     if (confirmed) BRWalletUpdateTransactions(g_wallet, &h, 1, 1000000 + t, 1780000000u + t);
     if (g_fundedCount < sizeof(g_funded) / sizeof(*g_funded)) g_funded[g_fundedCount++] = h;
     return h;
+}
+
+static UInt256 fund(const uint8_t *const spk[], const size_t spkLen[], const uint64_t amt[], size_t count,
+                    int64_t carrierQty, int confirmed)
+{
+    return fundAs(0, spk, spkLen, amt, count, carrierQty, confirmed);
 }
 
 static void cleanup(void)
@@ -475,7 +490,12 @@ static BRAssetTransferStatus coreSign(const Plan *p, const BRAssetSendOutcome *o
         check(r.input == SIZE_MAX, "SIGNED reports input %zu", r.input);
         check(r.paidFeeSats == o->plan.paidFeeSats, "SIGNED reports fee %lld, the plan %lld",
               (long long)r.paidFeeSats, (long long)o->plan.paidFeeSats);
+        check(r.signVerdict == BR_ASSET_SIGN_OK, "SIGNED reports sign verdict %d", (int)r.signVerdict);
     } else {
+        // The sign gate's verdict is reported by its two statuses, and only by them.
+        if (s == BR_ASSET_TRANSFER_NOT_APPROVED || s == BR_ASSET_TRANSFER_SIGNED_NOT_APPROVED)
+            check(r.signVerdict != BR_ASSET_SIGN_OK, "%s reports no sign verdict", statusName(s));
+        else check(r.signVerdict == BR_ASSET_SIGN_OK, "%s reports sign verdict %d", statusName(s), (int)r.signVerdict);
         check(tx == NULL, "refused (%s) and *txOut is not NULL", statusName(s));
         // The wallet's checks (15) name the input they refuse, as BAD_INPUT does; every other refusal names none.
         if (s >= BR_ASSET_TRANSFER_INPUT_SPENT && s <= BR_ASSET_TRANSFER_FEE_COIN_NOT_PLAIN)
@@ -1346,6 +1366,57 @@ static void fee_coin_not_plain(void)
     cleanup();
 }
 
+// ONE-FAMILY (15a): an asset row naming an output of a transaction marked DigiDollar (its nVersion) and DigiAsset (a
+// carrier naming that output). Check 15 finds it unspent, valid and at its row; it is OTHER_FAMILY (-3).
+static void one_family_input(void)
+{
+    Coin a[1], f[1];
+    Plan p;
+    const uint8_t *s[1] = { g_ownSpk[1][0] };
+    size_t l[1] = { g_ownLen[1][0] };
+    uint64_t amt[1] = { 6000 };
+    UInt256 h = fundAs(((uint32_t)DD_TYPE_TRANSFER << 24) | DD_VERSION_MARKER, s, l, amt, 1, 600, 1);
+    coinSet(&a[0], h, 0, s[0], l[0], 6000, kAsset, 600);
+    plainCoin(&f[0], 1, 1, 40000000);
+    check(BRWalletOutpointAssetState(g_wallet, h, 0) == -3 && BRWalletOutpointIsOneFamilyHeld(g_wallet, h, 0) == 1,
+          "setup: the dual-family output is OTHER_FAMILY");
+    Coin *as[1] = { &a[0] }, *fs[1] = { &f[0] };
+    check(choose(&p, as, 1, fs, 1, 100, 100000), "planned");
+    sendBoth("an output of a dual-family transaction as the asset input", &p, &p.o, kAsset, 100, recip(), NOLIMIT, NULL, 0,
+             BR_ASSET_TRANSFER_OTHER_FAMILY, 0);
+    cleanup();
+}
+
+// ASSET-SIGN-GATE (15b): an asset row naming an unconfirmed coin someone else sent to the wallet. Check 15 finds it
+// unspent, valid and at its row; it is neither a coin the wallet's selection would spend nor a DigiAsset holding.
+// Confirmed, it is a coin selection would spend, which the gate admits as any input: both sides sign it.
+static void sign_gate_input(void)
+{
+    Coin a[1], f[1];
+    Plan p;
+    const uint8_t *s[1] = { g_ownSpk[1][8] };
+    size_t l[1] = { g_ownLen[1][8] };
+    uint64_t amt[1] = { 6000 };
+    UInt256 h = fund(s, l, amt, 1, 0, 0);
+    coinSet(&a[0], h, 0, s[0], l[0], 6000, kAsset, 600);
+    plainCoin(&f[0], 1, 1, 40000000);
+    BRUTXO held[16];
+    size_t nHeld = BRWalletAssetUTXOs(g_wallet, held, 16), k;
+    for (k = 0; k < nHeld && ! (held[k].n == 0 && UInt256Eq(held[k].hash, h)); k++) ;
+    check(BRWalletOutpointAssetState(g_wallet, h, 0) == 1 && ! BRWalletOutpointSelectable(g_wallet, h, 0) && k == nHeld,
+          "setup: the unconfirmed receive is the wallet's, not selectable and not a DigiAsset holding");
+    Coin *as[1] = { &a[0] }, *fs[1] = { &f[0] };
+    check(choose(&p, as, 1, fs, 1, 100, 100000), "planned");
+    sendBoth("an unconfirmed coin someone else sent as the asset input", &p, &p.o, kAsset, 100, recip(), NOLIMIT, NULL, 0,
+             BR_ASSET_TRANSFER_NOT_APPROVED, 0);
+    check(g_lastReport.signVerdict == BR_ASSET_SIGN_COIN_NOT_WALLETS, "the gate's verdict is COIN_NOT_WALLETS (%d)",
+          (int)g_lastReport.signVerdict);
+    BRWalletUpdateTransactions(g_wallet, &h, 1, 1500000, 1790000000u);
+    check(BRWalletOutpointSelectable(g_wallet, h, 0), "setup: confirmed, it is a coin selection would spend");
+    sendBoth("the same coin, confirmed", &p, &p.o, kAsset, 100, recip(), NOLIMIT, NULL, 0, BR_ASSET_TRANSFER_SIGNED, 2);
+    cleanup();
+}
+
 static void record_mismatch(void)
 {
     Coin a[1], f[1];
@@ -1436,7 +1507,22 @@ static void sign_failed(void)
     plainCoin(&f[0], 1, 1, 40000000);
     Coin *as[1] = { &a[0] }, *fs[1] = { &f[0] };
     check(choose(&p, as, 1, fs, 1, 10, 100000), "planned");
-    sendBoth("an input the wallet has no key for", &p, &p.o, kAsset, 10, recip(), NOLIMIT, NULL, 0, BR_ASSET_TRANSFER_SIGN_FAILED, 0);
+    // Its script is the plan's source script, so the change pays an address that is not the wallet's: the sign gate,
+    // which reads the outputs first, refuses it before anything is signed (15b), as the bridge's does.
+    sendBoth("an input the wallet has no key for", &p, &p.o, kAsset, 10, recip(), NOLIMIT, NULL, 0, BR_ASSET_TRANSFER_NOT_APPROVED, 0);
+    check(g_lastReport.signVerdict == BR_ASSET_SIGN_NOT_APPROVED, "the gate's verdict is NOT_APPROVED (%d)",
+          (int)g_lastReport.signVerdict);
+    cleanup();
+    // The wallet's own coins, signed with a seed that is not the wallet's: no input is signed (17). The bridge signs
+    // with its own seed, so it is not asked.
+    Coin a2[1], f2[1];
+    Plan p2;
+    uint8_t mine[64];
+    basicPlan(&p2, a2, 1, f2, 1, 100);
+    memcpy(mine, g_seedBytes, sizeof(mine));
+    BRBIP39DeriveKey(g_seedBytes, kOtherMnemonic, NULL);
+    sendBoth("signed with another wallet's seed", &p2, &p2.o, kAsset, 100, recip(), NOLIMIT, NULL, 0, BR_ASSET_TRANSFER_SIGN_FAILED, -2);
+    memcpy(g_seedBytes, mine, sizeof(mine));
     cleanup();
 }
 
@@ -1445,7 +1531,9 @@ static void no_memory(void)
     Coin a[2], f[1];
     Plan p;
     basicPlan(&p, a, 2, f, 1, 800);
-    // Every allocation the core's unit makes, failed in turn, is NO_MEMORY; with none failed, it signs.
+    // Every allocation the core's unit makes, failed in turn, is NO_MEMORY; with none failed, it signs. The last two
+    // are the sign gate's copies of the held DigiAsset outputs (BRAssetSignCheck, 15b and 18a): without one the gate
+    // cannot tell, and answers COIN_UNKNOWN, as the bridge's does; after signing, the claim is released.
     g_failAt = LONG_MAX;
     g_allocSeq = 0;
     sendBoth("counting the core's allocations", &p, &p.o, kAsset, 800, recip(), NOLIMIT, NULL, 0, BR_ASSET_TRANSFER_SIGNED, 2);
@@ -1454,7 +1542,12 @@ static void no_memory(void)
     for (long k = 0; k < total; k++) {
         g_allocSeq = 0;
         g_failAt = k;
-        sendBoth("one of the core's allocations fails", &p, &p.o, kAsset, 800, recip(), NOLIMIT, NULL, 0, BR_ASSET_TRANSFER_NO_MEMORY, -2);
+        BRAssetTransferStatus want = k == total - 2 ? BR_ASSET_TRANSFER_NOT_APPROVED
+                                   : k == total - 1 ? BR_ASSET_TRANSFER_SIGNED_NOT_APPROVED : BR_ASSET_TRANSFER_NO_MEMORY;
+        sendBoth("one of the core's allocations fails", &p, &p.o, kAsset, 800, recip(), NOLIMIT, NULL, 0, want, -2);
+        if (want != BR_ASSET_TRANSFER_NO_MEMORY)
+            check(g_lastReport.signVerdict == BR_ASSET_SIGN_COIN_UNKNOWN, "allocation %ld: the gate's verdict is %d", k,
+                  (int)g_lastReport.signVerdict);
     }
     g_failAt = -1;
     cleanup();
@@ -1586,6 +1679,7 @@ static const Scenario kScenarios[] = {
     { "carrier_units", carrier_units }, { "carrier_list", carrier_list }, { "carrier_noncanonical", carrier_noncanonical },
     { "carrier_not_exact", carrier_not_exact }, { "carrier_not_transfer", carrier_not_transfer },
     { "fee_mismatch", fee_mismatch }, { "held_fee_coin", held_fee_coin }, { "fee_coin_not_plain", fee_coin_not_plain },
+    { "one_family_input", one_family_input }, { "sign_gate_input", sign_gate_input },
     { "record_mismatch", record_mismatch }, { "spent_before_sign", spent_before_sign }, { "gate_claims", gate_claims },
     { "sign_failed", sign_failed }, { "no_memory", no_memory }, { "keys_wiped", keys_wiped }, { "fuzz", fuzz },
 };
