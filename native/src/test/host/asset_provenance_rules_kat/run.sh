@@ -4,8 +4,8 @@
 # classifier, and the search for a named asset's facts), and whether an asset may move by a plain
 # transfer. Moved from Kotlin core/.../asset/AssetProvenanceWalker.kt, AssetManager.kt's
 # classifyProvenanceHopFrom, factsForNamedAsset and verifyTransferRules, and asset/rules/TransferRuleState.kt;
-# their tests (AssetProvenanceWalkerTest, AssetProvenanceTxidBindingTest, AssetTransferRuleGateTest,
-# AssetSendRuleGateTest) run here value for value, beside a line-for-line C model of the Kotlin that the
+# their tests (AssetProvenanceWalkerTest, AssetProvenanceTxidBindingTest, AssetProvenanceCarrierRuleTest,
+# AssetTransferRuleGateTest, AssetSendRuleGateTest) run here value for value, beside a line-for-line C model of the Kotlin that the
 # headers are compared with over fixed pseudo-random inputs. See asset_provenance_rules_kat_main.c.
 #
 #   comparison  one arm per defect. p<bit>: -DASSET_PROVENANCE_UNFIXED=<bit> (BRAssetProvenance.h): 1 the
@@ -17,7 +17,8 @@
 #               2048 a walk's answer for another asset is taken; 4096 the other inputs' transactions are not
 #               walked; 8192 a repeated parent, and the start txid, are walked again; 16384 a row without the
 #               issuance opcode answers for the issuance; 32768 the store's issuance facts are taken without
-#               the id check. r<bit>: -DASSET_RULE_GATE_UNFIXED=<bit> (BRAssetRuleGate.h): 1 a proxy answer
+#               the id check; 65536 the hop decodes the first script that begins 0x6a, not the carrier the one
+#               carrier rule (BRTxAssetCarrier) names. r<bit>: -DASSET_RULE_GATE_UNFIXED=<bit> (BRAssetRuleGate.h): 1 a proxy answer
 #               without rules stands in for the lock; 2 a rule-free opcode is NONE whether or not it is
 #               locked; 4 the proxy's rules object is not read; 8 only opcode 3 carries rules; 16 a locked
 #               issuance of any opcode but 3 and 4 is NONE; 32 the verdict for the facts' asset is taken for
@@ -32,6 +33,10 @@
 #
 # Gates first: each header must test its seam's VALUE (#if, never #ifdef) with an #ifndef default.
 # Then:
+#   VECTORS GATE      the core's vectors/asset-provenance-hop/vectors.txt is what vectors/asset-provenance-hop/generate.c
+#                     writes from this header (and the core's vectors/da-carrier/vectors.txt): the shared hop vectors a
+#                     platform's own hop is held to are current. The case hop_vectors holds the header and the Kotlin
+#                     model to every line of it.
 #   PORTABILITY GATE  each header includes only libc and the core headers whose types or functions it
 #                     uses, reads no clock, does no I/O and allocates nothing, and builds clean under -Wall
 #                     -Wextra -Wpedantic -Werror at c99/c11/c17 (two TUs, the headers included twice in the
@@ -50,6 +55,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../../.." && pwd)"
 CORE_DIR="${CORE_DIR:-$REPO_ROOT/native/src/main/jni/digibytewallet-core}"
 PROV="$CORE_DIR/BRAssetProvenance.h"
+VEC_DIR="$CORE_DIR/vectors/asset-provenance-hop"
+export HOP_VECTORS="$VEC_DIR/vectors.txt"
 GATE="$CORE_DIR/BRAssetRuleGate.h"
 BUILD_DIR="$(mktemp -d)"
 trap 'rm -rf "$BUILD_DIR"' EXIT
@@ -85,8 +92,11 @@ CASES=(
     binding_guard_requested:-
     binding_guard_upper_case:-
     hop_carriers:-
-    hop_rules:p256,p512,p1024
+    hop_rules:p256,p512,p1024,p65536
     hop_edges:-
+    carrier_rule_hops:p65536
+    carrier_rule_walks:p4,p65536
+    hop_vectors:p65536
     walk_refusals:p1,p4,p16,p32
     walk_hop_counts:p1,p2,p16,p32,p128
     walk_path_rules:p1,p8,p16,p32,p64
@@ -113,7 +123,7 @@ CASES=(
     send_no_utxo:-
     send_placeholder:r32
     sweep_walk:p1,p2,p4,p8,p16,p32,p64,p128
-    sweep_hop:p256,p512,p1024
+    sweep_hop:p256,p512,p1024,p65536
     sweep_named:p2048,p4096,p8192,p32768
     sweep_gate:r1,r2,r4,r8,r16,r32
     two_units:-
@@ -121,7 +131,7 @@ CASES=(
 ARMS=(p1:no-resume p2:unavailable-clears p4:dead-end-keeps p8:no-cycle-check p16:ancestor-ignored
       p32:force-reads-cache p64:path-start-only p128:hops-not-carried p256:unlocked-named p512:no-bytes-dead-end
       p1024:burn-walks p2048:other-asset p4096:parents-not-tried p8192:parents-repeated p16384:issuance-any-row
-      p32768:known-unchecked
+      p32768:known-unchecked p65536:first-op-return
       r1:api-loosens r2:unlocked-final r4:api-ignored r8:opcode-4-free r16:any-opcode-free r32:other-asset
       r64:unknown-sends)
 
@@ -196,7 +206,7 @@ strip_comments() {   # a C file with // and /* */ comments removed
         print out }'
 }
 IO_RE='(^|[^A-Za-z0-9_])(time|clock|clock_gettime|gettimeofday|fopen|fread|fwrite|printf|fprintf|open|read|write|socket|malloc|calloc|realloc|free)[[:space:]]*\('
-for pair in "$PROV|\"BRAssetDecode.h\" \"BRAssetId.h\" \"BRTransaction.h\" <stddef.h> <stdint.h> <string.h> " \
+for pair in "$PROV|\"BRAssetDecode.h\" \"BRAssetId.h\" \"BRDigiAsset.h\" \"BRTransaction.h\" <stddef.h> <stdint.h> <string.h> " \
             "$GATE|\"BRSweepPartition.h\" <stdint.h> <string.h> "; do
     h="${pair%%|*}"; want="${pair#*|}"
     CODE="$(strip_comments "$h")"
@@ -321,6 +331,22 @@ EOF
         FAIL=1; strict_ok=0
     fi
 fi
+# ---- VECTORS GATE --------------------------------------------------------------------------
+if [ ! -f "$VEC_DIR/generate.c" ] || [ ! -f "$VEC_DIR/vectors.txt" ]; then
+    echo "VECTORS GATE FAILED: $VEC_DIR/generate.c or vectors.txt is missing"; FAIL=1
+elif ! compgen -G "$BUILD_DIR/strict_objs/*.o" >/dev/null || ! "$CC" -w -std=c99 -include stdint.h -I "$CORE_DIR" -I "$CORE_DIR/secp256k1/include" "$VEC_DIR/generate.c" \
+        "$BUILD_DIR"/strict_objs/*.o -lm -lpthread -o "$BUILD_DIR/gen"; then
+    echo "VECTORS GATE FAILED: generate.c did not compile (a build error is not evidence)"; FAIL=1
+elif ! "$BUILD_DIR/gen" "$CORE_DIR/vectors/da-carrier/vectors.txt" > "$BUILD_DIR/vectors.txt"; then
+    echo "VECTORS GATE FAILED: generate.c did not write its vectors (it exits 1 when a check fails)"; FAIL=1
+elif ! cmp -s "$BUILD_DIR/vectors.txt" "$VEC_DIR/vectors.txt"; then
+    echo "VECTORS GATE FAILED: vectors.txt is not what generate.c writes from this header; regenerate it"
+    diff "$VEC_DIR/vectors.txt" "$BUILD_DIR/vectors.txt" > "$BUILD_DIR/vec.diff"; sed -n '1,8p' "$BUILD_DIR/vec.diff" | cut -c1-200 | sed 's/^/      /'
+    FAIL=1
+else
+    echo "vectors gate: vectors/asset-provenance-hop/vectors.txt is current ($(grep -c '^hop ' "$VEC_DIR/vectors.txt") hops)"
+fi
+
 [ $strict_ok -eq 1 ] && echo "portability gate: libc + the core headers each uses, no clock/I/O/allocation; clean at c99/c11/c17 ($ios_note; $swift_note)"
 
 # ---- the arms ------------------------------------------------------------------------------
@@ -428,6 +454,6 @@ if ! grep -q "detect_leaks is not supported" <<<"$leak_probe"; then
 fi
 echo "leak check: $leak_note"
 
-[ $FAIL -eq 0 ] && echo "PASS: asset_provenance_rules_kat (${#CASES[@]} cases: ${#ARMS[@]} comparison arms each failing exactly its cases, shipped arm clean under ASan + UBSan; leak check $leak_note; portability)"
+[ $FAIL -eq 0 ] && echo "PASS: asset_provenance_rules_kat (${#CASES[@]} cases: ${#ARMS[@]} comparison arms each failing exactly its cases, shipped arm clean under ASan + UBSan; vectors current; leak check $leak_note; portability)"
 [ $FAIL -ne 0 ] && echo "FAIL: asset_provenance_rules_kat"
 exit $FAIL
