@@ -40,7 +40,9 @@ class HubResponseCloseTest {
         "messages" to { it.getMessages(1) },
         "report" to { it.reportContent(messageId = 1, reason = "reason") },
         "handle availability" to { it.checkHandleAvailable("handle") },
+        "game run start" to { it.startDigiRunnerRun() },
         "game score" to { it.submitDigiRunnerScore(1, 1, 1, 1) },
+        "game score with a run" to { it.submitDigiRunnerScore(1, 1, 1, 1, "0123456789abcdef0123456789abcdef") },
         "game leaderboard" to { it.getDigiRunnerLeaderboard() },
         "game stats" to { it.getDigiRunnerStats() },
     )

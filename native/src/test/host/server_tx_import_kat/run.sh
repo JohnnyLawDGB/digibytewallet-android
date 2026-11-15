@@ -15,6 +15,11 @@
 #          manager or parser no longer gives (TAKEN; an unsigned parse) and every call is compared.
 #   RED    -DKAT_RED_NO_FREE_REFUSED (core side only, Linux only: needs LeakSanitizer): a tx the wallet refused is not
 #          freed. Every scenario passes; the leak checker must report a leak, and the green arm must be leak-clean.
+#   RED    -DKAT_RED_FREE_HELD (core side only, DEVMERGE-KAT-NITS): BRWalletRegisterOutcomeHeld always answers no, so
+#          the import frees a tx the wallet kept (the opposite of KAT_RED_NO_FREE_REFUSED). The wallet's next look at
+#          its record must fault under AddressSanitizer: a heap-use-after-free or double-free of a block freed by
+#          BRServerTxImport, in import_unsigned_form (the first scenario whose tx the wallet keeps), after exactly the
+#          four scenarios that keep nothing have passed.
 #   GATES  the bridge functions this suite compiles are the ones that ship (they are compiled, not copied); the
 #          header is included twice in one unit and compiles clean under -Wall -Wextra -Werror.
 set -uo pipefail   # NOT -e: a comparison arm's non-zero exit is captured
@@ -127,6 +132,27 @@ red() {
 red KAT_RED_KEEP_UNPROVABLE "import_unprovable note_lowest"
 red KAT_RED_NO_DUP_CHECK "import_not_wallet_again dup_confirmed dup_confirmed_deep dup_pending_rechecking dup_pending_unprovable dup_pending_no_manager dup_pending_scripted_taken confirm_rechecking confirm_above_tip confirm_unprovable confirm_foreign_pending confirm_timestamp_wide confirm_scripted_taken"
 
+# ── KAT_RED_FREE_HELD: a fault is the failure this arm must show (it frees what the wallet holds) ────────────────────
+FREE_HELD_PASSED_WANT="import_empty_bytes import_garbage import_no_wallet import_null_bytes"
+if build "$BUILD_DIR/red_KAT_RED_FREE_HELD" -DKAT_RED_FREE_HELD; then
+    OUT="$(ASAN_OPTIONS="halt_on_error=1 abort_on_error=0 detect_leaks=0" timeout 120 "$BUILD_DIR/red_KAT_RED_FREE_HELD" 2>&1)"; RC=$?
+    [ -n "${KAT_LOG_DIR:-}" ] && printf '%s\n' "$OUT" > "$KAT_LOG_DIR/red_KAT_RED_FREE_HELD.log"
+    FH_PASSED="$(<<<"$OUT" sed -n 's/^SCENARIO-PASS: //p' | sort | tr '\n' ' ' | sed 's/ $//')"
+    # The stack of the free that came first: from "freed by thread" to the next blank line.
+    FH_FREED_BY="$(<<<"$OUT" sed -n '/freed by thread/,/^$/p')"
+    if [ "$RC" -ne 0 ] && <<<"$OUT" grep -Eq "ERROR: AddressSanitizer: (heap-use-after-free|attempting double-free)" \
+       && <<<"$FH_FREED_BY" grep -q " in BRServerTxImport " && <<<"$FH_FREED_BY" grep -q " in runImport " \
+       && [ "$FH_PASSED" = "$FREE_HELD_PASSED_WANT" ] && ! <<<"$OUT" grep -q "^SCENARIO-FAIL" \
+       && ! <<<"$OUT" grep -q "^PASS: server_tx_import_kat"; then
+        echo "  [red KAT_RED_FREE_HELD] the import freed a tx the wallet kept: $(<<<"$OUT" sed -n 's/^SUMMARY: AddressSanitizer: \([a-z-]*\).*/\1/p' | head -1) in import_unsigned_form, freed by BRServerTxImport"
+    else
+        echo "GATE FAILURE: the KAT_RED_FREE_HELD arm (rc=$RC) did not show exactly a use-after-free of the kept tx (passed [$FH_PASSED], required [$FREE_HELD_PASSED_WANT])"
+        <<<"$OUT" grep -E "SCENARIO-FAIL|$SAN_RE" | head -8; FAIL=1
+    fi
+else
+    echo "GATE FAILURE: the KAT_RED_FREE_HELD arm did not build"; FAIL=1
+fi
+
 # ── LEAKS (where LeakSanitizer exists: Linux CI; not on macOS) ─────────────────────────────────────────────────────
 # Every path frees what it parsed or hands it to the wallet: the bridge and the core alike.
 printf '#include <stdlib.h>\nint main(void){return 0;}\n' > "$BUILD_DIR/probe.c"
@@ -156,7 +182,7 @@ else
 fi
 
 if [ "$FAIL" -eq 0 ]; then
-    echo "PASS: server_tx_import_kat (bridge and core agree on every scenario; two comparison arms red on exactly theirs; ASan+UBSan)"
+    echo "PASS: server_tx_import_kat (bridge and core agree on every scenario; two comparison arms red on exactly theirs, KAT_RED_FREE_HELD faulting on the kept tx; ASan+UBSan)"
     exit 0
 fi
 echo "FAIL: server_tx_import_kat"

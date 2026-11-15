@@ -639,8 +639,6 @@ object NativeBridge {
     /** Returns true if the raw serialized transaction contains a DigiAsset OP_RETURN. */
     external fun isAssetTransaction(rawTx: ByteArray): Boolean
 
-    /** Returns the raw script bytes of the first OP_RETURN output, or null if none. */
-    external fun getOpReturnData(rawTx: ByteArray): ByteArray?
 
     /** Walks the outputs of a wallet-known transaction and returns each as
      *  "vout|satoshis|scriptHex". Returns null if the wallet hasn't seen
@@ -771,22 +769,24 @@ object NativeBridge {
      *  [app.aroundtheblock.wallet.core.asset.AssetSpentState]: 0 = SPENT, 1 = HELD, -1 = UNDETECTED
      *  (funding tx unknown — leave the persisted flag unchanged), -2 = CONFLICTED (the
      *  funding tx is known but invalid, i.e. a stuck send that was re-sent; its outputs
-     *  will never exist on-chain). Reads the authoritative spentOutputs set plus
-     *  transaction validity, not the asset-UTXO array. */
+     *  will never exist on-chain), -3 = OTHER_FAMILY (ONE-FAMILY: a DigiDollar output, or an
+     *  output of a transaction marked both DigiDollar and DigiAsset). Reads the authoritative
+     *  spentOutputs set plus transaction validity, not the asset-UTXO array. */
     external fun outpointSpentState(txHashHex: String, vout: Int): Int
 
     /** Where the wallet's balance rule put each outpoint ("txidHex|vout", display order), one code
-     *  per line in order: 1 spendable, 2 held (carries DigiAsset units, explicitly or registered),
+     *  per line in order: 1 in balance (the set the DGB balance sums; SEND-GATE-SET), 2 held (carries DigiAsset units, explicitly or registered),
      *  3 DigiDollar, 4 immature coin generation, 5 not credited (does not pay a derived address),
      *  6 in a pending transaction, 0 spent by a wallet transaction, -1 transaction not held,
      *  -2 transaction held but invalid, -3 line unreadable. Null when no wallet is loaded. See
      *  [app.aroundtheblock.wallet.core.reconcile.WalletOutpointCode]. */
     external fun classifyOutpoints(outpoints: Array<String>): IntArray?
 
-    /** How many of the wallet's spendable outputs are NOT among [outpoints] ("txidHex|vout"), and
-     *  their total satoshis, as [count, sat]: the part of the spendable balance a scan's source did
-     *  not report. Lists no outpoint. Null when no wallet is loaded. */
-    external fun spendableNotListed(outpoints: Array<String>): LongArray?
+    /** How many of the outputs the wallet's balance sums are NOT among [outpoints] ("txidHex|vout"),
+     *  and their total satoshis, as [count, sat]: the part of the balance a scan's source did not
+     *  report. Lists no outpoint. Null when no wallet is loaded. (SEND-GATE-SET: named for the set
+     *  the balance sums, not for what a send may spend.) */
+    external fun balanceCoinsNotListed(outpoints: Array<String>): LongArray?
 
     /** Hold an outpoint OUT of the spendable DGB UTXO set because it carries DigiAsset
      *  units the native tx-local classifier cannot see — chiefly implicit change, the
@@ -900,8 +900,18 @@ object NativeBridge {
      *  (e.g. for the OP_RETURN). Otherwise the address is resolved via
      *  BRAddressScriptPubKey and outputScriptsHex[i] is ignored.
      *
+     *  ASSET-SIGN-GATE: [approvedToAddress] is the recipient the confirmation showed and
+     *  [approvedRecipientSats] the DGB its output carries (the DigiAsset marker); [planFeeSats] is the
+     *  fee of the plan being signed and [approvedMaxFeeSats] the fee the confirmation showed. Native
+     *  refuses, before signing and again on the signed transaction, unless every input is a wallet or
+     *  held-asset coin at the amount the wallet holds, the recipient is paid by exactly one output at
+     *  [approvedRecipientSats], every other output pays the wallet or is the one zero-value data
+     *  output, the fee is exactly [planFeeSats], and [planFeeSats] is no more than
+     *  [approvedMaxFeeSats]. (The plan's fee alone would check the plan against itself; the
+     *  approved fee is what bounds it.)
+     *
      *  Returns signed tx hex, or null on any failure (invalid address,
-     *  hex parse error, signing failure, etc.). */
+     *  hex parse error, signing failure, a refused approval check, etc.). */
     external fun buildAndSignAssetTransferTx(
         inputTxidsHex: Array<String>,
         inputVouts: IntArray,
@@ -910,6 +920,10 @@ object NativeBridge {
         outputAddresses: Array<String>,
         outputAmounts: LongArray,
         outputScriptsHex: Array<String>,
+        approvedToAddress: String,
+        approvedRecipientSats: Long,
+        planFeeSats: Long,
+        approvedMaxFeeSats: Long,
     ): String?
 
     /**

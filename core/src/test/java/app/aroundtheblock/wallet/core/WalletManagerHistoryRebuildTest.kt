@@ -61,7 +61,7 @@ class WalletManagerHistoryRebuildTest {
         writeCache(c) // the new wallet's own records, written by this build
 
         assertEquals(OutcomeKind.NOT_NEEDED, HistoryRebuildOnUpgrade.runAtProcessStart(c).kind)
-        assertTrue(c.getSharedPreferences("dgb_sync_data", Context.MODE_PRIVATE).contains("saved_transactions"))
+        assertTrue(app.aroundtheblock.wallet.core.sync.SavedTransactionsStore.exists(c))
         assertEquals("a different wallet's floor is forgotten", 0L, HistoryRebuildOnUpgrade.floorHint(c))
         assertEquals(0L, HistoryRebuildOnUpgrade.floorTime(c))
     }
@@ -73,7 +73,7 @@ class WalletManagerHistoryRebuildTest {
         writeCache(c)
 
         walletManager(c).rebuildFromChainRescan()
-        assertFalse(c.getSharedPreferences("dgb_sync_data", Context.MODE_PRIVATE).contains("saved_transactions"))
+        assertFalse(app.aroundtheblock.wallet.core.sync.SavedTransactionsStore.exists(c))
         val armed = HistoryRebuildOnUpgrade.readState(c)
         assertFalse("done must be left unset", armed.done)
         assertTrue("the runner is armed", armed.inProgress)
@@ -83,7 +83,7 @@ class WalletManagerHistoryRebuildTest {
         writeCache(c)
 
         assertEquals(OutcomeKind.RAN, HistoryRebuildOnUpgrade.runAtProcessStart(c, 1L) { 0L }.kind)
-        assertFalse(c.getSharedPreferences("dgb_sync_data", Context.MODE_PRIVATE).contains("saved_transactions"))
+        assertFalse(app.aroundtheblock.wallet.core.sync.SavedTransactionsStore.exists(c))
         assertTrue(HistoryRebuildOnUpgrade.readState(c).done)
         assertTrue(HistoryRebuildOnUpgrade.floorTime(c) in 1L..8L)
     }
@@ -134,7 +134,7 @@ class WalletManagerHistoryRebuildTest {
     @Test fun restoreFromDisk_evaluatesTheRebuildBeforeItReadsTheCache() {
         val b = body("restoreFromDisk")
         val eval = b.indexOf("HistoryRebuildOnUpgrade.beforeWalletLoad(")
-        val read = b.indexOf("getString(\"saved_transactions\"")
+        val read = b.indexOf("SavedTransactionsStore.load(context)")
         assertTrue("scanner is blind: no cache read", read >= 0)
         assertTrue("the rebuild is not evaluated before the cache is read", eval in 0 until read)
         assertTrue("a partial rebuild must not load the cache", b.substring(eval, read).contains("isInProgress("))

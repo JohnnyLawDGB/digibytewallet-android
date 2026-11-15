@@ -1,11 +1,15 @@
-// Host KAT: the core derives exactly the addresses in vectors/derivation/abandon-about.txt.
+// Host KAT: the core derives exactly the addresses in a vectors/derivation/*.txt file (argv[1]).
 //
 // The vectors come from vectors/derivation/generate.py, an implementation independent of the
 // core (Python standard library only; it reproduces the published BIP84, BIP86 and BIP44 test
-// vectors). The iOS test target reads the same file. Every address is checked three ways:
+// vectors). No iOS test target exists yet; one must read the same files. Every address is
+// checked three ways:
 //   from the master PUBLIC key, as the wallet derives what it watches (BRBIP32PubKey);
 //   from the PRIVATE key the wallet signs with (BRBIP32PrivKey*), so watched == spendable;
 //   contained in a wallet built by the shared recipe (BRWalletNewDual + BRWalletSetTaprootKey).
+// The file's phrase itself is held to BIP39 (GUARD mnemonic_bip39_valid, DERIV-24): the core
+// must accept it, decode it to words*4/3 bytes of entropy and re-encode the same phrase, and the
+// KAT prints its word count (WORDS n), which run.sh pairs with each file.
 //
 // Built twice by run.sh:
 //   -DDERIVATION_VECTORS_RED  plausible porting mistakes: BIP84 over the legacy master key,
@@ -17,6 +21,7 @@
 #include "BRWallet.h"
 #include "BRBIP32Sequence.h"
 #include "BRBIP39Mnemonic.h"
+#include "BRBIP39WordsEn.h"
 #include "BRKey.h"
 #include "BRAddress.h"
 #include <stdio.h>
@@ -64,6 +69,30 @@ int main(int argc, char *argv[])
     fclose(f);
     snprintf(why, sizeof(why), "%zu rows, mnemonic %s", n, mnemonic[0] ? "found" : "MISSING");
     result("vectors_parsed", n == 160 && mnemonic[0], why);
+
+    // DERIV-24: the file's phrase is a real BIP39 phrase of the length run.sh expects. PBKDF2
+    // takes any string, so without this a file regenerated from the wrong phrase (or a 12-word
+    // file under a 24-word name) passes every case above and below. The restore path validates
+    // the phrase with BRBIP39PhraseIsValid, which for 24 words means 32 bytes of entropy and an
+    // 8-bit checksum: decode, re-encode, and require the same phrase back.
+    {
+        size_t words = 0, len = 0, entLen = 0;
+        const char *p;
+        uint8_t entropy[32];
+        char again[256] = "";
+        int valid;
+
+        for (p = mnemonic; *p; p++) if (*p != ' ' && (p == mnemonic || p[-1] == ' ')) words++;
+        printf("WORDS %zu\n", words);
+        valid = mnemonic[0] && BRBIP39PhraseIsValid(BRBIP39WordsEn, mnemonic) == 1;
+        if (valid) entLen = BRBIP39Decode(entropy, sizeof(entropy), BRBIP39WordsEn, mnemonic);
+        if (entLen > 0) len = BRBIP39Encode(again, sizeof(again), BRBIP39WordsEn, entropy, entLen);
+        snprintf(why, sizeof(why), "%zu words, phrase %s, %zu entropy bytes, re-encoded %s", words,
+                 valid ? "valid" : "INVALID", entLen, (len > 0 && strcmp(again, mnemonic) == 0) ? "equal" : "DIFFERENT");
+        result("mnemonic_bip39_valid", valid && entLen == words * 4 / 3 && len > 0 && strcmp(again, mnemonic) == 0, why);
+        memset(entropy, 0, sizeof(entropy));
+        memset(again, 0, sizeof(again));
+    }
 
     // BIP39: the seed the whole file hangs from ("(empty)" is no passphrase).
     BRBIP39DeriveKey(seed.u8, mnemonic, strcmp(passphrase, "(empty)") == 0 ? NULL : passphrase);

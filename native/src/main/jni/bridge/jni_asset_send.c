@@ -17,6 +17,9 @@
 #include "BRWallet.h"
 #include "BRInt.h"
 #include "asset_tx_checks.h"
+#include "one_family_gate.h"
+#include "asset_sign_gate.h"
+#include "coin_reservation.h"
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -97,6 +100,16 @@ NativeBridge_addressToScriptPubKey(
  *     address is validated and BRAddressScriptPubKey computes the script.
  *     outputScriptsHex[i] is ignored in the address case.
  *
+ * Approval (ASSET-SIGN-GATE):
+ *   approvedToAddress     — the recipient the confirmation showed;
+ *   approvedRecipientSats — the DGB the recipient's output carries (the DigiAsset marker);
+ *   planFeeSats           — the fee of the plan being signed;
+ *   approvedMaxFeeSats    — the fee the confirmation showed, the most this send may pay.
+ *   Before signing and again on the signed transaction, asset_sign_check must hold: every input is a
+ *   wallet or held-asset coin at the amount the wallet holds; the recipient is paid by exactly one
+ *   output at approvedRecipientSats; every other output pays the wallet or is the one zero-value data
+ *   output; the fee is exactly planFeeSats and planFeeSats <= approvedMaxFeeSats.
+ *
  * Returns: signed tx as hex string, or NULL on any failure.
  */
 jstring JNICALL
@@ -108,7 +121,11 @@ NativeBridge_buildAndSignAssetTransferTx(
     jobjectArray inputScriptPubKeysHex,
     jobjectArray outputAddresses,
     jlongArray outputAmounts,
-    jobjectArray outputScriptsHex)
+    jobjectArray outputScriptsHex,
+    jstring approvedToAddress,
+    jlong approvedRecipientSats,
+    jlong planFeeSats,
+    jlong approvedMaxFeeSats)
 {
     WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
     (void)thiz;
@@ -124,6 +141,22 @@ NativeBridge_buildAndSignAssetTransferTx(
     if (!inputTxidsHex || !inputVouts || !inputAmounts || !inputScriptPubKeysHex ||
         !outputAddresses || !outputAmounts || !outputScriptsHex) {
         LOGW("buildAndSignAssetTransferTx: null required array");
+        return NULL;
+    }
+    if (!approvedToAddress || approvedRecipientSats <= 0 || planFeeSats <= 0 || approvedMaxFeeSats <= 0) {
+        LOGW("buildAndSignAssetTransferTx: no approved recipient, amount or fee (ASSET-SIGN-GATE)");
+        return NULL;
+    }
+    uint8_t recipScript[64];
+    size_t recipScriptLen = 0;
+    {
+        const char *approvedStr = (*env)->GetStringUTFChars(env, approvedToAddress, NULL);
+        if (!approvedStr) return NULL;
+        recipScriptLen = BRAddressScriptPubKey(recipScript, sizeof(recipScript), approvedStr);
+        (*env)->ReleaseStringUTFChars(env, approvedToAddress, approvedStr);
+    }
+    if (recipScriptLen == 0) {
+        LOGW("buildAndSignAssetTransferTx: the approved recipient is not an address (ASSET-SIGN-GATE)");
         return NULL;
     }
 
@@ -188,6 +221,13 @@ NativeBridge_buildAndSignAssetTransferTx(
         ok = 0;
     }
 
+    /* ONE-FAMILY: never sign a DigiDollar output, or an output of a dual-family transaction, into an
+     * asset send. The Kotlin selection refuses the same; this is the last place before signing. */
+    if (ok && !tx_inputs_one_family_ok(g_wallet, tx)) {
+        LOGW("buildAndSignAssetTransferTx: an input belongs to another token family (ONE-FAMILY)");
+        ok = 0;
+    }
+
     if (!ok) {
         (*env)->ReleaseLongArrayElements(env, outputAmounts, outAmtJ, JNI_ABORT);
         BRTransactionFree(tx);
@@ -237,10 +277,34 @@ NativeBridge_buildAndSignAssetTransferTx(
 
     if (!ok) { BRTransactionFree(tx); return NULL; }
 
+    /* ASSET-SIGN-GATE, before signing: only wallet and held-asset coins, at the amounts the wallet
+     * holds; the recipient paid once, at the approved amount; otherwise the wallet and one data output
+     * only; the plan's fee, and no more than the approved fee. */
+    AssetSignVerdict gate = asset_sign_check(g_wallet, tx, recipScript, recipScriptLen,
+                                             (uint64_t)approvedRecipientSats, (uint64_t)planFeeSats,
+                                             (uint64_t)approvedMaxFeeSats);
+    if (gate != ASSET_SIGN_OK) {
+        LOGW("buildAndSignAssetTransferTx: not the approved send (ASSET-SIGN-GATE verdict %d); nothing signed", (int)gate);
+        BRTransactionFree(tx);
+        return NULL;
+    }
+
     /* ── Sign with the wallet's keys ────────────────────────────────── */
     int signed_ok = seed_sign_transaction(g_wallet, tx, 0);
     if (!signed_ok || !BRTransactionIsSigned(tx)) {
         LOGW("buildAndSignAssetTransferTx: signing failed");
+        if (signed_ok) coin_reservation_release(tx->txHash);   /* the claim seed_sign_transaction took */
+        BRTransactionFree(tx);
+        return NULL;
+    }
+
+    /* ASSET-SIGN-GATE, after signing: the signed transaction is still exactly the approved send. */
+    gate = asset_sign_check(g_wallet, tx, recipScript, recipScriptLen,
+                            (uint64_t)approvedRecipientSats, (uint64_t)planFeeSats,
+                            (uint64_t)approvedMaxFeeSats);
+    if (gate != ASSET_SIGN_OK) {
+        LOGW("buildAndSignAssetTransferTx: the signed transaction is not the approved send (ASSET-SIGN-GATE verdict %d)", (int)gate);
+        coin_reservation_release(tx->txHash);   /* never broadcast: its coins are free again */
         BRTransactionFree(tx);
         return NULL;
     }

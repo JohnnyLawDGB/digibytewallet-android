@@ -537,6 +537,7 @@
     <string name="sec_autolock_30m">30 menit</string>
     <string name="sec_autolock_custom">Kustom</string>
     <string name="sec_pin_changed">PIN berhasil diubah</string>
+    <string name="sec_pin_change_failed">PIN baru tidak dapat disimpan. PIN lama Anda masih aktif.</string>
     <string name="sec_pins_mismatch">PIN tidak cocok</string>
     <string name="sec_biometric_required">Autentikasi biometrik diperlukan</string>
     <string name="did_logged_in">Anda kini masuk ke %1$s</string>
@@ -605,6 +606,9 @@
     <string name="send_fail_unknown">Transaksi tidak dapat dikirim.</string>
     <string name="send_fail_try_again">Coba lagi</string>
     <string name="rf_splitting_for_assets">Menyiapkan pemindahan %1$d DigiAssets: DGB Anda dibagi agar masing-masing dapat membayar biaya transfernya sendiri. Menunggu satu konfirmasi, biasanya kurang dari satu menit.</string>
+    <string name="rf_fanout_short">DigiAssets Anda tetap di dompet lama: memindahkannya memerlukan %1$s di sana untuk biaya. DGB Anda sudah dipindahkan. Untuk memindahkan aset, kirim %1$s ke dompet lama dalam satu transaksi lalu jalankan Pulihkan dana lagi.</string>
+    <string name="rf_fanout_unread">DigiAssets Anda tetap di dompet lama: memindahkannya memerlukan %1$s di sana untuk biaya. DGB Anda sudah dipindahkan, kecuali %2$d koin yang tidak dapat diperiksa dan tetap di dompet lama. Untuk memindahkan aset, kirim %1$s ke dompet lama dalam satu transaksi lalu jalankan Pulihkan dana lagi.</string>
+    <string name="rf_fanout_failed">DigiAssets Anda tetap di dompet lama: langkah yang membagi DGB untuk biaya transfernya tidak dapat diselesaikan. DGB Anda sudah dipindahkan. Aset masih ada di frasa lama; jalankan Pulihkan dana lagi dan jumlah yang dibutuhkan dompet lama akan ditampilkan.</string>
     <string name="rf_nothing_moved">Tidak ada yang dipindahkan</string>
     <string name="rf_dd_fee_floor">Perlu %1$s untuk biaya jaringan: dompet ini punya %2$s.</string>
     <string name="rf_dd_found">%1$s DigiDollar ditemukan</string>
@@ -637,10 +641,10 @@
          Machine-assisted. -->
     <string name="reconcile_outputs_found">Output yang ditemukan di blockchain</string>
     <string name="reconcile_found_not_compared">Ditemukan di blockchain, tidak dibandingkan</string>
-    <string name="reconcile_spendable">Dapat dibelanjakan</string>
-    <string name="reconcile_wallet_spendable">Saldo dompet yang dapat dibelanjakan</string>
-    <string name="reconcile_matches_wallet">Cocok dengan saldo dompet yang dapat dibelanjakan.</string>
-    <string name="reconcile_does_not_match_wallet">Tidak cocok dengan saldo dompet yang dapat dibelanjakan: lihat di bawah.</string>
+    <string name="reconcile_in_balance">Dihitung dalam saldo</string>
+    <string name="reconcile_wallet_balance">Saldo dompet</string>
+    <string name="reconcile_matches_wallet_balance">Cocok dengan saldo dompet.</string>
+    <string name="reconcile_does_not_match_wallet_balance">Tidak cocok dengan saldo dompet: lihat di bawah.</string>
     <string name="reconcile_held_asset">Ditahan untuk DigiAsset</string>
     <string name="reconcile_held_unknown">Ditahan: status aset tidak diketahui</string>
     <string name="reconcile_proven_plain">DGB biasa, dapat dibelanjakan setelah mulai ulang</string>
@@ -712,6 +716,9 @@
     <string name="seedview_pass_unreadable_title">Frasa sandi tidak dapat dibaca</string>
     <string name="seedview_pass_unreadable_body">Frasa sandi dompet ini tidak dapat dibaca saat ini. Kata-kata pemulihan Anda saja mungkin tidak dapat memulihkan dompet ini, jadi kata-kata itu tidak ditampilkan sampai frasa sandi dapat ditampilkan bersamanya. Coba lagi.</string>
     <string name="seedview_pass_retry">Coba lagi</string>
+    <!-- SEED-VIEW-AUTH -->
+    <string name="seedview_device_lock_title">Konfirmasi kunci layar Anda</string>
+    <string name="seedview_device_lock_body">Frasa pemulihan Anda dilindungi oleh kunci layar ponsel ini. Untuk menampilkannya, konfirmasi kunci layar dengan PIN, pola, atau sandi Anda.</string>
     <!-- /pkg E2-keys -->
     <string name="pinstore_title">PIN Anda tidak bisa diperiksa saat ini</string>
     <string name="pinstore_body">Penyimpanan kunci aman ponsel tidak terbuka, jadi dompet tetap terkunci. Tidak ada yang dihapus. Tutup aplikasi lalu buka lagi. Jika terus terjadi, mulai ulang ponsel; frasa pemulihan Anda tetap bisa memulihkan dompet di perangkat mana pun.</string>
@@ -725,4 +732,15 @@
     <string name="reconcile_rebuild_button">Bangun ulang penuh dari chain (pindai ulang)</string>
     <string name="rf_capped_body">Pemindaian berhenti di batasnya pada %1$s saat jalur itu masih dipakai, jadi mungkin ada dana lebih banyak di sana daripada yang ditampilkan. Yang tidak ditampilkan tetap aman di rantai.</string>
     <string name="reconcile_stuck_stale_cleared">, %1$d di antaranya tidak pernah diteruskan (setelah sehari jaringan tidak memiliki transaksi itu maupun apa pun yang membelanjakan koinnya). Jika salah satu pembayaran itu ternyata sampai ke penerima, pembayaran itu masih bisa terkonfirmasi: tanyakan kepada penerima sebelum membayar lagi</string>
+    <!-- KS-BIND: seed key bound to the device lock -->
+    <string name="ksb_prompt_subtitle">Konfirmasi kunci layar Anda sekali agar kunci dompet dapat diikat padanya</string>
+    <string name="ksb_notice_title">Ponsel ini tidak memiliki kunci layar</string>
+    <string name="ksb_notice_body">Dompet Anda terenkripsi di ponsel ini, tetapi kuncinya tidak dapat diikat ke kunci layar karena ponsel ini tidak memilikinya. Jadi hanya PIN dompet yang berada di antara aplikasi dan dana Anda. Atur PIN, pola, atau sandi di pengaturan Android: dompet akan mengikat kuncinya saat aplikasi berikutnya dimulai dan membuka dompet. Pengaturan keamanan menampilkan apakah kunci sudah terikat.</string>
+    <string name="ksb_notice_ok">Saya mengerti</string>
+    <string name="sec_seed_key">Kunci dompet</string>
+    <string name="sec_seed_key_bound">Terikat ke kunci layar ponsel ini</string>
+    <string name="sec_seed_key_pending">Belum terikat: akan diikat ke kunci layar Anda saat aplikasi berikutnya dimulai dan membuka dompet</string>
+    <string name="sec_seed_key_no_lock">Tidak terikat: ponsel ini tidak memiliki kunci layar. Atur di pengaturan Android.</string>
+    <string name="sec_seed_key_lock_removed">Kunci layar dihapus setelah dompet ini disiapkan, sehingga kuncinya tidak dapat dibuka lagi, bahkan dengan kunci layar baru. Selagi dompet masih terbuka, pastikan frasa pemulihan Anda sudah tercatat, atau pindahkan dana Anda sekarang: saat aplikasi berikutnya dimulai, dompet akan memerlukan frasa pemulihannya.</string>
+    <string name="sec_seed_key_cannot_bind">Tidak terikat: kunci dari kunci layar sebelumnya tidak berfungsi lagi, sehingga kunci dompet ini tidak dapat diikat pada instalasi ini. Menghapus dompet lalu memulihkannya dari frasa pemulihannya akan mengikatnya.</string>
 </resources>

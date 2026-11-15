@@ -21,10 +21,10 @@ class ScanAndMarketStringsTest {
     private val scanStrings = linkedMapOf(
         "reconcile_outputs_found" to "Outputs found on chain",
         "reconcile_found_not_compared" to "Found on chain, not compared",
-        "reconcile_spendable" to "Spendable",
-        "reconcile_wallet_spendable" to "Wallet spendable balance",
-        "reconcile_matches_wallet" to "Matches the wallet\\'s spendable balance.",
-        "reconcile_does_not_match_wallet" to "Does not match the wallet\\'s spendable balance: see below.",
+        "reconcile_in_balance" to "Counted in balance",
+        "reconcile_wallet_balance" to "Wallet balance",
+        "reconcile_matches_wallet_balance" to "Matches the wallet\\'s balance.",
+        "reconcile_does_not_match_wallet_balance" to "Does not match the wallet\\'s balance: see below.",
         "reconcile_held_asset" to "Held for a DigiAsset",
         "reconcile_held_unknown" to "Held: asset state unknown",
         "reconcile_proven_plain" to "Plain DGB, spendable after restart",
@@ -67,6 +67,33 @@ class ScanAndMarketStringsTest {
     @Test fun `every key exists in English with its text`() {
         for ((key, text) in scanStrings + marketStrings) {
             assertEquals("English text of $key", text, englishText(key))
+        }
+    }
+
+    /**
+     * SEND-GATE-SET: the scan's comparison lines show the set the wallet's balance sums, which includes a
+     * coin someone else sent that has not confirmed and that no send spends. A label calling that figure
+     * "spendable" would disagree with the sender, so the lines are worded as balance, in every language,
+     * and the keys that called it spendable are gone.
+     */
+    @Test fun `the scan's balance lines are not called spendable`() {
+        val retired = listOf("reconcile_spendable", "reconcile_wallet_spendable",
+            "reconcile_matches_wallet", "reconcile_does_not_match_wallet")
+        val res = File("src/main/res")
+        val files = res.listFiles { f -> f.isDirectory && f.name.startsWith("values") }!!
+            .map { File(it, "strings_wallet.xml") }.filter { it.exists() }
+        assertTrue("no strings_wallet.xml found — the gate is blind", files.size >= 13)
+        for (f in files) {
+            val text = f.readText()
+            for (key in retired) assertTrue("${f.parentFile.name} still defines $key", !text.contains("name=\"$key\""))
+        }
+        val screen = File(srcRoot, "ui/settings/ReconcileScreen.kt").readText()
+        for (key in retired) assertTrue("ReconcileScreen still uses R.string.$key", !Regex("""R\.string\.$key\b""").containsMatchIn(screen))
+        for (key in listOf("reconcile_in_balance", "reconcile_wallet_balance", "reconcile_matches_wallet_balance",
+                           "reconcile_does_not_match_wallet_balance")) {
+            val en = englishText(key)
+            assertTrue("English $key is missing", en != null)
+            assertTrue("English $key calls the balance spendable: $en", !en!!.contains("pendable", ignoreCase = true))
         }
     }
 

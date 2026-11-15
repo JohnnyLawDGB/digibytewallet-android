@@ -27,6 +27,10 @@ object AssetSpentState {
      *  alone in case the conflict resolves the other way. */
     const val CONFLICTED = -2
 
+    /** ONE-FAMILY ([OneFamily]): the output is a DigiDollar output, or its transaction carries both a
+     *  DigiDollar marking and a DigiAsset tag. Never an asset holding, whatever a row says. */
+    const val OTHER_FAMILY = -3
+
     /** The probe itself failed (JNI threw). Treated as [UNDETECTED]. */
     const val PROBE_ERROR = -99
 }

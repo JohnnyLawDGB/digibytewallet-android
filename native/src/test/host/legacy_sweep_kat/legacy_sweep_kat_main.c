@@ -7,40 +7,53 @@
 // against the core's serialization); a core refusal must also be the typed refusal the scenario names, and a
 // signed transaction must be the one the bridge passed to its signed-spend gate.
 //
-// WHERE THE CORE NOW REFUSES AND THE BRIDGE DOES NOT. The core refuses three things the bridge still signs (or
-// refuses by accident of a wrapped value): a feePerKb above BR_LEGACY_SWEEP_MAX_FEE_PER_KB (FEE_RATE_TOO_HIGH), an
-// amount or running total above MAX_MONEY (BAD_AMOUNT), and estSize * feePerKb that does not fit in 64 bits
-// (FEE_OVERFLOW). Only there are the two sides allowed to differ, and only with the core refusing; everywhere else
-// they still agree byte for byte. The Android caller passes 100,000 sat/kB and amounts of proven coins, so it never
-// reaches those refusals (android_default_rate).
+// THE FEE RULE (SWEEP-ABS-CEIL) is one copy, BRLegacySweepFee.h, which the bridge's backstop (sweep_fee_guard.h)
+// and the core both apply: the rate within [100,000, 1,000,000] sat/kB, the fee at most 10,000,000 sats, the 5%
+// refusal for a lone input as for many, and every amount positive. The bridge is the reference: the core must
+// refuse everything it refuses and sign byte for byte what it signs.
+//
+// WHERE THE CORE REFUSES AND THE BRIDGE MAY NOT. Only an amount or running total above MAX_MONEY (BAD_AMOUNT; the
+// bridge bounds its sum at UINT64_MAX and signs some of these). A product estSize * feePerKb that does not fit is
+// refused by both (the bridge as a rate out of range); the core names it FEE_OVERFLOW. Only on BAD_AMOUNT above
+// MAX_MONEY may the two sides differ, and only with the core refusing; everywhere else they agree byte for byte.
+// The Android caller passes 100,000 sat/kB and amounts of proven coins, so it never reaches it
+// (android_default_rate).
 //
 // SCENARIOS
 //   pinned_*      the Android device tests, case for case: LegacySweepSignedTxKatTest (P2PKH, its pinned hex),
 //                 LegacySweepSegwitKatTest (P2WPKH, its pinned hex), LegacySweepAmountGuardTest (three cases),
 //                 foreign_taproot_sign_kat (a P2TR key-path input from a foreign seed), plus a P2SH-P2WPKH input.
-//   boundary_*    each fee rule at, below and above its boundary: the size estimate, the 1000 floor, the 5% refusal
-//                 (at fee*20, one below and one above; a lone input exempt), dust at fee+546.
+//   boundary_*    each fee rule at, below and above its boundary: the size estimate; the rate floor (100,000 signs,
+//                 99,999, 1 and 0 refused) and cap (1,000,000 signs, 1,000,001 refused); the fee truncated, not
+//                 rounded; the absolute ceiling (a fee of exactly 10,000,000 signs, 10,000,012 is refused; at the top
+//                 rate 62 inputs sign, 63 are refused); the 5% refusal for two inputs (at fee*20, one below, one
+//                 above, and at the top rate) and for a lone input (408,000 refused, 408,001 signs; 40,800 and the
+//                 old dust line fee+545..547 refused by it, since the ratio now implies the dust bound).
 //   refuse_*      every typed refusal: no inputs, seed length, script length (0, 128 accepted, 129), destination,
-//                 a script no derived key matches; the two values that could wrap (the sum totalIn: refuse_amount_*,
-//                 the product estSize * feePerKb: refuse_fee_overflow) and a fee rate above the bound
-//                 (refuse_fee_rate_cap), each refused by the core where the bridge signs or wraps.
-//   boundary_amount_max_money, boundary_fee_rate_cap, boundary_fee_overflow: each new refusal at its line (an
-//                 amount and a total of MAX_MONEY sign, one more is refused; the bound signs, one more is refused;
-//                 the largest product that fits is not a wrap, one more is).
+//                 a script no derived key matches, an amount of 0; the two values that could wrap (the sum totalIn:
+//                 refuse_amount_*, the product estSize * feePerKb: refuse_fee_overflow) and a fee rate far above
+//                 the cap (refuse_fee_rate_cap).
+//   boundary_amount_max_money, boundary_fee_overflow: the core's own lines (an amount and a total of MAX_MONEY
+//                 sign, one more is refused; the largest product that fits is not a wrap, one more is).
 //   android_default_rate the rate the Android caller passes (100,000 sat/kB, checked in its Kotlin by run.sh) is
-//                 under the bound, and sweeps at it of 1..16 inputs up to a MAX_MONEY total sign byte for byte what
-//                 the bridge signs.
+//                 the floor of the range, and sweeps at it of 1..16 inputs up to a MAX_MONEY total sign byte for byte
+//                 what the bridge signs.
 //   gate_*        the bridge's signed-spend gate refusing: the bridge returns nothing, the core still signs (the gate
 //                 is the platform's) and the bytes the bridge gated are the core's.
 //   proof         outpoints, amounts and scripts taken from coins and their BRRawTxBindingCheck proofs
 //                 (BRLegacySweepInputFromProof); a vout outside 0..UINT32_MAX, another coin's parent, an unproven
 //                 proof and out-of-range indexes are refused.
-//   fee_rate_large a lone coin at the largest rate the core takes (the bound) signs, paying most of itself in fee
-//                 (the 5% rule exempts a lone input); the bound limits that fee to 1,068,169 satoshis.
+//   fee_floor_masked, fee_dust_masked  the two rules no sweep reaches (the 1000-sat fee floor and the dust refusal
+//                 totalIn <= fee + 546, both masked by the rate floor and the 5% refusal), pinned on BRLegacySweepFee.h
+//                 compiled with those two removed (legacy_sweep_kat_fee.c): the floor at rates 0..4,901 on a lone
+//                 input (fee 1000), not above it (4,902 -> 1000, 4,907 -> 1001); the dust line at fee + 546 refused,
+//                 fee + 547 accepted, at 100,000 and 1,000,000 sat/kB.
+//   fee_rate_large a lone coin at the largest rate (1,000,000) signs and pays 204,000 satoshis, the most a lone
+//                 coin can pay; it must list more than 20 times that.
 //   fuzz          KAT_FUZZ sweeps (default 2000; KAT_FUZZ_SEED varies them) over every derivation profile and format, 1..12 inputs, random and
-//                 boundary amounts and fee rates, mismatched and malformed scripts, bad destinations and seeds; amounts
-//                 and totals about MAX_MONEY, rates about the bound and rates that wrap. Agreement with the bridge is
-//                 required wherever none of the three new refusals applies; where one does, the core must give it.
+//                 boundary amounts and fee rates, mismatched and malformed scripts, bad destinations and seeds, zero
+//                 amounts; amounts and totals about MAX_MONEY, rates about both ends of the range and rates that wrap.
+//                 Agreement with the bridge is required everywhere but above MAX_MONEY, where the core must refuse.
 //   keys_wiped    no block the core frees holds a derived private key or the seed (the allocation recorder below);
 //                 the caller's seed is unchanged.
 //   stack_probe   informational only: the stack below the caller is searched for key material after a sweep, on
@@ -68,6 +81,8 @@ BRLegacySweepResult kat_core_sweep(const uint8_t *seed, size_t seedLen, const ch
 BRLegacySweepResult kat_core_sweep_null_out(const uint8_t *seed, size_t seedLen);
 int kat_core_from_proof(BRLegacySweepInput *in, const BRRawTxBindingUtxo *utxo, const BRRawTxProof *proof,
                         const BRRawTxBindingParent *parents, size_t parentCount);
+// BRLegacySweepFee.h with the rate floor and the 5% refusal removed (legacy_sweep_kat_fee.c).
+int kat_fee_masked(uint64_t totalIn, size_t inputCount, uint64_t feePerKb, size_t *estSize, uint64_t *fee);
 
 jstring JNICALL NativeBridge_buildAndSignLegacySweep(JNIEnv *env, jobject thiz, jbyteArray seedBytes, jstring hmacKey,
                                                      jintArray prefixPath, jobjectArray txidsHex, jintArray vouts,
@@ -388,18 +403,41 @@ static UInt256 fill256(uint8_t b) { UInt256 u; memset(u.u8, b, 32); return u; }
 
 // Inputs at prefix/chain/index paying the key's own script in format f.
 typedef struct { BRLegacySweepInput in[16]; uint8_t scripts[16][40]; size_t n; } Inputs;
+static void make_input(BRLegacySweepInput *in, uint8_t *script, const uint8_t *seed, size_t seedLen,
+                       const char *hmac, const uint32_t *prefix, size_t prefixLen, uint32_t chain, uint32_t index,
+                       int f, UInt256 txid, uint32_t vout, uint64_t amount)
+{
+    BRKey k;
+    derive(&k, seed, seedLen, hmac, prefix, prefixLen, chain, index);
+    in->scriptLen = script_for(&k, f, script);
+    in->script = script;
+    BRKeyClean(&k);
+    in->txHash = txid; in->vout = vout; in->amount = amount; in->chain = chain; in->index = index;
+}
 static void add_input(Inputs *x, const uint8_t *seed, size_t seedLen, const char *hmac, const uint32_t *prefix,
                       size_t prefixLen, uint32_t chain, uint32_t index, int f, UInt256 txid, uint32_t vout,
                       uint64_t amount)
 {
-    BRKey k;
-    BRLegacySweepInput *in = &x->in[x->n];
-    derive(&k, seed, seedLen, hmac, prefix, prefixLen, chain, index);
-    in->scriptLen = script_for(&k, f, x->scripts[x->n]);
-    in->script = x->scripts[x->n];
-    BRKeyClean(&k);
-    in->txHash = txid; in->vout = vout; in->amount = amount; in->chain = chain; in->index = index;
+    make_input(&x->in[x->n], x->scripts[x->n], seed, seedLen, hmac, prefix, prefixLen, chain, index, f, txid, vout,
+               amount);
     x->n++;
+}
+
+// A sweep of up to BIG_MAX P2PKH inputs at m/0'/0/i under "DigiByte seed", each of amount sats (the ceiling's
+// scenarios need more inputs than Inputs holds).
+#define BIG_MAX 80
+static BRLegacySweepInput g_big[BIG_MAX];
+static uint8_t g_bigScripts[BIG_MAX][40];
+static void big_inputs(size_t n, uint64_t amount)
+{
+    const uint32_t m0[1] = { 0 | 0x80000000u };
+    for (size_t i = 0; i < n && i < BIG_MAX; i++) {
+        UInt256 t;
+        memset(t.u8, 0x70, 32);
+        t.u8[0] = (uint8_t)i;
+        make_input(&g_big[i], g_bigScripts[i], g_seed, 64, "DigiByte seed", m0, 1, 0, (uint32_t)i,
+                   BR_DERIVATION_FORMAT_P2PKH, t, (uint32_t)i, amount);
+    }
 }
 
 // Every derived secret of a sweep, for the allocation recorder.
@@ -446,7 +484,8 @@ static uint64_t g_rng = 0x9E3779B97F4A7C15ull;
 static uint64_t rnd(void) { g_rng ^= g_rng << 13; g_rng ^= g_rng >> 7; g_rng ^= g_rng << 17; return g_rng; }
 static uint64_t rndn(uint64_t n) { return n ? rnd() % n : 0; }
 
-// The fee the rules give, computed here from the rules as written (not from the header).
+// The fee the rules give, computed here from the rules as written (not from the header): the 1000 floor never binds
+// inside the rate range, and is kept so a rate outside it models as the header computes it.
 static uint64_t model_fee(size_t n, uint64_t feePerKb)
 {
     size_t est = 10 + n * 160 + 34;
@@ -544,7 +583,8 @@ int main(int argc, char **argv)
     begin("pinned_foreign_taproot");
     {
         Inputs x = { .n = 0 };
-        add_input(&x, g_seed, 64, "Bitcoin seed", m86, 3, 0, 0, BR_DERIVATION_FORMAT_P2TR, fill256(0x11), 0, 100000);
+        // 1,000,000 sats: the kat's 100,000 is below what a lone coin must list at the default rate (408,001).
+        add_input(&x, g_seed, 64, "Bitcoin seed", m86, 3, 0, 0, BR_DERIVATION_FORMAT_P2TR, fill256(0x11), 0, 1000000);
         Sweep s = { g_seed, 64, "Bitcoin seed", m86, 3, x.in, 1, kDest, 100000 };
         agree(&s, BR_LEGACY_SWEEP_SIGNED, "a P2TR input");
         Both b = run_both(&s, 1);
@@ -588,47 +628,85 @@ int main(int argc, char **argv)
     }
     end();
 
-    begin("boundary_floor_signs");   // feePerKb 1: 0.204 sat -> 0 -> the 1000 floor; 1547 leaves 547
-    one.in[0].amount = 1547; s1.feePerKb = 1;
-    agree(&s1, BR_LEGACY_SWEEP_SIGNED, "1547 at the floor");
-    { Both b = run_both(&s1, 1); check(b.tx && b.tx->outputs[0].amount == 547, "output 547"); both_free(&b); }
+    // The rate range (SWEEP-ABS-CEIL): 100,000 is the floor and signs; below it nothing signs, not even at the old
+    // 1000-satoshi fee floor (a rate of 1 or 0, which signed before).
+    begin("boundary_rate_floor");
+    one.in[0].amount = 1000000; s1.feePerKb = 100000;
+    agree(&s1, BR_LEGACY_SWEEP_SIGNED, "100,000 sat/kB");
+    { Both b = run_both(&s1, 1); check(b.fee.fee == 20400 && b.tx && b.tx->outputs[0].amount == 1000000 - 20400,
+                                       "fee 20400, output 979600"); both_free(&b); }
+    s1.feePerKb = 99999;
+    agree(&s1, BR_LEGACY_SWEEP_FEE_RATE_TOO_LOW, "99,999 sat/kB");
+    s1.feePerKb = 1;
+    agree(&s1, BR_LEGACY_SWEEP_FEE_RATE_TOO_LOW, "1 sat/kB (the old 1000 floor)");
+    s1.feePerKb = 0;
+    agree(&s1, BR_LEGACY_SWEEP_FEE_RATE_TOO_LOW, "0 sat/kB");
+    { Sweep t = s2; BRLegacySweepInput in2[2] = { two.in[0], two.in[1] }; in2[0].amount = in2[1].amount = 10000000;
+      t.in = in2; t.feePerKb = 99999; agree(&t, BR_LEGACY_SWEEP_FEE_RATE_TOO_LOW, "two inputs at 99,999"); }
     end();
-    begin("boundary_floor_zero_rate");   // feePerKb 0 is the floor too
-    one.in[0].amount = 5000; s1.feePerKb = 0;
-    agree(&s1, BR_LEGACY_SWEEP_SIGNED, "feePerKb 0");
-    { Both b = run_both(&s1, 1); check(b.tx && b.tx->outputs[0].amount == 4000, "output 4000"); both_free(&b); }
+    begin("boundary_rate_cap");   // 1,000,000 signs (a lone input: fee 204,000), 1,000,001 is refused
+    one.in[0].amount = 100000000; s1.feePerKb = 1000000;
+    agree(&s1, BR_LEGACY_SWEEP_SIGNED, "1,000,000 sat/kB");
+    { Both b = run_both(&s1, 0); check(b.fee.fee == 204000, "fee 204000"); both_free(&b); }
+    s1.feePerKb = 1000001;
+    agree(&s1, BR_LEGACY_SWEEP_FEE_RATE_TOO_HIGH, "1,000,001 sat/kB");
+    s1.feePerKb = 5236126;   // the bound before SWEEP-ABS-CEIL, MAX_FEE_PER_KB
+    agree(&s1, BR_LEGACY_SWEEP_FEE_RATE_TOO_HIGH, "MAX_FEE_PER_KB");
+    { Sweep t = s2; BRLegacySweepInput in2[2] = { two.in[0], two.in[1] }; in2[0].amount = in2[1].amount = 100000000;
+      t.in = in2; t.feePerKb = 1000000; agree(&t, BR_LEGACY_SWEEP_SIGNED, "two inputs at 1,000,000");
+      t.feePerKb = 1000001; agree(&t, BR_LEGACY_SWEEP_FEE_RATE_TOO_HIGH, "two inputs at 1,000,001"); }
     end();
-    begin("boundary_floor_dust");   // 1546 = 1000 + 546: refused
-    one.in[0].amount = 1546; s1.feePerKb = 1;
-    agree(&s1, BR_LEGACY_SWEEP_DUST_OUTPUT, "1546 at the floor");
-    end();
-    begin("boundary_floor_edge");   // feePerKb 4901: 204 * 4901 / 1000 = 999 -> 1000; 4902 -> 1000 exactly
-    one.in[0].amount = 100000; s1.feePerKb = 4901;
-    agree(&s1, BR_LEGACY_SWEEP_SIGNED, "999 raised to 1000");
-    { Both b = run_both(&s1, 0); check(b.fee.fee == 1000, "fee 1000"); both_free(&b); }
-    s1.feePerKb = 4902;
-    agree(&s1, BR_LEGACY_SWEEP_SIGNED, "exactly 1000");
-    s1.feePerKb = 4906;   // 1000.8 -> 1000
-    agree(&s1, BR_LEGACY_SWEEP_SIGNED, "1000.8 truncated");
-    { Both b = run_both(&s1, 0); check(b.fee.fee == 1000, "fee 1000 (truncated, not rounded)"); both_free(&b); }
+    begin("boundary_fee_truncated");   // 204 * 100004 / 1000 = 20400.8 -> 20400; 100005 -> 20401.02 -> 20401
+    one.in[0].amount = 1000000; s1.feePerKb = 100004;
+    agree(&s1, BR_LEGACY_SWEEP_SIGNED, "20400.8 truncated");
+    { Both b = run_both(&s1, 0); check(b.fee.fee == 20400, "fee 20400 (truncated, not rounded)"); both_free(&b); }
+    s1.feePerKb = 100005;
+    agree(&s1, BR_LEGACY_SWEEP_SIGNED, "20401.02");
+    { Both b = run_both(&s1, 0); check(b.fee.fee == 20401, "fee 20401"); both_free(&b); }
     end();
 
-    s1.feePerKb = 100000;   // fee 20400
-    begin("boundary_dust_at");   // 20946 = 20400 + 546: refused
-    one.in[0].amount = 20946;
-    agree(&s1, BR_LEGACY_SWEEP_DUST_OUTPUT, "fee + 546");
+    // The absolute ceiling, 10,000,000 sats: 75 inputs (estSize 12044) at 830,289 sat/kB pay exactly 10,000,000 and
+    // sign; at 830,290 they pay 10,000,012 and are refused. At the top rate 62 inputs (9,964,000) sign, 63
+    // (10,124,000) are refused. Each input lists 10,000,000, so the 5% refusal is far away.
+    begin("boundary_fee_ceiling");
+    {
+        Sweep t = { g_seed, 64, "DigiByte seed", m0, 1, g_big, 75, kDest, 830289 };
+        big_inputs(75, 10000000);
+        agree(&t, BR_LEGACY_SWEEP_SIGNED, "a fee of exactly 10,000,000");
+        { Both b = run_both(&t, 0); check(b.fee.estSize == 12044 && b.fee.fee == 10000000, "estSize 12044, fee 10,000,000");
+          both_free(&b); }
+        t.feePerKb = 830290;
+        agree(&t, BR_LEGACY_SWEEP_FEE_ABOVE_CEILING, "a fee of 10,000,012");
+        { BRLegacySweepFee f; int sg; core_r(&t, &f, &sg); check(f.fee == 10000012 && f.outAmount == 0 && ! sg,
+                                                                 "the fee it would pay reported, no output"); }
+        t.feePerKb = 1000000; t.n = 62;
+        agree(&t, BR_LEGACY_SWEEP_SIGNED, "62 inputs at 1,000,000");
+        t.n = 63;
+        agree(&t, BR_LEGACY_SWEEP_FEE_ABOVE_CEILING, "63 inputs at 1,000,000");
+    }
     end();
-    begin("boundary_dust_above");
-    one.in[0].amount = 20947;
-    agree(&s1, BR_LEGACY_SWEEP_SIGNED, "fee + 547");
+
+    s1.feePerKb = 100000;   // a lone input: fee 20400, fee * 20 = 408000
+    begin("boundary_ratio_single_at");   // a lone input is not exempt: 408,000 is refused
+    one.in[0].amount = 408000;
+    agree(&s1, BR_LEGACY_SWEEP_FEE_TOO_HIGH, "a lone input, totalIn == fee * 20");
     end();
-    begin("boundary_dust_below");
-    one.in[0].amount = 20945;
-    agree(&s1, BR_LEGACY_SWEEP_DUST_OUTPUT, "fee + 545");
+    begin("boundary_ratio_single_above");
+    one.in[0].amount = 408001;
+    agree(&s1, BR_LEGACY_SWEEP_SIGNED, "a lone input, totalIn == fee * 20 + 1");
+    { Both b = run_both(&s1, 1); check(b.tx && b.tx->outputs[0].amount == 408001 - 20400, "output 387601"); both_free(&b); }
     end();
-    begin("boundary_ratio_single_exempt");   // a lone input paying 50% in fee still signs
+    begin("boundary_ratio_single_below");   // a lone input paying 50% in fee (signed before SWEEP-ABS-CEIL)
     one.in[0].amount = 40800;
-    agree(&s1, BR_LEGACY_SWEEP_SIGNED, "a lone input, fee 50%");
+    agree(&s1, BR_LEGACY_SWEEP_FEE_TOO_HIGH, "a lone input, fee 50%");
+    end();
+    begin("boundary_ratio_single_dust");   // the old dust line fee + 545..547: the ratio refuses it first
+    one.in[0].amount = 20945;
+    agree(&s1, BR_LEGACY_SWEEP_FEE_TOO_HIGH, "fee + 545");
+    one.in[0].amount = 20946;
+    agree(&s1, BR_LEGACY_SWEEP_FEE_TOO_HIGH, "fee + 546");
+    one.in[0].amount = 20947;
+    agree(&s1, BR_LEGACY_SWEEP_FEE_TOO_HIGH, "fee + 547");
     end();
 
     // 2 inputs at 100 sat/byte: fee 36400, fee * 20 = 728000.
@@ -644,13 +722,22 @@ int main(int argc, char **argv)
     two.in[0].amount = 364000; two.in[1].amount = 364001;
     agree(&s2, BR_LEGACY_SWEEP_SIGNED, "totalIn == fee * 20 + 1");
     end();
-    begin("boundary_ratio_floor");   // at feePerKb 1 the floor sets fee 1000 for 2 inputs: the line is 20000
-    s2.feePerKb = 1;
-    two.in[0].amount = 10000; two.in[1].amount = 10000;
-    agree(&s2, BR_LEGACY_SWEEP_FEE_TOO_HIGH, "20000 at the floor");
-    two.in[1].amount = 10001;
-    agree(&s2, BR_LEGACY_SWEEP_SIGNED, "20001 at the floor");
+    begin("boundary_ratio_rate_cap");   // at 1,000,000 sat/kB two inputs pay 364,000: the line is 7,280,000
+    s2.feePerKb = 1000000;
+    two.in[0].amount = 3640000; two.in[1].amount = 3640000;
+    agree(&s2, BR_LEGACY_SWEEP_FEE_TOO_HIGH, "7,280,000 at the top rate");
+    two.in[1].amount = 3640001;
+    agree(&s2, BR_LEGACY_SWEEP_SIGNED, "7,280,001 at the top rate");
     s2.feePerKb = 100000;
+    {   // a lone input at the top rate pays 204,000: the line is 4,080,000
+        Sweep t = s1;
+        BRLegacySweepInput in1 = one.in[0];
+        t.in = &in1; t.feePerKb = 1000000;
+        in1.amount = 4080000;
+        agree(&t, BR_LEGACY_SWEEP_FEE_TOO_HIGH, "a lone input, 4,080,000 at the top rate");
+        in1.amount = 4080001;
+        agree(&t, BR_LEGACY_SWEEP_SIGNED, "a lone input, 4,080,001 at the top rate");
+    }
     end();
 
     // ── refusals ───────────────────────────────────────────────────────────────────────────────────────────────────
@@ -719,8 +806,29 @@ int main(int argc, char **argv)
         agree(&s, BR_LEGACY_SWEEP_SIGN_FAILED, "the wrong HMAC key");
     }
     end();
-    // The two values that could wrap, and the fee rate, are refused by the core; the bridge still wraps them (and so
-    // signs some of them). Each case below names what the bridge does with the same arguments.
+    begin("refuse_zero_amount");   // SWEEP-ABS-CEIL: every amount is positive
+    {
+        Sweep s = s2;
+        BRLegacySweepInput in[2] = { two.in[0], two.in[1] };
+        s.in = in;
+        in[0].amount = 0; in[1].amount = 10000000;
+        agree(&s, BR_LEGACY_SWEEP_BAD_AMOUNT, "0 then 10,000,000");
+        { Both b = run_both(&s, 0); check(b.fee.input == 0, "input 0 named"); both_free(&b); }
+        in[0].amount = 10000000; in[1].amount = 0;
+        agree(&s, BR_LEGACY_SWEEP_BAD_AMOUNT, "10,000,000 then 0");
+        { Both b = run_both(&s, 0); check(b.fee.input == 1 && b.fee.totalIn == 10000000, "input 1 named"); both_free(&b); }
+        Sweep t = s1;
+        BRLegacySweepInput in1 = one.in[0];
+        in1.amount = 0; t.in = &in1; t.feePerKb = 100000;
+        agree(&t, BR_LEGACY_SWEEP_BAD_AMOUNT, "a lone coin of 0");
+        in1.amount = 1;   // positive: not BAD_AMOUNT (the fee rule refuses it; which of its refusals is not this case's)
+        { Both b = run_both(&t, 0); check(! b.bridgeHex && ! b.coreHex && b.r != BR_LEGACY_SWEEP_BAD_AMOUNT,
+                                          "a lone coin of 1: both refuse, and not as BAD_AMOUNT"); both_free(&b); }
+    }
+    end();
+    // The two values that could wrap: the core refuses both. The bridge refuses a wrapped rate as out of range, and
+    // a total above MAX_MONEY only once it wraps 64 bits or an amount reads as negative. Each case below names what
+    // the bridge does with the same arguments.
     const uint64_t MM = BR_LEGACY_SWEEP_MAX_MONEY, CAP = BR_LEGACY_SWEEP_MAX_FEE_PER_KB;
 
     begin("boundary_amount_max_money");   // statuses only: the line is MAX_MONEY, whatever the fee rules give
@@ -753,9 +861,9 @@ int main(int argc, char **argv)
         BRLegacySweepFee f;
         int bridgeSigned;
         s.in = in; s.feePerKb = 100000;
-        in[0].amount = 1ull << 63; in[1].amount = 1ull << 63;   // the sum wraps to 0: the bridge refuses (5%)
+        in[0].amount = 1ull << 63; in[1].amount = 1ull << 63;   // a negative jlong: the bridge refuses (not positive)
         core_refuses(&s, BR_LEGACY_SWEEP_BAD_AMOUNT, "2^63 + 2^63", &f, &bridgeSigned);
-        check(f.input == 0 && ! bridgeSigned, "2^63: input 0 named (the bridge refused the wrapped sum by its 5% rule)");
+        check(f.input == 0 && ! bridgeSigned, "2^63: input 0 named (the bridge refused it as not positive)");
         in[0].amount = UINT64_MAX; in[1].amount = 2;            // the sum wraps to 1
         core_refuses(&s, BR_LEGACY_SWEEP_BAD_AMOUNT, "UINT64_MAX + 2", &f, NULL);
         check(f.input == 0, "UINT64_MAX: input 0 named");
@@ -764,7 +872,7 @@ int main(int argc, char **argv)
         check(f.input == 1 && bridgeSigned, "MAX_MONEY twice: input 1 named; the bridge signs it");
         in[0].amount = (uint64_t)(int64_t)-1; in[1].amount = 10000000;   // a negative jlong, as the bridge reads it
         core_refuses(&s, BR_LEGACY_SWEEP_BAD_AMOUNT, "a negative jlong", &f, &bridgeSigned);
-        check(f.input == 0 && bridgeSigned, "a negative jlong: input 0 named; the bridge signs it");
+        check(f.input == 0 && ! bridgeSigned, "a negative jlong: input 0 named; the bridge refuses it too");
         // Per input, in order: the script, then the amount.
         in[0].amount = MM + 1; in[1].scriptLen = 0;
         core_refuses(&s, BR_LEGACY_SWEEP_BAD_AMOUNT, "a bad amount before an empty script", &f, NULL);
@@ -802,66 +910,42 @@ int main(int argc, char **argv)
         // 364 x 0x0168168168168169 = 2 x 2^64 + 332: the wrapped fee is 0, raised to the 1000 floor.
         s.feePerKb = 0x0168168168168169ull;
         core_refuses(&s, BR_LEGACY_SWEEP_FEE_OVERFLOW, "a rate whose product wraps to 332", NULL, &bridgeSigned);
-        check(bridgeSigned, "the bridge signs that rate at the 1000-satoshi floor");
+        check(! bridgeSigned, "the bridge refuses that rate (out of range), not signing it at the 1000 floor");
         Sweep t = s1;   // a lone input: 204 x 0x0282828282828283 = 2 x 2^64 + 100
         BRLegacySweepInput in = one.in[0];
         in.amount = 1000000000ull;
         t.in = &in; t.feePerKb = 0x0282828282828283ull;
         core_refuses(&t, BR_LEGACY_SWEEP_FEE_OVERFLOW, "a lone input, product wraps to 100", NULL, &bridgeSigned);
-        check(bridgeSigned, "the bridge signs that one too");
+        check(! bridgeSigned, "the bridge refuses that one too");
     }
     end();
 
-    begin("boundary_fee_rate_cap");   // statuses only: the line is the rate, whatever the fee rules give
+    begin("refuse_fee_rate_cap");   // rates far above the cap: both refuse, with no wrap involved
     {
         Sweep s = s1;
         BRLegacySweepInput in1 = one.in[0];
         BRLegacySweepFee f;
-        int sg;
-        in1.amount = 1000000000ull;
-        s.in = &in1;
-        check(CAP == 5236126ull && DEFAULT_FEE_PER_KB < CAP, "the bound is MAX_FEE_PER_KB, 5,236,126 sat/kB");
-        s.feePerKb = CAP;
-        check(core_r(&s, NULL, &sg) == BR_LEGACY_SWEEP_SIGNED && sg, "a lone coin at the bound signs");
-        s.feePerKb = CAP + 1;
-        core_refuses(&s, BR_LEGACY_SWEEP_FEE_RATE_TOO_HIGH, "a lone coin at the bound + 1", &f, NULL);
-        check(f.outAmount == 0, "no output computed");
-        Sweep t = s2;
-        BRLegacySweepInput in2[2] = { two.in[0], two.in[1] };
-        in2[0].amount = 100000000000ull; in2[1].amount = 100000000000ull;
-        t.in = in2;
-        t.feePerKb = CAP;
-        check(core_r(&t, NULL, &sg) == BR_LEGACY_SWEEP_SIGNED && sg, "two coins at the bound sign");
-        t.feePerKb = CAP + 1;
-        core_refuses(&t, BR_LEGACY_SWEEP_FEE_RATE_TOO_HIGH, "two coins at the bound + 1", NULL, NULL);
-    }
-    end();
-
-    begin("refuse_fee_rate_cap");
-    {
-        Sweep s = s1;
-        BRLegacySweepInput in1 = one.in[0];
-        int bridgeSigned;
-        in1.amount = 1000000000ull;   // 10 DGB at 4.9e9 sat/kB: the bridge pays 9.996 DGB of it in fee
+        in1.amount = 1000000000ull;   // 10 DGB at 4.9e9 sat/kB: signed before the rate bound existed
         s.in = &in1; s.feePerKb = 4900000000ull;
-        core_refuses(&s, BR_LEGACY_SWEEP_FEE_RATE_TOO_HIGH, "a lone coin at 4.9e9 sat/kB", NULL, &bridgeSigned);
-        check(bridgeSigned, "the bridge signs it (the burn the bound stops)");
+        agree(&s, BR_LEGACY_SWEEP_FEE_RATE_TOO_HIGH, "a lone coin at 4.9e9 sat/kB");
+        core_r(&s, &f, NULL);
+        check(f.outAmount == 0, "no output computed");
         Sweep t = s2;
         BRLegacySweepInput in2[2] = { two.in[0], two.in[1] };
         in2[0].amount = 100000000000ull; in2[1].amount = 100000000000ull;   // 2000 DGB at 1e9: a 3.64 DGB fee, under 5%
         t.in = in2; t.feePerKb = 1000000000ull;
-        core_refuses(&t, BR_LEGACY_SWEEP_FEE_RATE_TOO_HIGH, "two coins at 1e9 sat/kB", NULL, &bridgeSigned);
-        check(bridgeSigned, "the bridge signs it (the 5% rule passes it)");
+        agree(&t, BR_LEGACY_SWEEP_FEE_RATE_TOO_HIGH, "two coins at 1e9 sat/kB");
         t.feePerKb = UINT64_MAX / 364;   // the largest rate that does not wrap
-        core_refuses(&t, BR_LEGACY_SWEEP_FEE_RATE_TOO_HIGH, "(2^64 - 1) / 364", NULL, NULL);
+        agree(&t, BR_LEGACY_SWEEP_FEE_RATE_TOO_HIGH, "(2^64 - 1) / 364");
     }
     end();
 
-    // The Android caller (LegacySweepService.kt, checked by run.sh) passes 100,000 sat/kB, under the bound, and the
+    // The Android caller (LegacySweepService.kt, checked by run.sh) passes 100,000 sat/kB, the floor of the range, and the
     // amounts of proven coins. At that rate the core signs exactly what the bridge signs, up to a total of MAX_MONEY.
     begin("android_default_rate");
     {
-        check(DEFAULT_FEE_PER_KB == 100000ull && DEFAULT_FEE_PER_KB <= CAP, "100,000 sat/kB is under the bound");
+        check(DEFAULT_FEE_PER_KB == 100000ull && DEFAULT_FEE_PER_KB == BR_LEGACY_SWEEP_MIN_FEE_PER_KB &&
+              DEFAULT_FEE_PER_KB <= CAP, "100,000 sat/kB is the floor of the range");
         const size_t counts[4] = { 1, 2, 5, 16 };
         for (int c = 0; c < 4; c++) {
             for (int big = 0; big < 2; big++) {
@@ -963,19 +1047,59 @@ int main(int argc, char **argv)
     end();
 
     // ── the largest fee rate on a lone coin ────────────────────────────────────────────────────────────────────────
-    // 0.02 DGB at the bound, 5,236,126 sat/kB: 204 * 5236126 / 1000 = 1068169 sat of fee (53%), and it signs (a lone
-    // input is exempt from the 5% rule). Above the bound: refuse_fee_rate_cap.
+    // 0.05 DGB at the top rate, 1,000,000 sat/kB: 204 * 1000000 / 1000 = 204,000 sat of fee (4.08%), the most a lone
+    // coin can pay, and only on one listing more than 4,080,000. Above the cap: boundary_rate_cap, refuse_fee_rate_cap.
     begin("fee_rate_large");
     {
         Sweep s = s1;
         BRLegacySweepInput in = one.in[0];
-        in.amount = 2000000ull;
+        in.amount = 5000000ull;
         s.in = &in; s.feePerKb = BR_LEGACY_SWEEP_MAX_FEE_PER_KB;
-        agree(&s, BR_LEGACY_SWEEP_SIGNED, "a lone coin at the bound");
+        agree(&s, BR_LEGACY_SWEEP_SIGNED, "a lone coin at the top rate");
         Both b = run_both(&s, 1);
-        check(b.fee.fee == 1068169ull && b.tx && b.tx->outputs[0].amount == 2000000ull - 1068169ull,
-              "fee 1068169, output 931831");
+        check(b.fee.fee == 204000ull && b.tx && b.tx->outputs[0].amount == 5000000ull - 204000ull,
+              "fee 204000, output 4796000");
         both_free(&b);
+    }
+    end();
+
+    // ── the masked rules: the fee floor and the dust refusal (DEVMERGE-KAT-NITS) ───────────────────────────────────
+    // On the fee header with the rate floor and the 5% refusal removed. One input: estSize 204.
+    begin("fee_floor_masked");
+    {
+        static const struct { uint64_t rate, fee; } kFloor[] = {
+            { 0, 1000 }, { 1, 1000 }, { 999, 1000 }, { 4901, 1000 },   // 204 * 4901 / 1000 = 999 -> 1000
+            { 4902, 1000 }, { 4907, 1001 }, { 100000, 20400 },                 // the floor no longer binds
+        };
+        for (size_t i = 0; i < sizeof(kFloor) / sizeof(kFloor[0]); i++) {
+            size_t est = 0; uint64_t fee = 0;
+            int v = kat_fee_masked(100000000ull, 1, kFloor[i].rate, &est, &fee);
+            char d[96];
+            snprintf(d, sizeof(d), "rate %llu: OK, estSize 204, fee %llu", (unsigned long long)kFloor[i].rate,
+                     (unsigned long long)kFloor[i].fee);
+            check(v == BR_LEGACY_SWEEP_FEE_CHECK_OK && est == 204 && fee == kFloor[i].fee, d);
+        }
+    }
+    end();
+    begin("fee_dust_masked");
+    {
+        static const struct { uint64_t rate, totalIn; int verdict; } kDust[] = {
+            { 100000, 0, BR_LEGACY_SWEEP_FEE_CHECK_DUST },
+            { 100000, 20400, BR_LEGACY_SWEEP_FEE_CHECK_DUST },        // totalIn == fee
+            { 100000, 20945, BR_LEGACY_SWEEP_FEE_CHECK_DUST },        // fee + 545
+            { 100000, 20946, BR_LEGACY_SWEEP_FEE_CHECK_DUST },        // fee + 546: the line itself is refused
+            { 100000, 20947, BR_LEGACY_SWEEP_FEE_CHECK_OK },          // fee + 547
+            { 1000000, 204546, BR_LEGACY_SWEEP_FEE_CHECK_DUST },      // fee 204,000 + 546
+            { 1000000, 204547, BR_LEGACY_SWEEP_FEE_CHECK_OK },
+        };
+        for (size_t i = 0; i < sizeof(kDust) / sizeof(kDust[0]); i++) {
+            uint64_t fee = 0;
+            int v = kat_fee_masked(kDust[i].totalIn, 1, kDust[i].rate, NULL, &fee);
+            char d[96];
+            snprintf(d, sizeof(d), "rate %llu, totalIn %llu: verdict %d", (unsigned long long)kDust[i].rate,
+                     (unsigned long long)kDust[i].totalIn, kDust[i].verdict);
+            check(v == kDust[i].verdict && fee == kDust[i].rate * 204 / 1000, d);
+        }
     }
     end();
 
@@ -985,9 +1109,9 @@ int main(int argc, char **argv)
         long iters = getenv("KAT_FUZZ") ? atol(getenv("KAT_FUZZ")) : 2000;
         size_t pc;
         const BRDerivationProfile *profiles = BRDerivationProfiles(&pc);
-        long signedN = 0, refusedN = 0, mism = 0, newRefusals = 0, bridgeSignedNew = 0;
-        static const uint64_t rates[] = { 0, 1, 999, 1000, 4901, 4902, 100000, 100000, 100000, 250000, 1000000,
-                                          BR_LEGACY_SWEEP_MAX_FEE_PER_KB, BR_LEGACY_SWEEP_MAX_FEE_PER_KB + 1 };
+        long signedN = 0, refusedN = 0, mism = 0, newRefusals = 0, bridgeSignedNew = 0, rateRefusals = 0;
+        static const uint64_t rates[] = { 0, 1, 99999, 100000, 100000, 100000, 100000, 100000, 100000, 100004, 250000,
+                                          999999, 1000000, 1000000, 1000001, 5236126 };
         const char *dests[] = { kDest, "dgb1qxxxxxxxx", "", "DGAf4MmtdP6D6QY1KREaznT3DZwxeAkWyn" };
         for (long it = 0; it < iters; it++) {
             uint8_t seed[65];
@@ -1012,7 +1136,7 @@ int main(int argc, char **argv)
             }
             uint64_t rr = rndn(10), rate;
             if (rr == 0) rate = rnd();                                            // almost always a wrap
-            else if (rr == 1) rate = rndn(10000000000000ull);                     // mostly above the bound, no wrap
+            else if (rr == 1) rate = rndn(10000000000000ull);                     // mostly above the cap, no wrap
             else rate = rates[rndn(sizeof(rates) / sizeof(*rates))];
             uint64_t fee = model_fee(n, rate);
             uint64_t mode = rndn(7), total;
@@ -1035,13 +1159,15 @@ int main(int argc, char **argv)
                        (! b.coreHex || strcmp(b.coreHex, b.bridgeHex) == 0);
             // The typed refusal against the rules as written (only where the inputs pin the outcome).
             if (seedLen >= 1 && seedLen <= 64) {
-                // Per input, in order: an empty script, then an amount or running total above MAX_MONEY.
-                int badScript = 0, badAmount = 0;
+                // Per input, in order: an empty script, then an amount of 0 or an amount or running total above
+                // MAX_MONEY.
+                int badScript = 0, badAmount = 0, overMax = 0;
                 uint64_t tin = 0, est = 10 + (uint64_t)n * 160 + 34, prod;
                 for (size_t i = 0; i < n; i++) {
                     if (x.in[i].scriptLen == 0) { badScript = 1; break; }
+                    if (x.in[i].amount == 0) { badAmount = 1; break; }
                     if (x.in[i].amount > BR_LEGACY_SWEEP_MAX_MONEY || tin + x.in[i].amount > BR_LEGACY_SWEEP_MAX_MONEY) {
-                        badAmount = 1; break;   // tin <= MAX_MONEY and amount <= MAX_MONEY: the sum fits
+                        badAmount = overMax = 1; break;   // tin <= MAX_MONEY and amount <= MAX_MONEY: the sum fits
                     }
                     tin += x.in[i].amount;
                 }
@@ -1053,13 +1179,17 @@ int main(int argc, char **argv)
                 else if (badAmount) want = BR_LEGACY_SWEEP_BAD_AMOUNT;
                 else if (badDest) want = BR_LEGACY_SWEEP_BAD_DESTINATION;
                 else if (wraps) want = BR_LEGACY_SWEEP_FEE_OVERFLOW;
-                else if (rate > 5236126ull) want = BR_LEGACY_SWEEP_FEE_RATE_TOO_HIGH;
-                else if (n > 1 && tin <= fee * 20) want = BR_LEGACY_SWEEP_FEE_TOO_HIGH;
+                else if (rate < 100000ull) want = BR_LEGACY_SWEEP_FEE_RATE_TOO_LOW;
+                else if (rate > 1000000ull) want = BR_LEGACY_SWEEP_FEE_RATE_TOO_HIGH;
+                else if (fee > 10000000ull) want = BR_LEGACY_SWEEP_FEE_ABOVE_CEILING;
+                else if (tin <= fee * 20) want = BR_LEGACY_SWEEP_FEE_TOO_HIGH;
                 else if (tin <= fee + 546) want = BR_LEGACY_SWEEP_DUST_OUTPUT;
                 else want = b.r == BR_LEGACY_SWEEP_SIGN_FAILED ? BR_LEGACY_SWEEP_SIGN_FAILED : BR_LEGACY_SWEEP_SIGNED;
-                if (want == BR_LEGACY_SWEEP_BAD_AMOUNT || want == BR_LEGACY_SWEEP_FEE_OVERFLOW ||
-                    want == BR_LEGACY_SWEEP_FEE_RATE_TOO_HIGH) {
-                    // A refusal the bridge does not make: the core must give it, the bridge may do anything.
+                if (want == BR_LEGACY_SWEEP_FEE_OVERFLOW || want == BR_LEGACY_SWEEP_FEE_RATE_TOO_LOW ||
+                    want == BR_LEGACY_SWEEP_FEE_RATE_TOO_HIGH)
+                    rateRefusals++;
+                if (overMax) {
+                    // Above MAX_MONEY: the core must refuse, the bridge may do anything.
                     newRefusals++;
                     if (b.bridgeHex) bridgeSignedNew++;
                     same = b.r == want && ! b.coreHex;
@@ -1078,11 +1208,12 @@ int main(int argc, char **argv)
             if (b.coreHex) signedN++; else refusedN++;
             both_free(&b);
         }
-        printf("   fuzz: %ld sweeps, %ld signed, %ld refused, %ld disagreements; %ld new refusals (%ld the bridge signs)\n",
-               iters, signedN, refusedN, mism, newRefusals, bridgeSignedNew);
+        printf("   fuzz: %ld sweeps, %ld signed, %ld refused, %ld disagreements; %ld rate refusals; %ld above MAX_MONEY "
+               "(%ld the bridge signs)\n", iters, signedN, refusedN, mism, rateRefusals, newRefusals, bridgeSignedNew);
         check(mism == 0, "every fuzzed sweep: the bridge's answer, and the typed refusal the rules give");
         check(signedN > iters / 5 && refusedN > iters / 10, "the fuzz reaches both signed and refused sweeps");
-        check(newRefusals > iters / 50, "the fuzz reaches the new refusals");
+        check(newRefusals > iters / 50, "the fuzz reaches the core's MAX_MONEY refusal");
+        check(rateRefusals > iters / 50, "the fuzz reaches the rate range");
     }
     end();
 
@@ -1091,7 +1222,7 @@ int main(int argc, char **argv)
     {
         uint8_t seedCopy[64];
         memcpy(seedCopy, g_seed, 64);
-        Sweep cases[8];
+        Sweep cases[12];
         BRLegacySweepInput bad[2] = { two.in[0], two.in[1] };
         bad[1].scriptLen = 0;
         BRLegacySweepInput low[2] = { two.in[0], two.in[1] };
@@ -1106,8 +1237,15 @@ int main(int argc, char **argv)
         cases[5] = s2; cases[5].in = over;                 // BAD_AMOUNT after one key was derived
         cases[6] = s2; cases[6].feePerKb = BR_LEGACY_SWEEP_MAX_FEE_PER_KB + 1;   // FEE_RATE_TOO_HIGH, every key derived
         cases[7] = s2; cases[7].feePerKb = UINT64_MAX;     // FEE_OVERFLOW, every key derived
+        BRLegacySweepInput zero[2] = { two.in[0], two.in[1] };
+        zero[1].amount = 0;
+        cases[8] = s2; cases[8].in = zero;                 // BAD_AMOUNT (0) after one key was derived
+        cases[9] = s2; cases[9].feePerKb = BR_LEGACY_SWEEP_MIN_FEE_PER_KB - 1;   // FEE_RATE_TOO_LOW, every key derived
+        big_inputs(63, 10000000);
+        cases[10] = s2; cases[10].in = g_big; cases[10].n = 63; cases[10].feePerKb = 1000000;   // FEE_ABOVE_CEILING
+        cases[11] = s2; cases[11].in = g_big; cases[11].n = 62; cases[11].feePerKb = 1000000;   // signed, 62 inputs
         int totalHits = 0;
-        for (int c = 0; c < 8; c++) {
+        for (int c = 0; c < 12; c++) {
             set_secrets(&cases[c]);
             g_freedHits = 0; g_freedBlocks = 0;
             uint8_t *ser = NULL; size_t n = 0;

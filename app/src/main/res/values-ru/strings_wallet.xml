@@ -546,6 +546,7 @@
     <string name="sec_autolock_30m">30 минут</string>
     <string name="sec_autolock_custom">Своё значение</string>
     <string name="sec_pin_changed">PIN-код успешно изменён</string>
+    <string name="sec_pin_change_failed">Не удалось сохранить новый PIN-код. Старый PIN-код по-прежнему действует.</string>
     <string name="sec_pins_mismatch">PIN-коды не совпадают</string>
     <string name="sec_biometric_required">Требуется биометрическая аутентификация</string>
     <string name="did_logged_in">Вы вошли на %1$s</string>
@@ -614,6 +615,9 @@
     <string name="send_fail_unknown">Не удалось отправить транзакцию.</string>
     <string name="send_fail_try_again">Повторить</string>
     <string name="rf_splitting_for_assets">Подготовка к перемещению %1$d DigiAssets: ваши DGB делятся, чтобы каждый актив мог оплатить свой перевод. Ожидание одного подтверждения, обычно меньше минуты.</string>
+    <string name="rf_fanout_short">Ваши DigiAssets остались в старом кошельке: для их перемещения там нужно %1$s на комиссии. Ваши DGB перемещены. Чтобы переместить активы, отправьте %1$s на старый кошелёк одной транзакцией и снова запустите восстановление средств.</string>
+    <string name="rf_fanout_unread">Ваши DigiAssets остались в старом кошельке: для их перемещения там нужно %1$s на комиссии. Ваши DGB перемещены, кроме %2$d монет, которые не удалось проверить: они остались в старом кошельке. Чтобы переместить активы, отправьте %1$s на старый кошелёк одной транзакцией и снова запустите восстановление средств.</string>
+    <string name="rf_fanout_failed">Ваши DigiAssets остались в старом кошельке: не удалось завершить шаг, который делит DGB на комиссии за их перевод. Ваши DGB перемещены. Активы по-прежнему на старой фразе; снова запустите восстановление средств, и оно покажет сумму, нужную старому кошельку.</string>
     <string name="rf_nothing_moved">Ничего не перемещено</string>
     <string name="rf_dd_fee_floor">Требуется %1$s на комиссию сети: в этом кошельке %2$s.</string>
     <string name="rf_dd_found">Найдено %1$s в DigiDollar</string>
@@ -646,10 +650,10 @@
          Machine-assisted. -->
     <string name="reconcile_outputs_found">Выходы, найденные в блокчейне</string>
     <string name="reconcile_found_not_compared">Найдено в блокчейне, не сравнивалось</string>
-    <string name="reconcile_spendable">Расходуемые</string>
-    <string name="reconcile_wallet_spendable">Расходуемый баланс кошелька</string>
-    <string name="reconcile_matches_wallet">Совпадает с расходуемым балансом кошелька.</string>
-    <string name="reconcile_does_not_match_wallet">Не совпадает с расходуемым балансом кошелька: см. ниже.</string>
+    <string name="reconcile_in_balance">Учтено в балансе</string>
+    <string name="reconcile_wallet_balance">Баланс кошелька</string>
+    <string name="reconcile_matches_wallet_balance">Совпадает с балансом кошелька.</string>
+    <string name="reconcile_does_not_match_wallet_balance">Не совпадает с балансом кошелька: см. ниже.</string>
     <string name="reconcile_held_asset">Удерживается для DigiAsset</string>
     <string name="reconcile_held_unknown">Удерживается: состояние актива неизвестно</string>
     <string name="reconcile_proven_plain">Обычные DGB, станут расходуемыми после перезапуска</string>
@@ -727,6 +731,9 @@
     <string name="seedview_pass_unreadable_title">Не удалось прочитать парольную фразу</string>
     <string name="seedview_pass_unreadable_body">Парольную фразу этого кошелька сейчас не удалось прочитать. Одних слов восстановления может быть недостаточно, чтобы восстановить этот кошелёк, поэтому они не показываются, пока парольную фразу нельзя показать вместе с ними. Попробуйте ещё раз.</string>
     <string name="seedview_pass_retry">Повторить</string>
+    <!-- SEED-VIEW-AUTH -->
+    <string name="seedview_device_lock_title">Подтвердите блокировку экрана</string>
+    <string name="seedview_device_lock_body">Ваша фраза восстановления защищена блокировкой экрана этого телефона. Чтобы показать её, подтвердите блокировку экрана PIN-кодом, графическим ключом или паролем.</string>
     <!-- /pkg E2-keys -->
     <string name="pinstore_title">Сейчас не удаётся проверить PIN-код</string>
     <string name="pinstore_body">Защищённое хранилище ключей телефона не открылось, поэтому кошелёк остаётся заблокированным. Ничего не удалено. Закройте приложение и откройте снова. Если это повторяется, перезагрузите телефон; фраза восстановления по-прежнему восстанавливает кошелёк на любом устройстве.</string>
@@ -740,4 +747,15 @@
     <string name="reconcile_rebuild_button">Полная перестройка из цепочки (повторное сканирование)</string>
     <string name="rf_capped_body">Сканирование на %1$s остановилось на пределе, хотя этот путь ещё используется, поэтому средств там может быть больше, чем показано. То, что не показано, остаётся в безопасности в блокчейне.</string>
     <string name="reconcile_stuck_stale_cleared">, из них %1$d так и не были ретранслированы (спустя сутки в сети не было ни их, ни транзакций, тратящих их монеты). Если какой-то из этих платежей всё же дошёл до получателя, он ещё может подтвердиться: уточните у получателя, прежде чем платить снова</string>
+    <!-- KS-BIND: seed key bound to the device lock -->
+    <string name="ksb_prompt_subtitle">Подтвердите блокировку экрана один раз, чтобы ключ кошелька можно было привязать к ней</string>
+    <string name="ksb_notice_title">На этом телефоне нет блокировки экрана</string>
+    <string name="ksb_notice_body">Кошелёк зашифрован на этом телефоне, но его ключ нельзя привязать к блокировке экрана, потому что её нет. Тогда между приложением и вашими средствами стоит только PIN-код кошелька. Установите PIN-код, графический ключ или пароль в настройках Android: кошелёк привяжет к нему ключ, когда приложение в следующий раз запустится и откроет кошелёк. В настройках безопасности видно, привязан ли ключ.</string>
+    <string name="ksb_notice_ok">Понятно</string>
+    <string name="sec_seed_key">Ключ кошелька</string>
+    <string name="sec_seed_key_bound">Привязан к блокировке экрана этого телефона</string>
+    <string name="sec_seed_key_pending">Ещё не привязан: будет привязан к блокировке экрана, когда приложение в следующий раз запустится и откроет кошелёк</string>
+    <string name="sec_seed_key_no_lock">Не привязан: на этом телефоне нет блокировки экрана. Установите её в настройках Android.</string>
+    <string name="sec_seed_key_lock_removed">Блокировку экрана удалили после настройки этого кошелька, поэтому его ключ больше не открывается, даже с новой блокировкой. Пока кошелёк ещё открыт, проверьте, что фраза восстановления записана, или переведите средства сейчас: при следующем запуске приложения кошельку понадобится фраза восстановления.</string>
+    <string name="sec_seed_key_cannot_bind">Не привязан: ключ от прежней блокировки экрана больше не работает, поэтому ключ этого кошелька нельзя привязать в этой установке. Если стереть кошелёк и восстановить его по фразе восстановления, ключ будет привязан.</string>
 </resources>

@@ -540,6 +540,7 @@
     <string name="sec_autolock_30m">30 minuto</string>
     <string name="sec_autolock_custom">Custom</string>
     <string name="sec_pin_changed">Matagumpay na nabago ang PIN</string>
+    <string name="sec_pin_change_failed">Hindi na-save ang bagong PIN. Aktibo pa rin ang luma mong PIN.</string>
     <string name="sec_pins_mismatch">Hindi tugma ang mga PIN</string>
     <string name="sec_biometric_required">Kailangan ng biometric authentication</string>
     <string name="did_logged_in">Naka-log in ka na sa %1$s</string>
@@ -608,6 +609,9 @@
     <string name="send_fail_unknown">Hindi naipadala ang transaksyon.</string>
     <string name="send_fail_try_again">Subukan ulit</string>
     <string name="rf_splitting_for_assets">Inihahanda ang paglipat ng %1$d DigiAssets: hinahati ang iyong DGB para makabayad ang bawat isa ng sarili nitong transfer fee. Naghihintay ng isang kumpirmasyon, karaniwang wala pang isang minuto.</string>
+    <string name="rf_fanout_short">Naiwan ang iyong DigiAssets sa lumang wallet: para mailipat sila, kailangan ng %1$s doon para sa fees. Nailipat na ang iyong DGB. Para mailipat ang assets, magpadala ng %1$s sa lumang wallet sa iisang transaksyon at patakbuhin muli ang Recover funds.</string>
+    <string name="rf_fanout_unread">Naiwan ang iyong DigiAssets sa lumang wallet: para mailipat sila, kailangan ng %1$s doon para sa fees. Nailipat na ang iyong DGB, maliban sa %2$d coin na hindi masuri at naiwan sa lumang wallet. Para mailipat ang assets, magpadala ng %1$s sa lumang wallet sa iisang transaksyon at patakbuhin muli ang Recover funds.</string>
+    <string name="rf_fanout_failed">Naiwan ang iyong DigiAssets sa lumang wallet: hindi natapos ang hakbang na naghahati ng DGB para sa kanilang transfer fee. Nailipat na ang iyong DGB. Nasa lumang phrase pa rin ang assets; patakbuhin muli ang Recover funds at sasabihin nito ang halagang kailangan ng lumang wallet.</string>
     <string name="rf_nothing_moved">Walang nailipat</string>
     <string name="rf_dd_fee_floor">Kailangan ng %1$s na bayad sa network: ang wallet na ito ay may %2$s.</string>
     <string name="rf_dd_found">Nakita ang %1$s na DigiDollar</string>
@@ -640,10 +644,10 @@
          Machine-assisted. -->
     <string name="reconcile_outputs_found">Mga output na nakita sa blockchain</string>
     <string name="reconcile_found_not_compared">Nakita sa blockchain, hindi naikumpara</string>
-    <string name="reconcile_spendable">Magagastos</string>
-    <string name="reconcile_wallet_spendable">Magagastos na balanse ng wallet</string>
-    <string name="reconcile_matches_wallet">Tugma sa magagastos na balanse ng wallet.</string>
-    <string name="reconcile_does_not_match_wallet">Hindi tugma sa magagastos na balanse ng wallet: tingnan sa ibaba.</string>
+    <string name="reconcile_in_balance">Kasama sa balanse</string>
+    <string name="reconcile_wallet_balance">Balanse ng wallet</string>
+    <string name="reconcile_matches_wallet_balance">Tugma sa balanse ng wallet.</string>
+    <string name="reconcile_does_not_match_wallet_balance">Hindi tugma sa balanse ng wallet: tingnan sa ibaba.</string>
     <string name="reconcile_held_asset">Nakalaan para sa isang DigiAsset</string>
     <string name="reconcile_held_unknown">Nakalaan: hindi alam ang estado ng asset</string>
     <string name="reconcile_proven_plain">Karaniwang DGB, magagastos pagkatapos mag-restart</string>
@@ -717,6 +721,9 @@
     <string name="seedview_pass_unreadable_title">Hindi mabasa ang passphrase</string>
     <string name="seedview_pass_unreadable_body">Hindi mabasa ngayon ang passphrase ng wallet na ito. Maaaring hindi maibalik ng iyong mga recovery word lamang ang wallet na ito, kaya hindi ipapakita ang mga ito hangga\'t hindi maipapakita ang passphrase kasama nila. Subukan ulit.</string>
     <string name="seedview_pass_retry">Subukan ulit</string>
+    <!-- SEED-VIEW-AUTH -->
+    <string name="seedview_device_lock_title">Kumpirmahin ang screen lock</string>
+    <string name="seedview_device_lock_body">Protektado ng screen lock ng teleponong ito ang iyong recovery phrase. Para maipakita ito, kumpirmahin ang screen lock gamit ang iyong PIN, pattern o password.</string>
     <!-- /pkg E2-keys -->
     <string name="pinstore_title">Hindi masuri ang iyong PIN ngayon</string>
     <string name="pinstore_body">Hindi nagbukas ang ligtas na key store ng telepono, kaya nananatiling naka-lock ang wallet. Walang binura. Isara ang app at buksan muli. Kung paulit-ulit ito, i-restart ang telepono; maibabalik pa rin ng iyong recovery phrase ang wallet sa anumang device.</string>
@@ -730,4 +737,15 @@
     <string name="reconcile_rebuild_button">Buong muling pagbuo mula sa chain (muling pag-scan)</string>
     <string name="rf_capped_body">Huminto ang scan sa limitasyon nito sa %1$s habang ginagamit pa ang path na iyon, kaya maaaring mas marami ang pondo roon kaysa sa ipinapakita. Ligtas pa rin sa chain ang hindi naipakita.</string>
     <string name="reconcile_stuck_stale_cleared">, %1$d sa mga ito ang hindi kailanman na-relay (pagkalipas ng isang araw, wala sa network ang mga ito o anumang gumagastos sa kanilang coin). Kung naabot ng isa sa mga bayad na iyon ang tatanggap, maaari pa rin itong makumpirma: kumpirmahin muna sa kanila bago magbayad ulit</string>
+    <!-- KS-BIND: seed key bound to the device lock -->
+    <string name="ksb_prompt_subtitle">Kumpirmahin nang isang beses ang screen lock mo para maitali rito ang susi ng wallet</string>
+    <string name="ksb_notice_title">Walang screen lock ang teleponong ito</string>
+    <string name="ksb_notice_body">Naka-encrypt ang wallet mo sa teleponong ito, pero hindi maitatali ang susi nito sa screen lock dahil wala nito ang teleponong ito. Kaya ang wallet PIN lang ang nasa pagitan ng app at ng pondo mo. Magtakda ng PIN, pattern o password sa mga setting ng Android: itatali ng wallet ang susi nito roon sa susunod na pagbukas ng app at ng wallet. Makikita sa mga setting ng seguridad kung nakatali na ang susi.</string>
+    <string name="ksb_notice_ok">Naiintindihan ko</string>
+    <string name="sec_seed_key">Susi ng wallet</string>
+    <string name="sec_seed_key_bound">Nakatali sa screen lock ng teleponong ito</string>
+    <string name="sec_seed_key_pending">Hindi pa nakatali: itatali ito sa screen lock mo sa susunod na pagbukas ng app at ng wallet</string>
+    <string name="sec_seed_key_no_lock">Hindi nakatali: walang screen lock ang teleponong ito. Magtakda nito sa mga setting ng Android.</string>
+    <string name="sec_seed_key_lock_removed">Inalis ang screen lock matapos i-set up ang wallet na ito, kaya hindi na bumubukas ang susi nito, kahit may bagong lock. Habang bukas pa ang wallet, tiyaking nakasulat ang recovery phrase mo, o ilipat na ngayon ang pondo mo: sa susunod na pagbukas ng app, kakailanganin ng wallet ang recovery phrase nito.</string>
+    <string name="sec_seed_key_cannot_bind">Hindi nakatali: hindi na gumagana ang susing naiwan mula sa dating screen lock, kaya hindi maitatali ang susi ng wallet na ito sa install na ito. Natatali ito kapag binura ang wallet at ibinalik mula sa recovery phrase nito.</string>
 </resources>

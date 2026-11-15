@@ -1,6 +1,7 @@
 package app.aroundtheblock.wallet.core.security
 
 import android.os.Build
+import android.os.SystemClock
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
@@ -63,14 +64,19 @@ class BiometricAuth {
         subtitle: String = "Confirm your device lock to unlock the wallet key",
     ): BiometricResult = suspendCancellableCoroutine { cont ->
         val executor = ContextCompat.getMainExecutor(activity)
+        // SEED-VIEW-AUTH: generation of this prompt in OwnCredentialPromptExemption; set before
+        // prompt.authenticate, so every callback below closes this prompt and no other.
+        var promptGen = 0
         val callback = object : BiometricPrompt.AuthenticationCallback() {
             override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                OwnCredentialPromptExemption.closePrompt(promptGen, success = true)
                 if (cont.isActive) cont.resume(BiometricResult.Success)
             }
             override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                OwnCredentialPromptExemption.closePrompt(promptGen, success = false)
                 if (cont.isActive) cont.resume(BiometricResult.Error(errorCode, errString.toString()))
             }
-            override fun onAuthenticationFailed() { /* prompt retries internally */ }
+            override fun onAuthenticationFailed() { /* prompt retries internally; still up */ }
         }
         // androidx.biometric rejects BIOMETRIC_STRONG|DEVICE_CREDENTIAL on API
         // 28-29 with an IllegalArgumentException (crash-looped the Note 8 at
@@ -93,8 +99,18 @@ class BiometricAuth {
                 .setSubtitle(subtitle)
                 .setAllowedAuthenticators(authenticators)
                 .build()
+            // SEED-VIEW-AUTH: opens this prompt; arms the onStop deferral only on API 29 (the framework
+            // launches the confirm). API <= 28 arms at the confirm launch, API >= 30 never.
+            promptGen = OwnCredentialPromptExemption.openPrompt(SystemClock.elapsedRealtime(), Build.VERSION.SDK_INT)
             prompt.authenticate(info)
+            // A caller cancelled (its effect left the composition): take the prompt down with it, so it
+            // is not left over the next screen with nothing waiting on its answer. Main thread only.
+            cont.invokeOnCancellation {
+                OwnCredentialPromptExemption.closePrompt(promptGen, success = false)
+                executor.execute { runCatching { prompt.cancelAuthentication() } }
+            }
         } catch (t: Throwable) {
+            OwnCredentialPromptExemption.closePrompt(promptGen, success = false)
             // A credential prompt must never be able to crash the wallet - the
             // caller treats this like any other prompt failure.
             if (cont.isActive) cont.resume(BiometricResult.Error(-1, t.message ?: "prompt failed"))

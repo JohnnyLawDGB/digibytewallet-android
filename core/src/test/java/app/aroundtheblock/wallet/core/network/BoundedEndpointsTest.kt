@@ -105,6 +105,7 @@ class BoundedEndpointsTest {
         Case("hub handle availability", HUB_SMALL, false) { hub(it).checkHandleAvailable("handle") },
         Case("hub game stats", HUB_SMALL, null) { hub(it).getDigiRunnerStats() },
         Case("hub game leaderboard", HUB_SMALL, emptyList<Any>()) { hub(it).getDigiRunnerLeaderboard() },
+        Case("hub game run start", HUB_SMALL, null) { hub(it).startDigiRunnerRun() },
         // The score is accepted on the status; its answer is read only for the log.
         Case("hub game score answer", HUB_SMALL, true) { hub(it).submitDigiRunnerScore(1, 1, 1, 1) },
         Case("hub messages", HUB_LIST, emptyList<Any>()) { hub(it).getMessages(1) },

@@ -13,7 +13,7 @@ import androidx.security.crypto.MasterKey
  * credential for the user's Hub identity and, unlike the seed / PIN / DB-key blobs, was not
  * Keystore-wrapped — the one secret in the app that a backup or a root shell could lift and
  * replay. It now lives in the hardware-keyed `dgb_hub_session` EncryptedSharedPreferences,
- * built the same way `PinManager` builds `dgb_pin_store`.
+ * built the way `PinManager` built `dgb_pin_store` before PIN-STORE moved the PIN to a sealed file.
  *
  * An existing plaintext token is migrated exactly once on first [load]: copied into the
  * encrypted store and removed from the plaintext one, so an upgrade does not log the user out

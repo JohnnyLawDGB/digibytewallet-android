@@ -136,13 +136,15 @@ fun AppNavigation(
     // recur. popUpTo(0) clears the wallet graph so BACK from the PIN screen leaves the app
     // instead of revealing the screen underneath; UnlockScreen's existing success path then
     // navigates to "wallet" exactly as on a cold start. See shouldRouteToUnlock for the
-    // flows deliberately left alone (lost-PIN → pin_setup, onboarding graph, cold start).
+    // flows deliberately left alone (lost-PIN → pin_setup, setup routes with no wallet stored,
+    // cold start).
     // Also keyed on the route: a wallet screen that appears while the state is already Locked (no
     // Unlocked→Locked change to react to) is routed to unlock too (LOCK-PD).
     LaunchedEffect(walletState, currentRoute) {
         // A store that cannot be read counts as PIN-protected: routed to unlock, never left open (row 23, R10).
         val hasPin = pinManager.pinAssumedForLock()
-        if (shouldRouteToUnlock(walletState, hasPin, currentRoute)) {
+        // Read here, not a key: every path that stores or erases a wallet also navigates, which re-runs this.
+        if (shouldRouteToUnlock(walletState, hasPin, currentRoute, walletManager.hasSavedWallet())) {
             android.util.Log.i("AppNavigation", "wallet locked on route=$currentRoute — routing to unlock")
             SeedViewGate.revoke()
             resumeAfterUnlock = routeToResumeAfterUnlock(currentRoute)
@@ -341,7 +343,18 @@ fun AppNavigation(
                 // "wallet already exists, skip creation" vs. "create a new wallet")
                 // can never race an in-flight restore and create a duplicate wallet.
                 var restoring by remember { mutableStateOf(lostPinRestorePending.value) }
-                if (restoring) {
+                // The wallet's key is gone (device lock removed): the record is still stored, so
+                // PinSetupScreen would only fail with pin_err_wallet. Say what recovers it instead.
+                var keyLost by rememberSaveable { mutableStateOf(false) }
+                if (keyLost) {
+                    Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+                        Text(
+                            text = stringResource(R.string.unlock_device_lock_removed),
+                            color = Color.White,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
+                } else if (restoring) {
                     LaunchedEffect(Unit) {
                         // Restore-crash bracket (see UnlockScreen's unlock path for the
                         // same pattern + rationale): BootGuard (app module) isn't importable
@@ -367,9 +380,11 @@ fun AppNavigation(
                                 android.util.Log.e("AppNavigation", "lost-PIN restore needs device auth", e)
                             }
                         } catch (e: app.aroundtheblock.wallet.core.security.KeystoreKeyInvalidatedException) {
-                            // Device lock removed — only the recovery phrase recovers this
-                            // wallet. PinSetupScreen's no-wallet branch offers exactly that.
+                            // Device lock removed — only the recovery phrase recovers this wallet.
+                            // The record is still stored, so PinSetupScreen is NOT shown (it would
+                            // report pin_err_wallet): the restore message is, as at unlock.
                             android.util.Log.e("AppNavigation", "wallet key permanently invalidated", e)
+                            keyLost = true
                         }
                         lostPinRestorePending.value = false
                         restoring = false
@@ -464,15 +479,30 @@ fun AppNavigation(
             composable("digirunner") {
                 val gameContext = LocalContext.current
                 val coroutineScope = rememberCoroutineScope()
+                // DIGIRUNNER-RUNID: each run (the first, every Play Again) asks the server for its
+                // runId, and the score submit carries it; a failed run call never holds up play.
+                // Known, accepted: a rotation recreates this screen and starts a new run, leaving the
+                // old one open on the server; enough of them (MAX_OPEN_RUNS within MAX_RUN_SECONDS)
+                // and /run answers 429, so the score goes out without a runId, stored unverified.
+                val runs = remember(coroutineScope) {
+                    app.aroundtheblock.wallet.core.hub.DigiRunnerRuns(
+                        scope = coroutineScope,
+                        startRun = { digiScopeClient.startDigiRunnerRun() },
+                        submitScore = { score, distance, coins, livesRemaining, runId ->
+                            digiScopeClient.submitDigiRunnerScore(score, distance, coins, livesRemaining, runId)
+                        },
+                    )
+                }
 
                 Box(modifier = Modifier.fillMaxSize()) {
                     DigiRunnerGame(
                         standalone = true,
+                        onRunStart = { runs.onRunStarted() },
                         onScoreSubmit = { score, distance, coins, livesRemaining ->
+                            // Taken in the tap, before a Play Again can start the next run.
+                            val run = runs.capture()
                             coroutineScope.launch {
-                                val ok = digiScopeClient.submitDigiRunnerScore(
-                                    score, distance, coins, livesRemaining
-                                )
+                                val ok = runs.submit(run, score, distance, coins, livesRemaining)
                                 val msg = if (ok) context.getString(R.string.game_score_submitted) else context.getString(R.string.game_score_failed)
                                 Toast.makeText(gameContext, msg, Toast.LENGTH_SHORT).show()
                             }
@@ -570,7 +600,8 @@ fun AppNavigation(
                     SeedViewScreen(
                         navController = navController,
                         walletManager = walletManager,
-                        keyStoreManager = keyStoreManager
+                        keyStoreManager = keyStoreManager,
+                        biometricAuth = biometricAuth,
                     )
                 } else {
                     LaunchedEffect(Unit) {

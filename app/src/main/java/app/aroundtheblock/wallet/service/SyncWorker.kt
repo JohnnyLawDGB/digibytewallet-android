@@ -108,12 +108,8 @@ class SyncWorker @AssistedInject constructor(
                 refresh?.cancel()
             }
             // Persist transactions so balance is current on next app open
-            val txData = NativeBridge.getSerializedTransactions()
-            if (txData != null) {
-                val hex = txData.joinToString("") { "%02x".format(it) }
-                applicationContext.getSharedPreferences("dgb_sync_data" + networkSuffix(applicationContext), 0)
-                    .edit().putString("saved_transactions", hex).apply()
-            }
+            // (the one checkpoint writer, to the file store: TX-CKPT-CAP)
+            app.aroundtheblock.wallet.core.WalletTxPersister(applicationContext).persistCheckpoint()
             // Re-check before tearing down: SyncService can have started during our 30s
             // window — the user opening the app is exactly the event this worker is filling
             // in for — and disconnecting then would kill a sync that had just come up.

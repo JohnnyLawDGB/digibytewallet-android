@@ -21,6 +21,8 @@
 // in the core's procedure; run.sh requires each to fail exactly its scenarios and pass every other one.
 // KAT_RED_NO_FREE_REFUSED keeps the tx the wallet refused (import_refused_freed) unfreed; only the leak checker can
 // see that, so run.sh runs that arm only where LeakSanitizer exists (Linux) and requires a leak report from it.
+// KAT_RED_FREE_HELD frees the tx the wallet kept (import_unsigned_form is the first); run.sh requires AddressSanitizer
+// to report the use-after-free of that block, freed by BRServerTxImport (DEVMERGE-KAT-NITS).
 //
 // THE NOTE'S SCOPE. The bridge kept the unprovable-height note in one static for the whole process
 // (g_unprovableServerHeight), so a height noted before a wallet swap or a manager rebuild is still taken by the next

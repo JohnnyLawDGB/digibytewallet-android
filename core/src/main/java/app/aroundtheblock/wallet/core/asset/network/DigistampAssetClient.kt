@@ -1,5 +1,6 @@
 package app.aroundtheblock.wallet.core.asset.network
 
+import app.aroundtheblock.wallet.core.LogSafe
 import app.aroundtheblock.wallet.core.network.BoundedBody
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -101,7 +102,8 @@ class DigistampAssetClient(
             }
         }
     } catch (e: Exception) {
-        android.util.Log.w("DigistampAssetClient", "GET ${endpointOf(url)} failed", e)
+        // ASSET-LOG-CRLF: not the throwable -- its message and stack trace can quote the remote body.
+        android.util.Log.w("DigistampAssetClient", "GET ${endpointOf(url)} failed: ${e::class.java.simpleName}: ${LogSafe.text(e.message)}")
         null
     }
 

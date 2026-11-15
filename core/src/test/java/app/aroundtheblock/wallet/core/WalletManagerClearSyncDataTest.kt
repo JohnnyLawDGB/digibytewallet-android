@@ -1,6 +1,8 @@
 package app.aroundtheblock.wallet.core
 
 import android.content.Context
+import app.aroundtheblock.wallet.core.sync.CfScanLedgerStore
+import app.aroundtheblock.wallet.core.sync.FilterHeaderStore
 import app.aroundtheblock.wallet.core.sync.SavedBlockStore
 import app.aroundtheblock.wallet.core.sync.fakeContext
 import io.mockk.every
@@ -10,6 +12,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
+import java.io.File
 import org.junit.rules.TemporaryFolder
 
 /**
@@ -54,6 +57,32 @@ class WalletManagerClearSyncDataTest {
                 "inherit a DIFFERENT wallet's block window",
             SavedBlockStore.file(ctx).exists(),
         )
+    }
+
+    /** STORE-DURABILITY review: a new wallet (create, recover, seed change) must not inherit the previous
+     *  wallet's scan ledger or filter-header chain, nor a tmp of either, nor a write snapshotted before. */
+    @Test
+    fun clearSyncData_deletesTheFilterHeaderChainAndScanLedger() {
+        val ctx = fakeContext()
+        val dir = tmp.newFolder("files")
+        every { ctx.filesDir } returns dir
+        val headerEpoch = FilterHeaderStore.currentEpoch()
+        val ledgerEpoch = CfScanLedgerStore.currentEpoch()
+        FilterHeaderStore.write(ctx, byteArrayOf(1, 2, 3), headerEpoch)
+        CfScanLedgerStore.write(ctx, byteArrayOf(4, 5, 6), ledgerEpoch)
+        File(dir, "saved_filter_headers.bin.tmp").writeBytes(byteArrayOf(7))
+        File(dir, "saved_cf_ledger.bin.tmp").writeBytes(byteArrayOf(8))
+
+        walletManager(ctx).clearSyncData()
+
+        for (name in listOf("saved_filter_headers.bin", "saved_filter_headers.bin.tmp", "saved_cf_ledger.bin", "saved_cf_ledger.bin.tmp")) {
+            assertFalse("clearSyncData left $name for the next wallet", File(dir, name).exists())
+        }
+        // Through delete(): an in-flight write snapshotted before the clear is dropped, not resurrected.
+        FilterHeaderStore.write(ctx, byteArrayOf(9), headerEpoch)
+        CfScanLedgerStore.write(ctx, byteArrayOf(9), ledgerEpoch)
+        assertFalse(FilterHeaderStore.file(ctx).exists())
+        assertFalse(CfScanLedgerStore.file(ctx).exists())
     }
 
     /** A create or a restore clears the sync blob; the display currency it used to hold is kept. */

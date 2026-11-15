@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Host KAT runner for BROutpointClassify.h: the reconcile outpoint classifier moved from the bridge
-# (jni_wallet.c NativeBridge_classifyOutpoints / NativeBridge_spendableNotListed) into the core. The
+# (jni_wallet.c NativeBridge_classifyOutpoints / NativeBridge_balanceCoinsNotListed) into the core. The
 # bridge's own jni_wallet.c is compiled beside the core and both are driven through the same wallets and
 # lists; every answer and the wallet's state must be the same. See outpoint_classify_kat_main.c.
 #
@@ -90,7 +90,7 @@ if ! grep -Eq '^[[:space:]]*#[[:space:]]*ifndef[[:space:]]+OUTPOINT_CLASSIFY_UNF
     echo "GATE FAILURE: $HEADER selects an arm by the macro's PRESENCE, or gives it no default of 0."; exit 1
 fi
 JNI="$(cat "$BRIDGE_DIR/jni_wallet.c")"
-for fn in NativeBridge_classifyOutpoints NativeBridge_spendableNotListed; do
+for fn in NativeBridge_classifyOutpoints NativeBridge_balanceCoinsNotListed; do
     if ! grep -Eq "^$fn\(" <<<"$JNI"; then
         echo "GATE FAILURE: jni_wallet.c no longer defines $fn, this suite's reference."; exit 1
     fi

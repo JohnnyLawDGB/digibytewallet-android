@@ -11,7 +11,8 @@ void JNICALL NativeBridge_addDandelionPeer(JNIEnv *env, jobject thiz, jstring ip
 void JNICALL NativeBridge_addWatchedAddresses(JNIEnv *env, jobject thiz, jobjectArray addrs);  /* jni_wallet.c */
 jbyteArray JNICALL NativeBridge_addressToScriptPubKey(JNIEnv *env, jobject thiz, jstring address);  /* jni_asset_send.c */
 jlong JNICALL NativeBridge_backfillAbandonedBandStep(JNIEnv *env, jobject thiz);  /* jni_peer.c */
-jstring JNICALL NativeBridge_buildAndSignAssetTransferTx(JNIEnv *env, jobject thiz, jobjectArray inputTxidsHex, jintArray inputVouts, jlongArray inputAmounts, jobjectArray inputScriptPubKeysHex, jobjectArray outputAddresses, jlongArray outputAmounts, jobjectArray outputScriptsHex);  /* jni_asset_send.c */
+jlongArray JNICALL NativeBridge_balanceCoinsNotListed(JNIEnv *env, jobject thiz, jobjectArray outpoints);  /* jni_wallet.c */
+jstring JNICALL NativeBridge_buildAndSignAssetTransferTx(JNIEnv *env, jobject thiz, jobjectArray inputTxidsHex, jintArray inputVouts, jlongArray inputAmounts, jobjectArray inputScriptPubKeysHex, jobjectArray outputAddresses, jlongArray outputAmounts, jobjectArray outputScriptsHex, jstring approvedToAddress, jlong approvedRecipientSats, jlong planFeeSats, jlong approvedMaxFeeSats);  /* jni_asset_send.c */
 jstring JNICALL NativeBridge_buildAndSignForeignAssetTransfer(JNIEnv *env, jobject thiz, jbyteArray seedBytes, jstring hmacKey, jintArray prefixPath, jobjectArray txidsHex, jintArray vouts, jlongArray amounts, jintArray chainIndices, jintArray addressIndices, jobjectArray scriptPubKeysHex, jobjectArray outputAddresses, jlongArray outputAmounts, jobjectArray outputScriptsHex, jlong feePerKb);  /* jni_derive.c */
 jstring JNICALL NativeBridge_buildAndSignForeignDigiDollarTransfer(JNIEnv *env, jobject thiz, jbyteArray seedBytes, jobjectArray ddTxidsHex, jintArray ddVouts, jobjectArray ddScriptsHex, jintArray ddChains, jintArray ddIndices, jobjectArray feeHmacKeys, jobjectArray feePrefixPaths, jobjectArray feeTxidsHex, jintArray feeVouts, jlongArray feeAmounts, jobjectArray feeScriptsHex, jintArray feeChains, jintArray feeIndices, jstring recipientKeyHex, jstring changeAddress, jlong changeAmount, jlong cents);  /* jni_derive.c */
 jstring JNICALL NativeBridge_buildAndSignLegacySweep(JNIEnv *env, jobject thiz, jbyteArray seedBytes, jstring hmacKey, jintArray prefixPath, jobjectArray txidsHex, jintArray vouts, jlongArray amounts, jintArray chainIndices, jintArray addressIndices, jobjectArray scriptPubKeysHex, jstring destAddress, jlong feePerKb);  /* jni_derive.c */
@@ -71,7 +72,6 @@ jlong JNICALL NativeBridge_getEstimatedFee(JNIEnv *env, jobject thiz, jint prior
 jstring JNICALL NativeBridge_getFilterElementStats(JNIEnv *env, jobject thiz);  /* jni_wallet.c */
 jlong JNICALL NativeBridge_getLastBlockHeight(JNIEnv *env, jobject thiz);  /* jni_peer.c */
 jlong JNICALL NativeBridge_getLowestNeededHeight(JNIEnv *env, jobject thiz);  /* jni_peer.c */
-jbyteArray JNICALL NativeBridge_getOpReturnData(JNIEnv *env, jobject thiz, jbyteArray rawTx);  /* jni_asset.c */
 jint JNICALL NativeBridge_getPeerCount(JNIEnv *env, jobject thiz);  /* jni_peer.c */
 jint JNICALL NativeBridge_getPublishResult(JNIEnv *env, jobject thiz, jstring txidHex);  /* jni_transaction.c */
 jobjectArray JNICALL NativeBridge_getRawTransactionInputs(JNIEnv *env, jobject thiz, jbyteArray rawTx);  /* jni_asset.c */
@@ -170,7 +170,6 @@ jstring JNICALL NativeBridge_signMessage(JNIEnv *env, jobject thiz, jstring mess
 jbyteArray JNICALL NativeBridge_signPreparedTransaction(JNIEnv *env, jobject thiz, jbyteArray unsignedTx, jstring toAddress, jlong amountSats, jlong approvedFeeSats);  /* jni_transaction.c */
 jbyteArray JNICALL NativeBridge_signTransaction(JNIEnv *env, jobject thiz, jbyteArray unsignedTx);  /* jni_transaction.c */
 jlong JNICALL NativeBridge_snapAutoFetchThroughToScanFrontier(JNIEnv *env, jobject thiz);  /* jni_peer.c */
-jlongArray JNICALL NativeBridge_spendableNotListed(JNIEnv *env, jobject thiz, jobjectArray outpoints);  /* jni_wallet.c */
 jboolean JNICALL NativeBridge_staleSendIsStale(JNIEnv *env, jobject thiz, jlong timestampS, jlong nowS, jboolean neverRelayed);  /* jni_stale_send.c */
 jint JNICALL NativeBridge_staleSendNextStep(JNIEnv *env, jobject thiz, jboolean pinnedNode, jint inputCount, jint txStatus, jint inputsAsked, jint lastInputAnswer);  /* jni_stale_send.c */
 jboolean JNICALL NativeBridge_staleSendOldEnough(JNIEnv *env, jobject thiz, jlong timestampS, jlong nowS);  /* jni_stale_send.c */
@@ -188,7 +187,8 @@ jboolean JNICALL NativeBridge_walletContainsAddress(JNIEnv *env, jobject thiz, j
     { "addWatchedAddresses", "([Ljava/lang/String;)V", (void *) NativeBridge_addWatchedAddresses }, \
     { "addressToScriptPubKey", "(Ljava/lang/String;)[B", (void *) NativeBridge_addressToScriptPubKey }, \
     { "backfillAbandonedBandStep", "()J", (void *) NativeBridge_backfillAbandonedBandStep }, \
-    { "buildAndSignAssetTransferTx", "([Ljava/lang/String;[I[J[Ljava/lang/String;[Ljava/lang/String;[J[Ljava/lang/String;)Ljava/lang/String;", (void *) NativeBridge_buildAndSignAssetTransferTx }, \
+    { "balanceCoinsNotListed", "([Ljava/lang/String;)[J", (void *) NativeBridge_balanceCoinsNotListed }, \
+    { "buildAndSignAssetTransferTx", "([Ljava/lang/String;[I[J[Ljava/lang/String;[Ljava/lang/String;[J[Ljava/lang/String;Ljava/lang/String;JJJ)Ljava/lang/String;", (void *) NativeBridge_buildAndSignAssetTransferTx }, \
     { "buildAndSignForeignAssetTransfer", "([BLjava/lang/String;[I[Ljava/lang/String;[I[J[I[I[Ljava/lang/String;[Ljava/lang/String;[J[Ljava/lang/String;J)Ljava/lang/String;", (void *) NativeBridge_buildAndSignForeignAssetTransfer }, \
     { "buildAndSignForeignDigiDollarTransfer", "([B[Ljava/lang/String;[I[Ljava/lang/String;[I[I[Ljava/lang/String;[[I[Ljava/lang/String;[I[J[Ljava/lang/String;[I[ILjava/lang/String;Ljava/lang/String;JJ)Ljava/lang/String;", (void *) NativeBridge_buildAndSignForeignDigiDollarTransfer }, \
     { "buildAndSignLegacySweep", "([BLjava/lang/String;[I[Ljava/lang/String;[I[J[I[I[Ljava/lang/String;Ljava/lang/String;J)Ljava/lang/String;", (void *) NativeBridge_buildAndSignLegacySweep }, \
@@ -248,7 +248,6 @@ jboolean JNICALL NativeBridge_walletContainsAddress(JNIEnv *env, jobject thiz, j
     { "getFilterElementStats", "()Ljava/lang/String;", (void *) NativeBridge_getFilterElementStats }, \
     { "getLastBlockHeight", "()J", (void *) NativeBridge_getLastBlockHeight }, \
     { "getLowestNeededHeight", "()J", (void *) NativeBridge_getLowestNeededHeight }, \
-    { "getOpReturnData", "([B)[B", (void *) NativeBridge_getOpReturnData }, \
     { "getPeerCount", "()I", (void *) NativeBridge_getPeerCount }, \
     { "getPublishResult", "(Ljava/lang/String;)I", (void *) NativeBridge_getPublishResult }, \
     { "getRawTransactionInputs", "([B)[Ljava/lang/String;", (void *) NativeBridge_getRawTransactionInputs }, \
@@ -347,7 +346,6 @@ jboolean JNICALL NativeBridge_walletContainsAddress(JNIEnv *env, jobject thiz, j
     { "signPreparedTransaction", "([BLjava/lang/String;JJ)[B", (void *) NativeBridge_signPreparedTransaction }, \
     { "signTransaction", "([B)[B", (void *) NativeBridge_signTransaction }, \
     { "snapAutoFetchThroughToScanFrontier", "()J", (void *) NativeBridge_snapAutoFetchThroughToScanFrontier }, \
-    { "spendableNotListed", "([Ljava/lang/String;)[J", (void *) NativeBridge_spendableNotListed }, \
     { "staleSendIsStale", "(JJZ)Z", (void *) NativeBridge_staleSendIsStale }, \
     { "staleSendNextStep", "(ZIIII)I", (void *) NativeBridge_staleSendNextStep }, \
     { "staleSendOldEnough", "(JJ)Z", (void *) NativeBridge_staleSendOldEnough }, \
@@ -360,6 +358,6 @@ jboolean JNICALL NativeBridge_walletContainsAddress(JNIEnv *env, jobject thiz, j
     { "takeUnprovableServerHeight", "()J", (void *) NativeBridge_takeUnprovableServerHeight }, \
     { "walletContainsAddress", "(Ljava/lang/String;)Z", (void *) NativeBridge_walletContainsAddress }, \
 
-#define DGB_JNI_NATIVEBRIDGE_METHOD_COUNT 175
+#define DGB_JNI_NATIVEBRIDGE_METHOD_COUNT 174
 
 #endif

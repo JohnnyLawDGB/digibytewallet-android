@@ -34,7 +34,7 @@ class LockGatePolicyTest {
         for (route in listOf("wallet", "send", "receive", "assets", "asset_send/abc",
                 "settings", "settings_security", "recover_funds", "hub", "digistamp",
                 "digiid_confirm/x", "node_pair_confirm/x", "qr_scanner", "transaction_detail/t")) {
-            assertTrue(route, shouldRouteToUnlock(WalletState.Locked, hasPin = true, currentRoute = route))
+            assertTrue(route, shouldRouteToUnlock(WalletState.Locked, hasPin = true, currentRoute = route, walletStored = true))
         }
     }
 
@@ -42,14 +42,14 @@ class LockGatePolicyTest {
     fun `already on unlock never re-navigates`() {
         // Re-navigating onto "unlock" is the "double PIN prompt" the once-only start
         // destination was introduced to avoid.
-        assertFalse(shouldRouteToUnlock(WalletState.Locked, hasPin = true, currentRoute = "unlock"))
+        assertFalse(shouldRouteToUnlock(WalletState.Locked, hasPin = true, currentRoute = "unlock", walletStored = true))
     }
 
     @Test
     fun `unlocked or no wallet never routes`() {
-        assertFalse(shouldRouteToUnlock(WalletState.Unlocked, hasPin = true, currentRoute = "wallet"))
-        assertFalse(shouldRouteToUnlock(WalletState.NoWallet, hasPin = true, currentRoute = "onboarding"))
-        assertFalse(shouldRouteToUnlock(WalletState.NoWallet, hasPin = false, currentRoute = "wallet"))
+        assertFalse(shouldRouteToUnlock(WalletState.Unlocked, hasPin = true, currentRoute = "wallet", walletStored = true))
+        assertFalse(shouldRouteToUnlock(WalletState.NoWallet, hasPin = true, currentRoute = "onboarding", walletStored = true))
+        assertFalse(shouldRouteToUnlock(WalletState.NoWallet, hasPin = false, currentRoute = "wallet", walletStored = true))
     }
 
     @Test
@@ -57,26 +57,63 @@ class LockGatePolicyTest {
         // Locked && !hasPin is the lost-PIN path: startDestination routes it to pin_setup,
         // which restores the wallet from disk off the main thread. Sending it to "unlock"
         // would present a PIN prompt that no PIN can satisfy.
-        assertFalse(shouldRouteToUnlock(WalletState.Locked, hasPin = false, currentRoute = "wallet"))
-        assertFalse(shouldRouteToUnlock(WalletState.Locked, hasPin = false, currentRoute = "pin_setup"))
+        assertFalse(shouldRouteToUnlock(WalletState.Locked, hasPin = false, currentRoute = "wallet", walletStored = true))
+        assertFalse(shouldRouteToUnlock(WalletState.Locked, hasPin = false, currentRoute = "pin_setup", walletStored = true))
     }
 
     @Test
     fun `before the NavHost has a graph the start destination is authoritative`() {
         // currentRoute is null until NavHost sets its graph. Cold start already lands on
         // "unlock" via startDestination; navigating here would be a second prompt.
-        assertFalse(shouldRouteToUnlock(WalletState.Locked, hasPin = true, currentRoute = null))
+        assertFalse(shouldRouteToUnlock(WalletState.Locked, hasPin = true, currentRoute = null, walletStored = true))
     }
 
     @Test
-    fun `onboarding graph is never re-gated`() {
-        // "Restore a different wallet" from the unlock screen walks the onboarding graph
-        // while the on-disk wallet is still Locked with a PIN. Bouncing those screens to
-        // the PIN prompt would strand the restore.
-        for (route in listOf("onboarding", "seed_display/12", "seed_verify", "seed_passphrase",
-                "mnemonic_input", "recovery_scan", "recovery_date", "pin_setup")) {
-            assertFalse(route, shouldRouteToUnlock(WalletState.Locked, hasPin = true, currentRoute = route))
+    fun `a setup route over a stored wallet locked behind its PIN routes to unlock`() {
+        // NAV-DEEPLINK: however a setup screen was reached, it never sets a new PIN or replaces the
+        // seed of a stored wallet that is locked behind its PIN. Includes BACK from a finished create
+        // flow to onboarding, and a lock on the biometric opt-in after the PIN was set.
+        for (route in SETUP) {
+            assertTrue(route, shouldRouteToUnlock(WalletState.Locked, hasPin = true, currentRoute = route, walletStored = true))
         }
+    }
+
+    @Test
+    fun `with no wallet stored the setup routes are never re-gated`() {
+        // First run, after a wipe, and the owed wipe that ends with nothing left: the state can still
+        // read Locked and the PIN store still answers "set" (review R1), but there is nothing to unlock,
+        // and unlock would send the user straight back to onboarding.
+        for (route in SETUP) {
+            assertFalse(route, shouldRouteToUnlock(WalletState.Locked, hasPin = true, currentRoute = route, walletStored = false))
+        }
+    }
+
+    @Test
+    fun `with no PIN the setup routes are never re-gated`() {
+        // The lost-PIN branch, and a restore between storing the phrase and setting its PIN.
+        for (route in SETUP) {
+            assertFalse(route, shouldRouteToUnlock(WalletState.Locked, hasPin = false, currentRoute = route, walletStored = true))
+        }
+    }
+
+    @Test
+    fun `unlock and the store-unavailable screen are never re-gated`() {
+        for (stored in listOf(true, false)) {
+            assertFalse(shouldRouteToUnlock(WalletState.Locked, hasPin = true, currentRoute = "unlock", walletStored = stored))
+            assertFalse(shouldRouteToUnlock(WalletState.Locked, hasPin = true, currentRoute = PIN_STORE_UNAVAILABLE_ROUTE, walletStored = stored))
+        }
+    }
+
+    @Test
+    fun `wallet routes are gated whatever the disk says`() {
+        for (stored in listOf(true, false)) {
+            assertTrue(shouldRouteToUnlock(WalletState.Locked, hasPin = true, currentRoute = "send", walletStored = stored))
+        }
+    }
+
+    private companion object {
+        val SETUP = listOf("onboarding", "seed_display/12", "seed_verify", "seed_passphrase",
+            "mnemonic_input", "recovery_scan", "recovery_date", "pin_setup")
     }
 }
 
@@ -184,7 +221,7 @@ class WipeRouteGatePolicyTest {
     @Test fun `the store-unavailable screen is never routed to unlock`() {
         assertFalse(
             "a Locked wallet on the store-unavailable screen was routed to unlock",
-            shouldRouteToUnlock(WalletState.Locked, hasPin = true, currentRoute = PIN_STORE_UNAVAILABLE_ROUTE),
+            shouldRouteToUnlock(WalletState.Locked, hasPin = true, currentRoute = PIN_STORE_UNAVAILABLE_ROUTE, walletStored = true),
         )
     }
 }

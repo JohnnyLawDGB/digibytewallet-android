@@ -97,7 +97,11 @@ class WalletManagerChainRebuildParityTest {
     }
 
     private fun assertNothingCleared(c: Context) {
-        assertTrue("the transaction cache was cleared", sync(c).contains("saved_transactions"))
+        // TX-CKPT-CAP: reading the cache moves a legacy prefs key into the file store, so the cache
+        // is still there when either holds it.
+        assertTrue("the transaction cache was cleared",
+            sync(c).contains("saved_transactions") ||
+                app.aroundtheblock.wallet.core.sync.SavedTransactionsStore.file(c).exists())
         assertTrue("has_synced was cleared", sync(c).contains("has_synced"))
         assertEquals("the stored floor was touched", 5L, settings(c).getLong("cf_birth_height", -1L))
         assertNotNull("the recorded sends were dropped", OutgoingTxStore(c).lookup("ff66"))
