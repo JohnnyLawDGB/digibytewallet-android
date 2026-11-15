@@ -3,8 +3,10 @@
 //
 //  Host KAT for BRAssetHoldings.h: which asset rows count, the held balance, the reconcile of a row's
 //  spent flag, the prunes, the write made for a detected output, the indexer's answer for one output,
-//  the prune gate, and a row's stored form. Moved from Android's Kotlin (core/.../asset/AssetManager.kt:
-//  isHeldForDisplay, computeHeldAssetBalancesImpl, decideAssetSpent, reconcileAssetRowsLocallyImpl,
+//  the prune gate, a row's stored form, and the count rule's carrier half, the first counted row and what
+//  is shown. Moved from Android's Kotlin (core/.../asset/AssetManager.kt: isHeldForDisplay,
+//  computeHeldAssetBalancesImpl, carrierCreditRefusal, rowCountRefusal, firstCountedRow,
+//  displayHeldBalances, decideAssetSpent, reconcileAssetRowsLocallyImpl,
 //  clearDeadAssetSend, pruneRemovedNativeAssetRowsImpl, pruneDeadBroadcastRowsImpl,
 //  persistDetectedAssetOutput, settledRow, settleFromIndexer, isOutgoingUnconfirmedRow; AssetSums.add;
 //  AssetMaintenanceGate.kt; network/DigiScopeAssetParsing.kt's txOutStack and notFound). The header
@@ -13,7 +15,9 @@
 //
 //    1. BY HAND. The inputs and expected answers of the Kotlin tests, value for value:
 //       HeldAssetBalancesTest (balances_*), AssetHeldMeansNativeHoldsItTest (held_*),
-//       AssetConflictedSendTest (conflicted_*), TxOutStackParsingTest (stack_*), and beside them the
+//       AssetConflictedSendTest (conflicted_*), TxOutStackParsingTest (stack_*), AssetCarrierCountRuleTest
+//       (count_*, on transactions the core's parser reads, beside cases of this suite's own and the
+//       core's vectors/asset-count-carrier), and beside them the
 //       Kotlin tests of the other rules moved: AssetSpentReconcileTest, AssetMaintenanceGateTest,
 //       PruneRemovedNativeAssetRowsTest, AssetDeadBroadcastRowTest, AssetLocalReconcileTest,
 //       AssetProvenanceTaggingTest, AssetSourceFixTest and UnbackedAssetCreditTest's settle tests
@@ -103,6 +107,11 @@ static BRAssetRow row(const char *txid, int32_t vout, const uint8_t *script, siz
 #define VER BR_ASSET_CREDIT_VERIFIED
 #define UNC BR_ASSET_CREDIT_UNCHECKED
 
+// Every row's carrier answer CREDITS: for the cases that are not about the carrier rule (Kotlin: the
+// computeHeldAssetBalancesImpl overload whose carrier refusal is always null). main fills it.
+#define CRD BR_ASSET_ROW_CARRIER_CREDITS
+static BRAssetRowCarrier CREDIT[64];
+
 // ---- showing answers -----------------------------------------------------------------------------
 
 static size_t put(char *buf, size_t at, const char *fmt, ...)
@@ -134,7 +143,7 @@ static void balances(const char *what, const BRAssetRow *rows, size_t n, const i
 {
     char got[4096];
     size_t count = 0;
-    BRAssetHoldingsStatus st = BRAssetHeldBalances(rows, n, states, owned, ownedCount, HB, N(HB), &count);
+    BRAssetHoldingsStatus st = BRAssetHeldBalances(rows, n, states, CREDIT, owned, ownedCount, HB, N(HB), &count);
 
     showBalances(got, st, HB, count);
     ck(strcmp(got, want) == 0, "%s: balances [%s] (want [%s])", what, got, want);
@@ -150,7 +159,7 @@ static void heldIs(const char *what, const uint8_t *s, size_t len, BRAssetSource
 {
     BRAssetRow r = row(tx(31, "", 'a'), 0, s, len, 700000, "La3", 1, 0, src, VER);
 
-    ck(held(s, len, src, state) == want && BRAssetRowCounts(&r, OWNED, 1, state) == want,
+    ck(held(s, len, src, state) == want && BRAssetRowCounts(&r, OWNED, 1, state, CRD) == want,
        "%s: source %s state %d -> %s", what, src == NAT ? "NATIVE" : "BACKEND", state, want ? "held" : "not held");
 }
 
@@ -232,7 +241,7 @@ static void balances_fully_phantom(void)   // fully_phantom_asset_resolves_to_ze
 
     r[0] = row(tx(0, "79", 'b'), 0, FOREIGN, 3, 700000, "LaPhantom", 5, 0, NAT, VER);
     r[1] = row(tx(1, "79", 'a'), 0, OWN, 3, 700000, "LaPhantom", 3, 0, NAT, VER);
-    s = BRAssetHeldBalances(r, 2, st, OWNED, 1, HB, N(HB), &count);
+    s = BRAssetHeldBalances(r, 2, st, CREDIT, OWNED, 1, HB, N(HB), &count);
     for (i = 0; i < count; i++) if (strcmp(HB[i].assetId, "LaPhantom") == 0 && HB[i].quantity != 0) ok = 0;
     ck(s == BR_ASSET_HOLDINGS_OK && ok, "an asset whose every row is a phantom is absent or zero");
 }
@@ -1475,12 +1484,12 @@ static void capacity(void)
     r[1] = row(tx(1, "", '2'), 0, OWN, 3, 0, "La2", 5, 0, NAT, VER);
     r[2] = row(tx(2, "", '3'), 0, OWN, 3, 0, "La1", 5, 0, NAT, VER);
     HB[0].assetId = "untouched";
-    ck(BRAssetHeldBalances(r, 3, st, OWNED, 1, HB, 1, &n) == BR_ASSET_HOLDINGS_CAPACITY && n == 0 && strcmp(HB[0].assetId, "untouched") == 0,
+    ck(BRAssetHeldBalances(r, 3, st, CREDIT, OWNED, 1, HB, 1, &n) == BR_ASSET_HOLDINGS_CAPACITY && n == 0 && strcmp(HB[0].assetId, "untouched") == 0,
        "two assets into one balance: CAPACITY, nothing written");
-    ck(BRAssetHeldBalances(r, 3, st, OWNED, 1, HB, 2, &n) == BR_ASSET_HOLDINGS_OK && n == 2, "into two: OK");
-    ck(BRAssetHeldBalances(r, 3, st, OWNED, 1, NULL, 0, &n) == BR_ASSET_HOLDINGS_CAPACITY, "into none: CAPACITY");
+    ck(BRAssetHeldBalances(r, 3, st, CREDIT, OWNED, 1, HB, 2, &n) == BR_ASSET_HOLDINGS_OK && n == 2, "into two: OK");
+    ck(BRAssetHeldBalances(r, 3, st, CREDIT, OWNED, 1, NULL, 0, &n) == BR_ASSET_HOLDINGS_CAPACITY, "into none: CAPACITY");
     st[0] = st[1] = st[2] = 0;
-    ck(BRAssetHeldBalances(r, 3, st, OWNED, 1, NULL, 0, &n) == BR_ASSET_HOLDINGS_OK && n == 0, "nothing counts: none is room enough");
+    ck(BRAssetHeldBalances(r, 3, st, CREDIT, OWNED, 1, NULL, 0, &n) == BR_ASSET_HOLDINGS_OK && n == 0, "nothing counts: none is room enough");
 
     e[0] = entry(1, "La1", 1, 1); e[1] = entry(1, "La2", 1, 2); e[2] = entry(1, "", 1, 3);
     a = answer(0, ASKED, 1, 0, 1, e, 2);
@@ -1529,12 +1538,13 @@ static void arguments(void)
     BRAssetDetectedOutput d = detected(tx(0, "", 'a'), 0, 1, 0, NULL);
 
     r[0] = row(tx(0, "", 'a'), 0, OWN, 3, 0, "La1", 5, 0, NAT, VER);
-    ck(BRAssetHeldBalances(r, 1, st, OWNED, 1, HB, 1, NULL) == BR_ASSET_HOLDINGS_REFUSED, "balances: no count");
-    ck(BRAssetHeldBalances(NULL, 1, st, OWNED, 1, HB, 1, &n) == BR_ASSET_HOLDINGS_REFUSED && n == 0, "balances: no rows");
-    ck(BRAssetHeldBalances(r, 1, NULL, OWNED, 1, HB, 1, &n) == BR_ASSET_HOLDINGS_REFUSED, "balances: no states");
-    ck(BRAssetHeldBalances(r, 1, st, NULL, 1, HB, 1, &n) == BR_ASSET_HOLDINGS_REFUSED, "balances: no owned set");
-    ck(BRAssetHeldBalances(r, 1, st, OWNED, 1, NULL, 1, &n) == BR_ASSET_HOLDINGS_REFUSED, "balances: room and no buffer");
-    ck(BRAssetHeldBalances(NULL, 0, NULL, OWNED, 1, NULL, 0, &n) == BR_ASSET_HOLDINGS_OK && n == 0, "balances: no rows at all");
+    ck(BRAssetHeldBalances(r, 1, st, CREDIT, OWNED, 1, HB, 1, NULL) == BR_ASSET_HOLDINGS_REFUSED, "balances: no count");
+    ck(BRAssetHeldBalances(NULL, 1, st, CREDIT, OWNED, 1, HB, 1, &n) == BR_ASSET_HOLDINGS_REFUSED && n == 0, "balances: no rows");
+    ck(BRAssetHeldBalances(r, 1, NULL, CREDIT, OWNED, 1, HB, 1, &n) == BR_ASSET_HOLDINGS_REFUSED, "balances: no states");
+    ck(BRAssetHeldBalances(r, 1, st, NULL, OWNED, 1, HB, 1, &n) == BR_ASSET_HOLDINGS_REFUSED, "balances: no carrier answers");
+    ck(BRAssetHeldBalances(r, 1, st, CREDIT, NULL, 1, HB, 1, &n) == BR_ASSET_HOLDINGS_REFUSED, "balances: no owned set");
+    ck(BRAssetHeldBalances(r, 1, st, CREDIT, OWNED, 1, NULL, 1, &n) == BR_ASSET_HOLDINGS_REFUSED, "balances: room and no buffer");
+    ck(BRAssetHeldBalances(NULL, 0, NULL, CREDIT, OWNED, 1, NULL, 0, &n) == BR_ASSET_HOLDINGS_OK && n == 0, "balances: no rows at all");
     ck(BRAssetReconcileRows(r, 1, OWNED, 1, 1, st, CH, NULL) == BR_ASSET_HOLDINGS_REFUSED &&
        BRAssetReconcileRows(NULL, 1, OWNED, 1, 1, st, CH, &n) == BR_ASSET_HOLDINGS_REFUSED &&
        BRAssetReconcileRows(r, 1, OWNED, 1, 1, NULL, CH, &n) == BR_ASSET_HOLDINGS_REFUSED &&
@@ -1573,7 +1583,7 @@ static void arguments(void)
     ck(BRAssetPersistDetectedOutput(&d, NULL).action == BR_ASSET_PERSIST_NOTHING, "persist: no txid");
     ck(! BRAssetSettledRowOf(NULL, "x", VER, NULL), "settled row: nothing");
     ck(! BRAssetHeldForDisplay(OWN, 3, NULL, 1, NAT, 1) && ! BRAssetHeldForDisplay(NULL, 3, OWNED, 1, NAT, 1) &&
-       ! BRAssetRowCounts(NULL, OWNED, 1, 1), "held: no owned set, no script, no row");
+       ! BRAssetRowCounts(NULL, OWNED, 1, 1, CRD), "held: no owned set, no script, no row");
     ck(BRAssetIdIsUnresolved(NULL) && BRAssetIdIsUnresolved("unresolved:") && BRAssetIdIsUnresolved("unresolved:abc") &&
        ! BRAssetIdIsUnresolved("unresolved") && ! BRAssetIdIsUnresolved("Unresolved:x") && ! BRAssetIdIsUnresolved(""),
        "unresolved: no id, or the prefix exactly");
@@ -1618,27 +1628,27 @@ static void edges(void)
         // A script of no bytes at a real pointer, against an owned entry of no bytes: never held.
         ck(! BRAssetHeldForDisplay(OWN, 0, zero, 1, NAT, 1), "an empty script is not held, even where an owned entry is empty");
         x = row(tx(0, "", 'a'), 0, OWN, 0, 1, "La1", 5, 0, NAT, VER);
-        ck(! BRAssetRowCounts(&x, zero, 1, 1), "nor does its row count");
-        ck(BRAssetHeldBalances(&x, 1, st, zero, 1, HB, N(HB), &n) == BR_ASSET_HOLDINGS_OK && n == 0, "nor reach a balance");
+        ck(! BRAssetRowCounts(&x, zero, 1, 1, CRD), "nor does its row count");
+        ck(BRAssetHeldBalances(&x, 1, st, CREDIT, zero, 1, HB, N(HB), &n) == BR_ASSET_HOLDINGS_OK && n == 0, "nor reach a balance");
     }
 
     // BRAssetRowCounts on its own.
     x = row(tx(0, "", 'a'), 0, OWN, 3, 1, "La1", 5, 0, NAT, VER);
-    ck(BRAssetRowCounts(&x, OWNED, 1, 1), "an asset row that counts");
+    ck(BRAssetRowCounts(&x, OWNED, 1, 1, CRD), "an asset row that counts");
     x.isAsset = 0;
-    ck(! BRAssetRowCounts(&x, OWNED, 1, 1), "a DGB row never counts");
+    ck(! BRAssetRowCounts(&x, OWNED, 1, 1, CRD), "a DGB row never counts");
     x.isAsset = 1; x.assetId = NULL;
-    ck(! BRAssetRowCounts(&x, OWNED, 1, 1), "a row with no id never counts");
+    ck(! BRAssetRowCounts(&x, OWNED, 1, 1, CRD), "a row with no id never counts");
 
     // Balances: capacity counts each asset once, whatever lies between.
     r[0] = row(tx(0, "", '1'), 0, OWN, 3, 1, "La1", 5, 0, NAT, VER);
     r[1] = row(tx(1, "", '2'), 0, OWN, 3, 1, "La2", 5, 0, NAT, VER);
-    ck(BRAssetHeldBalances(r, 2, st, OWNED, 1, HB, 1, &n) == BR_ASSET_HOLDINGS_CAPACITY, "two assets, room for one: CAPACITY");
+    ck(BRAssetHeldBalances(r, 2, st, CREDIT, OWNED, 1, HB, 1, &n) == BR_ASSET_HOLDINGS_CAPACITY, "two assets, room for one: CAPACITY");
     r[1].assetId = "La1";
-    ck(BRAssetHeldBalances(r, 2, st, OWNED, 1, HB, 1, &n) == BR_ASSET_HOLDINGS_OK && n == 1 && HB[0].quantity == 10, "one asset twice, room for one");
+    ck(BRAssetHeldBalances(r, 2, st, CREDIT, OWNED, 1, HB, 1, &n) == BR_ASSET_HOLDINGS_OK && n == 1 && HB[0].quantity == 10, "one asset twice, room for one");
     r[1] = row(tx(1, "", '2'), 0, FOREIGN, 3, 1, "La9", 5, 0, NAT, VER);
     r[2] = row(tx(2, "", '3'), 0, OWN, 3, 1, "La2", 5, 0, NAT, VER);
-    ck(BRAssetHeldBalances(r, 3, st, OWNED, 1, HB, 1, &n) == BR_ASSET_HOLDINGS_CAPACITY, "a row that does not count between them: still CAPACITY");
+    ck(BRAssetHeldBalances(r, 3, st, CREDIT, OWNED, 1, HB, 1, &n) == BR_ASSET_HOLDINGS_CAPACITY, "a row that does not count between them: still CAPACITY");
 
     // Reconcile: a row with no txid, a row whose script is missing, a DGB row, duplicate outpoints.
     r[0] = row(NULL, 0, FOREIGN, 3, 0, "La1", 5, 0, NAT, UNC);
@@ -1774,7 +1784,7 @@ static void zero_structs(void)
 
     memset(&r, 0, sizeof(r)); memset(&p, 0, sizeof(p)); memset(&a, 0, sizeof(a)); memset(&s, 0, sizeof(s));
     memset(&d, 0, sizeof(d)); memset(&e, 0, sizeof(e));
-    ck(r.source == BAK && r.credit == UNC && ! r.isAsset && ! BRAssetRowCounts(&r, OWNED, 1, 1), "a row nobody filled: no asset row, counts nothing");
+    ck(r.source == BAK && r.credit == UNC && ! r.isAsset && ! BRAssetRowCounts(&r, OWNED, 1, 1, CRD), "a row nobody filled: no asset row, counts nothing");
     ck(p.action == BR_ASSET_PERSIST_NOTHING && a.verdict == BR_ASSET_ACCEPT_NO_ANSWER, "a write or an acceptance nobody filled does nothing");
     ck((int)BR_ASSET_HOLDINGS_REFUSED == 0 && (int)BR_ASSET_ROW_KEEP == 0 && (int)BR_ASSET_ASK_NO == 0 &&
        (int)BR_ASSET_TX_HELD == 0 && (int)BR_ASSET_ABSENCE_NATIVE == 0, "the zero of each enum");
@@ -1799,6 +1809,606 @@ static void zero_structs(void)
     ck(BR_ASSET_ABSENCE_PASSES == 2 && BR_ASSET_RECEIPT_RECHECK_MS == 60000 && BR_ASSET_TX_UNCONFIRMED == INT32_MAX &&
        BR_ASSET_ROW_WIRE_FIXED == 38 && BR_ASSET_ROW_WIRE_MAX == 66083 && BR_ASSET_STATE_PROBE_ERROR == -99 &&
        BR_ASSET_STATE_CONFLICTED == -2 && BR_CF_BEHIND_THRESHOLD == 100, "the constants");
+}
+
+// ---- AssetCarrierCountRuleTest --------------------------------------------------------------------
+//
+// THE CARRIER on real transactions: each funding transaction is built from the Kotlin test's output lines
+// ("<vout>|<satoshis>|<scriptHex>", in order), parsed by the core's parser, and its hash is the row's txid.
+// Native holds every row (HELD), as the Kotlin's spentState does. The Kotlin's fundingInputCount is unknown
+// where the test passes none, which its rule reads as one input; one input is built there.
+
+#define C_OURS        "0014" "1111111111111111111111111111111111111111"
+#define C_TRANSFER    "6a0644410115000a"            // transfer, 10 units to output 0
+#define C_PLAIN       "6a04deadbeef"
+#define C_ISSUANCE    "6a06444103050a10"            // issuance of 10, no instructions
+#define C_ISSUE_TO_0  "6a0844410305" "0a" "000a" "10"   // v3 issuance of 10 with one instruction: all 10 to output 0
+#define C_RANGE       "6a07444101154002" "0a"       // transfer, one range instruction: 10 units over outputs 0..2
+#define C_TWO         "6a08444101150005" "0205"     // transfer, two instructions: 5 to output 0, 5 to output 2
+
+static const uint8_t COURS_B[22] = { 0x00, 0x14, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
+                                     0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11 };
+static const BRAssetScript COURS[] = { { COURS_B, 22 } };
+
+typedef struct { uint64_t sats; const char *script; } FLine;
+
+static int hexNibble(char c)
+{
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+// hex -> bytes; (size_t)-1 when it is not whole hex or does not fit
+static size_t unhex(const char *hex, uint8_t *out, size_t cap)
+{
+    size_t n = 0, len = strlen(hex);
+
+    if (len % 2) return (size_t)-1;
+    for (; *hex; hex += 2) {
+        int hi = hexNibble(hex[0]), lo = hexNibble(hex[1]);
+        if (hi < 0 || lo < 0 || n >= cap) return (size_t)-1;
+        out[n++] = (uint8_t)(hi * 16 + lo);
+    }
+    return n;
+}
+
+#define FMAX 8
+static BRTransaction *FTX[FMAX];
+static char FTXID[FMAX][BR_ASSET_TXID_LENGTH + 1];
+
+static void txidOf(const BRTransaction *t, char *out)
+{
+    static const char digits[] = "0123456789abcdef";
+    int i;
+
+    for (i = 0; i < 32; i++) {
+        out[2 * i] = digits[t->txHash.u8[31 - i] >> 4];
+        out[2 * i + 1] = digits[t->txHash.u8[31 - i] & 0x0f];
+    }
+    out[64] = '\0';
+}
+
+static const BRTransaction *parsedInto(int k, const uint8_t *b, size_t n)
+{
+    if (FTX[k]) BRTransactionFree(FTX[k]);
+    FTX[k] = BRTransactionParseSigned(b, n);
+    if (FTX[k]) txidOf(FTX[k], FTXID[k]);
+    else FTXID[k][0] = '\0';
+    return FTX[k];
+}
+
+// Slot k: the funding transaction with these output lines, `inputs` inputs (spending 0x10..10:0, 0x20..20:1, ...)
+// and nVersion `version`; its txid in FTXID[k]. NULL (and a failed check) when it does not build.
+static const BRTransaction *funding(int k, const FLine *lines, size_t n, size_t inputs, uint32_t version)
+{
+    uint8_t b[2048], s[300];
+    size_t at = 0, i, j, len;
+
+    for (i = 0; i < 4; i++) b[at++] = (uint8_t)(version >> (8 * i));
+    b[at++] = (uint8_t)inputs;
+    for (i = 0; i < inputs; i++) {
+        for (j = 0; j < 32; j++) b[at++] = (uint8_t)(0x10 * (i + 1));
+        for (j = 0; j < 4; j++) b[at++] = (uint8_t)(i >> (8 * j));
+        b[at++] = 0;
+        for (j = 0; j < 4; j++) b[at++] = 0xff;
+    }
+    b[at++] = (uint8_t)n;
+    for (i = 0; i < n; i++) {
+        len = unhex(lines[i].script, s, sizeof(s));
+        if (len == (size_t)-1 || len >= 0xfd || at + 9 + len + 4 > sizeof(b)) { ck(0, "a fixture that does not build"); return NULL; }
+        for (j = 0; j < 8; j++) b[at++] = (uint8_t)(lines[i].sats >> (8 * j));
+        b[at++] = (uint8_t)len;
+        memcpy(b + at, s, len);
+        at += len;
+    }
+    for (j = 0; j < 4; j++) b[at++] = 0;
+    if (! parsedInto(k, b, at)) ck(0, "a fixture the parser refuses");
+    return FTX[k];
+}
+
+static void fundingsFree(void)
+{
+    int k;
+
+    for (k = 0; k < FMAX; k++) if (FTX[k]) { BRTransactionFree(FTX[k]); FTX[k] = NULL; }
+}
+
+// The Kotlin test's row: our script, 700 sat, height 700,000, asset "La1", NATIVE, VERIFIED.
+static BRAssetRow crow(const char *txid, int32_t vout, int64_t qty)
+{
+    BRAssetRow r = row(txid, vout, COURS_B, sizeof(COURS_B), 700000, "La1", qty, 0, NAT, VER);
+
+    r.satoshis = 700;
+    return r;
+}
+
+static const char *CARRIER_NAMES[] = { "unreadable", "credits", "none", "undecided", "digidollar", "no-such-output",
+                                       "data-output", "not-targeted", "not-funding" };
+
+static const char *carrierName(BRAssetRowCarrier a)
+{
+    return ((unsigned)a < N(CARRIER_NAMES)) ? CARRIER_NAMES[a] : "?";
+}
+
+static void carrierIs(const char *what, const BRAssetRow *r, const BRTransaction *t, BRAssetRowCarrier want)
+{
+    BRAssetRowCarrier got = BRAssetRowCarrierOf(r, t);
+
+    ck(got == want, "%s: carrier %s (want %s)", what, carrierName(got), carrierName(want));
+}
+
+// The balance over rows[0, n), row i's funding transaction fundings[i], every row HELD (computeHeldAssetBalancesImpl
+// with the carrier half).
+static void cbalances(const char *what, const BRAssetRow *rows, size_t n, const BRTransaction *const *fundings, const char *want)
+{
+    int states[16];
+    BRAssetRowCarrier carriers[16];
+    char got[4096];
+    size_t i, count = 0;
+    BRAssetHoldingsStatus st;
+
+    for (i = 0; i < n; i++) {
+        states[i] = BR_ASSET_STATE_HELD;
+        carriers[i] = BRAssetRowCarrierOf(&rows[i], fundings[i]);
+    }
+    st = BRAssetHeldBalances(rows, n, states, carriers, COURS, 1, HB, N(HB), &count);
+    showBalances(got, st, HB, count);
+    ck(strcmp(got, want) == 0, "%s: balances [%s] (want [%s])", what, got, want);
+}
+
+static void count_undecided_funding(void)   // a row an earlier rule credited stops counting
+{
+    static const FLine l[] = { { 700, C_OURS }, { 0, C_TRANSFER }, { 0, C_PLAIN } };
+    const BRTransaction *t = funding(0, l, 3, 1, 1);
+    BRAssetRow r[1];
+
+    r[0] = crow(FTXID[0], 0, 40000);
+    carrierIs("[ours, carrier, plain OP_RETURN]: DigiAsset Core reads it as plain", &r[0], t, BR_ASSET_ROW_CARRIER_UNDECIDED);
+    cbalances("an undecided transaction's row", r, 1, &t, "");
+    ck(BRAssetHeldForDisplay(r[0].script, r[0].scriptLen, COURS, 1, r[0].source, BR_ASSET_STATE_HELD),
+       "native still holds the output: only the carrier answer drops it");
+    fundingsFree();
+}
+
+static void count_genuine_row(void)   // a genuine row still counts
+{
+    static const FLine l[] = { { 700, C_OURS }, { 0, C_TRANSFER } };
+    const BRTransaction *t = funding(0, l, 2, 1, 1);
+    BRAssetRow r[1];
+
+    r[0] = crow(FTXID[0], 0, 10);
+    carrierIs("a single carrier, 10 to output 0", &r[0], t, BR_ASSET_ROW_CARRIER_CREDITS);
+    cbalances("a genuine single-carrier row", r, 1, &t, "La1=10/1");
+    fundingsFree();
+}
+
+static void count_remainder_last_output(void)   // a remainder on the last output still counts
+{
+    static const FLine l[] = { { 700, C_OURS }, { 0, C_TRANSFER }, { 700, C_OURS } };
+    const BRTransaction *t = funding(0, l, 3, 1, 1);
+    BRAssetRow r[1];
+
+    r[0] = crow(FTXID[0], 2, 5);
+    carrierIs("the last output, where the remainder goes", &r[0], t, BR_ASSET_ROW_CARRIER_CREDITS);
+    cbalances("a remainder row", r, 1, &t, "La1=5/1");
+    fundingsFree();
+}
+
+static void count_not_targeted(void)   // an output the carrier cannot deliver to does not count
+{
+    static const FLine l[] = { { 700, C_OURS }, { 700, C_OURS }, { 0, C_TRANSFER }, { 700, C_OURS } };
+    const BRTransaction *t = funding(0, l, 4, 1, 1);
+    BRAssetRow r[1];
+
+    r[0] = crow(FTXID[0], 1, 7);
+    carrierIs("output 1: named by no instruction and not the last", &r[0], t, BR_ASSET_ROW_CARRIER_NOT_TARGETED);
+    cbalances("an output no instruction reaches", r, 1, &t, "");
+    fundingsFree();
+}
+
+static void count_unreadable_funding(void)   // an unreadable funding transaction does not count
+{
+    static const FLine l[] = { { 700, C_OURS }, { 0, C_TRANSFER } };
+    const BRTransaction *t = funding(0, l, 2, 1, 1), *none = NULL;
+    BRTransaction copy;
+    BRTxOutput outs[2];
+    BRAssetRow r[1];
+    const BRTransaction *cp = &copy;
+
+    r[0] = crow(FTXID[0], 0, 7);
+    carrierIs("no transaction to read (Kotlin: a line that is not <vout>|<sats>|<hex>)", &r[0], NULL, BR_ASSET_ROW_CARRIER_UNREADABLE);
+    cbalances("no funding transaction", r, 1, &none, "");
+    if (t) {
+        copy = *t;
+        memcpy(outs, t->outputs, sizeof(outs));
+        outs[1].script = NULL;   // a length and no bytes
+        copy.outputs = outs;
+        carrierIs("a script with a length and no bytes", &r[0], &copy, BR_ASSET_ROW_CARRIER_UNREADABLE);
+        cbalances("a script that cannot be read", r, 1, &cp, "");
+        copy.outputs = t->outputs;
+        copy.outCount = 0;
+        carrierIs("no outputs (Kotlin: an empty list)", &r[0], &copy, BR_ASSET_ROW_CARRIER_UNREADABLE);
+        copy.outCount = 2;
+        copy.outputs = NULL;
+        carrierIs("outputs counted and not there", &r[0], &copy, BR_ASSET_ROW_CARRIER_UNREADABLE);
+    }
+    fundingsFree();
+}
+
+static void count_instruction_fixtures(void)   // the instruction fixtures decode as described
+{
+    const char *const fx[4] = { C_ISSUANCE, C_ISSUE_TO_0, C_RANGE, C_TWO };
+    BRAssetTransferInstruction in[BR_ASSET_MAX_INSTRUCTIONS];
+    BRAssetHeader h;
+    uint8_t s[64];
+    size_t n, i;
+
+    for (i = 0; i < 4; i++) {   // each is the only nulldata output of [it, ours]: the one rule's carrier
+        FLine l[2];
+        const BRTransaction *t;
+        size_t at = 9;
+
+        l[0].sats = 0; l[0].script = fx[i]; l[1].sats = 700; l[1].script = C_OURS;
+        t = funding(0, l, 2, 1, 1);
+        ck(t && BRTxAssetCarrier(t, &at) == DA_TX_CARRIER && at == 0, "%s is nulldata and the transaction's carrier", fx[i]);
+    }
+    n = unhex(C_ISSUANCE, s, sizeof(s));
+    ck(BRAssetDecodeInstructions(s, n, &h, in, N(in)) == BR_ASSET_SCRIPT_ASSET && h.operation == DA_ISSUANCE, "issuance of ten: ISSUANCE");
+    n = unhex(C_ISSUE_TO_0, s, sizeof(s));
+    ck(BRAssetDecodeInstructions(s, n, &h, in, N(in)) == BR_ASSET_SCRIPT_ASSET && h.totalQuantity == 10 && h.instructionCount == 1 &&
+       in[0].outputIndex == 0 && in[0].amount == 10, "issuance all to zero: 10 units, [0 to 10]");
+    n = unhex(C_RANGE, s, sizeof(s));
+    ck(BRAssetDecodeInstructions(s, n, &h, in, N(in)) == BR_ASSET_SCRIPT_ASSET && h.instructionCount == 1 && in[0].range &&
+       in[0].outputIndex == 2, "range to two: one range instruction to output 2");
+    n = unhex(C_TWO, s, sizeof(s));
+    ck(BRAssetDecodeInstructions(s, n, &h, in, N(in)) == BR_ASSET_SCRIPT_ASSET && h.instructionCount == 2 &&
+       in[0].outputIndex == 0 && in[0].amount == 5 && in[1].outputIndex == 2 && in[1].amount == 5,
+       "two instructions: [0 to 5, 2 to 5]");
+    fundingsFree();
+}
+
+static void count_issuance_marker(void)   // an issuance marker row counts
+{
+    static const FLine l[] = { { 0, C_ISSUANCE }, { 700, C_OURS }, { 700, C_OURS } };
+    const BRTransaction *t = funding(0, l, 3, 1, 1);
+    BRAssetRow r[1];
+
+    r[0] = crow(FTXID[0], 1, 10);
+    carrierIs("the issuer's marker: the first output that is not OP_RETURN", &r[0], t, BR_ASSET_ROW_CARRIER_CREDITS);
+    cbalances("an issuance's marker row", r, 1, &t, "La1=10/1");
+    fundingsFree();
+}
+
+static void count_issuance_not_targeted(void)   // an issuance output nothing can deliver to does not count
+{
+    static const FLine l[] = { { 700, C_OURS }, { 0, C_ISSUE_TO_0 }, { 700, C_OURS }, { 700, C_OURS } };
+    const BRTransaction *t = funding(0, l, 4, 1, 1);
+    BRAssetRow r[1];
+
+    r[0] = crow(FTXID[0], 2, 3);
+    carrierIs("output 2 of an issuance that sends all to output 0", &r[0], t, BR_ASSET_ROW_CARRIER_NOT_TARGETED);
+    cbalances("an issuance output nothing reaches", r, 1, &t, "");
+    fundingsFree();
+}
+
+static void count_range_transfer(void)   // a range transfer credits the outputs it spans
+{
+    static const FLine l[] = { { 700, C_OURS }, { 700, C_OURS }, { 700, C_OURS }, { 700, C_OURS }, { 0, C_RANGE }, { 700, C_OURS } };
+    const BRTransaction *t = funding(0, l, 6, 1, 1);
+    const BRTransaction *f[4];
+    BRAssetRow r[4];
+
+    r[0] = crow(FTXID[0], 0, 1);
+    r[1] = crow(FTXID[0], 1, 2);
+    r[2] = crow(FTXID[0], 2, 3);
+    r[3] = crow(FTXID[0], 3, 100);
+    f[0] = f[1] = f[2] = f[3] = t;
+    carrierIs("output 3: past the range and not the last", &r[3], t, BR_ASSET_ROW_CARRIER_NOT_TARGETED);
+    cbalances("outputs 0..2 count, output 3 does not", r, 4, f, "La1=6/3");
+    fundingsFree();
+}
+
+static void count_multi_instruction(void)   // a multi-instruction transfer credits what it names and the last output
+{
+    static const FLine l[] = { { 700, C_OURS }, { 700, C_OURS }, { 700, C_OURS }, { 0, C_TWO }, { 700, C_OURS } };
+    const BRTransaction *t = funding(0, l, 5, 1, 1);
+    const BRTransaction *f[4];
+    BRAssetRow r[4];
+
+    r[0] = crow(FTXID[0], 0, 5);
+    r[1] = crow(FTXID[0], 1, 50);
+    r[2] = crow(FTXID[0], 2, 5);
+    r[3] = crow(FTXID[0], 4, 4);
+    f[0] = f[1] = f[2] = f[3] = t;
+    carrierIs("output 1: named by neither instruction", &r[1], t, BR_ASSET_ROW_CARRIER_NOT_TARGETED);
+    cbalances("outputs 0, 2 and the last count", r, 4, f, "La1=14/3");
+    fundingsFree();
+}
+
+static void count_encrypted_key_shape(void)   // a carrier in the encrypted-key shape does not count
+{
+    static const FLine l[] = { { 650, C_OURS }, { 0, C_TRANSFER }, { 700, C_OURS } };
+    const BRTransaction *t = funding(0, l, 3, 1, 1);
+    BRAssetRow r[1];
+
+    r[0] = crow(FTXID[0], 0, 10);
+    carrierIs("[650 sat, carrier, ours], one input: an encrypted-key transaction", &r[0], t, BR_ASSET_ROW_CARRIER_UNDECIDED);
+    cbalances("the encrypted-key shape", r, 1, &t, "");
+    fundingsFree();
+}
+
+static void count_encrypted_key_two_inputs(void)   // the same shape with two inputs counts
+{
+    static const FLine l[] = { { 650, C_OURS }, { 0, C_TRANSFER }, { 700, C_OURS } };
+    const BRTransaction *t = funding(0, l, 3, 2, 1);
+    BRAssetRow r[1];
+
+    r[0] = crow(FTXID[0], 0, 10);
+    carrierIs("the same outputs, two inputs: an asset transaction", &r[0], t, BR_ASSET_ROW_CARRIER_CREDITS);
+    cbalances("the shape with two inputs", r, 1, &t, "La1=10/1");
+    fundingsFree();
+}
+
+// [a legacy row, a genuine row] of one asset, and their carrier answers.
+static void legacyAndReal(BRAssetRow *r, BRAssetRowCarrier *c)
+{
+    static const FLine legacy[] = { { 700, C_OURS }, { 0, C_TRANSFER }, { 0, C_PLAIN } };
+    static const FLine real[] = { { 700, C_OURS }, { 0, C_TRANSFER } };
+    const BRTransaction *tl = funding(0, legacy, 3, 2, 1), *tr = funding(1, real, 2, 2, 1);
+
+    r[0] = crow(FTXID[0], 0, 40000);
+    r[1] = crow(FTXID[1], 0, 10);
+    c[0] = BRAssetRowCarrierOf(&r[0], tl);
+    c[1] = BRAssetRowCarrierOf(&r[1], tr);
+}
+
+static void count_first_counted_row(void)   // the rule check starts from a counted row, not an excluded one
+{
+    BRAssetRow r[2];
+    BRAssetRowCarrier c[2];
+    int st[2] = { BR_ASSET_STATE_HELD, BR_ASSET_STATE_HELD };
+    size_t at;
+
+    legacyAndReal(r, c);
+    at = BRAssetFirstCountedRow(r, 2, "La1", st, c, COURS, 1);
+    ck(at == 1 && strcmp(r[at < 2 ? at : 0].txid, FTXID[1]) == 0, "the excluded legacy row listed first is skipped: row %zu", at);
+    ck(BRAssetFirstCountedRow(r, 2, "La2", st, c, COURS, 1) == 2, "another asset's rows are not its rows");
+    ck(BRAssetFirstCountedRow(r, 2, "La1", st, c, COURS, 0) == 2, "no owned set: no row (Kotlin: null)");
+    fundingsFree();
+}
+
+static void count_no_counted_row(void)   // with only excluded rows there is no counted row
+{
+    BRAssetRow r[2];
+    BRAssetRowCarrier c[2];
+    int st[1] = { BR_ASSET_STATE_HELD };
+
+    legacyAndReal(r, c);
+    ck(BRAssetFirstCountedRow(r, 1, "La1", st, c, COURS, 1) == 1, "only the excluded row: none (the gate then reads UNKNOWN)");
+    ck(BRAssetFirstCountedRow(NULL, 0, "La1", st, c, COURS, 1) == 0 && BRAssetFirstCountedRow(r, 1, NULL, st, c, COURS, 1) == 1 &&
+       BRAssetFirstCountedRow(r, 1, "La1", NULL, c, COURS, 1) == 1 && BRAssetFirstCountedRow(r, 1, "La1", st, NULL, COURS, 1) == 1 &&
+       BRAssetFirstCountedRow(r, 1, "La1", st, c, NULL, 1) == 1, "a missing argument: none");
+    fundingsFree();
+}
+
+static void count_last_good_answer(void)   // an unavailable recompute shows the last good answer, else nothing
+{
+    BRAssetRow r[1];
+    BRAssetRowCarrier c[1];
+    int st[1] = { BR_ASSET_STATE_HELD };
+    size_t n = 9;
+    BRAssetHoldingsStatus s;
+    static const FLine l[] = { { 700, C_OURS }, { 0, C_TRANSFER } };
+    const BRTransaction *t = funding(0, l, 2, 1, 1);
+
+    r[0] = crow(FTXID[0], 0, 10);
+    c[0] = BRAssetRowCarrierOf(&r[0], t);
+    s = BRAssetHeldBalances(r, 1, st, c, COURS, 0, HB, N(HB), &n);
+    ck(s == BR_ASSET_HOLDINGS_NO_OWNERSHIP && BRAssetHeldBalancesShow(s, 0) == BR_ASSET_SHOW_NOTHING,
+       "before the first good answer, an unavailable recompute shows nothing");
+    s = BRAssetHeldBalances(r, 1, st, c, COURS, 1, HB, N(HB), &n);
+    ck(s == BR_ASSET_HOLDINGS_OK && n == 1 && HB[0].quantity == 10 && BRAssetHeldBalancesShow(s, 0) == BR_ASSET_SHOW_COMPUTED,
+       "a good answer is shown");
+    s = BRAssetHeldBalances(r, 1, st, c, COURS, 0, HB, N(HB), &n);
+    ck(BRAssetHeldBalancesShow(s, 1) == BR_ASSET_SHOW_LAST_GOOD, "after it, an unavailable recompute shows the last good answer");
+    ck(BRAssetHeldBalancesShow(BR_ASSET_HOLDINGS_OK, 1) == BR_ASSET_SHOW_COMPUTED, "a new good answer replaces it");
+    ck(BRAssetHeldBalancesShow(BR_ASSET_HOLDINGS_CAPACITY, 1) == BR_ASSET_SHOW_LAST_GOOD &&
+       BRAssetHeldBalancesShow(BR_ASSET_HOLDINGS_REFUSED, 1) == BR_ASSET_SHOW_LAST_GOOD &&
+       BRAssetHeldBalancesShow(BR_ASSET_HOLDINGS_CAPACITY, 0) == BR_ASSET_SHOW_NOTHING &&
+       BRAssetHeldBalancesShow((BRAssetHoldingsStatus)77, 0) == BR_ASSET_SHOW_NOTHING,
+       "any answer but OK is no answer to show");
+    fundingsFree();
+}
+
+static void count_other_family_never_counts(void)   // OTHER_FAMILY (-3) is never held, whatever the carrier says
+{
+    static const FLine l[] = { { 700, C_OURS }, { 0, C_TRANSFER } };
+    const BRTransaction *t = funding(0, l, 2, 1, 1);
+    BRAssetRow r[2];
+    int st[2] = { BR_ASSET_STATE_OTHER_FAMILY, BR_ASSET_STATE_OTHER_FAMILY };
+    BRAssetRowCarrier c[2];
+    size_t n = 9;
+    int spent = 7;
+
+    r[0] = crow(FTXID[0], 0, 10);
+    r[1] = r[0];
+    r[1].source = BAK;
+    c[0] = BRAssetRowCarrierOf(&r[0], t);
+    c[1] = c[0];
+    ck(c[0] == BR_ASSET_ROW_CARRIER_CREDITS, "the carrier credits the output");
+    ck(! BRAssetHeldForDisplay(r[0].script, r[0].scriptLen, COURS, 1, NAT, BR_ASSET_STATE_OTHER_FAMILY) &&
+       ! BRAssetHeldForDisplay(r[0].script, r[0].scriptLen, COURS, 1, BAK, BR_ASSET_STATE_OTHER_FAMILY),
+       "an OTHER_FAMILY output is not held, NATIVE or BACKEND");
+    ck(! BRAssetRowCounts(&r[0], COURS, 1, BR_ASSET_STATE_OTHER_FAMILY, c[0]), "nor does its row count");
+    ck(BRAssetHeldBalances(r, 2, st, c, COURS, 1, HB, N(HB), &n) == BR_ASSET_HOLDINGS_OK && n == 0, "nor reach a balance");
+    ck(! BRAssetRowSpentDecide(BR_ASSET_STATE_OTHER_FAMILY, &spent) && spent == 7, "and its spent flag is left as it is");
+    ck(BR_ASSET_STATE_OTHER_FAMILY == -3, "OTHER_FAMILY is BRWalletOutpointAssetState's -3");
+    fundingsFree();
+}
+
+static void count_digidollar_marked(void)   // ONE-FAMILY: a carrier beside a DigiDollar marking credits nothing
+{
+    static const FLine opcode[] = { { 700, C_OURS }, { 0, C_TRANSFER }, { 0, "6abb" } };
+    static const FLine push[] = { { 700, C_OURS }, { 0, C_TRANSFER }, { 0, "6a02444476" } };
+    static const FLine plain[] = { { 700, C_OURS }, { 0, C_TRANSFER } };
+    const BRTransaction *t;
+    BRAssetRow r[1];
+
+    t = funding(0, opcode, 3, 1, 1);
+    r[0] = crow(FTXID[0], 0, 10);
+    carrierIs("OP_RETURN OP_DIGIDOLLAR beside the carrier", &r[0], t, BR_ASSET_ROW_CARRIER_DIGIDOLLAR);
+    cbalances("OP_RETURN OP_DIGIDOLLAR", r, 1, &t, "");
+    t = funding(1, push, 3, 1, 1);
+    r[0] = crow(FTXID[1], 0, 10);
+    carrierIs("an OP_RETURN whose first push is \"DD\"", &r[0], t, BR_ASSET_ROW_CARRIER_DIGIDOLLAR);
+    cbalances("a \"DD\" push", r, 1, &t, "");
+    t = funding(2, plain, 2, 1, 0x00010770u);
+    r[0] = crow(FTXID[2], 0, 10);
+    carrierIs("the nVersion marker (0x0770 in its low 16 bits)", &r[0], t, BR_ASSET_ROW_CARRIER_DIGIDOLLAR);
+    cbalances("the nVersion marker", r, 1, &t, "");
+    t = funding(3, plain, 2, 1, 0x07700001u);
+    r[0] = crow(FTXID[3], 0, 10);
+    carrierIs("0x0770 in the high 16 bits is no marker", &r[0], t, BR_ASSET_ROW_CARRIER_CREDITS);
+    fundingsFree();
+}
+
+static void count_data_output(void)   // a row at an OP_RETURN output counts nothing
+{
+    static const FLine transfer[] = { { 700, C_OURS }, { 0, C_TRANSFER } };
+    static const FLine issuance[] = { { 0, C_ISSUANCE }, { 700, C_OURS } };
+    const BRTransaction *t;
+    BRAssetRow r[1];
+
+    t = funding(0, transfer, 2, 1, 1);
+    r[0] = crow(FTXID[0], 1, 10);
+    carrierIs("the carrier itself, the transfer's last output", &r[0], t, BR_ASSET_ROW_CARRIER_DATA_OUTPUT);
+    cbalances("a row at the carrier", r, 1, &t, "");
+    t = funding(1, issuance, 2, 1, 1);
+    r[0] = crow(FTXID[1], 0, 10);
+    carrierIs("an issuance's carrier", &r[0], t, BR_ASSET_ROW_CARRIER_DATA_OUTPUT);
+    fundingsFree();
+}
+
+static void count_not_funding(void)   // a transaction that is not the row's says nothing of it
+{
+    static const FLine a[] = { { 700, C_OURS }, { 0, C_TRANSFER } };
+    static const FLine b[] = { { 701, C_OURS }, { 0, C_TRANSFER } };
+    const BRTransaction *ta = funding(0, a, 2, 1, 1), *tb = funding(1, b, 2, 1, 1);
+    char upper[BR_ASSET_TXID_LENGTH + 1], shortId[BR_ASSET_TXID_LENGTH], longId[BR_ASSET_TXID_LENGTH + 2];
+    BRAssetRow r[1];
+    size_t i;
+
+    r[0] = crow(FTXID[1], 0, 10);
+    carrierIs("another transaction's row", &r[0], ta, BR_ASSET_ROW_CARRIER_NOT_FUNDING);
+    cbalances("a funding transaction that is not the row's", r, 1, &ta, "");
+    carrierIs("the row's own transaction", &r[0], tb, BR_ASSET_ROW_CARRIER_CREDITS);
+    for (i = 0; i <= BR_ASSET_TXID_LENGTH; i++) upper[i] = (char)toupper((unsigned char)FTXID[1][i]);
+    r[0].txid = upper;
+    carrierIs("its txid in upper case", &r[0], tb, BR_ASSET_ROW_CARRIER_CREDITS);
+    memcpy(shortId, FTXID[1], BR_ASSET_TXID_LENGTH - 1);
+    shortId[BR_ASSET_TXID_LENGTH - 1] = '\0';
+    r[0].txid = shortId;
+    carrierIs("its txid one character short", &r[0], tb, BR_ASSET_ROW_CARRIER_NOT_FUNDING);
+    memcpy(longId, FTXID[1], BR_ASSET_TXID_LENGTH);
+    longId[BR_ASSET_TXID_LENGTH] = '0';
+    longId[BR_ASSET_TXID_LENGTH + 1] = '\0';
+    r[0].txid = longId;
+    carrierIs("its txid and one character more", &r[0], tb, BR_ASSET_ROW_CARRIER_NOT_FUNDING);
+    fundingsFree();
+}
+
+static void count_carrier_answers(void)   // every other answer, and what a row needs to have one
+{
+    static const FLine plain[] = { { 700, C_OURS }, { 0, C_PLAIN } };
+    static const FLine transfer[] = { { 700, C_OURS }, { 0, C_TRANSFER } };
+    const BRTransaction *tp = funding(0, plain, 2, 1, 1), *tt = funding(1, transfer, 2, 1, 1);
+    BRAssetRow r;
+
+    r = crow(FTXID[0], 0, 10);
+    carrierIs("a plain transaction", &r, tp, BR_ASSET_ROW_CARRIER_NONE);
+    r = crow(FTXID[1], 2, 10);
+    carrierIs("vout one past the last", &r, tt, BR_ASSET_ROW_CARRIER_NO_SUCH_OUTPUT);
+    r.vout = -1;
+    carrierIs("a negative vout", &r, tt, BR_ASSET_ROW_CARRIER_NO_SUCH_OUTPUT);
+    r.vout = INT32_MAX;
+    carrierIs("vout INT32_MAX", &r, tt, BR_ASSET_ROW_CARRIER_NO_SUCH_OUTPUT);
+    r.txid = NULL;
+    carrierIs("a row with no txid", &r, tt, BR_ASSET_ROW_CARRIER_UNREADABLE);
+    ck(BRAssetRowCarrierOf(NULL, tt) == BR_ASSET_ROW_CARRIER_UNREADABLE, "no row");
+    ck(BR_ASSET_ROW_CARRIER_UNREADABLE == 0, "a carrier answer nobody filled reads as unreadable, never as credits");
+    fundingsFree();
+}
+
+static void count_balances_carriers(void)   // only CREDITS counts, whatever else the platform passes
+{
+    BRAssetRow r[1];
+    BRAssetRowCarrier c[1];
+    int st[1] = { BR_ASSET_STATE_HELD }, v;
+    size_t n = 9;
+    char what[64];
+
+    r[0] = row(tx(0, "ca", 'a'), 0, OWN, 3, 700000, "La1", 10, 0, NAT, VER);
+    for (v = -2; v <= 12; v++) {
+        int want = v == BR_ASSET_ROW_CARRIER_CREDITS;
+
+        c[0] = (BRAssetRowCarrier)v;
+        snprintf(what, sizeof(what), "carrier answer %d", v);
+        ck(BRAssetRowCounts(&r[0], OWNED, 1, BR_ASSET_STATE_HELD, c[0]) == want, "%s: the row %s", what, want ? "counts" : "does not count");
+        ck(BRAssetHeldBalances(r, 1, st, c, OWNED, 1, HB, N(HB), &n) == BR_ASSET_HOLDINGS_OK && n == (size_t)want &&
+           (! want || HB[0].quantity == 10), "%s: %zu balances", what, n);
+    }
+    ck(BRAssetHeldBalances(r, 1, st, NULL, OWNED, 1, HB, N(HB), &n) == BR_ASSET_HOLDINGS_REFUSED, "no carrier answers: refused");
+}
+
+static void count_vectors(void)   // the core's vectors/asset-count-carrier: every answer is the header's
+{
+    const char *path = getenv("ASSET_COUNT_VECTORS");
+    FILE *f = path ? fopen(path, "r") : NULL;
+    static char line[1 << 16];
+    static uint8_t b[1 << 15];
+    int lines = 0, bad = 0, rule = 0, answers = 0;
+
+    if (! f) { ck(0, "ASSET_COUNT_VECTORS (%s) cannot be read", path ? path : "unset"); return; }
+    while (fgets(line, sizeof(line), f)) {
+        char *name, *hex, *want, *save = line + 6, *end;
+        const BRTransaction *t;
+        BRAssetRow r;
+        size_t n, v = 0;
+
+        if (strncmp(line, "count ", 6) != 0) continue;
+        line[strcspn(line, "\r\n")] = '\0';
+        name = save; end = strchr(name, ' '); if (! end) { bad++; continue; } *end = '\0';
+        hex = end + 1; end = strchr(hex, ' '); if (! end) { bad++; continue; } *end = '\0';
+        want = end + 1;
+        n = unhex(hex, b, sizeof(b));
+        t = (n == (size_t)-1) ? NULL : parsedInto(0, b, n);
+        if (! t) { ck(0, "%s: the transaction does not parse", name); bad++; continue; }
+        memset(&r, 0, sizeof(r));
+        r.txid = FTXID[0];
+        r.isAsset = 1;
+        lines++;
+        if (strncmp(name, "count_rule_", 11) == 0) rule++;
+        while (*want) {
+            char *sp = strchr(want, ' ');
+            const char *got;
+
+            if (sp) *sp = '\0';
+            r.vout = (int32_t)v;
+            got = carrierName(BRAssetRowCarrierOf(&r, t));
+            if (strcmp(got, want) != 0) { bad++; ck(0, "%s vout %zu: the file says %s, the header %s", name, v, want, got); }
+            answers++;
+            v++;
+            if (! sp) break;
+            want = sp + 1;
+        }
+        if (v != t->outCount + 1) { bad++; ck(0, "%s: %zu answers for %zu outputs", name, v, t->outCount); }
+    }
+    fclose(f);
+    fundingsFree();
+    ck(bad == 0 && lines >= 60 && rule == 10, "every answer of the core's count-carrier vectors is the header's (%d transactions, "
+       "%d answers, %d of AssetCarrierCountRuleTest)", lines, answers, rule);
 }
 
 // =================================================================================================
@@ -1869,14 +2479,28 @@ static int mIsHeldForDisplay(const char *scriptHexLower, const MSet *ownedLower,
     case 0: return 0;     // SPENT
     case 1: return 1;     // HELD
     case -2: return 0;    // CONFLICTED
+    case -3: return 0;    // OTHER_FAMILY
     default: return 0;
     }
 }
 
 typedef struct { int n; char id[MR][80]; int64_t qty[MR]; int cnt[MR]; } MBalances;
 
+// rowCountRefusal is null: the row is not spent, its credit counts, it is held, and carrierRefusal (here
+// carrier[i], CREDITS for null and any other value a reason) is null.
+static int mCountsRow(const MRow *r, const MSet *owned, int state, int carrier)
+{
+    char scriptHex[2 * MS + 1];
+
+    if (r->spent) return 0;
+    mLower(r->scriptHex, scriptHex);
+    if (! (mCounts(r->credit) && mIsHeldForDisplay(scriptHex, owned, r->source, state))) return 0;
+    return carrier == BR_ASSET_ROW_CARRIER_CREDITS;
+}
+
 // computeHeldAssetBalancesImpl: 0 for null.
-static int mComputeHeld(const MSet *ownedScriptHexes, const MRow *rows, int n, const int *states, MBalances *out)
+static int mComputeHeld(const MSet *ownedScriptHexes, const MRow *rows, int n, const int *states, const int *carriers,
+                        MBalances *out)
 {
     MSet owned;
     int i, j;
@@ -1886,21 +2510,42 @@ static int mComputeHeld(const MSet *ownedScriptHexes, const MRow *rows, int n, c
     if (owned.n == 0) return 0;
     out->n = 0;
     for (i = 0; i < n; i++) {
-        char scriptHex[2 * MS + 1];
-        int keep;
-
         if (! rows[i].live || ! rows[i].isAsset) continue;   // getAllAssetUtxosNow: is_asset = 1
         if (rows[i].spent) continue;
         if (! rows[i].hasId) continue;
-        mLower(rows[i].scriptHex, scriptHex);
-        keep = mCounts(rows[i].credit) && mIsHeldForDisplay(scriptHex, &owned, rows[i].source, states[i]);
-        if (! keep) continue;
+        if (! mCountsRow(&rows[i], &owned, states[i], carriers[i])) continue;
         for (j = 0; j < out->n && strcmp(out->id[j], rows[i].assetId) != 0; j++) {}
         if (j == out->n) { strcpy(out->id[j], rows[i].assetId); out->qty[j] = 0; out->cnt[j] = 0; out->n++; }
         out->qty[j] = mAdd(out->qty[j], rows[i].qty);
         if (rows[i].qty > 0) out->cnt[j]++;
     }
     return 1;
+}
+
+// firstCountedRow: the index of the first of assetId's rows the count rule keeps, or -1 for null. Its query,
+// getAssetUtxosByIdNow: is_asset = 1, spent = 0, asset_id = :assetId, a credit that counts.
+static int mFirstCounted(const MSet *ownedScriptHexes, const MRow *rows, int n, const char *assetId, const int *states,
+                         const int *carriers)
+{
+    MSet owned;
+    int i;
+
+    owned.n = 0;
+    for (i = 0; i < ownedScriptHexes->n; i++) { char l[2 * MS + 1]; mLower(ownedScriptHexes->s[i], l); mAddTo(&owned, l); }
+    if (owned.n == 0) return -1;
+    for (i = 0; i < n; i++) {
+        if (! rows[i].live || ! rows[i].isAsset || rows[i].spent || ! rows[i].hasId || strcmp(rows[i].assetId, assetId) != 0 ||
+            ! mCounts(rows[i].credit)) continue;
+        if (mCountsRow(&rows[i], &owned, states[i], carriers[i])) return i;
+    }
+    return -1;
+}
+
+// displayHeldBalances: 2 shows `computed` (and keeps it), 1 the last good answer, 0 nothing.
+static int mDisplay(int computedIsNull, int *hasLast)
+{
+    if (! computedIsNull) { *hasLast = 1; return 2; }
+    return *hasLast ? 1 : 0;
 }
 
 static int mDecideAssetSpent(int state, int *v)   // 0 for null
@@ -2407,26 +3052,69 @@ static void rndOwned(void)
 enum { R_NULL, R_BALANCES, R_SATURATED, R_EMPTY_ROW, R_HELD, R_PRUNED, R_SET_SPENT, R_CLEARED, R_NATIVE_DELETE, R_DEAD_DELETE,
        R_RETAINED, R_INSERT, R_UPDATE, R_RAISED, R_SETTLED_WRITE, R_FOUND, R_UNAVAILABLE, R_ACCEPT, R_NOT_BELIEVED, R_LATER,
        R_WIRE_OK, R_WIRE_REFUSED, R_GATE_OPEN, R_TABLE_FULL, R_STALE_FREED,
-       R_PREFIX, R_EMPTY_AT_POINTER, R_LONG_TXID };
+       R_PREFIX, R_EMPTY_AT_POINTER, R_LONG_TXID, R_LAST_GOOD, R_FIRST_COUNTED, R_FIRST_SKIPS, R_CARRIER_DROPS };
+
+// The carrier answers, and the OTHER_FAMILY states drawn over the others, come from a stream of their own,
+// so the rest of the corpus is the one it was before they were drawn.
+static uint64_t CRNG;
+
+static uint32_t cbelow(uint32_t n)
+{
+    CRNG ^= CRNG << 13; CRNG ^= CRNG >> 7; CRNG ^= CRNG << 17;
+    return (uint32_t)(CRNG >> 24) % n;
+}
 
 static void sweepBalances(void)
 {
-    int round, i;
+    int round, i, hasLast = 0, shown;
+    BRAssetHeldShow show;
 
-    for (round = 0; round < 7000; round++) {
-        int states[MR], setSpent[MR], mpruned, prune;
+    CRNG = 0x2026111500000003ULL;
+    for (round = 0; round < 8500; round++) {
+        int states[MR], setSpent[MR], mpruned, prune, mcarriers[MR], mfirst;
+        BRAssetRowCarrier carriers[MR];
         char got[4096], model[4096];
-        size_t count = 0, pruned = 0, at;
+        size_t count = 0, pruned = 0, at, first;
         BRAssetHoldingsStatus st;
         MBalances mb;
 
         rndRows(MR);
         rndOwned();
         for (i = 0; i < CN; i++) states[i] = below(2) ? BR_ASSET_STATE_HELD : STATES[below(N(STATES))];
+        for (i = 0; i < CN; i++) {   // CREDITS seven times in eight; else a reason, or a value no reason has
+            if (cbelow(12) == 0) states[i] = BR_ASSET_STATE_OTHER_FAMILY;
+            mcarriers[i] = cbelow(8) ? BR_ASSET_ROW_CARRIER_CREDITS : cbelow(4) ? (int)cbelow(9) : 9 + (int)cbelow(100);
+            carriers[i] = (BRAssetRowCarrier)mcarriers[i];
+        }
 
-        st = BRAssetHeldBalances(CR, (size_t)CN, states, COWNED, COWNEDN, HB, N(HB), &count);
+        st = BRAssetHeldBalances(CR, (size_t)CN, states, carriers, COWNED, COWNEDN, HB, N(HB), &count);
         showBalances(got, st, HB, count);
-        if (! mComputeHeld(&MOWNED, MRS, CN, states, &mb)) { strcpy(model, "null"); REACH[R_NULL]++; }
+        show = BRAssetHeldBalancesShow(st, hasLast);
+        shown = mDisplay(st != BR_ASSET_HOLDINGS_OK, &hasLast);
+        if ((int)show != shown) {
+            snprintf(got, sizeof(got), "show %d", (int)show); snprintf(model, sizeof(model), "show %d", shown);
+            diff("show", round, got, model);
+        }
+        if (shown == 1) REACH[R_LAST_GOOD]++;
+        {
+            const char *asked = IDS[cbelow(N(IDS))];
+            first = BRAssetFirstCountedRow(CR, (size_t)CN, asked, states, carriers, COWNED, COWNEDN);
+            mfirst = mFirstCounted(&MOWNED, MRS, CN, asked, states, mcarriers);
+            if ((mfirst < 0 ? (size_t)CN : (size_t)mfirst) != first) {
+                snprintf(got, sizeof(got), "first %zu", first); snprintf(model, sizeof(model), "first %d", mfirst);
+                diff("first counted row", round, got, model);
+            }
+            if (mfirst >= 0) REACH[R_FIRST_COUNTED]++;
+            if (mfirst > 0) {   // a row of the asset before it that the query returns and the count rule does not keep
+                for (i = 0; i < mfirst; i++) {
+                    if (MRS[i].isAsset && ! MRS[i].spent && MRS[i].hasId && strcmp(MRS[i].assetId, asked) == 0 && mCounts(MRS[i].credit)) {
+                        REACH[R_FIRST_SKIPS]++;
+                        break;
+                    }
+                }
+            }
+        }
+        if (! mComputeHeld(&MOWNED, MRS, CN, states, mcarriers, &mb)) { strcpy(model, "null"); REACH[R_NULL]++; }
         else {
             at = 0; model[0] = '\0';
             for (i = 0; i < mb.n; i++) {
@@ -2447,6 +3135,8 @@ static void sweepBalances(void)
             mLower(MRS[i].scriptHex, l);
             mh = mIsHeldForDisplay(l, &ol, MRS[i].source, states[i]);
             if (mh) REACH[R_HELD]++;
+            if (mh && MRS[i].isAsset && MRS[i].hasId && ! MRS[i].spent && mCounts(MRS[i].credit) &&
+                mcarriers[i] != BR_ASSET_ROW_CARRIER_CREDITS) REACH[R_CARRIER_DROPS]++;
             if (states[i] == BR_ASSET_STATE_HELD && CR[i].scriptLen > 0) {   // a script that is a prefix of an owned one
                 size_t k;
                 for (k = 0; k < COWNEDN; k++) {
@@ -2849,6 +3539,10 @@ static void model_sweep(void)
         { R_PREFIX, 1000, "held rows whose script is a prefix of an owned one" },
         { R_EMPTY_AT_POINTER, 300, "held rows of no script bytes at a pointer, beside an empty owned entry" },
         { R_LONG_TXID, 3000, "absent rows of a 65-character txid" },
+        { R_LAST_GOOD, 600, "recomputes that show the last good answer" },
+        { R_FIRST_COUNTED, 250, "assets with a counted row" },
+        { R_FIRST_SKIPS, 60, "first counted rows after a row of the asset the count rule leaves out" },
+        { R_CARRIER_DROPS, 200, "held, backed, unspent rows the carrier answer leaves out" },
     };
     size_t i;
 
@@ -2958,6 +3652,28 @@ static const Case CASES[] = {
     { "zero_structs", zero_structs },
     { "edges", edges },
     { "second_unit", second_unit },
+    { "count_undecided_funding", count_undecided_funding },
+    { "count_genuine_row", count_genuine_row },
+    { "count_remainder_last_output", count_remainder_last_output },
+    { "count_not_targeted", count_not_targeted },
+    { "count_unreadable_funding", count_unreadable_funding },
+    { "count_instruction_fixtures", count_instruction_fixtures },
+    { "count_issuance_marker", count_issuance_marker },
+    { "count_issuance_not_targeted", count_issuance_not_targeted },
+    { "count_range_transfer", count_range_transfer },
+    { "count_multi_instruction", count_multi_instruction },
+    { "count_encrypted_key_shape", count_encrypted_key_shape },
+    { "count_encrypted_key_two_inputs", count_encrypted_key_two_inputs },
+    { "count_first_counted_row", count_first_counted_row },
+    { "count_no_counted_row", count_no_counted_row },
+    { "count_last_good_answer", count_last_good_answer },
+    { "count_other_family_never_counts", count_other_family_never_counts },
+    { "count_digidollar_marked", count_digidollar_marked },
+    { "count_data_output", count_data_output },
+    { "count_not_funding", count_not_funding },
+    { "count_carrier_answers", count_carrier_answers },
+    { "count_balances_carriers", count_balances_carriers },
+    { "count_vectors", count_vectors },
     { "model_sweep", model_sweep },
 };
 
@@ -2966,6 +3682,7 @@ int main(int argc, char **argv)
     size_t i;
 
     setvbuf(stdout, NULL, _IONBF, 0);
+    for (i = 0; i < N(CREDIT); i++) CREDIT[i] = CRD;
     if (argc != 2) { fprintf(stderr, "usage: %s <case>|list\n", argv[0]); return 2; }
     if (strcmp(argv[1], "list") == 0) {
         for (i = 0; i < N(CASES); i++) printf("%s\n", CASES[i].name);

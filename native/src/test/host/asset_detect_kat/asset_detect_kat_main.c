@@ -738,18 +738,24 @@ static const BRAssetDetectOutput *outAt(int32_t vout)
 static KRow *detectedRow(int32_t vout) { return rowAt(DET.txid, vout); }
 
 // The balance the Assets screen shows: every asset with a quantity above zero, "<id>:<qty>" sorted, or "-".
+// Every carrier answer is CREDITS, as the Kotlin tests these cases carry read the balance (the
+// computeHeldAssetBalancesImpl overload without the carrier half; asset_holdings_kat holds that half).
 static const char *balances(void)
 {
     static char text[512];
     BRAssetHeldBalance bal[16];
     int states[RMAX];
+    BRAssetRowCarrier carriers[RMAX];
     size_t i, j, n = 0, at = 0;
     const char *ids[16];
     int64_t q[16];
 
     syncView();
-    for (i = 0; i < ROWN; i++) states[i] = BR_ASSET_STATE_HELD;
-    if (BRAssetHeldBalances(VROWS, ROWN, states, OWNED, 2, bal, 16, &n) != BR_ASSET_HOLDINGS_OK) return "refused";
+    for (i = 0; i < ROWN; i++) {
+        states[i] = BR_ASSET_STATE_HELD;
+        carriers[i] = BR_ASSET_ROW_CARRIER_CREDITS;
+    }
+    if (BRAssetHeldBalances(VROWS, ROWN, states, carriers, OWNED, 2, bal, 16, &n) != BR_ASSET_HOLDINGS_OK) return "refused";
     for (i = 0, j = 0; i < n; i++) if (bal[i].quantity > 0) { ids[j] = bal[i].assetId; q[j] = bal[i].quantity; j++; }
     n = j;
     for (i = 0; i < n; i++) for (j = i + 1; j < n; j++) if (strcmp(ids[j], ids[i]) < 0) {
