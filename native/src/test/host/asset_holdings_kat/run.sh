@@ -2,15 +2,18 @@
 # Host KAT runner for BRAssetHoldings.h: which DigiAsset rows count and what the wallet holds of each asset,
 # the reconcile of a row's spent flag, the prunes of rows whose transaction the wallet no longer has, the
 # write made for a detected output, the indexer's answer for one output, the prune gate, and a row's stored
-# form. Moved from Kotlin core/.../asset/AssetManager.kt (isHeldForDisplay, computeHeldAssetBalancesImpl,
-# decideAssetSpent, reconcileAssetRowsLocallyImpl, clearDeadAssetSend, pruneRemovedNativeAssetRowsImpl,
-# pruneDeadBroadcastRowsImpl, persistDetectedAssetOutput, settledRow, settleFromIndexer,
-# isOutgoingUnconfirmedRow), AssetSums.add, AssetMaintenanceGate.kt and network/DigiScopeAssetParsing.kt;
-# their tests (HeldAssetBalancesTest, AssetHeldMeansNativeHoldsItTest, AssetConflictedSendTest,
-# TxOutStackParsingTest, and AssetSpentReconcileTest, AssetMaintenanceGateTest, PruneRemovedNativeAssetRowsTest,
-# AssetDeadBroadcastRowTest, AssetLocalReconcileTest, AssetProvenanceTaggingTest, AssetSourceFixTest and
-# UnbackedAssetCreditTest's settle tests) run here value for value, beside a line-for-line C model of the
-# Kotlin that the header is compared with over fixed pseudo-random inputs. See asset_holdings_kat_main.c.
+# form; and the count rule's carrier half (a row counts only when its funding transaction's carrier, by the
+# one carrier rule, credits its output), the first counted row and what the Assets screen shows. Moved from
+# Kotlin core/.../asset/AssetManager.kt (isHeldForDisplay, computeHeldAssetBalancesImpl, carrierCreditRefusal,
+# rowCountRefusal, firstCountedRow, displayHeldBalances, decideAssetSpent, reconcileAssetRowsLocallyImpl,
+# clearDeadAssetSend, pruneRemovedNativeAssetRowsImpl, pruneDeadBroadcastRowsImpl, persistDetectedAssetOutput,
+# settledRow, settleFromIndexer, isOutgoingUnconfirmedRow), AssetSums.add, AssetMaintenanceGate.kt and
+# network/DigiScopeAssetParsing.kt; their tests (HeldAssetBalancesTest, AssetHeldMeansNativeHoldsItTest,
+# AssetConflictedSendTest, TxOutStackParsingTest, AssetCarrierCountRuleTest, and AssetSpentReconcileTest,
+# AssetMaintenanceGateTest, PruneRemovedNativeAssetRowsTest, AssetDeadBroadcastRowTest, AssetLocalReconcileTest,
+# AssetProvenanceTaggingTest, AssetSourceFixTest and UnbackedAssetCreditTest's settle tests) run here value for
+# value, beside a line-for-line C model of the Kotlin that the header is compared with over fixed pseudo-random
+# inputs. See asset_holdings_kat_main.c.
 #
 #   comparison  one arm per rule, -DASSET_HOLDINGS_UNFIXED=<bit> (BRAssetHoldings.h): 1 a BACKEND row the
 #               wallet has no record of is held; 2 a CONFLICTED outpoint is held; 4 a script the wallet does
@@ -24,15 +27,25 @@
 #               re-detection rewrites a settled row; 262144 our own unconfirmed send's change is written;
 #               524288 the indexer is asked again at once; 1048576 a stored row with bytes after it is read;
 #               2097152 the prune gate opens whatever the scan frontier; 4194304 re-detection lowers an
-#               unsettled quantity. Each arm fails exactly the cases CASES lists for its bit and passes
-#               every other.
+#               unsettled quantity; 8388608 a row counts whatever its carrier answer; 16777216 an
+#               OTHER_FAMILY outpoint is held; 33554432 a carrier credits in a transaction marked DigiDollar;
+#               67108864 a carrier credits an output its instructions do not reach; 134217728 a carrier
+#               credits an OP_RETURN output; 268435456 a transaction that is not the row's answers for it;
+#               536870912 the first counted row is the asset's first row, counted or not; 1073741824 an
+#               answer that is not OK shows nothing after a good one. Each arm fails exactly the cases CASES
+#               lists for its bit and passes every other.
 #   shipped     -DASSET_HOLDINGS_UNFIXED=0: every case passes, exit 0.
-# All arms under ASan + UBSan, 64-bit. The header is the unit under test: nothing of the core is linked
-# (the core headers it includes are header-only). The arms run with detect_leaks=0; then every case runs
+# All arms under ASan + UBSan, 64-bit. The header is the unit under test; the core's transaction parser, the
+# one carrier rule (BRDigiAsset.c), the DigiDollar marking (BRDigiDollar.c) and the units they call are linked,
+# built once, without the seam; so is the second translation unit. The arms run with detect_leaks=0; then every case runs
 # once more on the shipped arm under LeakSanitizer where the platform has one (said so, and skipped, where
 # it does not -- Apple clang on macOS).
 #
 # Gates first: the header must test the seam's VALUE (#if, never #ifdef) with an #ifndef default. Then:
+#   VECTORS GATE      the core's vectors/asset-count-carrier/vectors.txt is what vectors/asset-count-carrier/generate.c
+#                     writes from this header (and the core's vectors/da-carrier/vectors.txt): the shared
+#                     count-carrier vectors a platform's own count rule is held to are current. The case
+#                     count_vectors holds the header to every line of it.
 #   PORTABILITY GATE  the header includes only libc and the core headers whose types or functions it uses,
 #                     reads no clock, does no I/O and allocates nothing, and builds clean under -Wall
 #                     -Wextra -Wpedantic -Werror at c99/c11/c17 (two TUs, the header included twice in the
@@ -50,6 +63,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../../.." && pwd)"
 CORE_DIR="${CORE_DIR:-$REPO_ROOT/native/src/main/jni/digibytewallet-core}"
 HEADER="$CORE_DIR/BRAssetHoldings.h"
+VEC_DIR="$CORE_DIR/vectors/asset-count-carrier"
+export ASSET_COUNT_VECTORS="$VEC_DIR/vectors.txt"
 BUILD_DIR="$(mktemp -d)"
 trap 'rm -rf "$BUILD_DIR"' EXIT
 
@@ -133,13 +148,37 @@ CASES=(
     zero_structs:-
     edges:4,512,32768
     second_unit:-
-    model_sweep:1,2,4,8,16,32,64,128,256,512,1024,2048,4096,8192,16384,32768,65536,131072,262144,524288,1048576,2097152,4194304
+    count_undecided_funding:8388608
+    count_genuine_row:-
+    count_remainder_last_output:-
+    count_not_targeted:8388608,67108864
+    count_unreadable_funding:8388608
+    count_instruction_fixtures:-
+    count_issuance_marker:-
+    count_issuance_not_targeted:8388608,67108864
+    count_range_transfer:8388608,67108864
+    count_multi_instruction:8388608,67108864
+    count_encrypted_key_shape:8388608
+    count_encrypted_key_two_inputs:-
+    count_first_counted_row:8388608,536870912
+    count_no_counted_row:8388608,536870912
+    count_last_good_answer:128,1073741824
+    count_other_family_never_counts:16777216
+    count_digidollar_marked:8388608,33554432
+    count_data_output:8388608,134217728
+    count_not_funding:8388608,268435456
+    count_carrier_answers:-
+    count_balances_carriers:8388608
+    count_vectors:33554432,67108864,134217728
+    model_sweep:1,2,4,8,16,32,64,128,256,512,1024,2048,4096,8192,16384,32768,65536,131072,262144,524288,1048576,2097152,4194304,8388608,16777216,536870912,1073741824
 )
 ARMS=(1:backend-rescues 2:conflicted-held 4:ownership-ignored 8:unbacked-counts 16:spent-counts 32:sums-wrap
       64:empty-rows-counted 128:no-ownership-empty 256:conflicted-spent 512:no-debounce 1024:txid-debounce
       2048:dead-prunes-confirmed 4096:prune-any-source 8192:scriptless-pruned 16384:stack-unbounded
       32768:stack-any-output 65536:bad-entry-skipped 131072:settled-rewritten 262144:outgoing-persisted
-      524288:asked-every-time 1048576:wire-trailing 2097152:gate-ignores-scan 4194304:quantity-lowered)
+      524288:asked-every-time 1048576:wire-trailing 2097152:gate-ignores-scan 4194304:quantity-lowered
+      8388608:carrier-ignored 16777216:other-family-held 33554432:digidollar-credited 67108864:untargeted-credited
+      134217728:data-output-credited 268435456:any-funding 536870912:first-row-any 1073741824:last-good-dropped)
 
 # ---- the seam is real ----------------------------------------------------------------------
 if [ ! -f "$HEADER" ]; then
@@ -150,7 +189,7 @@ for fn in BRAssetIdIsUnresolved BRAssetTxIsOutgoingUnconfirmed BRAssetRowSpentDe
           BRAssetRowCounts BRAssetHeldBalances BRAssetReconcileRows BRAssetClearDeadSend BRAssetPruneRemovedNativeRows \
           BRAssetPruneDeadBroadcastRows BRAssetSettledRowOf BRAssetPersistDetectedOutput BRAssetIndexerAskDecide \
           BRAssetStackAnswerRead BRAssetStackNotFoundRead BRAssetStackAnswerAccept BRAssetRowWireLength BRAssetRowEncode \
-          BRAssetRowDecode; do
+          BRAssetRowDecode BRAssetRowCarrierOf BRAssetFirstCountedRow BRAssetHeldBalancesShow; do
     if ! grep -Eq "static inline [a-zA-Z0-9_ ]+ \*?$fn\(" <<<"$HDR"; then
         echo "GATE FAILURE: $HEADER does not define $fn."; exit 1
     fi
@@ -171,6 +210,24 @@ done
 
 FAIL=0
 
+# The core units the KAT links (the transaction parser for the fixtures, the one carrier rule, the DigiDollar
+# marking and the units they call), compiled once per flag set; they do not read the seam.
+shopt -s nullglob; SHA3=("$CORE_DIR"/crypto/sha3/*.c); shopt -u nullglob
+UNITS=("$CORE_DIR"/BRWallet.c "$CORE_DIR"/BRTransaction.c "$CORE_DIR"/BRDigiDollar.c
+       "$CORE_DIR"/BRDigiAsset.c "$CORE_DIR"/BRKey.c "$CORE_DIR"/BRNetwork.c "$CORE_DIR"/BRAddress.c
+       "$CORE_DIR"/BRSet.c "$CORE_DIR"/BRBase58.c "$CORE_DIR"/BRBech32.c "$CORE_DIR"/BRCrypto.c
+       "$CORE_DIR"/BRBIP32Sequence.c "$CORE_DIR"/BRBIP39Mnemonic.c "$CORE_DIR"/crypto/groestl.c
+       "$CORE_DIR"/crypto/skein.c "$CORE_DIR"/crypto/qubit.c "$CORE_DIR"/crypto/odocrypt.c "${SHA3[@]}")
+objs() {   # <dir> <extra flags...>: compile UNITS into <dir>, print nothing; fails on a build error
+    local dir="$1"; shift
+    mkdir -p "$dir"
+    local u
+    for u in "${UNITS[@]}"; do
+        "$CC" -w -std=c99 -include stdint.h "$@" -I "$CORE_DIR" -I "$CORE_DIR/secp256k1/include" \
+            -c "$u" -o "$dir/$(basename "$(dirname "$u")")_$(basename "${u%.c}").o" || return 1
+    done
+}
+
 # ---- PORTABILITY GATE ----------------------------------------------------------------------
 strip_comments() {   # a C file with // and /* */ comments removed
     sed -e 's@//.*$@@' "$1" | awk 'BEGIN{c=0} { line=$0; out="";
@@ -181,9 +238,9 @@ strip_comments() {   # a C file with // and /* */ comments removed
         print out }'
 }
 IO_RE='(^|[^A-Za-z0-9_])(time|clock|clock_gettime|gettimeofday|fopen|fread|fwrite|printf|fprintf|open|read|write|socket|malloc|calloc|realloc|free)[[:space:]]*\('
-WANT_INCLUDES="\"BRAssetAllocate.h\" \"BRSyncFrontier.h\" <stddef.h> <stdint.h> <string.h> "
+WANT_INCLUDES="\"BRAssetAllocate.h\" \"BRAssetDecode.h\" \"BRAssetQuantity.h\" \"BRDigiAsset.h\" \"BRDigiDollar.h\" \"BRSyncFrontier.h\" \"BRTransaction.h\" <stddef.h> <stdint.h> <string.h> "
 CODE="$(strip_comments "$HEADER")"
-includes="$(grep -E '^[[:space:]]*#[[:space:]]*include' <<<"$CODE" | sed -E 's/.*include[[:space:]]*//; s/[[:space:]]+$//' | sort -u | tr '\n' ' ')"
+includes="$(grep -E '^[[:space:]]*#[[:space:]]*include' <<<"$CODE" | sed -E 's/.*include[[:space:]]*//; s/[[:space:]]+$//' | LC_ALL=C sort -u | tr '\n' ' ')"
 if [ "$includes" != "$WANT_INCLUDES" ]; then
     echo "PORTABILITY GATE FAILED: BRAssetHoldings.h includes $includes(want $WANT_INCLUDES)"; FAIL=1
 fi
@@ -201,6 +258,7 @@ int strict_tu1(void)
     BRAssetRow r;
     BRAssetHeldBalance b[1];
     BRAssetRowChange ch[1];
+    BRAssetRowCarrier c = BR_ASSET_ROW_CARRIER_CREDITS;
     int st = BR_ASSET_STATE_HELD;
     size_t n = 0, pruned = 9;
 
@@ -213,7 +271,9 @@ int strict_tu1(void)
     r.assetQuantity = 4;
     r.spent = 1;
     r.credit = BR_ASSET_CREDIT_VERIFIED;
-    return BRAssetHeldBalances(&r, 1, &st, owned, 1, b, 1, &n) == BR_ASSET_HOLDINGS_OK && n == 0 &&
+    return BRAssetHeldBalances(&r, 1, &st, &c, owned, 1, b, 1, &n) == BR_ASSET_HOLDINGS_OK && n == 0 &&
+           BRAssetRowCarrierOf(&r, NULL) == BR_ASSET_ROW_CARRIER_UNREADABLE &&
+           BRAssetFirstCountedRow(&r, 1, "La1", &st, &c, owned, 1) == 1 &&
            BRAssetReconcileRows(&r, 1, owned, 1, 1, &st, ch, &pruned) == BR_ASSET_HOLDINGS_OK && pruned == 0 &&
            ch[0] == BR_ASSET_ROW_MARK_UNSPENT;
 }
@@ -263,24 +323,29 @@ int main(void)
          BRAssetRowEncode(&p.row, buf, sizeof(buf), &n) == BR_ASSET_HOLDINGS_OK && BRAssetRowDecode(buf, n, &d) == BR_ASSET_HOLDINGS_OK &&
          strcmp(d.assetId, "unresolved:t") == 0 && BRAssetIndexerAskDecide(&d, 1, 0, BR_ASSET_RECEIPT_RECHECK_MS) == BR_ASSET_ASK_NOW &&
          BRAssetTxIsOutgoingUnconfirmed(1, BR_ASSET_TX_UNCONFIRMED) && BRAssetStackNotFoundRead(1, 1) == BR_ASSET_STACK_NOT_UNSPENT &&
-         BR_ASSET_STATE_UNDETECTED == -1 && BR_ASSET_ABSENCE_PASSES == 2;
+         BR_ASSET_STATE_UNDETECTED == -1 && BR_ASSET_STATE_OTHER_FAMILY == -3 && BR_ASSET_ABSENCE_PASSES == 2 &&
+         BRAssetHeldBalancesShow(BR_ASSET_HOLDINGS_NO_OWNERSHIP, 1) == BR_ASSET_SHOW_LAST_GOOD;
     return (ok && strict_tu1()) ? 0 : 1;
 }
 EOF
 strict_ok=1
-for std in c99 c11 c17; do
-    if ! "$CC" -std=$std -Wall -Wextra -Wpedantic -Werror -Wno-missing-braces -Wno-#pragma-messages -I "$CORE_DIR" \
-            "$BUILD_DIR/strict1.c" "$BUILD_DIR/strict2.c" -o "$BUILD_DIR/strict_$std" ||
-       ! "$BUILD_DIR/strict_$std"; then
-        echo "PORTABILITY GATE FAILED: -std=$std -Wall -Wextra -Wpedantic -Werror (two TUs)"; FAIL=1; strict_ok=0
-    fi
-done
+if ! objs "$BUILD_DIR/strict_objs" -O0; then
+    echo "PORTABILITY GATE FAILED: the core units did not compile"; FAIL=1; strict_ok=0
+else
+    for std in c99 c11 c17; do
+        if ! "$CC" -std=$std -Wall -Wextra -Wpedantic -Werror -Wno-missing-braces -Wno-#pragma-messages -I "$CORE_DIR" -I "$CORE_DIR/secp256k1/include" \
+                "$BUILD_DIR/strict1.c" "$BUILD_DIR/strict2.c" "$BUILD_DIR"/strict_objs/*.o -lm -lpthread -o "$BUILD_DIR/strict_$std" ||
+           ! "$BUILD_DIR/strict_$std"; then
+            echo "PORTABILITY GATE FAILED: -std=$std -Wall -Wextra -Wpedantic -Werror (two TUs)"; FAIL=1; strict_ok=0
+        fi
+    done
+fi
 ios_note="no Xcode SDK here, iOS cross-compile skipped"
 if command -v xcrun >/dev/null 2>&1 && xcrun --sdk iphoneos --show-sdk-path >/dev/null 2>&1; then
     ios_note="iphoneos + iphonesimulator"
     for sdk in iphoneos iphonesimulator; do
         if ! xcrun --sdk $sdk clang -arch arm64 -std=c11 -Wall -Wextra -Wpedantic -Werror -Wno-missing-braces -Wno-#pragma-messages -I "$CORE_DIR" \
-                -c "$BUILD_DIR/strict2.c" -o "$BUILD_DIR/ios_$sdk.o"; then
+                -I "$CORE_DIR/secp256k1/include" -c "$BUILD_DIR/strict2.c" -o "$BUILD_DIR/ios_$sdk.o"; then
             echo "PORTABILITY GATE FAILED: $sdk arm64"; FAIL=1; strict_ok=0
         fi
     done
@@ -304,10 +369,12 @@ let result: (BRAssetHoldingsStatus, Int, Int64) = own.withUnsafeBufferPointer { 
             r.credit = BR_ASSET_CREDIT_VERIFIED
             r.source = BR_ASSET_SOURCE_NATIVE
             var states: [Int32] = [Int32(BR_ASSET_STATE_HELD)]
+            var carriers: [BRAssetRowCarrier] = [BRAssetRowCarrierOf(&r, nil)]
             var out = [BRAssetHeldBalance](repeating: BRAssetHeldBalance(), count: 2)
             var count = 0
-            let st = BRAssetHeldBalances(&r, 1, &states, &owned, 1, &out, out.count, &count)
-            return (st, count, out[0].quantity)
+            let st = BRAssetHeldBalances(&r, 1, &states, &carriers, &owned, 1, &out, out.count, &count)
+            let first: Int = BRAssetFirstCountedRow(&r, 1, "La1", &states, &carriers, &owned, 1)
+            return (st, count + first, out[0].quantity)
         }
     }
 }
@@ -338,24 +405,45 @@ let decodeStatus: BRAssetHoldingsStatus = BRAssetRowDecode(&wire, wire.count, &d
 let absence = BRAssetAbsence()
 let txidBytes = absence.txid
 let persist: BRAssetPersistAction = BRAssetPersistDetectedOutput(nil, nil).action
+let show: BRAssetHeldShow = BRAssetHeldBalancesShow(BR_ASSET_HOLDINGS_OK, 0)
+let carrierNames: (BRAssetRowCarrier, BRAssetRowCarrier) = (BR_ASSET_ROW_CARRIER_CREDITS, BR_ASSET_ROW_CARRIER_NOT_FUNDING)
 let limits: (Int32, Int64, Int64, Int32, Int32, Int32, String) = (BR_ASSET_ABSENCE_PASSES, BR_ASSET_RECEIPT_RECHECK_MS,
     BR_ASSET_TX_UNCONFIRMED, BR_ASSET_ROW_WIRE_FIXED, BR_ASSET_STATE_PROBE_ERROR, BR_ASSET_STATE_CONFLICTED, BR_ASSET_UNRESOLVED_PREFIX)
 print(result, tableCount, decided, spent, gate, verdict == BR_ASSET_ACCEPT_SETTLED, ask == BR_ASSET_ASK_NO, lookup, readStatus,
       decodeStatus, txidBytes.0, persist, limits, BRAssetIdIsUnresolved("unresolved:x"), BR_ASSET_HOLDINGS_CAPACITY,
-      BR_ASSET_ROW_MARK_SPENT, BR_ASSET_SOURCE_BACKEND, BR_ASSET_TX_LOOKUP_FAILED, BR_ASSET_ABSENCE_DEAD, BR_CF_BEHIND_THRESHOLD)
+      BR_ASSET_ROW_MARK_SPENT, BR_ASSET_SOURCE_BACKEND, BR_ASSET_TX_LOOKUP_FAILED, BR_ASSET_ABSENCE_DEAD, BR_CF_BEHIND_THRESHOLD,
+      show == BR_ASSET_SHOW_COMPUTED, carrierNames.0 == BR_ASSET_ROW_CARRIER_CREDITS, BR_ASSET_STATE_OTHER_FAMILY)
 EOF
     # The headers alone, without the core's module.modulemap (Swift would read it as the BRCore module, and it
     # names headers this core no longer has): the way an app's bridging header sees them.
-    mkdir -p "$BUILD_DIR/swift_inc"
+    mkdir -p "$BUILD_DIR/swift_inc/crypto" "$BUILD_DIR/swift_inc/secp256k1/include"
     cp "$CORE_DIR"/*.h "$BUILD_DIR/swift_inc/"
+    cp "$CORE_DIR"/crypto/*.h "$BUILD_DIR/swift_inc/crypto/"
+    cp "$CORE_DIR"/secp256k1/include/*.h "$BUILD_DIR/swift_inc/secp256k1/include/" 2>/dev/null
     if swiftc -typecheck -import-objc-header "$BUILD_DIR/bridging.h" -Xcc -I"$BUILD_DIR/swift_inc" \
-            "$BUILD_DIR/use.swift" >"$BUILD_DIR/swift.out" 2>&1; then
+            -Xcc -I"$BUILD_DIR/swift_inc/secp256k1/include" "$BUILD_DIR/use.swift" >"$BUILD_DIR/swift.out" 2>&1; then
         swift_note="Swift imports it"
     else
         echo "PORTABILITY GATE FAILED: swiftc could not import the header"; sed -n '1,12p' "$BUILD_DIR/swift.out" | sed 's/^/      /'
         FAIL=1; strict_ok=0
     fi
 fi
+# ---- VECTORS GATE --------------------------------------------------------------------------
+if [ ! -f "$VEC_DIR/generate.c" ] || [ ! -f "$VEC_DIR/vectors.txt" ]; then
+    echo "VECTORS GATE FAILED: $VEC_DIR/generate.c or vectors.txt is missing"; FAIL=1
+elif ! compgen -G "$BUILD_DIR/strict_objs/*.o" >/dev/null || ! "$CC" -w -std=c99 -include stdint.h -I "$CORE_DIR" -I "$CORE_DIR/secp256k1/include" "$VEC_DIR/generate.c" \
+        "$BUILD_DIR"/strict_objs/*.o -lm -lpthread -o "$BUILD_DIR/gen"; then
+    echo "VECTORS GATE FAILED: generate.c did not compile (a build error is not evidence)"; FAIL=1
+elif ! "$BUILD_DIR/gen" "$CORE_DIR/vectors/da-carrier/vectors.txt" > "$BUILD_DIR/vectors.txt"; then
+    echo "VECTORS GATE FAILED: generate.c did not write its vectors (it exits 1 when a check fails)"; FAIL=1
+elif ! cmp -s "$BUILD_DIR/vectors.txt" "$VEC_DIR/vectors.txt"; then
+    echo "VECTORS GATE FAILED: vectors.txt is not what generate.c writes from this header; regenerate it"
+    diff "$VEC_DIR/vectors.txt" "$BUILD_DIR/vectors.txt" > "$BUILD_DIR/vec.diff"; sed -n '1,8p' "$BUILD_DIR/vec.diff" | cut -c1-200 | sed 's/^/      /'
+    FAIL=1
+else
+    echo "vectors gate: vectors/asset-count-carrier/vectors.txt is current ($(grep -c '^count ' "$VEC_DIR/vectors.txt") transactions)"
+fi
+
 [ $strict_ok -eq 1 ] && echo "portability gate: libc + the core headers it uses, no clock/I/O/allocation; clean at c99/c11/c17 ($ios_note; $swift_note)"
 
 # ---- the arms ------------------------------------------------------------------------------
@@ -369,6 +457,7 @@ int asset_holdings_kat_tu2(void)
     BRAssetScript owned[1] = { { own, 3 } };
     BRAssetRow r;
     BRAssetHeldBalance b[1];
+    BRAssetRowCarrier c = BR_ASSET_ROW_CARRIER_CREDITS;
     int st = BR_ASSET_STATE_HELD;
     size_t n = 0;
 
@@ -380,15 +469,19 @@ int asset_holdings_kat_tu2(void)
     r.assetId = "La1";
     r.assetQuantity = 4;
     r.credit = BR_ASSET_CREDIT_VERIFIED;
-    return BRAssetHeldBalances(&r, 1, &st, owned, 1, b, 1, &n) == BR_ASSET_HOLDINGS_OK && n == 1 && b[0].quantity == 4 &&
-           b[0].utxoCount == 1;
+    return BRAssetHeldBalances(&r, 1, &st, &c, owned, 1, b, 1, &n) == BR_ASSET_HOLDINGS_OK && n == 1 && b[0].quantity == 4 &&
+           b[0].utxoCount == 1 && BRAssetRowCarrierOf(&r, NULL) == BR_ASSET_ROW_CARRIER_UNREADABLE &&
+           BRAssetFirstCountedRow(&r, 1, "La1", &st, &c, owned, 1) == 0;
 }
 EOF
 
 SAN=(-g -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer)
+objs "$BUILD_DIR/san_objs" "${SAN[@]}" || { echo "GATE FAILURE: the core units did not compile under the sanitizers."; exit 1; }
+"$CC" -w -std=c99 -include stdint.h "${SAN[@]}" -I "$CORE_DIR" -I "$CORE_DIR/secp256k1/include" -c "$BUILD_DIR/tu2.c" \
+    -o "$BUILD_DIR/san_objs/zz_tu2.o" || { echo "GATE FAILURE: the second translation unit did not compile."; exit 1; }
 build() {   # <out> <ASSET_HOLDINGS_UNFIXED bits>
-    "$CC" -w -std=c99 -include stdint.h "${SAN[@]}" -DASSET_HOLDINGS_UNFIXED="$2" -I "$CORE_DIR" \
-        "$SCRIPT_DIR/asset_holdings_kat_main.c" "$BUILD_DIR/tu2.c" -o "$1"
+    "$CC" -w -std=c99 -include stdint.h "${SAN[@]}" -DASSET_HOLDINGS_UNFIXED="$2" -I "$CORE_DIR" -I "$CORE_DIR/secp256k1/include" \
+        "$SCRIPT_DIR/asset_holdings_kat_main.c" "$BUILD_DIR"/san_objs/*.o -lm -lpthread -o "$1"
 }
 
 for arm in "${ARMS[@]}"; do
@@ -456,6 +549,6 @@ if ! grep -q "detect_leaks is not supported" <<<"$leak_probe"; then
 fi
 echo "leak check: $leak_note"
 
-[ $FAIL -eq 0 ] && echo "PASS: asset_holdings_kat (${#CASES[@]} cases: ${#ARMS[@]} comparison arms each failing exactly its cases, shipped arm clean under ASan + UBSan; leak check $leak_note; portability)"
+[ $FAIL -eq 0 ] && echo "PASS: asset_holdings_kat (${#CASES[@]} cases: ${#ARMS[@]} comparison arms each failing exactly its cases, shipped arm clean under ASan + UBSan; vectors current; leak check $leak_note; portability)"
 [ $FAIL -ne 0 ] && echo "FAIL: asset_holdings_kat"
 exit $FAIL
