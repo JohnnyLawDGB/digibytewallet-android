@@ -127,7 +127,7 @@ jint JNICALL NativeBridge_publishAwaitTimeoutMs(JNIEnv *env, jobject thiz);  /* 
 jint JNICALL NativeBridge_publishErrnoValue(JNIEnv *env, jobject thiz, jint index);  /* jni_publish_outcome.c */
 jint JNICALL NativeBridge_publishOutcomeOf(JNIEnv *env, jobject thiz, jint error);  /* jni_publish_outcome.c */
 jstring JNICALL NativeBridge_publishTransaction(JNIEnv *env, jobject thiz, jbyteArray signedTx);  /* jni_transaction.c */
-jstring JNICALL NativeBridge_publishTransactionStem(JNIEnv *env, jobject thiz, jbyteArray signedTx);  /* jni_transaction.c */
+jstring JNICALL NativeBridge_publishTransactionStem(JNIEnv *env, jobject thiz, jbyteArray signedTx, jintArray stemmedOut);  /* jni_transaction.c */
 jlongArray JNICALL NativeBridge_quoteTransaction(JNIEnv *env, jobject thiz, jbyteArray unsignedTx);  /* jni_transaction.c */
 jstring JNICALL NativeBridge_rawTransactionId(JNIEnv *env, jobject thiz, jbyteArray rawTx);  /* jni_asset_send.c */
 jboolean JNICALL NativeBridge_reanchorCompactFilterChainAtFloor(JNIEnv *env, jobject thiz);  /* jni_peer.c */
@@ -153,7 +153,7 @@ jboolean JNICALL NativeBridge_restoreCfScanLedger(JNIEnv *env, jobject thiz, jby
 jboolean JNICALL NativeBridge_restoreWalletFromBytes(JNIEnv *env, jobject thiz, jbyteArray phraseBytes, jlong creationTimestamp, jbyteArray passphrase);  /* jni_wallet.c */
 jlong JNICALL NativeBridge_seederServicesParse(JNIEnv *env, jobject thiz, jstring servicesHex);  /* jni_seeder_peers.c */
 jboolean JNICALL NativeBridge_seederShouldRefresh(JNIEnv *env, jobject thiz, jlong lastFetchMs, jlong nowMs, jint cachedCount);  /* jni_seeder_peers.c */
-jstring JNICALL NativeBridge_sendApprovedDigiDollar(JNIEnv *env, jobject thiz, jstring tdAddress, jlong cents, jlong approvedFeeSats);  /* jni_transaction.c */
+jstring JNICALL NativeBridge_sendApprovedDigiDollar(JNIEnv *env, jobject thiz, jstring tdAddress, jlong cents, jlong approvedFeeSats, jboolean stem, jintArray stemmedOut);  /* jni_transaction.c */
 jbyteArray JNICALL NativeBridge_serializePeerPenalties(JNIEnv *env, jobject thiz);  /* jni_peer.c */
 void JNICALL NativeBridge_setCallbackHandler(JNIEnv *env, jobject thiz, jobject handler);  /* jni_peer.c */
 jboolean JNICALL NativeBridge_setCompactFilterChain(JNIEnv *env, jobject thiz, jbyteArray data);  /* jni_peer.c */
@@ -304,7 +304,7 @@ jboolean JNICALL NativeBridge_walletContainsAddress(JNIEnv *env, jobject thiz, j
     { "publishErrnoValue", "(I)I", (void *) NativeBridge_publishErrnoValue }, \
     { "publishOutcomeOf", "(I)I", (void *) NativeBridge_publishOutcomeOf }, \
     { "publishTransaction", "([B)Ljava/lang/String;", (void *) NativeBridge_publishTransaction }, \
-    { "publishTransactionStem", "([B)Ljava/lang/String;", (void *) NativeBridge_publishTransactionStem }, \
+    { "publishTransactionStem", "([B[I)Ljava/lang/String;", (void *) NativeBridge_publishTransactionStem }, \
     { "quoteTransaction", "([B)[J", (void *) NativeBridge_quoteTransaction }, \
     { "rawTransactionId", "([B)Ljava/lang/String;", (void *) NativeBridge_rawTransactionId }, \
     { "reanchorCompactFilterChainAtFloor", "()Z", (void *) NativeBridge_reanchorCompactFilterChainAtFloor }, \
@@ -330,7 +330,7 @@ jboolean JNICALL NativeBridge_walletContainsAddress(JNIEnv *env, jobject thiz, j
     { "restoreWalletFromBytes", "([BJ[B)Z", (void *) NativeBridge_restoreWalletFromBytes }, \
     { "seederServicesParse", "(Ljava/lang/String;)J", (void *) NativeBridge_seederServicesParse }, \
     { "seederShouldRefresh", "(JJI)Z", (void *) NativeBridge_seederShouldRefresh }, \
-    { "sendApprovedDigiDollar", "(Ljava/lang/String;JJ)Ljava/lang/String;", (void *) NativeBridge_sendApprovedDigiDollar }, \
+    { "sendApprovedDigiDollar", "(Ljava/lang/String;JJZ[I)Ljava/lang/String;", (void *) NativeBridge_sendApprovedDigiDollar }, \
     { "serializePeerPenalties", "()[B", (void *) NativeBridge_serializePeerPenalties }, \
     { "setCallbackHandler", "(" DGB_JNI_NATIVECALLBACK_SIG ")V", (void *) NativeBridge_setCallbackHandler }, \
     { "setCompactFilterChain", "([B)Z", (void *) NativeBridge_setCompactFilterChain }, \
