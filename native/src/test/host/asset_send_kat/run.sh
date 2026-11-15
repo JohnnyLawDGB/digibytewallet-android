@@ -9,7 +9,9 @@
 #            every scenario passes under AddressSanitizer and UndefinedBehaviorSanitizer (64-bit). Where both sign,
 #            the bytes are the same; every core refusal is the status its scenario names.
 #   RED      one arm per check (BR_ASSET_TRANSFER_UNFIXED=<bit>, on the core's unit only). Each must fail exactly
-#            its scenarios and pass every other one, with no sanitizer report.
+#            its scenarios and pass every other one, with no sanitizer report. 15b's refusal of a fee at or below 0
+#            (524288) is one that checks 13 and 14 make first, so it is run with each (64+524288, 128+524288): each
+#            pair fails its partner's scenarios and that fee's fee_sign_* scenario, which the partner alone passes.
 #   MUTANTS  every `if (` of BRAssetSend.c the shipped arm compiles, one at a time, made never to fire (its condition
 #            C becomes `0 && (C)`): the green arm must fail on each, except the lines listed in SURVIVORS with the
 #            reason the KAT cannot see them.
@@ -208,16 +210,19 @@ else
     echo "GATE FAILURE: the green arm (rc=$RC)"; grep -E "FAIL|$SAN_RE" <<<"$OUT" | head -30; FAIL=1
 fi
 
-# red <bit> <name> <space-separated scenarios that must fail>
+# red <bit>[+<bit>...] <name> <space-separated scenarios that must fail>
 red() {
     [ "$ARMS" = "0" ] && return
-    local bit="$1" name="$2" want
+    local bits="$1" name="$2" want b bit=0
     want="$(tr ' ' '\n' <<<"$3" | sed '/^$/d' | sort)"
     for s in $want; do
-        case " $KNOWN " in *" $s "*) ;; *) echo "GATE FAILURE: arm $bit lists $s, which the binary does not run"; FAIL=1 ;; esac
+        case " $KNOWN " in *" $s "*) ;; *) echo "GATE FAILURE: arm $bits lists $s, which the binary does not run"; FAIL=1 ;; esac
     done
-    grep -Eq "^#define BR_ASSET_TRANSFER_RED_[A-Z_]+[[:space:]]+$bit[[:space:]]*$" <<<"$SRC" ||
-        { echo "GATE FAILURE: BRAssetSend.c defines no seam of value $bit; arm $name would be the shipped code"; FAIL=1; return; }
+    for b in ${bits//+/ }; do
+        grep -Eq "^#define BR_ASSET_TRANSFER_RED_[A-Z_]+[[:space:]]+$b[[:space:]]*$" <<<"$SRC" ||
+            { echo "GATE FAILURE: BRAssetSend.c defines no seam of value $b; arm $name would be the shipped code"; FAIL=1; return; }
+        bit=$((bit + b))
+    done
     build "$BUILD_DIR/red_$bit" "$CORE_DIR/BRAssetSend.c" "-DBR_ASSET_TRANSFER_UNFIXED=$bit" ||
         { echo "GATE FAILURE: the $name arm did not build"; FAIL=1; return; }
     run_arm "$BUILD_DIR/red_$bit" "${KAT_FUZZ_RED:-100}"
@@ -228,7 +233,7 @@ red() {
     elif [ "$RC" -ne 1 ] || [ "$failed" != "$want" ]; then
         echo "GATE FAILURE: the $name arm (=$bit, rc=$RC) failed [$(echo $failed)], required exactly [$(echo $want)]"; FAIL=1
     else
-        echo "  [red $bit $name] failed exactly: $(echo $failed)"
+        echo "  [red $bits $name] failed exactly: $(echo $failed)"
     fi
 }
 
@@ -251,6 +256,8 @@ red 32768 duplicate      "duplicate_input"
 red 65536 rules          "rule_state fuzz"
 red 131072 one-family    "one_family_input"
 red 262144 sign-gate     "no_memory sign_failed sign_gate_input"
+red 64+524288  fee+sign-fee       "fee_mismatch fee_sign_plan fuzz"
+red 128+524288 approval+sign-fee  "binding_fee_approval fee_sign_approval keys_wiped fuzz"
 
 # ---- MUTANTS -----------------------------------------------------------------------------------------------------
 # Each `if (` of BRAssetSend.c in turn is made never to fire: its whole condition C becomes `0 && (C)`. A line the
@@ -264,6 +271,7 @@ SURVIVORS=(
     "if (h->operation != DA_TRANSFER || h->version != 3 || BRAssetHeaderHasRules(h)) return 0;@@in the shipped arm check 12's byte comparison refuses every such carrier too (the plan's encoding is a version-3 transfer); this is the refusal where the bytes are not compared (arm 16 passes carrier_not_transfer because of it)"
     "if (! BRAssetPayloadReadsExactly(plan->opReturnScript, plan->opReturnLen, h, insts, count)) return 0;@@in the shipped arm equal bytes read as the same list; the reading decides where the bytes are not compared (arm 16)"
     "if (! BRSpendGuardInputsUnspent(wallet, tx)) { r = BR_ASSET_TRANSFER_INPUT_SPENT; goto out; }@@it closes a race (a send registered after check 15); single-threaded, check 15 refuses the same coins first"
+    "if (plan->paidFeeSats <= 0 || approvedFeeSats <= 0) { r = BR_ASSET_TRANSFER_NOT_APPROVED; goto out; }@@in the shipped arm checks 13 and 14 refuse every such fee first; arms 64+524288 and 128+524288 show it refuses one on its own (fee_sign_plan, fee_sign_approval)"
 )
 mutate() {   # <line> <in> <out>: the `if (` condition on <line> wrapped as `0 && (...)`
     python3 - "$1" "$2" "$3" <<'PY'
@@ -334,7 +342,7 @@ fi
 echo "  [leaks] $leak_note"
 
 if [ "$FAIL" -eq 0 ]; then
-    arms_note="nineteen comparison arms red on exactly theirs"
+    arms_note="nineteen comparison arms and the fee refusal's two pairs red on exactly theirs"
     [ "$ARMS" = "0" ] && arms_note="comparison arms skipped (KAT_ARMS=0)"
     echo "PASS: asset_send_kat (bridge and core sign the same bytes wherever both sign; $arms_note; $mutant_note; ASan+UBSan; portability; leaks: $leak_note)"
     exit 0

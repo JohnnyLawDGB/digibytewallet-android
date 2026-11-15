@@ -28,6 +28,9 @@
 //   sign_gate_input  an asset row naming an unconfirmed coin someone else sent: NOT_APPROVED with
 //                    BR_ASSET_SIGN_COIN_NOT_WALLETS (15b), and the bridge refuses it too (asset_sign_check);
 //                    once confirmed it is a coin selection would spend, and both sign the same bytes.
+//   fee_sign_*       a plan fee of 0 (the transaction pays none) and an approval of 0 or below: refused by check 13
+//                    or 14, or, where that check is not made (arms 64, 128), by 15b before the gate is asked
+//                    (NOT_APPROVED, sign verdict OK); never signed. The bridge refuses the plan of no fee too.
 //   shape_*, bounds_*, duplicate_input, carrier_*, fee_mismatch, held_*, fee_coin_*, record_*, spent_*,
 //   gate_*, sign_failed, no_memory, not_planned, arguments: every check of BRAssetSend.h, each status.
 //   keys_wiped       checked after EVERY core call in every scenario too: no block the core's unit frees holds
@@ -492,8 +495,11 @@ static BRAssetTransferStatus coreSign(const Plan *p, const BRAssetSendOutcome *o
               (long long)r.paidFeeSats, (long long)o->plan.paidFeeSats);
         check(r.signVerdict == BR_ASSET_SIGN_OK, "SIGNED reports sign verdict %d", (int)r.signVerdict);
     } else {
-        // The sign gate's verdict is reported by its two statuses, and only by them.
-        if (s == BR_ASSET_TRANSFER_NOT_APPROVED || s == BR_ASSET_TRANSFER_SIGNED_NOT_APPROVED)
+        // The sign gate's verdict is reported by its two statuses, and only by them; 15b's refusal of a fee at or
+        // below 0 does not ask the gate.
+        if (s == BR_ASSET_TRANSFER_NOT_APPROVED && (o->plan.paidFeeSats <= 0 || approved <= 0))
+            check(r.signVerdict == BR_ASSET_SIGN_OK, "a fee at or below 0 reports sign verdict %d", (int)r.signVerdict);
+        else if (s == BR_ASSET_TRANSFER_NOT_APPROVED || s == BR_ASSET_TRANSFER_SIGNED_NOT_APPROVED)
             check(r.signVerdict != BR_ASSET_SIGN_OK, "%s reports no sign verdict", statusName(s));
         else check(r.signVerdict == BR_ASSET_SIGN_OK, "%s reports sign verdict %d", statusName(s), (int)r.signVerdict);
         check(tx == NULL, "refused (%s) and *txOut is not NULL", statusName(s));
@@ -1277,6 +1283,53 @@ static void fee_mismatch(void)
     cleanup();
 }
 
+// A fee at or below 0, refused: by `byCheck` (13 or 14) or, where that check is not made, by 15b before the gate
+// is asked, which then reports no verdict. Never signed. bridgeWant as sendBoth's.
+static void feeRefused(const char *what, const Plan *p, const BRAssetSendOutcome *o, int64_t approved,
+                       BRAssetTransferStatus byCheck, int bridgeWant)
+{
+    uint8_t bser[4096], cser[4096];
+    size_t blen = 0, clen = 0;
+    BRAssetTransferReport rep;
+    coin_reservation_clear(); BRCoinReservationClear();
+    int bridgeSigned = (bridgeWant == -2) ? 0 : bridgeSign(p, o, recip(), bser, &blen);
+    coin_reservation_clear();
+    BRAssetTransferStatus s = coreSign(p, o, kAsset, 100, recip(), approved, NULL, 0, cser, &clen, &rep);
+    check(s == byCheck || (s == BR_ASSET_TRANSFER_NOT_APPROVED && rep.signVerdict == BR_ASSET_SIGN_OK),
+          "%s: the core answered %s (sign verdict %d), want %s or NOT_APPROVED before the gate is asked", what,
+          statusName(s), (int)rep.signVerdict, statusName(byCheck));
+    if (bridgeWant == 0) check(! bridgeSigned, "%s: the bridge signed", what);
+    arena_free();
+}
+
+// 15b's own refusal of a plan fee of 0: the transaction pays exactly the plan's fee, 0, so BRAssetSignCheck,
+// handed it, would pass it; only check 13 (the estimate above 0, at most the fee) refuses it first.
+static void fee_sign_plan(void)
+{
+    Coin a[1], f[1];
+    Plan p;
+    basicPlan(&p, a, 1, f, 1, 100);
+    check(p.o.plan.outputCount == 4, "four outputs");
+    BRAssetSendOutcome o = p.o;
+    o.plan.outputs[2].sats += o.plan.paidFeeSats;   // the fee paid as change instead
+    o.plan.paidFeeSats = 0;
+    feeRefused("a plan, and a transaction, of no fee", &p, &o, NOLIMIT, BR_ASSET_TRANSFER_FEE_MISMATCH, 0);
+    cleanup();
+}
+
+// 15b's own refusal of an approval at or below 0: cast, -1 and INT64_MIN would read as approvals above any fee;
+// only check 14 refuses them first.
+static void fee_sign_approval(void)
+{
+    Coin a[1], f[1];
+    Plan p;
+    basicPlan(&p, a, 1, f, 1, 100);
+    feeRefused("an approval of -1", &p, &p.o, -1, BR_ASSET_TRANSFER_FEE_NOT_APPROVED, -2);
+    feeRefused("an approval of INT64_MIN", &p, &p.o, INT64_MIN, BR_ASSET_TRANSFER_FEE_NOT_APPROVED, -2);
+    feeRefused("an approval of 0", &p, &p.o, 0, BR_ASSET_TRANSFER_FEE_NOT_APPROVED, -2);
+    cleanup();
+}
+
 static void held_fee_coin(void)
 {
     Coin a[1], f[1];
@@ -1678,7 +1731,8 @@ static const Scenario kScenarios[] = {
     { "bounds_txid", bounds_txid }, { "bounds_amounts", bounds_amounts }, { "duplicate_input", duplicate_input },
     { "carrier_units", carrier_units }, { "carrier_list", carrier_list }, { "carrier_noncanonical", carrier_noncanonical },
     { "carrier_not_exact", carrier_not_exact }, { "carrier_not_transfer", carrier_not_transfer },
-    { "fee_mismatch", fee_mismatch }, { "held_fee_coin", held_fee_coin }, { "fee_coin_not_plain", fee_coin_not_plain },
+    { "fee_mismatch", fee_mismatch }, { "fee_sign_plan", fee_sign_plan }, { "fee_sign_approval", fee_sign_approval },
+    { "held_fee_coin", held_fee_coin }, { "fee_coin_not_plain", fee_coin_not_plain },
     { "one_family_input", one_family_input }, { "sign_gate_input", sign_gate_input },
     { "record_mismatch", record_mismatch }, { "spent_before_sign", spent_before_sign }, { "gate_claims", gate_claims },
     { "sign_failed", sign_failed }, { "no_memory", no_memory }, { "keys_wiped", keys_wiped }, { "fuzz", fuzz },

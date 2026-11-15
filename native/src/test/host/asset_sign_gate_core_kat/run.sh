@@ -5,8 +5,8 @@
 # one_family_gate.h, held by one_family_kat); the core headers must give the same verdicts in every arm, so the
 # bridge can include them in place of its copies.
 #
-# No cases of its own: it compiles asset_sign_gate_kat_main.c and one_family_kat_main.c, unchanged, against the
-# CORE headers, through shims written here (asset_sign_gate.h, one_family_gate.h) that name the core's functions by
+# Two sets of cases. First the bridge's: it compiles asset_sign_gate_kat_main.c and one_family_kat_main.c, unchanged,
+# against the CORE headers, through shims written here (asset_sign_gate.h, one_family_gate.h) that name the core's functions by
 # the bridge's names (asset_sign_check = BRAssetSignCheck, AssetSignVerdict = BRAssetSignVerdict, ASSET_SIGN_* =
 # BR_ASSET_SIGN_*, tx_inputs_one_family_ok = BRWalletTxInputsOneFamilyOK). The expectations are read from the two
 # suites' run.sh, so the copies are held to one set of cases:
@@ -18,6 +18,10 @@
 #                    RED_MUST_FAIL fails, and no check outside its letters; -DONE_FAMILY_SIGNER_UNFIXED alone (the
 #                    core header's seam, the wallet's rule shipped): exactly the "asset signer accepts" patterns of
 #                    that list fail, so the core gate refuses on its own; shipped: every check passes. ASan.
+# Then its own, asset_sign_gate_core_kat_main.c: BRAssetSignCheck and BRWalletTxInputsOneFamilyOK called directly, on
+# hand-built transactions and wallet state, for the guards no transaction the sign path builds reaches (see that
+# file's CASES): shipped, every check passes; -DASSET_SIGN_GATE_UNFIXED=1, exactly the named checks of B-K fail;
+# -DONE_FAMILY_SIGNER_UNFIXED, exactly those of M. ASan + UBSan, 64-bit, and 32-bit where a 32-bit link works.
 #
 # Gates first: the seams are tested the way the bridge copies test them (ASSET_SIGN_GATE_UNFIXED by VALUE with an
 # #ifndef default, ONE_FAMILY_SIGNER_UNFIXED by PRESENCE with no default); the shims' includes resolve to the core
@@ -26,7 +30,8 @@
 # has the same value under both names; and a SOURCE GATE over BRAssetSend.c's shipped arm (preprocessed): the
 # signer asks ONE-FAMILY and BRAssetSignCheck before its one BRWalletSignTransaction, and BRAssetSignCheck again
 # after BRSignedSpendGate, each handed the recipient's script, BR_ASSET_MARKER_SATS, the plan's fee and the
-# approved fee, and releases the claim when the second refuses.
+# approved fee, which it refuses at or below 0 before the first (the fees are cast to uint64_t there), and
+# releases the claim when the second refuses.
 #
 # CORE_DIR may be set to run against a core checkout other than the android submodule.
 # MACRO CONVENTION: VALUE of -DASSET_SIGN_GATE_UNFIXED (=1, =2 comparison, =0 shipped); PRESENCE of
@@ -40,6 +45,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../../../../.." && pwd)"
 CORE_DIR="${CORE_DIR:-$REPO_ROOT/native/src/main/jni/digibytewallet-core}"
 CORE_DIR="$(cd "$CORE_DIR" 2>/dev/null && pwd)" || { echo "GATE FAILURE: no core directory"; exit 1; }
 BRIDGE_DIR="$REPO_ROOT/native/src/main/jni/bridge"
+CASES_C="$SCRIPT_DIR/asset_sign_gate_core_kat_main.c"
 ASG_DIR="$SCRIPT_DIR/../asset_sign_gate_kat"
 OF_DIR="$SCRIPT_DIR/../one_family_kat"
 SIGN_H="$CORE_DIR/BRAssetSignGate.h"
@@ -54,7 +60,7 @@ LIMIT_S=300
 CC="${CC:-clang}"
 FAIL=0
 
-for f in "$ASG_DIR/run.sh" "$ASG_DIR/asset_sign_gate_kat_main.c" "$OF_DIR/run.sh" "$OF_DIR/one_family_kat_main.c" \
+for f in "$CASES_C" "$ASG_DIR/run.sh" "$ASG_DIR/asset_sign_gate_kat_main.c" "$OF_DIR/run.sh" "$OF_DIR/one_family_kat_main.c" \
          "$SIGN_H" "$FAMILY_H" "$SEND_C" "$BRIDGE_DIR/asset_sign_gate.h" "$BRIDGE_DIR/one_family_gate.h"; do
     [ -f "$f" ] || { echo "GATE FAILURE: $f not found (core pin too old? set CORE_DIR)"; exit 1; }
 done
@@ -220,6 +226,12 @@ if "$CC" -w -include stdint.h -E -P -I "$CORE_DIR" -I "$CORE_DIR/secp256k1/inclu
         fi
         n_bound="$(grep -oE 'BRAssetSignCheck[[:space:]]*\([[:space:]]*wallet[[:space:]]*,[[:space:]]*tx[[:space:]]*,[[:space:]]*recipientScript[[:space:]]*,[[:space:]]*recipientLen[[:space:]]*,[[:space:]]*(BR_ASSET_MARKER_SATS|6000)[[:space:]]*,[[:space:]]*\(uint64_t\)[[:space:]]*plan->paidFeeSats[[:space:]]*,[[:space:]]*\(uint64_t\)[[:space:]]*approvedFeeSats[[:space:]]*\)' <<<"$BODY" | wc -l | tr -d ' ')"
         [ "$n_bound" -eq 2 ] || say "each BRAssetSignCheck must be handed the recipient's script, the marker, the plan's fee and the approved fee (found $n_bound)"
+        FEES=($(offsets 'if[[:space:]]*\([[:space:]]*plan->paidFeeSats[[:space:]]*<=[[:space:]]*0[[:space:]]*\|\|[[:space:]]*approvedFeeSats[[:space:]]*<=[[:space:]]*0[[:space:]]*\)[[:space:]]*\{[[:space:]]*r[[:space:]]*=[[:space:]]*BR_ASSET_TRANSFER_NOT_APPROVED' "$BODY"))
+        if [ "${#FEES[@]}" -ne 1 ]; then
+            say "the plan's fee and the approved fee must be refused at or below 0 (NOT_APPROVED) exactly once (found ${#FEES[@]})"
+        elif [ "${#CHECKS[@]}" -ge 1 ] && [ "${FEES[0]}" -gt "${CHECKS[0]}" ]; then
+            say "the fees are refused at or below 0 only after the first BRAssetSignCheck casts them"
+        fi
         n_refuse="$(grep -oE 'if[[:space:]]*\([[:space:]]*rep\.signVerdict[[:space:]]*!=[[:space:]]*BR_ASSET_SIGN_OK[[:space:]]*\)' <<<"$BODY" | wc -l | tr -d ' ')"
         [ "$n_refuse" -eq 2 ] || say "each BRAssetSignCheck must refuse on a verdict other than BR_ASSET_SIGN_OK (found $n_refuse)"
     fi
@@ -227,7 +239,7 @@ else
     say "BRAssetSend.c does not preprocess"
 fi
 if [ "$src_fail" -eq 0 ]; then
-    echo "source gate: BRWalletBuildAssetTransfer asks ONE-FAMILY and the sign gate before its one signature, and the sign gate again after its claim"
+    echo "source gate: BRWalletBuildAssetTransfer refuses a fee at or below 0, asks ONE-FAMILY and the sign gate before its one signature, and the sign gate again after its claim"
 else
     echo "SOURCE GATE FAILED"; FAIL=1
 fi
@@ -285,6 +297,24 @@ green_arm() {   # <tag> <binary> <pass line>
 }
 
 ASG_PASS="^PASS: asset_sign_gate_kat"
+CASES_PASS="^PASS: asset_sign_gate_core_kat cases"
+CASES_RED1_MUST_FAIL=(
+    "^FAIL: B: an input past its transaction's last output is not refused"
+    "^FAIL: C: an input with no script is not refused"
+    "^FAIL: D: outputs whose sum passes 2^64 is not refused"
+    "^FAIL: E: inputs whose sum passes 2^64 is not refused"
+    "^FAIL: F: outputs one sat above the inputs, at a fee of 2^64 - 1 is not refused"
+    "^FAIL: G: an input spending an output with no address is not refused"
+    "^FAIL: H: a held asset coin in state 0 is not refused"
+    "^FAIL: I: an approved amount of 0 is not refused"
+    "^FAIL: J: a transaction with no inputs is not refused"
+    "^FAIL: K: no wallet is not refused"
+    "^FAIL: K: no transaction is not refused"
+)
+CASES_OF_MUST_FAIL=(
+    "^FAIL: M: a dual-family first input is accepted"
+    "^FAIL: M: a dual-family last input is accepted"
+)
 OF_PASS="^PASS: one_family_kat"
 L1="$(letters "${RED1_MUST_FAIL[@]}")"; L2="$(letters "${RED2_MUST_FAIL[@]}")"
 LF="$(letters "${RED_MUST_FAIL[@]}")"; LS="$(letters "${SIGNER_MUST_FAIL[@]}")"
@@ -300,14 +330,37 @@ asg_arms() {   # <bits> <-m32 or empty>
     red_arm "asg red2/$bits" "$BUILD_DIR/asg_red2_$bits" "$ASG_PASS" "$L2" "${RED2_MUST_FAIL[@]}"
     green_arm "asg green/$bits" "$BUILD_DIR/asg_green_$bits" "$ASG_PASS"
 }
+cases_arms() {   # <bits> <-m32 or empty>
+    local bits="$1" m="${2:-}" ok=1
+    build "$BUILD_DIR/cases_red1_$bits" "$CASES_C" address,undefined -fno-sanitize-recover=undefined ${m:+$m} -DASSET_SIGN_GATE_UNFIXED=1 || ok=0
+    build "$BUILD_DIR/cases_of_$bits" "$CASES_C" address,undefined -fno-sanitize-recover=undefined ${m:+$m} -DONE_FAMILY_SIGNER_UNFIXED || ok=0
+    build "$BUILD_DIR/cases_green_$bits" "$CASES_C" address,undefined -fno-sanitize-recover=undefined ${m:+$m} || ok=0
+    if [ "$ok" -ne 1 ]; then echo "GATE FAILURE: a core-cases ${bits}-bit arm did not compile (a build error is not evidence)."; FAIL=1; return; fi
+    red_arm "cases red1/$bits" "$BUILD_DIR/cases_red1_$bits" "$CASES_PASS" "B|C|D|E|F|G|H|I|J|K" "${CASES_RED1_MUST_FAIL[@]}"
+    red_arm "cases signer-only/$bits" "$BUILD_DIR/cases_of_$bits" "$CASES_PASS" "M" "${CASES_OF_MUST_FAIL[@]}"
+    green_arm "cases green/$bits" "$BUILD_DIR/cases_green_$bits" "$CASES_PASS"
+}
 echo "=== ASSET-SIGN-GATE (asset_sign_gate_kat's cases) ==="
 asg_arms 64
 printf 'int main(void){return 0;}\n' > "$BUILD_DIR/probe32.c"
 bits_note="32-bit skipped: no 32-bit link here"
+have32=0
 if "$CC" -m32 -g -fsanitize=address,undefined "$BUILD_DIR/probe32.c" -o "$BUILD_DIR/probe32" >/dev/null 2>&1 && "$BUILD_DIR/probe32"; then
     before=$FAIL
+    have32=1
     asg_arms 32 -m32
     bits_note="64-bit and 32-bit"
+    [ "$FAIL" -ne "$before" ] && bits_note="32-bit FAILED"
+else
+    echo "  ($bits_note)"
+fi
+
+# ---- the core's own cases: the headers called directly -------------------------------------------------------------
+echo "=== CORE CASES (asset_sign_gate_core_kat_main.c) ==="
+cases_arms 64
+if [ "$have32" -eq 1 ]; then
+    before=$FAIL
+    cases_arms 32 -m32
     [ "$FAIL" -ne "$before" ] && bits_note="32-bit FAILED"
 else
     echo "  ($bits_note)"
@@ -330,7 +383,7 @@ fi
 
 echo
 if [ "$FAIL" -eq 0 ]; then
-    echo "PASS: asset_sign_gate_core_kat (the core BRAssetSignGate.h on asset_sign_gate_kat's cases, two comparison arms and shipped, $bits_note, ASan+UBSan; BROneFamilyGate.h on one_family_kat's cases, both seams, the signer's alone, and shipped, ASan; drop-in gate; source gate over BRAssetSend.c)"
+    echo "PASS: asset_sign_gate_core_kat (the core BRAssetSignGate.h on asset_sign_gate_kat's cases, two comparison arms and shipped, $bits_note, ASan+UBSan; BROneFamilyGate.h on one_family_kat's cases, both seams, the signer's alone, and shipped, ASan; the core's own cases B-M on both headers, red-then-green, ASan+UBSan; drop-in gate; source gate over BRAssetSend.c)"
     exit 0
 fi
 echo "FAIL: asset_sign_gate_core_kat"
