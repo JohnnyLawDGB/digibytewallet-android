@@ -281,6 +281,36 @@ internal fun issuanceOutputCredits(
     header, outputCount, vouts,
 )
 
+/**
+ * Is [carrier] the transaction's first OP_RETURN output? [carrier] is the script
+ * [AssetManager]'s carrier choice took from [scripts]; it is compared by position (the same
+ * array), not by contents (BRAssetDetect.h: carrierIsFirstOpReturn).
+ */
+internal fun carrierIsFirstOpReturn(scripts: List<ByteArray>, carrier: ByteArray): Boolean =
+    scripts.firstOrNull { it.isNotEmpty() && it[0] == 0x6A.toByte() } === carrier
+
+/**
+ * The issuance walk's rename (BRAssetDetectRename): only an "unresolved:" placeholder is renamed,
+ * never a derived id, and only when the carrier is the transaction's first OP_RETURN output.
+ */
+internal fun issuanceRenameAllowed(
+    placeholderAssetId: String,
+    placeholderDerived: Boolean,
+    carrierIsFirstOpReturn: Boolean,
+): Boolean = placeholderAssetId.startsWith("unresolved:") && !placeholderDerived && carrierIsFirstOpReturn
+
+/**
+ * When the issuance walk is due (BRAssetDetect.h: issuanceWalkDue): for an issuance the walk has
+ * not answered for in this process, which brings the issuance's facts; after that, only while a
+ * write left a row unresolved that the rename can rename.
+ */
+internal fun issuanceWalkDue(
+    isIssuance: Boolean,
+    walkedInSession: Boolean,
+    anyUnresolved: Boolean,
+    renameAllowed: Boolean,
+): Boolean = isIssuance && (!walkedInSession || (anyUnresolved && renameAllowed))
+
 /** An allocation and what it means for each of the wallet's outputs. */
 internal class OutputCredits(
     val allocation: AssetTransferAllocator.Result,
@@ -1000,7 +1030,8 @@ class AssetManager(
         if (outputs.isEmpty()) return null
 
         // Locate the DigiAsset carrier among the OP_RETURN outputs (0x6A) and decode it.
-        val (carrierScript, header) = assetCarrier(outputs.map { it.script }) ?: return null
+        val scripts = outputs.map { it.script }
+        val (carrierScript, header) = assetCarrier(scripts) ?: return null
 
         // Asset-ID resolution:
         //  - ISSUANCE + locked: derive deterministically from first input outpoint.
@@ -1230,36 +1261,58 @@ class AssetManager(
                 .onFailure { android.util.Log.d("AssetManager", "M3 facts walk threw for ${LogTag.tx(txHashHex)}", it) }
         }
 
-        // M3 parent-walk (issuance only): fire if we still have a placeholder OR if we
-        // haven't yet walked this tx in the current session (to backfill
-        // chain-facts for rows resolved in a prior session). The session-
-        // local cache gates repeat walks to once per process lifetime.
-        val shouldWalk = isIssuance && ((anyStillUnresolved && placeholderAssetId.startsWith("unresolved:"))
-            || !walkedInSession.contains(txHashHex))
-        if (shouldWalk) {
-            runCatching {
-                val resolved = resolveTransferAssetId(txHashHex)
-                if (resolved != null) {
-                    walkedInSession.add(txHashHex)
-                    if (resolved.assetId != placeholderAssetId) {
-                        utxoDao.replaceAssetId(placeholderAssetId, resolved.assetId)
-                        // Also rewrite the TransactionEntity.assetId so the
-                        // per-asset transfer history query picks this tx up
-                        // under the real id instead of the placeholder.
-                        transactionDao.updateAssetId(txHashHex, resolved.assetId)
-                    }
-
-                    applyChainFacts(resolved)
-                    android.util.Log.i("AssetManager",
-                        "M3 resolved ${LogTag.tx(txHashHex)} → ${resolved.assetId} " +
-                        "(supply=${resolved.totalSupply} div=${resolved.divisibility}; placeholder rewritten)")
-                }
-            }.onFailure { android.util.Log.d("AssetManager", "M3 walk threw for ${LogTag.tx(txHashHex)}", it) }
+        if (isIssuance) {
+            issuanceWalk(
+                txHashHex = txHashHex,
+                placeholderAssetId = placeholderAssetId,
+                renameAllowed = issuanceRenameAllowed(
+                    placeholderAssetId, derivedAssetId != null, carrierIsFirstOpReturn(scripts, carrierScript),
+                ),
+                anyStillUnresolved = anyStillUnresolved,
+            )
         }
 
         val result = IncomingAssetInfo(header = header, assetId = placeholderAssetId)
         maybePersistAfterDetect(persistAfterDetect, result)
         return result
+    }
+
+    /**
+     * M3 parent-walk for an issuance, when [issuanceWalkDue] says so: the first walk in this
+     * process brings the issuance's facts (chain facts for rows resolved in a prior session), and
+     * it repeats only while a row is unresolved that the rename can rename. On an answer the
+     * transaction is marked walked, the rows under [placeholderAssetId] (and the history label)
+     * take the answer's id when [renameAllowed] ([issuanceRenameAllowed]) and the id differs, and
+     * the answer's facts are stored. [resolve] is [resolveTransferAssetId] in production.
+     */
+    internal suspend fun issuanceWalk(
+        txHashHex: String,
+        placeholderAssetId: String,
+        renameAllowed: Boolean,
+        anyStillUnresolved: Boolean,
+        resolve: suspend (String) -> ResolvedAsset? = ::resolveTransferAssetId,
+    ) {
+        if (!issuanceWalkDue(true, walkedInSession.contains(txHashHex), anyStillUnresolved, renameAllowed)) return
+        runCatching {
+            val resolved = resolve(txHashHex)
+            if (resolved != null) {
+                walkedInSession.add(txHashHex)
+                val rename = renameAllowed && resolved.assetId.isNotEmpty() && resolved.assetId != placeholderAssetId
+                if (rename) {
+                    utxoDao.replaceAssetId(placeholderAssetId, resolved.assetId)
+                    // Also rewrite the TransactionEntity.assetId so the
+                    // per-asset transfer history query picks this tx up
+                    // under the real id instead of the placeholder.
+                    transactionDao.updateAssetId(txHashHex, resolved.assetId)
+                }
+
+                applyChainFacts(resolved)
+                android.util.Log.i("AssetManager",
+                    "M3 resolved ${LogTag.tx(txHashHex)} → ${resolved.assetId} " +
+                    "(supply=${resolved.totalSupply} div=${resolved.divisibility}; " +
+                    "${if (rename) "placeholder rewritten" else "rows unchanged"})")
+            }
+        }.onFailure { android.util.Log.d("AssetManager", "M3 walk threw for ${LogTag.tx(txHashHex)}", it) }
     }
 
     /**
@@ -1613,10 +1666,10 @@ class AssetManager(
      * See [AssetProvenanceWalker] for the progress accounting and its tests.
      *
      * The walk is suspend-only, so callers decide whether to await or fire
-     * it into a background scope. When resolution succeeds, placeholder
-     * asset-ids already written into the utxos table are rewritten via
-     * [UtxoDao.replaceAssetId]. Metadata refresh is kicked off on the new
-     * real id so names/icons materialize if a CID is recoverable.
+     * it into a background scope. The caller ([issuanceWalk]) renames the
+     * placeholder rows to the answer only as [issuanceRenameAllowed] says.
+     * Metadata refresh is kicked off on the answer's id so names/icons
+     * materialize if a CID is recoverable.
      *
      * Returns the resolved asset ID, or null if the walk hit a dead end
      * (no parent tx available, max depth, unlocked issuance not yet
