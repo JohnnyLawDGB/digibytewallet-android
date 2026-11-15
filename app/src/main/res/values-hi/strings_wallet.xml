@@ -540,6 +540,7 @@
     <string name="sec_autolock_30m">30 मिनट</string>
     <string name="sec_autolock_custom">कस्टम</string>
     <string name="sec_pin_changed">PIN सफलतापूर्वक बदला गया</string>
+    <string name="sec_pin_change_failed">नया PIN सहेजा नहीं जा सका। आपका पुराना PIN अभी भी सक्रिय है।</string>
     <string name="sec_pins_mismatch">PIN मेल नहीं खाते</string>
     <string name="sec_biometric_required">बायोमेट्रिक प्रमाणीकरण आवश्यक</string>
     <string name="did_logged_in">आप अब %1$s में लॉग इन हैं</string>
@@ -608,6 +609,9 @@
     <string name="send_fail_unknown">लेनदेन नहीं भेजा जा सका।</string>
     <string name="send_fail_try_again">पुनः प्रयास करें</string>
     <string name="rf_splitting_for_assets">%1$d DigiAssets भेजने की तैयारी: आपके DGB को बाँटा जा रहा है ताकि हर एक अपना स्थानांतरण शुल्क चुका सके। एक पुष्टि की प्रतीक्षा, आमतौर पर एक मिनट से कम।</string>
+    <string name="rf_fanout_short">आपके DigiAssets पुराने वॉलेट में ही रहे: उन्हें भेजने के लिए वहाँ शुल्क हेतु %1$s चाहिए। आपके DGB भेज दिए गए। एसेट भेजने के लिए पुराने वॉलेट में %1$s एक ही ट्रांज़ैक्शन में भेजें और फ़ंड रिकवर करें फिर से चलाएँ।</string>
+    <string name="rf_fanout_unread">आपके DigiAssets पुराने वॉलेट में ही रहे: उन्हें भेजने के लिए वहाँ शुल्क हेतु %1$s चाहिए। आपके DGB भेज दिए गए, सिवाय %2$d कॉइन के जिन्हें जाँचा नहीं जा सका और जो पुराने वॉलेट में ही रहे। एसेट भेजने के लिए पुराने वॉलेट में %1$s एक ही ट्रांज़ैक्शन में भेजें और फ़ंड रिकवर करें फिर से चलाएँ।</string>
+    <string name="rf_fanout_failed">आपके DigiAssets पुराने वॉलेट में ही रहे: उनके ट्रांसफ़र शुल्क के लिए DGB बाँटने वाला चरण पूरा नहीं हो सका। आपके DGB भेज दिए गए। एसेट अभी भी पुराने फ़्रेज़ पर हैं; फ़ंड रिकवर करें फिर से चलाएँ, वह बताएगा कि पुराने वॉलेट को कितनी राशि चाहिए।</string>
     <string name="rf_nothing_moved">कुछ भी स्थानांतरित नहीं हुआ</string>
     <string name="rf_dd_fee_floor">नेटवर्क शुल्क के लिए %1$s चाहिए: इस वॉलेट में %2$s है।</string>
     <string name="rf_dd_found">%1$s DigiDollar मिले</string>
@@ -640,10 +644,10 @@
          Machine-assisted. -->
     <string name="reconcile_outputs_found">ब्लॉकचेन पर मिले आउटपुट</string>
     <string name="reconcile_found_not_compared">ब्लॉकचेन पर मिले, तुलना नहीं की गई</string>
-    <string name="reconcile_spendable">खर्च योग्य</string>
-    <string name="reconcile_wallet_spendable">वॉलेट का खर्च योग्य बैलेंस</string>
-    <string name="reconcile_matches_wallet">वॉलेट के खर्च योग्य बैलेंस से मेल खाता है।</string>
-    <string name="reconcile_does_not_match_wallet">वॉलेट के खर्च योग्य बैलेंस से मेल नहीं खाता: नीचे देखें।</string>
+    <string name="reconcile_in_balance">बैलेंस में गिना गया</string>
+    <string name="reconcile_wallet_balance">वॉलेट का बैलेंस</string>
+    <string name="reconcile_matches_wallet_balance">वॉलेट के बैलेंस से मेल खाता है।</string>
+    <string name="reconcile_does_not_match_wallet_balance">वॉलेट के बैलेंस से मेल नहीं खाता: नीचे देखें।</string>
     <string name="reconcile_held_asset">DigiAsset के लिए रोका गया</string>
     <string name="reconcile_held_unknown">रोका गया: एसेट की स्थिति अज्ञात</string>
     <string name="reconcile_proven_plain">साधारण DGB, रीस्टार्ट के बाद खर्च योग्य</string>
@@ -717,6 +721,9 @@
     <string name="seedview_pass_unreadable_title">पासफ़्रेज़ पढ़ा नहीं जा सका</string>
     <string name="seedview_pass_unreadable_body">इस वॉलेट का पासफ़्रेज़ अभी पढ़ा नहीं जा सका। केवल आपके रिकवरी शब्द इस वॉलेट को बहाल नहीं कर सकते, इसलिए वे तब तक नहीं दिखाए जाते जब तक पासफ़्रेज़ उनके साथ नहीं दिखाया जा सकता। फिर से कोशिश करें।</string>
     <string name="seedview_pass_retry">फिर से कोशिश करें</string>
+    <!-- SEED-VIEW-AUTH -->
+    <string name="seedview_device_lock_title">अपना स्क्रीन लॉक पुष्टि करें</string>
+    <string name="seedview_device_lock_body">आपका रिकवरी फ़्रेज़ इस फ़ोन के स्क्रीन लॉक से सुरक्षित है। इसे दिखाने के लिए अपने PIN, पैटर्न या पासवर्ड से स्क्रीन लॉक की पुष्टि करें।</string>
     <!-- /pkg E2-keys -->
     <string name="pinstore_title">अभी आपका PIN जाँचा नहीं जा सकता</string>
     <string name="pinstore_body">फ़ोन का सुरक्षित कुंजी भंडार नहीं खुला, इसलिए वॉलेट लॉक रहेगा। कुछ भी हटाया नहीं गया है। ऐप बंद करें और फिर से खोलें। अगर ऐसा बार-बार हो, तो फ़ोन रीस्टार्ट करें; आपका रिकवरी फ़्रेज़ किसी भी डिवाइस पर वॉलेट को अब भी वापस ला सकता है।</string>
@@ -730,4 +737,15 @@
     <string name="reconcile_rebuild_button">चेन से पूरा पुनर्निर्माण (फिर से स्कैन)</string>
     <string name="rf_capped_body">%1$s पर स्कैन अपनी सीमा पर रुक गया जबकि वह पाथ अब भी इस्तेमाल में था, इसलिए वहाँ दिखाए गए से ज़्यादा फ़ंड हो सकते हैं। जो नहीं दिखा, वह चेन पर सुरक्षित रहता है।</string>
     <string name="reconcile_stuck_stale_cleared">, इनमें से %1$d कभी रिले नहीं हुए (एक दिन बाद भी नेटवर्क के पास न ये थे, न इनके कॉइन खर्च करने वाला कोई लेन-देन)। अगर इनमें से कोई भुगतान प्राप्तकर्ता तक पहुँच गया था तो वह अब भी कन्फ़र्म हो सकता है: दोबारा भुगतान करने से पहले उनसे पुष्टि करें</string>
+    <!-- KS-BIND: seed key bound to the device lock -->
+    <string name="ksb_prompt_subtitle">अपना स्क्रीन लॉक एक बार पुष्टि करें ताकि वॉलेट की कुंजी उससे जोड़ी जा सके</string>
+    <string name="ksb_notice_title">इस फ़ोन में स्क्रीन लॉक नहीं है</string>
+    <string name="ksb_notice_body">आपका वॉलेट इस फ़ोन पर एन्क्रिप्ट है, लेकिन उसकी कुंजी किसी स्क्रीन लॉक से नहीं जोड़ी जा सकती, क्योंकि इस फ़ोन में कोई स्क्रीन लॉक नहीं है। तब ऐप और आपकी राशि के बीच केवल वॉलेट PIN रहता है। Android सेटिंग्स में PIN, पैटर्न या पासवर्ड सेट करें: अगली बार ऐप शुरू होकर वॉलेट खोलने पर वॉलेट अपनी कुंजी उससे जोड़ देगा। सुरक्षा सेटिंग्स दिखाती हैं कि कुंजी जुड़ी है या नहीं।</string>
+    <string name="ksb_notice_ok">मैं समझता/समझती हूँ</string>
+    <string name="sec_seed_key">वॉलेट कुंजी</string>
+    <string name="sec_seed_key_bound">इस फ़ोन के स्क्रीन लॉक से जुड़ी है</string>
+    <string name="sec_seed_key_pending">अभी नहीं जुड़ी: अगली बार ऐप शुरू होकर वॉलेट खोलने पर यह आपके स्क्रीन लॉक से जुड़ जाएगी</string>
+    <string name="sec_seed_key_no_lock">नहीं जुड़ी: इस फ़ोन में स्क्रीन लॉक नहीं है। Android सेटिंग्स में एक सेट करें।</string>
+    <string name="sec_seed_key_lock_removed">यह वॉलेट सेट होने के बाद स्क्रीन लॉक हटा दिया गया, इसलिए इसकी कुंजी अब नहीं खुलती, नया लॉक लगाने पर भी नहीं। जब तक वॉलेट खुला है, जाँच लें कि आपका रिकवरी वाक्यांश लिखा हुआ है, या अभी अपनी राशि दूसरी जगह भेज दें: अगली बार ऐप शुरू होने पर वॉलेट को उसके रिकवरी वाक्यांश की ज़रूरत होगी।</string>
+    <string name="sec_seed_key_cannot_bind">नहीं जुड़ी: पिछले स्क्रीन लॉक से बची एक कुंजी अब काम नहीं करती, इसलिए इस इंस्टॉल पर इस वॉलेट की कुंजी नहीं जोड़ी जा सकती। वॉलेट मिटाकर उसे रिकवरी वाक्यांश से फिर से बहाल करने पर यह जुड़ जाती है।</string>
 </resources>

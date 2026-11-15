@@ -28,6 +28,7 @@ import app.aroundtheblock.wallet.core.db.dao.WalletConfigDao
 import app.aroundtheblock.wallet.core.digiscope.DigiScopeClient
 import app.aroundtheblock.wallet.core.security.BiometricAuth
 import app.aroundtheblock.wallet.core.security.KeyStoreManager
+import app.aroundtheblock.wallet.core.security.OwnCredentialPromptExemption
 import app.aroundtheblock.wallet.core.security.PinManager
 import app.aroundtheblock.wallet.core.tor.TorManager
 import app.aroundtheblock.wallet.core.tor.TorState
@@ -51,6 +52,11 @@ class MainActivity : FragmentActivity() {
         /** Poll interval for the inactivity lock. Bounds the overshoot past the configured
          *  timeout (shortest option is 60 s, so at most ~8%) without waking every second. */
         const val AUTO_LOCK_TICK_MS = 5_000L
+
+        /** KS-BIND: how long a due no-screen-lock notice waits for a PIN to exist (10 min), then gives
+         *  up for this unlock; the next unlock asks again. */
+        const val NO_LOCK_NOTICE_PIN_CHECK_MS = 2_000L
+        const val NO_LOCK_NOTICE_PIN_CHECKS = 300
     }
 
     /**
@@ -115,6 +121,11 @@ class MainActivity : FragmentActivity() {
             )
         )
         enableEdgeToEdge()
+        // Before anything reads the intent, and before the NavHost exists: no launching intent
+        // chooses a screen (NAV-DEEPLINK).
+        app.aroundtheblock.wallet.ui.navigation.NavIntentExtras.strip(intent)
+        // SEED-VIEW-AUTH: recreated (rotation) while a stop lock was deferred: re-arm its deadline.
+        if (OwnCredentialPromptExemption.isDeferred()) scheduleDeferredStopLock()
 
         // Wipe-after-N backstop: if a prior wipe-after-N was interrupted (process
         // killed between PinManager returning ShouldWipe and the wallet wipe
@@ -366,6 +377,39 @@ class MainActivity : FragmentActivity() {
                     )
                 }
 
+                // KS-BIND: the no-screen-lock notice that PIN setup marked due but that was never
+                // dismissed (the app went to the background while it was up, and the lock screen
+                // took over). Shown again once the wallet is unlocked behind its PIN, and only while
+                // the device still has no lock screen. Never shown to a wallet that was not set up
+                // on this build: only PIN setup marks it due.
+                var showNoLockNotice by remember { mutableStateOf(false) }
+                androidx.compose.runtime.LaunchedEffect(walletState) {
+                    if (walletState !is app.aroundtheblock.wallet.core.WalletState.Unlocked) return@LaunchedEffect
+                    // Due first: almost every session owes no notice and must pay nothing here.
+                    if (!app.aroundtheblock.wallet.ui.onboarding.NoScreenLockNoticeFlags.isDue(this@MainActivity)) return@LaunchedEffect
+                    // Only behind a PIN. PIN setup marks the notice due after the PIN is saved, so
+                    // this nearly always answers at once; the wait is bounded and off the main thread.
+                    var pinChecks = 0
+                    while (!kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { pinManager.pinKnownToExist() }.getOrDefault(false) }) {
+                        if (++pinChecks > NO_LOCK_NOTICE_PIN_CHECKS) return@LaunchedEffect
+                        kotlinx.coroutines.delay(NO_LOCK_NOTICE_PIN_CHECK_MS)
+                    }
+                    val status = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        runCatching { walletManager.seedKeyStatus() }.getOrNull()
+                    }
+                    if (status == app.aroundtheblock.wallet.core.security.SeedKeyStatus.NO_LOCK_SCREEN &&
+                        !app.aroundtheblock.wallet.ui.onboarding.NoScreenLockNoticeFlags.onScreen
+                    ) {
+                        showNoLockNotice = true
+                    }
+                }
+                if (showNoLockNotice && !showBatteryPrompt) {
+                    app.aroundtheblock.wallet.ui.onboarding.NoScreenLockNotice(onDismiss = {
+                        app.aroundtheblock.wallet.ui.onboarding.NoScreenLockNoticeFlags.acknowledge(this@MainActivity)
+                        showNoLockNotice = false
+                    })
+                }
+
                 AppNavigation(
                     walletManager = walletManager,
                     pinManager = pinManager,
@@ -396,9 +440,77 @@ class MainActivity : FragmentActivity() {
         // UI-only lock — requires PIN/biometric to re-enter the app.
         // Does NOT call NativeBridge.lockSession() — the native seed stays
         // in memory so SyncService can continue syncing in the background.
-        if (walletManager.walletState.value is WalletState.Unlocked) {
+        // SEED-VIEW-AUTH: only the stop caused by our own confirm activity is deferred
+        // (OwnCredentialPromptExemption); any other stop locks now. A deferral is resolved at the
+        // next resume, by the deadline timer, a user-leave hint or onDestroy, and keeps the UI
+        // unlocked only on proof the confirm succeeded.
+        if (OwnCredentialPromptExemption.consumeForStop(android.os.SystemClock.elapsedRealtime())) {
+            scheduleDeferredStopLock()
+        } else if (walletManager.walletState.value is WalletState.Unlocked) {
             walletManager.lockUi()
         }
+    }
+
+    private val stopLockHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
+    /** The deadline: still stopped when the bound runs out, so the deferred stop locks. */
+    private val deferredStopLock = Runnable {
+        if (OwnCredentialPromptExemption.resolveOnTimer()) lockUiIfUnlocked()
+    }
+
+    private fun scheduleDeferredStopLock() {
+        stopLockHandler.removeCallbacks(deferredStopLock)
+        stopLockHandler.postDelayed(deferredStopLock,
+            OwnCredentialPromptExemption.remainingMs(android.os.SystemClock.elapsedRealtime()))
+    }
+
+    private fun lockUiIfUnlocked() {
+        if (walletManager.walletState.value is WalletState.Unlocked) walletManager.lockUi()
+    }
+
+    /** Resume decision for a deferred stop; API 29 posts it, so the queued success callback runs first. */
+    private fun resolveDeferredStopOnResume() {
+        if (!OwnCredentialPromptExemption.isDeferred()) return
+        stopLockHandler.removeCallbacks(deferredStopLock)
+        val decide = Runnable {
+            if (OwnCredentialPromptExemption.resolveOnResume(android.os.SystemClock.elapsedRealtime())) lockUiIfUnlocked()
+        }
+        if (OwnCredentialPromptExemption.deferredVia() == OwnCredentialPromptExemption.Via.API29_FRAMEWORK) {
+            stopLockHandler.post(decide)
+        } else {
+            decide.run()
+        }
+    }
+
+    /**
+     * API <= 28: androidx.biometric launches the confirm through here; arms only for that intent.
+     * Overrides the deprecated platform pair androidx.biometric 1.1.0 still uses (a compiler warning).
+     */
+    override fun startActivityForResult(intent: Intent, requestCode: Int, options: Bundle?) {
+        OwnCredentialPromptExemption.onActivityLaunch(
+            android.os.SystemClock.elapsedRealtime(), android.os.Build.VERSION.SDK_INT, intent.action, requestCode)
+        super.startActivityForResult(intent, requestCode, options)
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        OwnCredentialPromptExemption.onActivityResult(requestCode, resultCode)
+        super.onActivityResult(requestCode, resultCode, data)
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (OwnCredentialPromptExemption.onUserLeaveHint()) {
+            stopLockHandler.removeCallbacks(deferredStopLock)
+            lockUiIfUnlocked()
+        }
+    }
+
+    override fun onDestroy() {
+        stopLockHandler.removeCallbacks(deferredStopLock)
+        // A rotation keeps the deferral for the recreated activity (onCreate re-arms the deadline);
+        // any other destroy means the confirm's answer can no longer come back here.
+        if (!isChangingConfigurations && OwnCredentialPromptExemption.resolveOnDestroy()) lockUiIfUnlocked()
+        super.onDestroy()
     }
 
     /**
@@ -421,6 +533,7 @@ class MainActivity : FragmentActivity() {
      */
     override fun onResume() {
         super.onResume()
+        resolveDeferredStopOnResume()
         // Returning to the foreground is the interaction: without this, an unlock after a
         // long background sits on a stale stamp and the very first tick locks the wallet
         // the user just opened.
@@ -499,19 +612,22 @@ class MainActivity : FragmentActivity() {
     }
 
     override fun onNewIntent(intent: Intent) {
+        // Before any listener sees it (NAV-DEEPLINK).
+        app.aroundtheblock.wallet.ui.navigation.NavIntentExtras.strip(intent)
         super.onNewIntent(intent)
         handleDigiIdIntent(intent)
     }
 
     private fun handleDigiIdIntent(intent: Intent?) {
-        val uri = intent?.data?.toString()
-        if (uri != null && uri.startsWith("digiid://")) {
+        // MSG-LEN: a digiid:// link over DigiIdRequest.MAX_URI_LENGTH is not taken in.
+        val uri = DigiIdDeepLink.accepted(intent?.data?.toString())
+        if (uri != null) {
             pendingDigiIdUri = uri
             // Host only, never the URI. The URI carries the challenge nonce, and a logged
             // nonce is a replayable authentication for anything able to read logcat.
             // DigiIdManager already logs only request.domain; this is the same rule. The host
             // comes from whoever sent the link, so it is logged as printable ASCII only.
-            android.util.Log.i("MainActivity", "Captured Digi-ID deep link for ${DigiIdDeepLinkLog.host(intent.data?.host)}")
+            android.util.Log.i("MainActivity", "Captured Digi-ID deep link for ${DigiIdDeepLinkLog.host(intent?.data?.host)}")
         }
     }
 }

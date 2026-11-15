@@ -1,5 +1,6 @@
 package app.aroundtheblock.wallet.core.ipfs
 
+import app.aroundtheblock.wallet.core.LogSafe
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import app.aroundtheblock.wallet.core.network.BoundedBody
@@ -180,7 +181,7 @@ class IpfsClient(
         } catch (e: TorNotReadyException) {
             throw e
         } catch (e: Exception) {
-            android.util.Log.d(TAG, "tryGateway: $gateway threw for $cid — ${e.javaClass.simpleName}: ${e.message}")
+            android.util.Log.d(TAG, "tryGateway: $gateway threw for $cid — ${e.javaClass.simpleName}: ${LogSafe.text(e.message)}")
             null
         }
     }

@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.SharedPreferences
 import app.aroundtheblock.wallet.core.OutgoingTxStore
 import app.aroundtheblock.wallet.core.bridge.NativeBridge
-import app.aroundtheblock.wallet.core.decodeSavedTransactionsOrNull
 import app.aroundtheblock.wallet.core.networkSuffix
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -65,8 +64,8 @@ object HistoryRebuildOnUpgrade {
      *  mempool, so holding the cache for it any longer buys nothing. */
     const val DEFER_CAP_MS = 14L * 24 * 60 * 60 * 1000
 
-    /** Same record cap as the native loader (jni_transaction_persist.c). */
-    const val MAX_RECORDS = 10_000L
+    /** Same record limit as the native loader: the shared one (TX-CKPT-CAP). */
+    const val MAX_RECORDS = SavedTransactionsCheckpoint.MAX_RECORDS
 
     /** TX_UNCONFIRMED (BRTransaction.h): the height of a record that is not in a block. */
     const val UNCONFIRMED_HEIGHT = 0x7fffffffL
@@ -275,7 +274,8 @@ object HistoryRebuildOnUpgrade {
         if (state.done) return publish(Outcome(OutcomeKind.NOT_NEEDED))
 
         val sync = syncPrefs(context)
-        val cacheBytes = decodeSavedTransactionsOrNull(sync.getString(KEY_SAVED_TRANSACTIONS, null))
+        // The file store (TX-CKPT-CAP), migrating a legacy hex key once; an unreadable one is empty.
+        val cacheBytes = runCatching { SavedTransactionsStore.load(context) }.getOrNull()
         val summary = summarize(cacheBytes)
         val pending = runCatching { OutgoingTxStore(context).pendingTxids().size }.getOrDefault(0)
 
@@ -464,7 +464,9 @@ object HistoryRebuildOnUpgrade {
         context: Context,
         checkpointTimeAtOrBelow: (Long) -> Long = ::nativeCheckpointTimeAtOrBelow,
     ): Boolean {
-        val summary = summarize(decodeSavedTransactionsOrNull(syncPrefs(context).getString(KEY_SAVED_TRANSACTIONS, null)))
+        // The cache lives in the TX-CKPT-CAP file store on this line, as run() reads it: reading the
+        // old prefs key here would summarize nothing and carry no floor (the bug FLOOR_FROM_CACHE fixes).
+        val summary = summarize(runCatching { SavedTransactionsStore.load(context) }.getOrNull())
         val floor = floorFromDiscardedCache(readState(context), summary, checkpointTimeAtOrBelow)
         val landed = statePrefs(context).edit()
             .putLong(KEY_FLOOR_HINT, floor.height)
@@ -502,8 +504,6 @@ object HistoryRebuildOnUpgrade {
         evaluated.clear()
         _lastOutcome.value = null
     }
-
-    private const val KEY_SAVED_TRANSACTIONS = "saved_transactions"
 }
 
 /**
@@ -518,7 +518,7 @@ object HistoryRebuildOnUpgrade {
 fun clearTransactionCacheForRebuild(context: Context): Boolean {
     val suffix = networkSuffix(context)
     val committed = context.getSharedPreferences("dgb_sync_data$suffix", Context.MODE_PRIVATE).edit()
-        .remove("saved_transactions")   // the tx graph — re-derived from chain
+        .remove("saved_transactions")   // legacy key of the tx graph — the file store is authoritative now
         .remove("saved_filter_headers") // CF chain re-anchors at the floor
         .remove("saved_blocks")         // legacy key belt-and-suspenders — file store is authoritative now
         .remove("saved_blocks_tip")
@@ -526,6 +526,7 @@ fun clearTransactionCacheForRebuild(context: Context): Boolean {
         .remove("last_balance")
         .remove("last_dd_balance")      // the DigiDollar balance snapshot the wallet screen starts from
         .commit()
+    val txCacheGone = SavedTransactionsStore.delete(context) // the tx graph — re-derived from chain (TX-CKPT-CAP file)
     FilterHeaderStore.delete(context) // the file-backed CF-header chain (synchronous)
     SavedBlockStore.delete(context)   // and the file-backed saved-blocks window (I2 fix)
     // …and the file-backed CF SCAN LEDGER. This is load-bearing, not tidiness
@@ -543,7 +544,9 @@ fun clearTransactionCacheForRebuild(context: Context): Boolean {
     // is nothing left to recover and nothing to nag about.
     CfAbandonmentStore.clear(context)
     // Read back: a store file that is still there means the clear did not land.
-    val filesGone = listOf(FilterHeaderStore.file(context), SavedBlockStore.file(context), CfScanLedgerStore.file(context))
-        .none { runCatching { it.exists() }.getOrDefault(true) }
-    return committed && filesGone
+    val filesGone = listOf(
+        FilterHeaderStore.file(context), SavedBlockStore.file(context), CfScanLedgerStore.file(context),
+        SavedTransactionsStore.file(context),
+    ).none { runCatching { it.exists() }.getOrDefault(true) }
+    return committed && txCacheGone && filesGone
 }

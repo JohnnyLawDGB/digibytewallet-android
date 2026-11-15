@@ -1,5 +1,6 @@
 package app.aroundtheblock.wallet.service
 
+import app.aroundtheblock.wallet.core.LogSafe
 import app.aroundtheblock.wallet.core.network.BoundedBody
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
@@ -64,7 +65,9 @@ class SeederClient(baseClient: OkHttpClient, private val bodyCap: Long = MAX_BOD
                 }
             }
         } catch (e: Exception) {
-            onFailure("Seeder API unreachable: ${e.message}")
+            // ASSET-LOG-CRLF: the callers log this line as is, and OkHttp's message quotes what the
+            // peer sent (a pinning failure lists its certificate subjects), so it is escaped here.
+            onFailure("Seeder API unreachable: ${e::class.java.simpleName}: ${LogSafe.text(e.message)}")
             null
         }
     }

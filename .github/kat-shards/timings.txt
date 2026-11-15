@@ -18,6 +18,7 @@
 2 amount_vectors_kat
 1 asset_burn_marker_kat
 6 asset_conflicted_send_kat
+75 asset_detect_kat
 6 asset_implicit_change_kat
 6 asset_plain_opreturn_first_kat
 1 asset_range_targets_kat

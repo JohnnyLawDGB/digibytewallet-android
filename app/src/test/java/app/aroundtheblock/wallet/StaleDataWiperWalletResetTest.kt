@@ -321,7 +321,7 @@ class StaleDataWiperWalletResetTest {
                 CfScanLedgerStore.load(context),
                 SavedBlockStore.load(context),
                 synced,
-                sync["transactions_checkpointed"] == true || sync.containsKey("saved_transactions"),
+                sync["transactions_checkpointed"] == true || app.aroundtheblock.wallet.core.sync.SavedTransactionsStore.exists(context),
             )
             if (reset != null) {
                 sync.remove("has_synced")

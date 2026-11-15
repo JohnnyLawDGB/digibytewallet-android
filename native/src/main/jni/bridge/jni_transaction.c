@@ -12,6 +12,7 @@
 #include <errno.h>
 #include "coin_reservation.h"
 #include "jni_bridge.h"
+#include "one_family_gate.h"
 #include "BRDigiDollar.h"
 #include "BRNetwork.h"   /* BRNetworkIsTestnet() — runtime network for DD decode */
 #include "prepared_send.h"   /* the quote and the checks of a prepared DGB send (fee_quote_kat) */
@@ -163,8 +164,11 @@ static void _registerWalletCopy(BRTransaction *tx)
     if (BRWalletTransactionForHash(g_wallet, tx->txHash)) return;   /* already held: nothing to copy */
     BRTransaction *walletCopy = BRTransactionCopy(tx);
     if (!walletCopy) return;                                        /* the peer relay-back re-registers */
-    BRWalletRegisterTransactionTrusted(g_wallet, walletCopy);   /* this wallet signed it: no input check */
-    if (BRWalletTransactionForHash(g_wallet, tx->txHash) != walletCopy) BRTransactionFree(walletCopy);
+    BRWalletRegisterOutcome held = BR_WALLET_REGISTER_REFUSED;
+    /* this wallet signed it: no input check. Whether the wallet took the copy is the registration's own
+     * answer (REGISTER-RESULT), read under the wallet's lock, not a lookup made after it. */
+    BRWalletRegisterTransactionOutcome(g_wallet, walletCopy, BR_WALLET_REGISTER_TRUSTED, &held);
+    if (!BRWalletRegisterOutcomeHeld(held)) BRTransactionFree(walletCopy);
 }
 
 /* ---------- createTransaction ---------- */
@@ -269,6 +273,15 @@ NativeBridge_signTransaction(JNIEnv *env, jobject thiz,
 
     if (!tx) {
         LOGE("signTransaction: failed to parse transaction");
+        return NULL;
+    }
+
+    /* ONE-FAMILY: this generic signer never signs a DigiDollar output, an output of a dual-family
+     * transaction, or an input whose funding transaction the wallet does not hold. DigiDollar is
+     * sent only through sendApprovedDigiDollar. */
+    if (!tx_inputs_one_family_ok(g_wallet, tx)) {
+        LOGW("signTransaction: an input belongs to another token family or is not held (ONE-FAMILY)");
+        BRTransactionFree(tx);
         return NULL;
     }
 
@@ -384,7 +397,8 @@ NativeBridge_getBuiltTransactionOutputs(JNIEnv *env, jobject thiz, jbyteArray un
 /* Sign prepared unsigned bytes, or NULL: only the send that was approved -- amountSats to toAddress
  * at approvedFeeSats. Before signing, the bytes' outputs must be exactly that payment plus at most one
  * change output to an address of this wallet, they must pay exactly approvedFeeSats, and they must
- * spend only coins that are still the wallet's spendable plain coins; after signing, the signed
+ * spend only coins the wallet's selection would spend (BRWalletSelectableUTXOs, each asked alone via
+ * BRWalletOutpointSelectable; SEND-GATE-SET); after signing, the signed
  * transaction must pass the same check, or nothing is handed back to be broadcast. It signs those
  * bytes and nothing else: no build, no publish (the publish entry points stay publishTransaction /
  * publishTransactionStem, which tx_publish_ownership_kat watches). */
@@ -444,8 +458,10 @@ NativeBridge_signPreparedTransaction(JNIEnv *env, jobject thiz, jbyteArray unsig
     }
 
     /* Sign with wallet (RFC 6979 deterministic nonces); forkId=0 for DigiByte. */
-    if (!seed_sign_transaction(g_wallet, tx, 0) || !BRTransactionIsSigned(tx)) {
+    int signedOk = seed_sign_transaction(g_wallet, tx, 0);
+    if (!signedOk || !BRTransactionIsSigned(tx)) {
         LOGW("signPreparedTransaction: signing failed");
+        if (signedOk) coin_reservation_release(tx->txHash);   /* the claim seed_sign_transaction took */
         BRTransactionFree(tx);
         return NULL;
     }
@@ -455,6 +471,7 @@ NativeBridge_signPreparedTransaction(JNIEnv *env, jobject thiz, jbyteArray unsig
                                        (uint64_t)approvedFeeSats)) != PREPARED_SEND_OK) {
         LOGE("signPreparedTransaction: the signed transaction is not the approved send (verdict %d); not returned",
              (int)verdict);
+        coin_reservation_release(tx->txHash);   /* never broadcast: its coins are free again */
         BRTransactionFree(tx);
         return NULL;
     }
@@ -827,13 +844,17 @@ NativeBridge_registerRawTransaction(JNIEnv *env, jobject thiz,
     UInt256 txHash = tx->txHash;
     /* The height is the server's, not proven by this wallet: the tx's signatures on wallet coins are
      * checked at any height (BRWalletRegisterTransactionUnproven), now and at every balance rebuild. */
-    int ok = BRWalletRegisterTransactionUnproven(g_wallet, tx);
+    BRWalletRegisterOutcome held = BR_WALLET_REGISTER_REFUSED;
+    int ok = BRWalletRegisterTransactionOutcome(g_wallet, tx, BR_WALLET_REGISTER_UNPROVEN, &held);
+    /* Who owns tx now is the registration's own answer (REGISTER-RESULT): the wallet, when it kept tx as
+     * one of its transactions or as an unconfirmed non-wallet tx (tx is forced unconfirmed above, so a
+     * non-wallet tx registered here is kept as foreign while the kept set has room); otherwise this
+     * function, which frees it -- a refused tx (a non-wallet tx past the kept set's bounds, out of range,
+     * an unconfirmed tx that does not validly sign a wallet output), or a copy of a hash a peer thread
+     * registered since the lookup above. tx is not named again below. */
+    if (!BRWalletRegisterOutcomeHeld(held)) BRTransactionFree(tx);
+    tx = NULL;
     if (!ok) {
-        /* Not taken by the wallet. It keeps an unconfirmed non-wallet tx in its allTx set; anything
-         * else it refused -- a confirmed non-wallet tx, an out-of-range tx, an unconfirmed tx that
-         * does not validly sign a wallet output -- is not kept at any height, so ask the wallet
-         * whether it holds this object rather than infer it from the height, and free it if not. */
-        if (BRWalletTransactionForHash(g_wallet, txHash) != tx) BRTransactionFree(tx);
         LOGW("registerRawTransaction: tx not associated with wallet");
         return JNI_FALSE;
     }

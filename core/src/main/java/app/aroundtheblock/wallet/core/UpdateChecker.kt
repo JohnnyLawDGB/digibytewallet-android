@@ -107,7 +107,7 @@ class UpdateChecker(private val client: OkHttpClient, private val repo: String) 
                 } else null
             }
         } catch (e: Exception) {
-            android.util.Log.w("UpdateChecker", "Update check failed: ${e.message}")
+            android.util.Log.w("UpdateChecker", "Update check failed: ${LogSafe.text(e.message)}")
             null
         }
     }

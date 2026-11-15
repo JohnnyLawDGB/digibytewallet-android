@@ -545,6 +545,7 @@
     <string name="sec_autolock_30m">30 minutos</string>
     <string name="sec_autolock_custom">Personalizado</string>
     <string name="sec_pin_changed">PIN cambiado correctamente</string>
+    <string name="sec_pin_change_failed">No se pudo guardar el nuevo PIN. Tu PIN anterior sigue activo.</string>
     <string name="sec_pins_mismatch">Los PIN no coinciden</string>
     <string name="sec_biometric_required">Se requiere autenticación biométrica</string>
     <string name="did_logged_in">Ahora has iniciado sesión en %1$s</string>
@@ -613,6 +614,9 @@
     <string name="send_fail_unknown">No se pudo enviar la transacción.</string>
     <string name="send_fail_try_again">Reintentar</string>
     <string name="rf_splitting_for_assets">Preparando el traslado de %1$d DigiAssets: se dividen tus DGB para que cada uno pueda pagar su propia comisión de transferencia. Espera una confirmación, normalmente menos de un minuto.</string>
+    <string name="rf_fanout_short">Tus DigiAssets se quedaron en la billetera antigua: moverlos requiere %1$s allí para las comisiones. Tus DGB se movieron. Para mover los activos, envía %1$s a la billetera antigua en una sola transacción y vuelve a ejecutar Recuperar fondos.</string>
+    <string name="rf_fanout_unread">Tus DigiAssets se quedaron en la billetera antigua: moverlos requiere %1$s allí para las comisiones. Tus DGB se movieron, salvo %2$d moneda(s) que no se pudieron comprobar y siguen en la billetera antigua. Para mover los activos, envía %1$s a la billetera antigua en una sola transacción y vuelve a ejecutar Recuperar fondos.</string>
+    <string name="rf_fanout_failed">Tus DigiAssets se quedaron en la billetera antigua: no se pudo completar el paso que divide los DGB para sus comisiones de transferencia. Tus DGB se movieron. Los activos siguen en la frase antigua; vuelve a ejecutar Recuperar fondos y te indicará la cantidad que necesita la billetera antigua.</string>
     <string name="rf_nothing_moved">No se movió nada</string>
     <string name="rf_dd_fee_floor">Necesita %1$s de comisión de red: esta cartera tiene %2$s.</string>
     <string name="rf_dd_found">Se encontraron %1$s en DigiDollar</string>
@@ -645,10 +649,10 @@
          Machine-assisted. -->
     <string name="reconcile_outputs_found">Salidas encontradas en la blockchain</string>
     <string name="reconcile_found_not_compared">Encontrado en la blockchain, sin comparar</string>
-    <string name="reconcile_spendable">Gastable</string>
-    <string name="reconcile_wallet_spendable">Saldo gastable de la billetera</string>
-    <string name="reconcile_matches_wallet">Coincide con el saldo gastable de la billetera.</string>
-    <string name="reconcile_does_not_match_wallet">No coincide con el saldo gastable de la billetera: ver abajo.</string>
+    <string name="reconcile_in_balance">Contado en el saldo</string>
+    <string name="reconcile_wallet_balance">Saldo de la billetera</string>
+    <string name="reconcile_matches_wallet_balance">Coincide con el saldo de la billetera.</string>
+    <string name="reconcile_does_not_match_wallet_balance">No coincide con el saldo de la billetera: ver abajo.</string>
     <string name="reconcile_held_asset">Retenido para un DigiAsset</string>
     <string name="reconcile_held_unknown">Retenido: estado del activo desconocido</string>
     <string name="reconcile_proven_plain">DGB normal, gastable tras reiniciar</string>
@@ -724,6 +728,9 @@
     <string name="seedview_pass_unreadable_title">No se pudo leer la frase de contraseña</string>
     <string name="seedview_pass_unreadable_body">La frase de contraseña de esta billetera no se pudo leer en este momento. Es posible que tus palabras de recuperación por sí solas no restauren esta billetera, así que no se muestran hasta que la frase de contraseña pueda mostrarse con ellas. Inténtalo de nuevo.</string>
     <string name="seedview_pass_retry">Reintentar</string>
+    <!-- SEED-VIEW-AUTH -->
+    <string name="seedview_device_lock_title">Confirma el bloqueo de pantalla</string>
+    <string name="seedview_device_lock_body">Tu frase de recuperación está protegida por el bloqueo de pantalla de este teléfono. Para mostrarla, confirma el bloqueo de pantalla con tu PIN, patrón o contraseña.</string>
     <!-- /pkg E2-keys -->
     <string name="pinstore_title">Ahora no se puede comprobar tu PIN</string>
     <string name="pinstore_body">El almacén seguro de claves del teléfono no se abrió, así que la billetera sigue bloqueada. No se ha borrado nada. Cierra la app y vuelve a abrirla. Si sigue pasando, reinicia el teléfono; tu frase de recuperación sigue restaurando la billetera en cualquier dispositivo.</string>
@@ -737,4 +744,15 @@
     <string name="reconcile_rebuild_button">Reconstrucción completa desde la cadena (reescaneo)</string>
     <string name="rf_capped_body">El escaneo llegó a su límite en %1$s mientras esa ruta seguía en uso, así que puede haber más fondos allí de los que se muestran. Lo que no se muestra sigue a salvo en la cadena.</string>
     <string name="reconcile_stuck_stale_cleared">, %1$d de ellas nunca se retransmitieron (tras un día la red no tenía ni ellas ni nada que gastara sus monedas). Si alguno de esos pagos llegó a su destinatario, todavía puede confirmarse: consúltalo con él antes de volver a pagar</string>
+    <!-- KS-BIND: seed key bound to the device lock -->
+    <string name="ksb_prompt_subtitle">Confirma tu bloqueo de pantalla una vez para que la clave de la billetera pueda vincularse a él</string>
+    <string name="ksb_notice_title">Este teléfono no tiene bloqueo de pantalla</string>
+    <string name="ksb_notice_body">Tu billetera está cifrada en este teléfono, pero su clave no puede vincularse a un bloqueo de pantalla porque este teléfono no tiene ninguno. Así, solo el PIN de la billetera queda entre la app y tus fondos. Configura un PIN, patrón o contraseña en los ajustes de Android: la billetera vinculará su clave la próxima vez que la app se inicie y abra la billetera. Los ajustes de seguridad muestran si la clave está vinculada.</string>
+    <string name="ksb_notice_ok">Entendido</string>
+    <string name="sec_seed_key">Clave de la billetera</string>
+    <string name="sec_seed_key_bound">Vinculada al bloqueo de pantalla de este teléfono</string>
+    <string name="sec_seed_key_pending">Aún no vinculada: se vinculará a tu bloqueo de pantalla la próxima vez que la app se inicie y abra la billetera</string>
+    <string name="sec_seed_key_no_lock">No vinculada: este teléfono no tiene bloqueo de pantalla. Configura uno en los ajustes de Android.</string>
+    <string name="sec_seed_key_lock_removed">Se quitó el bloqueo de pantalla después de configurar esta billetera, así que su clave ya no abre, ni siquiera con un bloqueo nuevo. Mientras la billetera siga abierta, comprueba que tienes anotada tu frase de recuperación o mueve tus fondos ahora: la próxima vez que se inicie la app, la billetera necesitará su frase de recuperación.</string>
+    <string name="sec_seed_key_cannot_bind">No vinculada: una clave de un bloqueo de pantalla anterior ya no funciona, así que la clave de esta billetera no puede vincularse en esta instalación. Borrar la billetera y restaurarla con su frase de recuperación la vincula.</string>
 </resources>

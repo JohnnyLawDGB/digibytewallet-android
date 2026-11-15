@@ -1,5 +1,6 @@
 package app.aroundtheblock.wallet.core.asset.network
 
+import app.aroundtheblock.wallet.core.LogSafe
 import app.aroundtheblock.wallet.core.LogTag
 
 import app.aroundtheblock.wallet.core.network.BoundedBody
@@ -142,7 +143,7 @@ class DigiScopeAssetClient(
             if (!resp.isSuccessful) {
                 android.util.Log.w(
                     "DigiScopeAssetClient",
-                    "GET ${endpointOf(url)} returned HTTP ${resp.code} ${resp.message}"
+                    "GET ${endpointOf(url)} returned HTTP ${resp.code} ${LogSafe.text(resp.message)}"
                 )
                 return null
             }
@@ -156,8 +157,9 @@ class DigiScopeAssetClient(
     } catch (t: Throwable) {
         android.util.Log.w(
             "DigiScopeAssetClient",
-            "GET ${endpointOf(url)} threw ${t::class.java.simpleName}: ${t.message}",
-            t
+            // ASSET-LOG-CRLF: not the throwable -- org.json quotes the whole input in its message,
+            // and the stack trace prints that message raw.
+            "GET ${endpointOf(url)} threw ${t::class.java.simpleName}: ${LogSafe.text(t.message)}"
         )
         null
     }

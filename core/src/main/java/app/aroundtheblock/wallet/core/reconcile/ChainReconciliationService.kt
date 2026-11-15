@@ -267,14 +267,14 @@ class ChainReconciliationService(
     private suspend fun classify(utxos: List<UtxoEntry>): ScanPartition? {
         val lines = utxos.map { "${it.txid.lowercase()}|${it.vout}" }.toTypedArray()
         val codes = runCatching { NativeBridge.classifyOutpoints(lines) }.getOrNull()
-        val walletOnly = runCatching { walletOnlyOf(NativeBridge.spendableNotListed(lines)) }.getOrNull()
+        val walletOnly = runCatching { walletOnlyOf(NativeBridge.balanceCoinsNotListed(lines)) }.getOrNull()
         val balance = runCatching { NativeBridge.getBalance() }.getOrDefault(0L)
         return partitionScan(
             utxos = utxos,
             codes = codes,
             heldKind = { u -> heldKindOf(assetManager?.heldOutputFacts(u.txid.lowercase(), u.vout), u.vout) },
             walletOnly = walletOnly,
-            walletSpendableSat = balance,
+            walletBalanceSat = balance,
         )
     }
 

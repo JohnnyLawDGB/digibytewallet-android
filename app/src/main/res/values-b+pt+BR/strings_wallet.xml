@@ -543,6 +543,7 @@
     <string name="sec_autolock_30m">30 minutos</string>
     <string name="sec_autolock_custom">Personalizado</string>
     <string name="sec_pin_changed">PIN alterado com sucesso</string>
+    <string name="sec_pin_change_failed">Não foi possível salvar o novo PIN. Seu PIN antigo continua ativo.</string>
     <string name="sec_pins_mismatch">Os PINs não coincidem</string>
     <string name="sec_biometric_required">Autenticação biométrica necessária</string>
     <string name="did_logged_in">Você entrou em %1$s</string>
@@ -611,6 +612,9 @@
     <string name="send_fail_unknown">Não foi possível enviar a transação.</string>
     <string name="send_fail_try_again">Tentar de novo</string>
     <string name="rf_splitting_for_assets">Preparando para mover %1$d DigiAssets: seus DGB estão sendo divididos para que cada um pague sua própria taxa de transferência. Aguarda uma confirmação, normalmente menos de um minuto.</string>
+    <string name="rf_fanout_short">Seus DigiAssets ficaram na carteira antiga: movê-los exige %1$s nela para as taxas. Seus DGB foram movidos. Para mover os ativos, envie %1$s para a carteira antiga em uma única transação e execute Recuperar fundos novamente.</string>
+    <string name="rf_fanout_unread">Seus DigiAssets ficaram na carteira antiga: movê-los exige %1$s nela para as taxas. Seus DGB foram movidos, exceto %2$d moeda(s) que não puderam ser verificadas e ficaram na carteira antiga. Para mover os ativos, envie %1$s para a carteira antiga em uma única transação e execute Recuperar fundos novamente.</string>
+    <string name="rf_fanout_failed">Seus DigiAssets ficaram na carteira antiga: a etapa que divide os DGB para as taxas de transferência não pôde ser concluída. Seus DGB foram movidos. Os ativos continuam na frase antiga; execute Recuperar fundos novamente e ele informará o valor de que a carteira antiga precisa.</string>
     <string name="rf_nothing_moved">Nada foi movido</string>
     <string name="rf_dd_fee_floor">Precisa de %1$s de taxa de rede: esta carteira tem %2$s.</string>
     <string name="rf_dd_found">%1$s em DigiDollar encontrados</string>
@@ -643,10 +647,10 @@
          Machine-assisted. -->
     <string name="reconcile_outputs_found">Saídas encontradas na blockchain</string>
     <string name="reconcile_found_not_compared">Encontrado na blockchain, não comparado</string>
-    <string name="reconcile_spendable">Gastável</string>
-    <string name="reconcile_wallet_spendable">Saldo gastável da carteira</string>
-    <string name="reconcile_matches_wallet">Corresponde ao saldo gastável da carteira.</string>
-    <string name="reconcile_does_not_match_wallet">Não corresponde ao saldo gastável da carteira: veja abaixo.</string>
+    <string name="reconcile_in_balance">Contado no saldo</string>
+    <string name="reconcile_wallet_balance">Saldo da carteira</string>
+    <string name="reconcile_matches_wallet_balance">Corresponde ao saldo da carteira.</string>
+    <string name="reconcile_does_not_match_wallet_balance">Não corresponde ao saldo da carteira: veja abaixo.</string>
     <string name="reconcile_held_asset">Retido para um DigiAsset</string>
     <string name="reconcile_held_unknown">Retido: estado do ativo desconhecido</string>
     <string name="reconcile_proven_plain">DGB comum, gastável após reiniciar</string>
@@ -722,6 +726,9 @@
     <string name="seedview_pass_unreadable_title">Não foi possível ler a frase-senha</string>
     <string name="seedview_pass_unreadable_body">A frase-senha desta carteira não pôde ser lida agora. Suas palavras de recuperação sozinhas podem não restaurar esta carteira, por isso elas só aparecem quando a frase-senha puder aparecer junto. Tente novamente.</string>
     <string name="seedview_pass_retry">Tentar novamente</string>
+    <!-- SEED-VIEW-AUTH -->
+    <string name="seedview_device_lock_title">Confirme o bloqueio de tela</string>
+    <string name="seedview_device_lock_body">Sua frase de recuperação é protegida pelo bloqueio de tela deste telefone. Para exibi-la, confirme o bloqueio de tela com seu PIN, padrão ou senha.</string>
     <!-- /pkg E2-keys -->
     <string name="pinstore_title">Seu PIN não pode ser verificado agora</string>
     <string name="pinstore_body">O armazenamento seguro de chaves do celular não abriu, então a carteira continua bloqueada. Nada foi apagado. Feche o app e abra de novo. Se continuar acontecendo, reinicie o celular; sua frase de recuperação ainda restaura a carteira em qualquer aparelho.</string>
@@ -735,4 +742,15 @@
     <string name="reconcile_rebuild_button">Reconstrução completa a partir da cadeia (nova varredura)</string>
     <string name="rf_capped_body">A varredura chegou ao limite em %1$s enquanto esse caminho ainda estava em uso, então pode haver mais fundos lá do que o mostrado. O que não aparece continua seguro na cadeia.</string>
     <string name="reconcile_stuck_stale_cleared">, %1$d delas nunca foram retransmitidas (após um dia a rede não tinha nem elas nem nada gastando suas moedas). Se algum desses pagamentos chegou ao destinatário, ele ainda pode ser confirmado: confirme com ele antes de pagar de novo</string>
+    <!-- KS-BIND: seed key bound to the device lock -->
+    <string name="ksb_prompt_subtitle">Confirme o bloqueio de tela uma vez para que a chave da carteira possa ser vinculada a ele</string>
+    <string name="ksb_notice_title">Este celular não tem bloqueio de tela</string>
+    <string name="ksb_notice_body">Sua carteira está criptografada neste celular, mas a chave dela não pode ser vinculada a um bloqueio de tela, porque este celular não tem nenhum. Assim, só o PIN da carteira fica entre o app e seus fundos. Defina um PIN, padrão ou senha nas configurações do Android: a carteira vincula a chave a ele na próxima vez que o app iniciar e abrir a carteira. As configurações de segurança mostram se a chave está vinculada.</string>
+    <string name="ksb_notice_ok">Entendi</string>
+    <string name="sec_seed_key">Chave da carteira</string>
+    <string name="sec_seed_key_bound">Vinculada ao bloqueio de tela deste celular</string>
+    <string name="sec_seed_key_pending">Ainda não vinculada: será vinculada ao seu bloqueio de tela na próxima vez que o app iniciar e abrir a carteira</string>
+    <string name="sec_seed_key_no_lock">Não vinculada: este celular não tem bloqueio de tela. Defina um nas configurações do Android.</string>
+    <string name="sec_seed_key_lock_removed">O bloqueio de tela foi removido depois que esta carteira foi configurada, então a chave dela não abre mais, mesmo com um novo bloqueio. Enquanto a carteira ainda está aberta, confira se a frase de recuperação está anotada ou mova seus fundos agora: na próxima vez que o app iniciar, a carteira vai precisar da frase de recuperação.</string>
+    <string name="sec_seed_key_cannot_bind">Não vinculada: uma chave de um bloqueio de tela anterior não funciona mais, então a chave desta carteira não pode ser vinculada nesta instalação. Apagar a carteira e restaurá-la pela frase de recuperação faz o vínculo.</string>
 </resources>

@@ -27,6 +27,7 @@ import androidx.fragment.app.FragmentActivity
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import app.aroundtheblock.wallet.BootGuard
+import app.aroundtheblock.wallet.core.LogSafe
 import app.aroundtheblock.wallet.core.WalletManager
 import app.aroundtheblock.wallet.core.security.BiometricAuth
 import app.aroundtheblock.wallet.core.security.BiometricResult
@@ -267,7 +268,7 @@ fun UnlockScreen(
             android.util.Log.e("UnlockScreen", "wallet key permanently invalidated", e)
             errorMessage = deviceLockRemovedMsg
         } catch (t: Throwable) {
-            android.util.Log.e("UnlockScreen", "unlock failed: ${t.message}", t)
+            android.util.Log.e("UnlockScreen", "unlock failed: ${LogSafe.text(t.message)}", t)
             errorMessage = unlockFailedMsg
         } finally {
             isUnlocking = false

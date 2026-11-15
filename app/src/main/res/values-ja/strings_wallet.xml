@@ -537,6 +537,7 @@
     <string name="sec_autolock_30m">30 分</string>
     <string name="sec_autolock_custom">カスタム</string>
     <string name="sec_pin_changed">PIN を変更しました</string>
+    <string name="sec_pin_change_failed">新しい PIN を保存できませんでした。以前の PIN が引き続き有効です。</string>
     <string name="sec_pins_mismatch">PIN が一致しません</string>
     <string name="sec_biometric_required">生体認証が必要です</string>
     <string name="did_logged_in">%1$s にログインしました</string>
@@ -605,6 +606,9 @@
     <string name="send_fail_unknown">取引を送信できませんでした。</string>
     <string name="send_fail_try_again">再試行</string>
     <string name="rf_splitting_for_assets">%1$d 件の DigiAssets を移す準備中です。各資産が自分の送信手数料を支払えるよう DGB を分割しています。確認を 1 回待ちます（通常 1 分未満）。</string>
+    <string name="rf_fanout_short">DigiAssets は古いウォレットに残りました。移すには、手数料としてそこに %1$s が必要です。DGB は移されました。資産を移すには、古いウォレットに %1$s を 1 回の送金でまとめて送ってから、もう一度資金の回収を実行してください。</string>
+    <string name="rf_fanout_unread">DigiAssets は古いウォレットに残りました。移すには、手数料としてそこに %1$s が必要です。DGB は移されましたが、確認できなかった %2$d 件のコインは古いウォレットに残っています。資産を移すには、古いウォレットに %1$s を 1 回の送金でまとめて送ってから、もう一度資金の回収を実行してください。</string>
+    <string name="rf_fanout_failed">DigiAssets は古いウォレットに残りました。送信手数料のために DGB を分割する手順を完了できませんでした。DGB は移されました。資産は古いフレーズに残っています。もう一度資金の回収を実行すると、古いウォレットに必要な金額が表示されます。</string>
     <string name="rf_nothing_moved">何も移動されませんでした</string>
     <string name="rf_dd_fee_floor">ネットワーク手数料に %1$s が必要です。このウォレットには %2$s しかありません。</string>
     <string name="rf_dd_found">DigiDollar %1$s が見つかりました</string>
@@ -637,10 +641,10 @@
          Machine-assisted. -->
     <string name="reconcile_outputs_found">ブロックチェーン上で見つかったアウトプット</string>
     <string name="reconcile_found_not_compared">ブロックチェーン上で見つかりました（比較なし）</string>
-    <string name="reconcile_spendable">使用可能</string>
-    <string name="reconcile_wallet_spendable">ウォレットの使用可能残高</string>
-    <string name="reconcile_matches_wallet">ウォレットの使用可能残高と一致しています。</string>
-    <string name="reconcile_does_not_match_wallet">ウォレットの使用可能残高と一致しません：下記を参照してください。</string>
+    <string name="reconcile_in_balance">残高に含まれる</string>
+    <string name="reconcile_wallet_balance">ウォレットの残高</string>
+    <string name="reconcile_matches_wallet_balance">ウォレットの残高と一致しています。</string>
+    <string name="reconcile_does_not_match_wallet_balance">ウォレットの残高と一致しません：下記を参照してください。</string>
     <string name="reconcile_held_asset">DigiAsset 用に確保</string>
     <string name="reconcile_held_unknown">確保：アセットの状態は不明</string>
     <string name="reconcile_proven_plain">通常の DGB（再起動後に使用可能）</string>
@@ -712,6 +716,9 @@
     <string name="seedview_pass_unreadable_title">パスフレーズを読み取れませんでした</string>
     <string name="seedview_pass_unreadable_body">このウォレットのパスフレーズを今は読み取れませんでした。リカバリーワードだけではこのウォレットを復元できない可能性があるため、パスフレーズを一緒に表示できるまで表示されません。もう一度お試しください。</string>
     <string name="seedview_pass_retry">再試行</string>
+    <!-- SEED-VIEW-AUTH -->
+    <string name="seedview_device_lock_title">画面ロックを確認してください</string>
+    <string name="seedview_device_lock_body">リカバリーフレーズはこの端末の画面ロックで保護されています。表示するには、PIN、パターン、またはパスワードで画面ロックを確認してください。</string>
     <!-- /pkg E2-keys -->
     <string name="pinstore_title">現在 PIN を確認できません</string>
     <string name="pinstore_body">端末の安全なキーストアを開けなかったため、ウォレットはロックされたままです。何も削除されていません。アプリを閉じてもう一度開いてください。繰り返し起きる場合は端末を再起動してください。リカバリーフレーズがあれば、どの端末でもウォレットを復元できます。</string>
@@ -725,4 +732,15 @@
     <string name="reconcile_rebuild_button">チェーンから完全に再構築（再スキャン）</string>
     <string name="rf_capped_body">%1$s でスキャンが上限に達した時点で、そのパスはまだ使用中でした。表示以上の資金がある可能性があります。表示されていない分もチェーン上で安全です。</string>
     <string name="reconcile_stuck_stale_cleared">、うち %1$d 件は一度も中継されていません（1 日後もネットワークにはそれらも、そのコインを使う取引もありませんでした）。そのうちの支払いが受取人に届いていた場合、まだ承認される可能性があります。再度支払う前に受取人に確認してください</string>
+    <!-- KS-BIND: seed key bound to the device lock -->
+    <string name="ksb_prompt_subtitle">ウォレットの鍵を画面ロックに結び付けるため、画面ロックを一度確認してください</string>
+    <string name="ksb_notice_title">このスマートフォンには画面ロックがありません</string>
+    <string name="ksb_notice_body">ウォレットはこのスマートフォン上で暗号化されていますが、画面ロックが設定されていないため、その鍵を画面ロックに結び付けることができません。この場合、アプリと資金の間にあるのはウォレットの PIN だけです。Android の設定で PIN、パターン、またはパスワードを設定してください。次にアプリが起動してウォレットを開いたときに、ウォレットが鍵をそれに結び付けます。鍵が結び付けられているかはセキュリティ設定で確認できます。</string>
+    <string name="ksb_notice_ok">了解しました</string>
+    <string name="sec_seed_key">ウォレットの鍵</string>
+    <string name="sec_seed_key_bound">このスマートフォンの画面ロックに結び付けられています</string>
+    <string name="sec_seed_key_pending">まだ結び付けられていません：次にアプリが起動してウォレットを開いたときに画面ロックに結び付けられます</string>
+    <string name="sec_seed_key_no_lock">結び付けられていません：このスマートフォンには画面ロックがありません。Android の設定で設定してください。</string>
+    <string name="sec_seed_key_lock_removed">このウォレットの設定後に画面ロックが解除されたため、新しいロックを設定しても、その鍵はもう開けません。ウォレットが開いているうちに、復元フレーズが書き留めてあるか確認するか、今すぐ資金を移動してください。次にアプリが起動したとき、ウォレットには復元フレーズが必要です。</string>
+    <string name="sec_seed_key_cannot_bind">結び付けられていません：以前の画面ロックの鍵が使えなくなっているため、このインストールではこのウォレットの鍵を結び付けられません。ウォレットを消去し、復元フレーズから復元すると結び付けられます。</string>
 </resources>

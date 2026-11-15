@@ -39,7 +39,8 @@ class AssetSendSelectionTest {
     private fun choose(
         source: AssetStackSource?, rows: List<UtxoEntity>, qty: Long,
         fees: List<UtxoEntity> = listOf(fee("f")), parentHasData: (String) -> Boolean? = { false },
-    ) = runBlocking { AssetSendSelection(source, parentHasData).choose(asset, rows, fees, qty, 100_000L) }
+        otherFamily: (String, Int) -> Boolean? = { _, _ -> false },
+    ) = runBlocking { AssetSendSelection(source, parentHasData, otherFamily).choose(asset, rows, fees, qty, 100_000L) }
 
     // ── AssetInputCheck ──────────────────────────────────────────────────────────────────────
 
@@ -144,7 +145,7 @@ class AssetSendSelectionTest {
 
     @Test fun a_confirmed_output_is_not_asked_again_in_the_same_process() {
         val src = FakeSource(mapOf("a" to found(asset to 5)))
-        val sel = AssetSendSelection(src) { false }
+        val sel = AssetSendSelection(src, { false }) { _, _ -> false }
         runBlocking {
             sel.choose(asset, listOf(row("a", 5)), listOf(fee("f")), 3, 100_000L)
             sel.choose(asset, listOf(row("a", 5)), listOf(fee("f")), 2, 100_000L)
@@ -161,7 +162,7 @@ class AssetSendSelectionTest {
             override suspend fun stackOf(txid: String, vout: Int) =
                 if (txid == "new") answer else found(other to 9)
         }
-        val sel = AssetSendSelection(src) { false }
+        val sel = AssetSendSelection(src, { false }) { _, _ -> false }
         runBlocking {
             assertEquals(AssetSendSelection.Outcome.Unconfirmed, sel.choose(asset, listOf(row("new", 5)), listOf(fee("f")), 3, 100_000L))
             answer = found(asset to 5)

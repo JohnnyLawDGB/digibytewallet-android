@@ -195,6 +195,7 @@ class RecoveryScanClassifyTest {
                 // could tell" keeps them testing what they test rather than the new guard.
                 fetchRawTx = { byteArrayOf(1) },
                 isAssetTx = { false },
+                rawOutputScripts = { null },  // not an asset path: no scripts are read
             ),
             parents = parents.binding,
             // The real native signer: reaching it is what this test observes.

@@ -24,6 +24,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import app.aroundtheblock.wallet.core.LogSafe
 import com.google.zxing.*
 import com.google.zxing.common.HybridBinarizer
 import app.aroundtheblock.wallet.core.model.DigiByteUri
@@ -309,7 +310,7 @@ private class ZxingAnalyzer(private val onResult: (String) -> Unit) : ImageAnaly
         } catch (_: NotFoundException) {
             // No QR in this frame — normal, ignore
         } catch (e: Exception) {
-            Log.w(TAG, "ZXing error: ${e.message}")
+            Log.w(TAG, "ZXing error: ${LogSafe.text(e.message)}")
         } finally {
             image.close()
         }

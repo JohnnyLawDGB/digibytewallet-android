@@ -221,8 +221,14 @@ static size_t b_write_varint(uint8_t *buf, uint64_t val)
         buf[2] = (uint8_t)((val >> 8) & 0xff);
         return 3;
     }
-    buf[0] = (uint8_t)val;
-    return 1;
+    if (val <= 0xffffffffULL) {   /* signed_message.h, MSG-LEN */
+        buf[0] = 0xfe;
+        for (int i = 0; i < 4; i++) buf[1 + i] = (uint8_t)((val >> (8 * i)) & 0xff);
+        return 5;
+    }
+    buf[0] = 0xff;
+    for (int i = 0; i < 8; i++) buf[1 + i] = (uint8_t)((val >> (8 * i)) & 0xff);
+    return 9;
 }
 
 // message_utf8, from the string's UTF-16 units: a buffer the caller frees, *outLen bytes.
@@ -676,11 +682,12 @@ static void shared_key_derivation(void)
 
 static void message_prefix(void)
 {
-    static const struct { size_t len; uint8_t bytes[3]; size_t n; } V[] = {
+    static const struct { size_t len; uint8_t bytes[9]; size_t n; } V[] = {
         { 0, { 0x00 }, 1 }, { 1, { 0x01 }, 1 }, { 0xfc, { 0xfc }, 1 }, { 0xfd, { 0xfd, 0xfd, 0x00 }, 3 },
         { 0xfe, { 0xfd, 0xfe, 0x00 }, 3 }, { 0x100, { 0xfd, 0x00, 0x01 }, 3 }, { 0xffff, { 0xfd, 0xff, 0xff }, 3 },
-        { 0x10000, { 0x00 }, 1 }, { 0x10001, { 0x01 }, 1 }, { 0x100fc, { 0xfc }, 1 }, { 0x100fd, { 0xfd }, 1 },
-        { 0x1ffff, { 0xff }, 1 }, { 0xffffffffu, { 0xff }, 1 },
+        { 0x10000, { 0xfe, 0x00, 0x00, 0x01, 0x00 }, 5 }, { 0x10001, { 0xfe, 0x01, 0x00, 0x01, 0x00 }, 5 },
+        { 0x100fd, { 0xfe, 0xfd, 0x00, 0x01, 0x00 }, 5 }, { 0x1ffff, { 0xfe, 0xff, 0xff, 0x01, 0x00 }, 5 },
+        { 0xffffffffu, { 0xfe, 0xff, 0xff, 0xff, 0xff }, 5 },
     };
     uint8_t p[BR_DIGIID_MESSAGE_PREFIX_MAX], q[9];
     size_t i, n, m;
@@ -694,9 +701,14 @@ static void message_prefix(void)
         ck(BRDigiIdDigestWorkSize(V[i].len) == (V[i].len > SIZE_MAX - 26 - V[i].n ? 0 : 26 + V[i].n + V[i].len),
            "and its digest work is header + prefix + message");
     }
-    ck(BRDigiIdMessagePrefix(p, SIZE_MAX) == 1 && p[0] == 0xff, "SIZE_MAX: one byte, 0xff");
-    ck(BRDigiIdDigestWorkSize(SIZE_MAX) == 0 && BRDigiIdDigestWorkSize(SIZE_MAX - 27) == SIZE_MAX && BRDigiIdDigestWorkSize(SIZE_MAX - 26) == 0,
+    {
+        const size_t pmax = SIZE_MAX > 0xffffffffu ? 9 : 5;   /* SIZE_MAX's own prefix */
+        ck(BRDigiIdMessagePrefix(p, SIZE_MAX) == pmax && p[0] == (pmax == 9 ? 0xff : 0xfe) && p[1] == 0xff && p[pmax - 1] == 0xff,
+           "SIZE_MAX: a full compact size, %zu bytes", pmax);
+        ck(BRDigiIdDigestWorkSize(SIZE_MAX) == 0 && BRDigiIdDigestWorkSize(SIZE_MAX - 26 - pmax) == SIZE_MAX &&
+           BRDigiIdDigestWorkSize(SIZE_MAX - 25 - pmax) == 0,
        "a message length that does not fit with its header has no work size");
+    }
 }
 
 static void message_digest(void)

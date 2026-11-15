@@ -529,6 +529,7 @@
     <string name="sec_autolock_30m">30 minutes</string>
     <string name="sec_autolock_custom">Personnalisé</string>
     <string name="sec_pin_changed">Code PIN modifié avec succès</string>
+    <string name="sec_pin_change_failed">Le nouveau code PIN n’a pas pu être enregistré. Votre ancien code PIN reste actif.</string>
     <string name="sec_pins_mismatch">Les codes PIN ne correspondent pas</string>
     <string name="sec_biometric_required">Authentification biométrique requise</string>
     <string name="did_logged_in">Vous êtes maintenant connecté à %1$s</string>
@@ -591,6 +592,9 @@
     <string name="send_fail_unknown">La transaction n\'a pas pu être envoyée.</string>
     <string name="send_fail_try_again">Réessayer</string>
     <string name="rf_splitting_for_assets">Préparation du déplacement de %1$d DigiAssets : vos DGB sont répartis pour que chacun puisse payer ses propres frais de transfert. Attente d\'une confirmation, généralement moins d\'une minute.</string>
+    <string name="rf_fanout_short">Vos DigiAssets sont restés dans l\'ancien portefeuille : les déplacer demande %1$s sur celui-ci pour les frais. Vos DGB ont été déplacés. Pour déplacer les actifs, envoyez %1$s à l\'ancien portefeuille en une seule transaction et relancez Récupérer des fonds.</string>
+    <string name="rf_fanout_unread">Vos DigiAssets sont restés dans l\'ancien portefeuille : les déplacer demande %1$s sur celui-ci pour les frais. Vos DGB ont été déplacés, sauf %2$d pièce(s) qui n\'ont pas pu être vérifiées et sont restées dans l\'ancien portefeuille. Pour déplacer les actifs, envoyez %1$s à l\'ancien portefeuille en une seule transaction et relancez Récupérer des fonds.</string>
+    <string name="rf_fanout_failed">Vos DigiAssets sont restés dans l\'ancien portefeuille : l\'étape qui répartit les DGB pour leurs frais de transfert n\'a pas pu aboutir. Vos DGB ont été déplacés. Les actifs sont toujours sur l\'ancienne phrase ; relancez Récupérer des fonds et il indiquera le montant dont l\'ancien portefeuille a besoin.</string>
     <string name="rf_nothing_moved">Rien n’a été déplacé</string>
     <string name="rf_dd_fee_floor">Nécessite %1$s de frais de réseau : ce portefeuille a %2$s.</string>
     <string name="rf_dd_found">%1$s en DigiDollar trouvés</string>
@@ -623,10 +627,10 @@
          Machine-assisted. -->
     <string name="reconcile_outputs_found">Sorties trouvées sur la blockchain</string>
     <string name="reconcile_found_not_compared">Trouvé sur la blockchain, non comparé</string>
-    <string name="reconcile_spendable">Dépensable</string>
-    <string name="reconcile_wallet_spendable">Solde dépensable du portefeuille</string>
-    <string name="reconcile_matches_wallet">Correspond au solde dépensable du portefeuille.</string>
-    <string name="reconcile_does_not_match_wallet">Ne correspond pas au solde dépensable du portefeuille : voir ci-dessous.</string>
+    <string name="reconcile_in_balance">Compté dans le solde</string>
+    <string name="reconcile_wallet_balance">Solde du portefeuille</string>
+    <string name="reconcile_matches_wallet_balance">Correspond au solde du portefeuille.</string>
+    <string name="reconcile_does_not_match_wallet_balance">Ne correspond pas au solde du portefeuille : voir ci-dessous.</string>
     <string name="reconcile_held_asset">Retenu pour un DigiAsset</string>
     <string name="reconcile_held_unknown">Retenu : état de l\'actif inconnu</string>
     <string name="reconcile_proven_plain">DGB ordinaire, dépensable après redémarrage</string>
@@ -702,6 +706,9 @@
     <string name="seedview_pass_unreadable_title">Impossible de lire la phrase secrète</string>
     <string name="seedview_pass_unreadable_body">La phrase secrète de ce portefeuille n\'a pas pu être lue pour le moment. Vos mots de récupération seuls risquent de ne pas restaurer ce portefeuille : ils ne s\'affichent donc que lorsque la phrase secrète peut s\'afficher avec eux. Réessayez.</string>
     <string name="seedview_pass_retry">Réessayer</string>
+    <!-- SEED-VIEW-AUTH -->
+    <string name="seedview_device_lock_title">Confirmez le verrouillage de l\'écran</string>
+    <string name="seedview_device_lock_body">Votre phrase de récupération est protégée par le verrouillage de l\'écran de ce téléphone. Pour l\'afficher, confirmez le verrouillage avec votre code PIN, votre schéma ou votre mot de passe.</string>
     <!-- /pkg E2-keys -->
     <string name="pinstore_title">Votre code PIN ne peut pas être vérifié pour l\'instant</string>
     <string name="pinstore_body">Le stockage sécurisé des clés du téléphone ne s\'est pas ouvert : le portefeuille reste verrouillé. Rien n\'a été supprimé. Fermez l\'application et rouvrez-la. Si cela se reproduit, redémarrez le téléphone ; votre phrase de récupération restaure toujours le portefeuille sur n\'importe quel appareil.</string>
@@ -715,4 +722,15 @@
     <string name="reconcile_rebuild_button">Reconstruction complète depuis la chaîne (réanalyse)</string>
     <string name="rf_capped_body">Le scan a atteint sa limite sur %1$s alors que ce chemin était encore utilisé : il peut donc y avoir plus de fonds que ce qui est affiché. Ce qui n’est pas affiché reste en sécurité sur la chaîne.</string>
     <string name="reconcile_stuck_stale_cleared">, dont %1$d jamais relayées (après un jour, le réseau n’avait ni elles ni rien qui dépense leurs pièces). Si l’un de ces paiements a bien atteint son destinataire, il peut encore être confirmé : vérifiez auprès de lui avant de payer à nouveau</string>
+    <!-- KS-BIND: seed key bound to the device lock -->
+    <string name="ksb_prompt_subtitle">Confirmez une fois votre verrouillage d’écran pour que la clé du portefeuille puisse y être liée</string>
+    <string name="ksb_notice_title">Ce téléphone n’a pas de verrouillage d’écran</string>
+    <string name="ksb_notice_body">Votre portefeuille est chiffré sur ce téléphone, mais sa clé ne peut pas être liée à un verrouillage d’écran, car ce téléphone n’en a pas. Seul le code PIN du portefeuille se trouve alors entre l’application et vos fonds. Définissez un code, un schéma ou un mot de passe dans les paramètres Android : le portefeuille y liera sa clé la prochaine fois que l’application démarrera et ouvrira le portefeuille. Les paramètres de sécurité indiquent si la clé est liée.</string>
+    <string name="ksb_notice_ok">J’ai compris</string>
+    <string name="sec_seed_key">Clé du portefeuille</string>
+    <string name="sec_seed_key_bound">Liée au verrouillage d’écran de ce téléphone</string>
+    <string name="sec_seed_key_pending">Pas encore liée : elle sera liée à votre verrouillage d’écran la prochaine fois que l’application démarrera et ouvrira le portefeuille</string>
+    <string name="sec_seed_key_no_lock">Non liée : ce téléphone n’a pas de verrouillage d’écran. Définissez-en un dans les paramètres Android.</string>
+    <string name="sec_seed_key_lock_removed">Le verrouillage d’écran a été supprimé après la configuration de ce portefeuille, sa clé ne s’ouvre donc plus, même avec un nouveau verrouillage. Tant que le portefeuille est encore ouvert, vérifiez que votre phrase de récupération est notée, ou déplacez vos fonds maintenant : au prochain démarrage de l’application, le portefeuille aura besoin de sa phrase de récupération.</string>
+    <string name="sec_seed_key_cannot_bind">Non liée : une clé issue d’un ancien verrouillage d’écran ne fonctionne plus, la clé de ce portefeuille ne peut donc pas être liée sur cette installation. Effacer le portefeuille et le restaurer avec sa phrase de récupération la lie.</string>
 </resources>

@@ -58,12 +58,15 @@ fun SecuritySettingsScreen(
 ) {
     val appResources = androidx.compose.ui.platform.LocalContext.current.resources
     val pinChangedMsg = stringResource(R.string.sec_pin_changed)
+    val pinChangeFailedMsg = stringResource(R.string.sec_pin_change_failed)
     val pinsMismatchMsg = stringResource(R.string.sec_pins_mismatch)
     val bioRequiredMsg = stringResource(R.string.sec_biometric_required)
     // Hoisted: used inside click/callback lambdas, which are not composable.
     val wipeEnabledMsg = stringResource(R.string.sec_wipe_after_enabled, PinManager.WIPE_THRESHOLD)
     val authViewPhraseMsg = stringResource(R.string.sec_auth_view_phrase)
     val appName = stringResource(R.string.app_name_display)
+    // SEED-VIEW-AUTH: the seed-view biometric gate's negative button cancels; it says so.
+    val cancelLabel = stringResource(R.string.common_cancel)
     val incorrectPinMsg = stringResource(R.string.sec_incorrect_pin)
     val context = LocalContext.current
     val activity = context as? FragmentActivity
@@ -91,6 +94,14 @@ fun SecuritySettingsScreen(
     )
     val currentTimeout by viewModel.autoLockTimeout.collectAsStateWithLifecycle()
     val wipeAfterNEnabled by viewModel.wipeAfterNEnabled.collectAsStateWithLifecycle()
+
+    // KS-BIND: whether the seed key is bound to the device lock. Read once per visit, off the main
+    // thread (it asks the KeyguardManager and the record store); null until it answers.
+    val seedKeyStatus by produceState<app.aroundtheblock.wallet.core.security.SeedKeyStatus?>(null) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { walletManager.seedKeyStatus() }.getOrNull()
+        }
+    }
 
     val wipeResult by viewModel.wipeResult.collectAsStateWithLifecycle()
     LaunchedEffect(wipeResult) {
@@ -246,6 +257,16 @@ fun SecuritySettingsScreen(
                         subtitle = stringResource(R.string.sec_view_phrase_sub),
                         onClick = { activeDialog = SecurityDialog.ViewSeedWarning }
                     )
+                    seedKeyStatusSubtitle(seedKeyStatus)?.let { (bound, subtitle) ->
+                        SettingsRowDivider()
+                        SettingsRow(
+                            icon = if (bound) Icons.Default.Lock else Icons.Default.LockOpen,
+                            iconTint = if (bound) DigiByteAccent else Color(0xFFFFAA00),
+                            title = stringResource(R.string.sec_seed_key),
+                            subtitle = stringResource(subtitle),
+                            onClick = null,
+                        )
+                    }
                 }
             }
 
@@ -337,9 +358,13 @@ fun SecuritySettingsScreen(
                             pinError = null
                             if (pinInput.length == SEC_PIN_LENGTH) {
                                 if (pinInput == newPinFirst) {
-                                    viewModel.changePin(pinInput)
+                                    val newPin = pinInput
                                     resetDialogState()
-                                    snackMessage = pinChangedMsg
+                                    scope.launch {
+                                        // Success only once the new PIN is on disk; otherwise the old one still opens.
+                                        val landed = viewModel.changePin(newPin)
+                                        snackMessage = if (landed) pinChangedMsg else pinChangeFailedMsg
+                                    }
                                 } else {
                                     pinError = pinsMismatchMsg
                                     pinInput = ""
@@ -415,7 +440,8 @@ fun SecuritySettingsScreen(
                                                 val result = biometricAuth.authenticate(
                                                     activity,
                                                     title = appName,
-                                                    subtitle = authViewPhraseMsg
+                                                    subtitle = authViewPhraseMsg,
+                                                    negativeButtonText = cancelLabel
                                                 )
                                                 if (result is BiometricResult.Success) {
                                                     SeedViewGate.grant()
@@ -582,3 +608,20 @@ fun SecuritySettingsScreen(
         }
     }
 }
+
+/**
+ * KS-BIND: the Security-settings status line for the seed key — whether it is bound to the device
+ * lock — as (bound, subtitle). Null when there is nothing to say (no wallet, not yet read, or the
+ * key could not be asked: UNCHECKED).
+ */
+internal fun seedKeyStatusSubtitle(status: app.aroundtheblock.wallet.core.security.SeedKeyStatus?): Pair<Boolean, Int>? =
+    when (status) {
+        app.aroundtheblock.wallet.core.security.SeedKeyStatus.BOUND -> true to R.string.sec_seed_key_bound
+        app.aroundtheblock.wallet.core.security.SeedKeyStatus.PENDING -> false to R.string.sec_seed_key_pending
+        app.aroundtheblock.wallet.core.security.SeedKeyStatus.NO_LOCK_SCREEN -> false to R.string.sec_seed_key_no_lock
+        app.aroundtheblock.wallet.core.security.SeedKeyStatus.LOCK_REMOVED -> false to R.string.sec_seed_key_lock_removed
+        app.aroundtheblock.wallet.core.security.SeedKeyStatus.CANNOT_BIND -> false to R.string.sec_seed_key_cannot_bind
+        // UNCHECKED: the key could not be asked this visit; no evidence either way, so no line.
+        app.aroundtheblock.wallet.core.security.SeedKeyStatus.UNCHECKED,
+        app.aroundtheblock.wallet.core.security.SeedKeyStatus.NO_WALLET, null -> null
+    }

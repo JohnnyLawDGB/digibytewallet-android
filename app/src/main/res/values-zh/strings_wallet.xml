@@ -537,6 +537,7 @@
     <string name="sec_autolock_30m">30 分钟</string>
     <string name="sec_autolock_custom">自定义</string>
     <string name="sec_pin_changed">PIN 码修改成功</string>
+    <string name="sec_pin_change_failed">无法保存新的 PIN 码。您原来的 PIN 码仍然有效。</string>
     <string name="sec_pins_mismatch">PIN 码不一致</string>
     <string name="sec_biometric_required">需要生物识别认证</string>
     <string name="did_logged_in">您已登录 %1$s</string>
@@ -605,6 +606,9 @@
     <string name="send_fail_unknown">交易无法发送。</string>
     <string name="send_fail_try_again">重试</string>
     <string name="rf_splitting_for_assets">正在准备转移 %1$d 项 DigiAssets，正在拆分您的 DGB，使每一项都能支付自己的转账手续费。需等待一次确认，通常不到一分钟。</string>
+    <string name="rf_fanout_short">您的 DigiAssets 仍留在旧钱包中：转移它们需要旧钱包中有 %1$s 用于手续费。您的 DGB 已转移。要转移这些资产，请通过一笔交易向旧钱包发送 %1$s，然后再次运行找回资金。</string>
+    <string name="rf_fanout_unread">您的 DigiAssets 仍留在旧钱包中：转移它们需要旧钱包中有 %1$s 用于手续费。您的 DGB 已转移，但有 %2$d 枚无法核验的币仍留在旧钱包中。要转移这些资产，请通过一笔交易向旧钱包发送 %1$s，然后再次运行找回资金。</string>
+    <string name="rf_fanout_failed">您的 DigiAssets 仍留在旧钱包中：为其转账手续费拆分 DGB 的步骤未能完成。您的 DGB 已转移。这些资产仍在旧助记词上；再次运行找回资金，它会告诉您旧钱包需要多少金额。</string>
     <string name="rf_nothing_moved">没有转移任何资产</string>
     <string name="rf_dd_fee_floor">需要 %1$s 网络手续费：此钱包只有 %2$s。</string>
     <string name="rf_dd_found">找到 %1$s DigiDollar</string>
@@ -637,10 +641,10 @@
          Machine-assisted. -->
     <string name="reconcile_outputs_found">链上找到的输出</string>
     <string name="reconcile_found_not_compared">链上找到，未比对</string>
-    <string name="reconcile_spendable">可花费</string>
-    <string name="reconcile_wallet_spendable">钱包可花费余额</string>
-    <string name="reconcile_matches_wallet">与钱包的可花费余额一致。</string>
-    <string name="reconcile_does_not_match_wallet">与钱包的可花费余额不一致：见下文。</string>
+    <string name="reconcile_in_balance">计入余额</string>
+    <string name="reconcile_wallet_balance">钱包余额</string>
+    <string name="reconcile_matches_wallet_balance">与钱包余额一致。</string>
+    <string name="reconcile_does_not_match_wallet_balance">与钱包余额不一致：见下文。</string>
     <string name="reconcile_held_asset">为 DigiAsset 保留</string>
     <string name="reconcile_held_unknown">保留：资产状态未知</string>
     <string name="reconcile_proven_plain">普通 DGB，重启后可花费</string>
@@ -712,6 +716,9 @@
     <string name="seedview_pass_unreadable_title">无法读取密码短语</string>
     <string name="seedview_pass_unreadable_body">暂时无法读取此钱包的密码短语。仅凭您的助记词可能无法恢复此钱包，因此在密码短语能够与它们一起显示之前，不会显示这些助记词。请重试。</string>
     <string name="seedview_pass_retry">重试</string>
+    <!-- SEED-VIEW-AUTH -->
+    <string name="seedview_device_lock_title">请确认屏幕锁定</string>
+    <string name="seedview_device_lock_body">您的助记词受此手机的屏幕锁定保护。要显示它，请使用您的 PIN 码、图案或密码确认屏幕锁定。</string>
     <!-- /pkg E2-keys -->
     <string name="pinstore_title">暂时无法验证您的 PIN</string>
     <string name="pinstore_body">手机的安全密钥存储未能打开，因此钱包保持锁定。没有删除任何内容。请关闭应用后重新打开。如果仍然出现，请重启手机；您的恢复短语仍可在任何设备上恢复钱包。</string>
@@ -725,4 +732,15 @@
     <string name="reconcile_rebuild_button">从链上完全重建（重新扫描）</string>
     <string name="rf_capped_body">扫描在 %1$s 上达到上限时，该路径仍在使用中，因此那里的资金可能比显示的更多。未显示的部分仍安全地留在区块链上。</string>
     <string name="reconcile_stuck_stale_cleared">，其中 %1$d 笔从未被转发（一天后网络中既没有它们，也没有花费其币的交易）。如果其中某笔付款其实已到达收款方，它仍可能被确认：再次付款前请先与对方核实</string>
+    <!-- KS-BIND: seed key bound to the device lock -->
+    <string name="ksb_prompt_subtitle">请确认一次屏幕锁定，以便将钱包密钥与其绑定</string>
+    <string name="ksb_notice_title">此手机未设置屏幕锁定</string>
+    <string name="ksb_notice_body">您的钱包在此手机上已加密，但由于此手机未设置屏幕锁定，其密钥无法与屏幕锁定绑定。此时，应用与您的资金之间只有钱包 PIN 码。请在 Android 设置中设置 PIN 码、图案或密码：下次应用启动并打开钱包时，钱包会将密钥与其绑定。安全设置会显示密钥是否已绑定。</string>
+    <string name="ksb_notice_ok">我知道了</string>
+    <string name="sec_seed_key">钱包密钥</string>
+    <string name="sec_seed_key_bound">已与此手机的屏幕锁定绑定</string>
+    <string name="sec_seed_key_pending">尚未绑定：下次应用启动并打开钱包时将与您的屏幕锁定绑定</string>
+    <string name="sec_seed_key_no_lock">未绑定：此手机未设置屏幕锁定。请在 Android 设置中设置。</string>
+    <string name="sec_seed_key_lock_removed">此钱包设置后屏幕锁定被移除，因此即使设置了新的锁定，其密钥也无法再打开。趁钱包仍处于打开状态，请确认已记下恢复短语，或立即转移您的资金：下次应用启动时，钱包将需要其恢复短语。</string>
+    <string name="sec_seed_key_cannot_bind">未绑定：以前屏幕锁定留下的密钥已失效，因此此钱包的密钥无法在本次安装中绑定。清除钱包并用恢复短语恢复即可绑定。</string>
 </resources>

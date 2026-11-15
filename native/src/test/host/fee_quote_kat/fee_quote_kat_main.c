@@ -19,6 +19,14 @@
 //     Core's dust rule with Core's DigiDollar exemption (the send path's dust check refuses
 //     nothing a DigiDollar send emits).
 //
+// SEND-GATE-SET: the coins the check admits are the coins the wallet's own selection would spend
+// (BRWalletSelectableUTXOs), not the raw set its balance sums (BRWalletUTXOs). check_coin_foreign_unconfirmed
+// is red in run.sh's SEND-GATE-SET arm (-DSEND_GATE_SET_UNFIXED=1, the raw set); check_own_change_signs is
+// its guard (the wallet's own unconfirmed change is still spendable). check_budget_own_change is red in the
+// enumeration arm (-DSEND_GATE_SET_UNFIXED=2: the whole selectable set listed under one walk budget): each
+// input is asked alone (BRWalletOutpointSelectable), so many unconfirmed coins cannot use up the budget
+// before the gate reaches the one a send spends.
+//
 // MACRO CONVENTION: the header tests the VALUE of PREPARED_SEND_UNFIXED (#if, never #ifdef):
 // run.sh builds the comparison arm with -DPREPARED_SEND_UNFIXED=1 (today's behaviour: the
 // typical-size figure, nothing checked before signing) and the shipped arm with =0.
@@ -523,6 +531,152 @@ static void check_self_send_signs(void)
     BRWalletFree(w);
 }
 
+// SEND-GATE-SET: bytes spending `coin` (output n of a transaction the wallet holds): the approved payment
+// to p's destination plus change to the wallet, at `fee`. Returned as the bridge would hold them.
+static BRTransaction *spendingCoin(const Prepared *p, const BRTransaction *coin, uint32_t n, uint64_t fee)
+{
+    const BRTxOutput *o = &coin->outputs[n];
+    BRAddress own = BRWalletReceiveAddress(p->w, 1);
+    uint8_t ownScript[64]; size_t ownLen = BRAddressScriptPubKey(ownScript, sizeof(ownScript), own.s);
+    BRTransaction *t = BRTransactionNew();
+    BRTransactionAddInput(t, coin->txHash, n, o->amount, o->script, o->scriptLen, NULL, 0, NULL, 0, TXIN_SEQUENCE);
+    BRTransactionAddOutput(t, p->payAmount, p->payScript, p->payScriptLen);
+    BRTransactionAddOutput(t, o->amount - p->payAmount - fee, ownScript, ownLen);
+    BRTransaction *bytes = roundTrip(t);
+    BRTransactionFree(t);
+    return bytes;
+}
+
+// SEND-GATE-SET (red-then-green): a coin someone else sent, still unconfirmed, is in the wallet's coins
+// (the balance sums it) but the wallet's own selection never spends it; bytes spending it are refused.
+static void check_coin_foreign_unconfirmed(void)
+{
+    Prepared p;
+    ck(prepare(&p), "review prepares a send");
+    if (!p.bytes) { release(&p); return; }
+    BRAddress own = BRWalletReceiveAddress(p.w, 1);
+    BRTransaction *u = coinTx(own.s, 5000000, 0xB7);
+    u->blockHeight = TX_UNCONFIRMED;
+    u->timestamp = 0;
+    finalizeTxHash(u);
+    int reg = BRWalletRegisterTransaction(p.w, u);
+    ck(reg, "an unconfirmed receive from someone else is registered");
+    if (!reg) { BRTransactionFree(u); release(&p); return; }
+    ck(BRWalletUTXOs(p.w, NULL, 0) == BRWalletSelectableUTXOs(p.w, NULL, 0) + 1,
+       "it is among the wallet's coins and not among what selection spends");
+    BRTransaction *bytes = spendingCoin(&p, u, 0, 20000);
+    uint64_t fee = bytes ? BRWalletFeeForTx(p.w, bytes) : 0;
+    ck(bytes && fee == 20000, "the bytes spending it pay 20000 sat");
+    PreparedSendVerdict v = bytes ? checkAsApproved(&p, bytes, fee) : PREPARED_SEND_OK;
+    ck(v == PREPARED_SEND_COIN_UNAVAILABLE, "bytes spending a coin the wallet's selection would not spend are refused before signing (%s)", verdictName(v));
+    if (bytes) BRTransactionFree(bytes);
+    release(&p);
+}
+
+// SEND-GATE-SET guard: the wallet's own unconfirmed change is a coin its selection spends, so a send of
+// it still passes.
+static void check_own_change_signs(void)
+{
+    Prepared p;
+    ck(prepare(&p), "review prepares a send");
+    if (!p.bytes) { release(&p); return; }
+    int s = BRWalletSignTransaction(p.w, p.bytes, 0, g_seed, sizeof(g_seed));
+    int reg = s && BRWalletRegisterTransaction(p.w, p.bytes);
+    ck(reg, "the first send is signed and registered, unconfirmed");
+    if (!reg) { release(&p); return; }
+    BRTransaction *first = p.bytes;
+    p.bytes = NULL;   // the wallet's now
+    const BRTxOutput *change = changeOf(&p);
+    ck(change != NULL, "it has a change output");
+    if (!change) { release(&p); return; }
+    uint32_t n = (uint32_t)(change - p.built->outputs);
+    ck(first->outCount > n && first->outputs[n].amount == change->amount, "the registered send has the same change output");
+    // a second send, of the change only
+    p.payAmount = 500000;
+    BRTransaction *bytes = spendingCoin(&p, first, n, 20000);
+    PreparedSendVerdict v = bytes ? checkAsApproved(&p, bytes, 20000) : PREPARED_SEND_NOT_APPROVED;
+    ck(v == PREPARED_SEND_OK, "bytes spending the wallet's own unconfirmed change pass (%s)", verdictName(v));
+    if (bytes) BRTransactionFree(bytes);
+    release(&p);
+}
+
+// SEND-GATE-SET (red in the enumeration arm): a chain of 24 own unconfirmed sends. The first spends 500
+// confirmed coins; each later one spends the previous one's second output; each leaves one 0.01 DGB coin
+// (its first output) to the wallet. Asking whether the coin of send k is the wallet's own walks back
+// through k sends to the 500 confirmed inputs, about 500 + k visits. The whole set listed under one
+// SELECT_WALK_BUDGET (10,000 visits) runs out after about 19 of the 25 unconfirmed coins, so a gate that
+// enumerates refuses a send of any of the rest, which selection itself (stopping once covered) can take.
+// Each input asked alone has its own budget: every one passes.
+#define BUDGET_CHAIN 24
+#define BUDGET_INPUTS 500
+static void check_budget_own_change(void)
+{
+    Prepared p;
+    memset(&p, 0, sizeof(p));
+    p.w = BRWalletNew(NULL, 0, g_mpk84);
+    externalAddress(p.dest, sizeof(p.dest));
+    p.payAmount = 300000;
+    p.payScriptLen = BRAddressScriptPubKey(p.payScript, sizeof(p.payScript), p.dest);
+    BRAddress addr = BRWalletReceiveAddress(p.w, 1);
+    uint8_t ownScript[64]; size_t ownLen = BRAddressScriptPubKey(ownScript, sizeof(ownScript), addr.s);
+
+    // Five confirmed funding transactions of 100 coins each: 500 confirmed coins of 1,000,000 sat.
+    enum { PER_FUND = 100, N_FUND = BUDGET_INPUTS / PER_FUND };
+    BRTransaction *fund[N_FUND] = { 0 };
+    int ok = 1;
+    for (size_t f = 0; ok && f < N_FUND; f++) {
+        BRTransaction *c = BRTransactionNew();
+        UInt256 h; memset(h.u8, 0xC3, sizeof(h.u8)); h.u8[0] = (uint8_t)f;
+        c->version = 1;
+        BRTransactionAddInput(c, h, 0, 0, ownScript, ownLen, kPlaceholder, 0, kPlaceholder, 0, 0xffffffff);
+        for (size_t o = 0; o < PER_FUND; o++) BRTransactionAddOutput(c, 1000000, ownScript, ownLen);
+        c->blockHeight = 23700000; c->timestamp = 1700000000;
+        finalizeTxHash(c);
+        if (!BRWalletRegisterTransaction(p.w, c)) { BRTransactionFree(c); ok = 0; break; }
+        fund[f] = c;
+    }
+    ck(ok, "500 confirmed coins are registered");
+    BRTransaction *chain[BUDGET_CHAIN] = { 0 };
+    uint64_t carry = (uint64_t)BUDGET_INPUTS * 1000000;
+    for (size_t k = 0; ok && k < BUDGET_CHAIN; k++) {
+        BRTransaction *t = BRTransactionNew();
+        t->version = 1;
+        if (k == 0) {
+            for (size_t i = 0; i < BUDGET_INPUTS; i++)
+                BRTransactionAddInput(t, fund[i / PER_FUND]->txHash, (uint32_t)(i % PER_FUND), 1000000, ownScript, ownLen,
+                                      kPlaceholder, 0, kPlaceholder, 0, TXIN_SEQUENCE);
+        } else {
+            BRTransactionAddInput(t, chain[k - 1]->txHash, 1, carry, ownScript, ownLen,
+                                  kPlaceholder, 0, kPlaceholder, 0, TXIN_SEQUENCE);
+        }
+        carry -= 1000000 + 100000;   // its coin, and its fee
+        BRTransactionAddOutput(t, 1000000, ownScript, ownLen);
+        BRTransactionAddOutput(t, carry, ownScript, ownLen);
+        t->blockHeight = TX_UNCONFIRMED; t->timestamp = 0;
+        finalizeTxHash(t);
+        // the wallet's own signed send, registered as the bridge registers one it signed
+        if (!BRWalletRegisterTransactionTrusted(p.w, t)) { BRTransactionFree(t); ok = 0; break; }
+        chain[k] = t;
+    }
+    ck(ok, "a chain of 24 own unconfirmed sends is registered");
+    if (!ok) { BRWalletFree(p.w); return; }
+    size_t listed = BRWalletUTXOs(p.w, NULL, 0), enumerated = BRWalletSelectableUTXOs(p.w, NULL, 0);
+    printf("NOTE: the wallet lists %zu coins; enumerating the selectable set under one walk budget lists %zu\n",
+           listed, enumerated);
+    ck(listed == BUDGET_CHAIN + 1, "the wallet's coins are the 24 sends' coins and the last send's second output");
+    size_t passed = 0, alone = 0;
+    for (size_t k = 0; k < BUDGET_CHAIN; k++) {
+        alone += BRWalletOutpointSelectable(p.w, chain[k]->txHash, 0);
+        BRTransaction *bytes = spendingCoin(&p, chain[k], 0, 20000);
+        PreparedSendVerdict v = bytes ? checkAsApproved(&p, bytes, 20000) : PREPARED_SEND_NOT_APPROVED;
+        if (v == PREPARED_SEND_OK) passed++;
+        if (bytes) BRTransactionFree(bytes);
+    }
+    ck(alone == BUDGET_CHAIN, "each of the 24 coins, asked alone, is a coin selection would spend (%zu)", alone);
+    ck(passed == BUDGET_CHAIN, "a send of each of the 24 own unconfirmed coins passes the gate (%zu of 24)", passed);
+    BRWalletFree(p.w);
+}
+
 // A wallet holding one confirmed $100.00 DigiDollar coin and the DGB coin `sats` (dd_fee_rate_kat's shape).
 static BRWallet *ddWallet(uint64_t sats)
 {
@@ -590,6 +744,9 @@ static const Case kCases[] = {
     { "check_extra_output", check_extra_output },
     { "check_change_foreign", check_change_foreign },
     { "check_self_send_signs", check_self_send_signs },
+    { "check_coin_foreign_unconfirmed", check_coin_foreign_unconfirmed },
+    { "check_own_change_signs", check_own_change_signs },
+    { "check_budget_own_change", check_budget_own_change },
     { "dd_transfer_builds", dd_transfer_builds },
 };
 
@@ -606,7 +763,9 @@ int main(int argc, char **argv)
     g_mpk86 = BRBIP32MasterPubKeyBIP86(g_seed, sizeof(g_seed));
     for (size_t i = 0; i < n; i++) {
         if (strcmp(argv[1], kCases[i].name) != 0) continue;
-        printf("ARM: %s\n", PREPARED_SEND_UNFIXED ? "comparison (PREPARED_SEND_UNFIXED=1)" : "shipped");
+        printf("ARM: %s\n", PREPARED_SEND_UNFIXED ? "comparison (PREPARED_SEND_UNFIXED=1)"
+                            : SEND_GATE_SET_UNFIXED == 1 ? "comparison (SEND_GATE_SET_UNFIXED=1)"
+                            : SEND_GATE_SET_UNFIXED == 2 ? "comparison (SEND_GATE_SET_UNFIXED=2)" : "shipped");
         kCases[i].run();
         printf("RESULT %s %s\n", kCases[i].name, g_failed ? "fail" : "pass");
         return g_failed;

@@ -11,7 +11,7 @@
 #   comparison  one arm per rule, -DDIGIID_UNFIXED=<bit> (BRDigiId.h): 1 the account index is hashed
 #               big-endian; 2 A..D are read big-endian; 4 A..D are not hardened; 8 a negative index is
 #               taken as its uint32 bits; 16 the shared identity's address is given for any index; 32 a
-#               message over 0xffff bytes gets the standard compact size; 64 the message is hashed once;
+#               message over 0xffff bytes gets one length byte (the pre-MSG-LEN encoder); 64 the message is hashed once;
 #               128 the key is not marked compressed; 256 address format 2 answers P2PKH; 512 the caller's
 #               key is left unwiped after signing; 1024 a lone surrogate is written as three bytes; 2048
 #               modified UTF-8; 4096 the shared identity is m/0'/1/0; 8192 unpadded base64; 16384 the URI's

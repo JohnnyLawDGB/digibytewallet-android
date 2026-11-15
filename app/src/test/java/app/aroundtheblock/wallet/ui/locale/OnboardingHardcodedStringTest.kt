@@ -46,6 +46,8 @@ class OnboardingHardcodedStringTest {
         "ui/onboarding/SeedDisplayScreen.kt",
         "ui/onboarding/SeedVerifyScreen.kt",
         "ui/onboarding/PinSetupScreen.kt",
+        // KS-BIND: the no-screen-lock notice shown at setup.
+        "ui/onboarding/SeedKeyBindingStep.kt",
         "ui/onboarding/UnlockScreen.kt",
         // Not an onboarding screen, but its two dialogs fire immediately after onboarding and
         // before the user has seen anything else — the battery one explains how to stop the
@@ -103,6 +105,8 @@ class OnboardingHardcodedStringTest {
         // Log messages and pref keys, never rendered.
         "battery_prompt_dismissed", "notification_permission_asked", "beta_updates",
         "dgb_settings", "digiid://", "connection refused", "backstop wipe failed",
+        // KS-BIND: the no-screen-lock notice's pref keys.
+        "ksb_no_lock_notice_due", "ksb_no_lock_notice_ack",
         // Ticker, network name and unit — brand-class, never translated (see strings_wallet.xml).
         "DGB", "TESTNET", "USD",
         // Composites of already-localised parts plus a ticker or a bare number.

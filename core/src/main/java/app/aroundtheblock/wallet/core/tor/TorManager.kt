@@ -1,5 +1,6 @@
 package app.aroundtheblock.wallet.core.tor
 
+import app.aroundtheblock.wallet.core.LogSafe
 import android.content.Context
 import android.util.Log
 import io.matthewnelson.kmp.tor.resource.noexec.tor.ResourceLoaderTorNoExec
@@ -323,7 +324,7 @@ class TorManager(private val context: Context) {
         } catch (e: Exception) {
             val reason = e.message ?: "Unknown error"
             _state.value = TorState.Failed(reason)
-            Log.e(TAG, "Failed to start Tor: $reason", e)
+            Log.e(TAG, "Failed to start Tor: ${LogSafe.text(reason)}", e)
             teardownAfterFailure()
             _state.value
         }

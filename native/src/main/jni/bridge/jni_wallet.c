@@ -1034,6 +1034,8 @@ NativeBridge_registerAssetOutpoint(JNIEnv *env, jobject thiz,
  *                     its inputs; i.e. a stuck send the user re-sent. Nothing ever
  *                     spends the abandoned attempt's own change, so spent-ness alone
  *                     reads HELD and the asset layer counts that change twice.)
+ *   -3 = OTHER_FAMILY (ONE-FAMILY: a DigiDollar output, or an output of a transaction marked
+ *                     both DigiDollar and DigiAsset -- never an asset holding)
  * The reconcile marks a Room asset row spent on 0, unspent on 1, and leaves it
  * unchanged on -1 (so a mid-sync wallet never hides a real holding). Uses
  * BRWalletOutpointSpent (the authoritative spentOutputs set), NOT the asset-UTXO
@@ -1062,8 +1064,10 @@ NativeBridge_outpointSpentState(JNIEnv *env, jobject thiz,
 /* Where the wallet's own balance computation put each outpoint, so a caller holding a list of
  * outputs from elsewhere (the node a scan asked) can partition them by the wallet's rule
  * instead of summing them. One code per input "txidHex|vout" line, in order:
- *    1 SPENDABLE     in the spendable set (BRWalletUTXOs) -- what the DGB balance sums
- *    2 HELD          an owned, valid, unspent output kept out of the spendable set because it
+ *    1 IN_BALANCE    in the set the DGB balance sums (BRWalletUTXOs). SEND-GATE-SET: named for that
+ *                    set, not for what a send may spend -- it also holds an unconfirmed coin someone
+ *                    else sent, which selection (BRWalletSelectableUTXOs) never spends
+ *    2 HELD          an owned, valid, unspent output kept out of the balance's set because it
  *                    carries DigiAsset units (explicitly, or registered by the asset layer)
  *    3 DIGIDOLLAR    a DigiDollar token output (BRWalletDigiDollarUTXOs)
  *    4 IMMATURE      an owned coin-generation output that has not matured
@@ -1080,7 +1084,7 @@ NativeBridge_outpointSpentState(JNIEnv *env, jobject thiz,
  * Narrowest query for the purpose: the partition arrays (utxos / ddUtxos / assetUtxos) are
  * private to BRWallet.c and only utxos and ddUtxos have locked copy accessors, so HELD is
  * answered by elimination from the same rule _BRWalletUpdateBalance applies to an owned output
- * of a valid, credited transaction: DigiDollar, else asset, else spendable (immature coinbase
+ * of a valid, credited transaction: DigiDollar, else asset, else in balance (immature coinbase
  * aside). "Owned" is "derived" -- the derived prefix of one BRWalletCopyAllAddrs snapshot --
  * because the wallet credits only derived addresses. */
 static int _cmpAddrStr(const void *a, const void *b)
@@ -1170,14 +1174,14 @@ NativeBridge_classifyOutpoints(JNIEnv *env, jobject thiz,
     return result;
 }
 
-/* ---------- spendableNotListed ---------- */
-/* The other half of a scan's comparison: how many of the wallet's spendable outputs
- * (BRWalletUTXOs) are NOT among the given "txidHex|vout" lines, and their total value, as
+/* ---------- balanceCoinsNotListed ---------- */
+/* The other half of a scan's comparison: how many of the outputs the wallet's balance sums
+ * (BRWalletUTXOs; SEND-GATE-SET: not the set a send may spend) are NOT among the given "txidHex|vout" lines, and their total value, as
  * [count, satoshis]. A non-zero answer means the wallet counts something the caller's source did
  * not report. Read-only and builds nothing; it lists no outpoint. Null when no wallet is loaded or
  * on allocation failure. */
 jlongArray JNICALL
-NativeBridge_spendableNotListed(JNIEnv *env, jobject thiz,
+NativeBridge_balanceCoinsNotListed(JNIEnv *env, jobject thiz,
                                                              jobjectArray outpoints)
 {
     WALLET_READ_GUARD();   /* reads g_wallet: never while a create/restore frees it */
