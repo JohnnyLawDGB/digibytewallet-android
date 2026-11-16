@@ -89,9 +89,9 @@ internal fun compactFilterBirthHeight(
  * [removeBirth] is false; the hint is dropped only when [clearHint].
  */
 internal data class FloorHintStep(
-    /** Persist this `cf_birth_height`. */
+    /** Persist this scan floor under the wallet's key (`WalletStores.cfBirthHeightKey`; `cf_birth_height` for the legacy wallet). */
     val setBirth: Long? = null,
-    /** Remove `cf_birth_height`, so the scan start falls back to the wallet birth (the genesis
+    /** Remove the wallet's scan floor (`cf_birth_height`, suffixed per wallet), so the scan start falls back to the wallet birth (the genesis
      *  anchor: a 0 floor is never persisted). */
     val removeBirth: Boolean = false,
     /** The floor is applied: forget the hint. */

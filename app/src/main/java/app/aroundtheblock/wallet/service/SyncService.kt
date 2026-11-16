@@ -2297,8 +2297,9 @@ class SyncService : Service() {
             filterHeadersDirty = false
             pendingCfLedger = null
             val birth = NativeBridge.getWalletBirthCheckpointHeight()
+            val birthKey = WalletStores.cfBirthHeightKey(walletScope)
             getSharedPreferences("dgb_settings", MODE_PRIVATE).edit().apply {
-                if (birth > 0L) putLong("cf_birth_height", birth) else remove("cf_birth_height")
+                if (birth > 0L) putLong(birthKey, birth) else remove(birthKey)
             }.commit()
             // Durable diagnostic breadcrumb (DGB-1005): the reset reason is otherwise only in
             // Logcat, which is gone on reboot and unreachable for a report filed without device
@@ -2391,6 +2392,7 @@ class SyncService : Service() {
         // BLOOM_ONLY is removed. The `sync_mode` pref key below is read only for the
         // (dead) function-signature arg and otherwise ignored.
         val settings = getSharedPreferences("dgb_settings", MODE_PRIVATE)
+        val birthKey = WalletStores.cfBirthHeightKey(walletScope)
         val syncMode = syncModeFor(
             pref = settings.getInt("sync_mode", NativeBridge.SyncMode.BOTH),
             customNodeEnabled = CustomNodePrefs.isEnabled(this@SyncService),
@@ -2426,11 +2428,11 @@ class SyncService : Service() {
                 if (floorHint > 0L || floorPending) {
                     val loaded = NativeBridge.isWalletLoaded()
                     val anchor = if (loaded) NativeBridge.getWalletBirthCheckpointHeight() else 0L
-                    val persisted = if (settings.contains("cf_birth_height")) settings.getLong("cf_birth_height", 0L) else null
+                    val persisted = if (settings.contains(birthKey)) settings.getLong(birthKey, 0L) else null
                     val step = floorHintStep(loaded, anchor, persisted, floorHint, floorPending)
                     when {
-                        step.setBirth != null -> settings.edit().putLong("cf_birth_height", step.setBirth).commit()
-                        step.removeBirth -> settings.edit().remove("cf_birth_height").commit()
+                        step.setBirth != null -> settings.edit().putLong(birthKey, step.setBirth).commit()
+                        step.removeBirth -> settings.edit().remove(birthKey).commit()
                     }
                     if (step.clearHint) HistoryRebuildOnUpgrade.clearFloorHint(this@SyncService)
                     if (step.anchorAboveHint) {
@@ -2458,8 +2460,8 @@ class SyncService : Service() {
                 wasSynced = hasReachedSynced,
                 savedTip = savedTip,
                 walletBirth = NativeBridge.getWalletBirthCheckpointHeight(),
-                persistedBirth = if (settings.contains("cf_birth_height")) {
-                    settings.getLong("cf_birth_height", 0L)
+                persistedBirth = if (settings.contains(birthKey)) {
+                    settings.getLong(birthKey, 0L)
                 } else null,
             )
 
@@ -2554,8 +2556,8 @@ class SyncService : Service() {
                 wasSynced = hasReachedSynced,
                 savedTip = savedTipForWatchdog,
                 walletBirth = NativeBridge.getWalletBirthCheckpointHeight(),
-                persistedBirth = if (settings.contains("cf_birth_height")) {
-                    settings.getLong("cf_birth_height", 0L)
+                persistedBirth = if (settings.contains(birthKey)) {
+                    settings.getLong(birthKey, 0L)
                 } else null,
             )
             startBip158Watchdog(birthHeightForWatchdog)
@@ -4036,7 +4038,7 @@ class SyncService : Service() {
         ).edit().putBoolean("has_synced", true).commit()
         if (!synced) return false
         getSharedPreferences("dgb_settings", MODE_PRIVATE)
-            .edit().remove("cf_birth_height").commit()
+            .edit().remove(WalletStores.cfBirthHeightKey(walletScope)).commit()
         return true
     }
 

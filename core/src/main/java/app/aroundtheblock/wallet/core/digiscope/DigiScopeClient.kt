@@ -7,6 +7,7 @@ import app.aroundtheblock.wallet.core.hub.DigiRunnerStats
 import app.aroundtheblock.wallet.core.hub.LeaderboardEntry
 import app.aroundtheblock.wallet.core.hub.UserInfo
 import app.aroundtheblock.wallet.core.network.BoundedBody
+import app.aroundtheblock.wallet.core.wallets.ActiveWallet
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -82,7 +83,7 @@ class DigiScopeClient(
         .followSslRedirects(false)
         .build()
 
-    private val tokenStore = HubTokenStore(context)
+    private val tokenStore = HubTokenStore(context, ActiveWallet.scope(context))
 
     private var jwtToken: String? = null
 

@@ -1,5 +1,7 @@
 package app.aroundtheblock.wallet
 
+import app.aroundtheblock.wallet.core.wallets.WalletScope
+import app.aroundtheblock.wallet.core.wallets.WalletStores
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
@@ -319,6 +321,7 @@ class StaleDataWiperWalletResetTest {
          */
         fun syncStart(anchor: Long, savedTip: Long): Long {
             val settings = prefs.store("dgb_settings")
+            val birthKey = WalletStores.cfBirthHeightKey(WalletScope.legacy(false))
             val sync = prefs.store("dgb_sync_data")
             var synced = sync["has_synced"] == true
             var tip = savedTip
@@ -334,25 +337,25 @@ class StaleDataWiperWalletResetTest {
                 FilterHeaderStore.delete(context)
                 CfScanLedgerStore.delete(context)
                 CfAbandonmentStore.clear(context)
-                if (anchor > 0L) settings["cf_birth_height"] = anchor else settings.remove("cf_birth_height")
+                if (anchor > 0L) settings[birthKey] = anchor else settings.remove(birthKey)
                 synced = false
                 tip = 0L
             }
             val step = floorHintStep(
                 walletLoaded = true,
                 anchor = anchor,
-                persistedBirth = settings["cf_birth_height"] as Long?,
+                persistedBirth = settings[birthKey] as Long?,
                 floorHint = HistoryRebuildOnUpgrade.floorHint(context),
                 floorPending = HistoryRebuildOnUpgrade.floorPending(context),
             )
-            step.setBirth?.let { settings["cf_birth_height"] = it }
-            if (step.removeBirth) settings.remove("cf_birth_height")
+            step.setBirth?.let { settings[birthKey] = it }
+            if (step.removeBirth) settings.remove(birthKey)
             if (step.clearHint) HistoryRebuildOnUpgrade.clearFloorHint(context)
             return compactFilterBirthHeight(
                 wasSynced = synced,
                 savedTip = tip,
                 walletBirth = anchor,
-                persistedBirth = settings["cf_birth_height"] as Long?,
+                persistedBirth = settings[birthKey] as Long?,
             )
         }
 

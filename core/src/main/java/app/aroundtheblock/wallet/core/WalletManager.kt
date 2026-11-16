@@ -314,8 +314,9 @@ class WalletManager @Suppress("LongParameterList") constructor(
                 // rescan()/first sync reads it.
                 val birth = runCatching { birthHeightNative() }.getOrDefault(0L)
                 val toPersist = cfBirthHeightToPersist(birth)
+                val birthKey = WalletStores.cfBirthHeightKey(scope)
                 context.getSharedPreferences("dgb_settings", Context.MODE_PRIVATE).edit().apply {
-                    if (toPersist != null) putLong("cf_birth_height", toPersist) else remove("cf_birth_height")
+                    if (toPersist != null) putLong(birthKey, toPersist) else remove(birthKey)
                 }.commit()
                 android.util.Log.i("WalletManager", "recoverWallet: persisted cf_birth_height=$toPersist (raw=$birth)")
                 rescanNative()
@@ -820,8 +821,9 @@ class WalletManager @Suppress("LongParameterList") constructor(
         // record carries anything lower (the cache's floor above) into it at sync start.
         val birth = runCatching { NativeBridge.getWalletBirthCheckpointHeight() }.getOrDefault(0L)
         val toPersist = cfBirthHeightToPersist(birth)
+        val birthKey = WalletStores.cfBirthHeightKey(scope)
         context.getSharedPreferences("dgb_settings", Context.MODE_PRIVATE).edit().apply {
-            if (toPersist != null) putLong("cf_birth_height", toPersist) else remove("cf_birth_height")
+            if (toPersist != null) putLong(birthKey, toPersist) else remove(birthKey)
         }.commit()
         return true
     }

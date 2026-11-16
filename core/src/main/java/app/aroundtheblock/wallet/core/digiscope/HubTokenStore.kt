@@ -5,6 +5,9 @@ import android.content.SharedPreferences
 import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import app.aroundtheblock.wallet.core.wallets.ActiveWallet
+import app.aroundtheblock.wallet.core.wallets.WalletScope
+import app.aroundtheblock.wallet.core.wallets.WalletStores
 
 /**
  * Persistence for the Hub session JWT.
@@ -31,11 +34,26 @@ class HubTokenStore internal constructor(
     secureProvider: () -> SharedPreferences,
     private val resetSecure: () -> Unit = {},
 ) {
-    constructor(context: Context) : this(
-        context.applicationContext.getSharedPreferences(LEGACY_PREFS_NAME, Context.MODE_PRIVATE),
-        { encryptedPrefs(context.applicationContext) },
-        { context.applicationContext.deleteSharedPreferences(SECURE_PREFS_NAME) },
+    /** One wallet's Hub session: its own plain and encrypted stores, never another wallet's. */
+    constructor(context: Context, scope: WalletScope) : this(
+        context,
+        scope,
+        { name -> encryptedPrefs(context.applicationContext, name) },
     )
+
+    internal constructor(
+        context: Context,
+        scope: WalletScope,
+        secureFactory: (String) -> SharedPreferences,
+    ) : this(
+        context.applicationContext.getSharedPreferences(
+            WalletStores.prefsName(LEGACY_PREFS_NAME, scope), Context.MODE_PRIVATE,
+        ),
+        { secureFactory(WalletStores.prefsName(SECURE_PREFS_NAME, scope)) },
+        { context.applicationContext.deleteSharedPreferences(WalletStores.prefsName(SECURE_PREFS_NAME, scope)) },
+    )
+
+    constructor(context: Context) : this(context, ActiveWallet.scope(context))
 
     private val secure: SharedPreferences by lazy(secureProvider)
 
@@ -102,13 +120,13 @@ class HubTokenStore internal constructor(
         const val SECURE_PREFS_NAME = "dgb_hub_session"
         const val KEY_JWT = "dgb_jwt"
 
-        private fun encryptedPrefs(context: Context): SharedPreferences {
+        private fun encryptedPrefs(context: Context, fileName: String): SharedPreferences {
             val masterKey = MasterKey.Builder(context)
                 .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
                 .build()
             return EncryptedSharedPreferences.create(
                 context,
-                SECURE_PREFS_NAME,
+                fileName,
                 masterKey,
                 EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
                 EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
