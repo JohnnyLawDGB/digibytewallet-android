@@ -262,22 +262,30 @@ private fun WordInputField(
         else emptyList()
     }
 
-    // Brings the focused field into view when the soft keyboard appears.
+    // Brings the focused field AND its suggestions into view above the soft keyboard.
     // Doing it on focus alone fires BEFORE the keyboard finishes animating
     // up, so the requested position is wrong by the time IME is fully
     // visible — we re-trigger every time the IME bottom inset changes
     // (initial show, autocomplete state changes, configuration changes).
+    //
+    // The requester sits on the Column that holds the field and the suggestion list, not on
+    // the text field, and the request is repeated when the suggestions change. The suggestions
+    // appear only after typing, below the field, with no focus or inset change to re-trigger a
+    // request on the field alone. Measured on a Pixel 6 profile (API 36, Gboard, 1080x2400):
+    // from word 9 of 24 on, the focused field was brought flush to the viewport bottom at
+    // [..,1197][..,1365] and the suggestions began at y=1355, so all four sat under the
+    // keyboard (top 1428) and could not be tapped.
     val bringIntoView = remember { BringIntoViewRequester() }
     val scope = rememberCoroutineScope()
     val imeBottomPx = keyboardBottomPx()
 
-    LaunchedEffect(isFocused, imeBottomPx) {
+    LaunchedEffect(isFocused, imeBottomPx, suggestions) {
         if (isFocused && imeBottomPx > 0) {
             bringIntoView.bringIntoView()
         }
     }
 
-    Column(modifier = modifier) {
+    Column(modifier = modifier.bringIntoViewRequester(bringIntoView)) {
         OutlinedTextField(
             value = value,
             onValueChange = { input ->
@@ -287,7 +295,6 @@ private fun WordInputField(
             modifier = Modifier
                 .fillMaxWidth()
                 .semantics { password() }
-                .bringIntoViewRequester(bringIntoView)
                 .onFocusChanged { state ->
                     if (state.isFocused) {
                         onFocused()
