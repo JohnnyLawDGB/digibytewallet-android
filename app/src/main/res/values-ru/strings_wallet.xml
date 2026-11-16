@@ -56,6 +56,7 @@
     <string name="verify_success_title">Проверено!</string>
     <string name="verify_retry_title">Попробуем ещё раз</string>
     <string name="verify_success_body">Ваша фраза восстановления надёжно записана. Теперь задайте PIN-код.</string>
+    <string name="verify_success_body_add">Ваша фраза восстановления надёжно записана. Этот кошелёк уже защищён PIN-кодом приложения.</string>
     <string name="verify_retry_body">Некоторые ответы неверны. Проверьте фразу восстановления и попробуйте снова.</string>
     <string name="verify_setup_pin">Задать PIN-код</string>
     <string name="verify_try_again">Попробовать снова</string>
@@ -781,6 +782,7 @@
     <string name="wallet_switcher_add">Добавить кошелёк</string>
     <string name="wallet_switcher_manage">Управление</string>
     <string name="wallet_switcher_failed">Не удалось открыть этот кошелёк. Ничего не изменено.</string>
+    <string name="wallet_switcher_digistamp_note">Если вы пользуетесь DigiStamp в браузере, там может сохраниться вход под кошельком, с которого вы переключаетесь.</string>
     <string name="wallet_manage_title">Управление кошельками</string>
     <string name="wallet_manage_rename">Переименовать</string>
     <string name="wallet_manage_move_up">Выше</string>

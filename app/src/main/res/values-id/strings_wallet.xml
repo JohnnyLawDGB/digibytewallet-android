@@ -56,6 +56,7 @@
     <string name="verify_success_title">Terverifikasi!</string>
     <string name="verify_retry_title">Mari coba lagi</string>
     <string name="verify_success_body">Frasa pemulihan Anda sudah dicatat dengan aman. Sekarang atur PIN.</string>
+    <string name="verify_success_body_add">Frasa pemulihan Anda sudah dicatat dengan aman. PIN aplikasi Anda sudah melindungi dompet ini.</string>
     <string name="verify_retry_body">Beberapa jawaban salah. Periksa kembali frasa pemulihan Anda lalu coba lagi.</string>
     <string name="verify_setup_pin">Atur PIN</string>
     <string name="verify_try_again">Coba lagi</string>
@@ -766,6 +767,7 @@
     <string name="wallet_switcher_add">Tambah dompet</string>
     <string name="wallet_switcher_manage">Kelola</string>
     <string name="wallet_switcher_failed">Dompet itu tidak dapat dibuka. Tidak ada yang diubah.</string>
+    <string name="wallet_switcher_digistamp_note">Jika Anda memakai DigiStamp di browser, DigiStamp mungkin masih masuk sebagai dompet yang Anda tinggalkan.</string>
     <string name="wallet_manage_title">Kelola dompet</string>
     <string name="wallet_manage_rename">Ganti nama</string>
     <string name="wallet_manage_move_up">Pindah ke atas</string>

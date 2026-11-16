@@ -56,6 +56,7 @@
     <string name="verify_success_title">सत्यापित!</string>
     <string name="verify_retry_title">चलिए फिर से कोशिश करते हैं</string>
     <string name="verify_success_body">आपका रिकवरी वाक्यांश सुरक्षित रूप से लिख लिया गया है। अब एक PIN सेट करें।</string>
+    <string name="verify_success_body_add">आपका रिकवरी वाक्यांश सुरक्षित रूप से लिख लिया गया है। आपका ऐप PIN पहले से ही इस वॉलेट की सुरक्षा करता है।</string>
     <string name="verify_retry_body">कुछ उत्तर गलत थे। कृपया अपना रिकवरी वाक्यांश जाँचें और फिर से कोशिश करें।</string>
     <string name="verify_setup_pin">PIN सेट करें</string>
     <string name="verify_try_again">फिर से कोशिश करें</string>
@@ -771,6 +772,7 @@
     <string name="wallet_switcher_add">वॉलेट जोड़ें</string>
     <string name="wallet_switcher_manage">प्रबंधित करें</string>
     <string name="wallet_switcher_failed">वह वॉलेट नहीं खुल सका। कुछ भी नहीं बदला गया।</string>
+    <string name="wallet_switcher_digistamp_note">यदि आप अपने ब्राउज़र में DigiStamp का उपयोग करते हैं, तो वह अभी भी उस वॉलेट से साइन इन हो सकता है जिससे आप स्विच कर रहे हैं।</string>
     <string name="wallet_manage_title">वॉलेट प्रबंधित करें</string>
     <string name="wallet_manage_rename">नाम बदलें</string>
     <string name="wallet_manage_move_up">ऊपर ले जाएँ</string>

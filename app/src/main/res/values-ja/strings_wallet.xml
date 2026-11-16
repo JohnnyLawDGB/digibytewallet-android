@@ -56,6 +56,7 @@
     <string name="verify_success_title">確認できました</string>
     <string name="verify_retry_title">もう一度お試しください</string>
     <string name="verify_success_body">リカバリーフレーズが安全に記録されました。次に PIN を設定してください。</string>
+    <string name="verify_success_body_add">リカバリーフレーズが安全に記録されました。このウォレットはすでにアプリの PIN で保護されています。</string>
     <string name="verify_retry_body">一部の回答が正しくありませんでした。リカバリーフレーズを確認して、もう一度お試しください。</string>
     <string name="verify_setup_pin">PIN を設定</string>
     <string name="verify_try_again">もう一度試す</string>
@@ -766,6 +767,7 @@
     <string name="wallet_switcher_add">ウォレットを追加</string>
     <string name="wallet_switcher_manage">管理</string>
     <string name="wallet_switcher_failed">そのウォレットを開けませんでした。何も変更されていません。</string>
+    <string name="wallet_switcher_digistamp_note">ブラウザで DigiStamp を使っている場合、切り替え前のウォレットでサインインしたままになっていることがあります。</string>
     <string name="wallet_manage_title">ウォレットの管理</string>
     <string name="wallet_manage_rename">名前を変更</string>
     <string name="wallet_manage_move_up">上へ移動</string>

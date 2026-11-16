@@ -56,6 +56,7 @@
     <string name="verify_success_title">Verificado!</string>
     <string name="verify_retry_title">Vamos tentar de novo</string>
     <string name="verify_success_body">Sua frase de recuperação está anotada com segurança. Agora configure um PIN.</string>
+    <string name="verify_success_body_add">Sua frase de recuperação está anotada com segurança. O PIN do app já protege esta carteira.</string>
     <string name="verify_retry_body">Algumas respostas estavam incorretas. Revise sua frase de recuperação e tente novamente.</string>
     <string name="verify_setup_pin">Configurar PIN</string>
     <string name="verify_try_again">Tentar novamente</string>
@@ -776,6 +777,7 @@
     <string name="wallet_switcher_add">Adicionar carteira</string>
     <string name="wallet_switcher_manage">Gerenciar</string>
     <string name="wallet_switcher_failed">Não foi possível abrir essa carteira. Nada foi alterado.</string>
+    <string name="wallet_switcher_digistamp_note">Se você usa o DigiStamp no navegador, ele ainda pode estar conectado com a carteira da qual você está saindo.</string>
     <string name="wallet_manage_title">Gerenciar carteiras</string>
     <string name="wallet_manage_rename">Renomear</string>
     <string name="wallet_manage_move_up">Mover para cima</string>

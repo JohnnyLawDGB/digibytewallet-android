@@ -56,6 +56,7 @@
     <string name="verify_success_title">已验证！</string>
     <string name="verify_retry_title">再试一次</string>
     <string name="verify_success_body">您的恢复助记词已安全记录。现在设置 PIN 码。</string>
+    <string name="verify_success_body_add">您的恢复助记词已安全记录。您的应用 PIN 码已在保护此钱包。</string>
     <string name="verify_retry_body">部分答案不正确。请检查您的恢复助记词后重试。</string>
     <string name="verify_setup_pin">设置 PIN 码</string>
     <string name="verify_try_again">再试一次</string>
@@ -766,6 +767,7 @@
     <string name="wallet_switcher_add">添加钱包</string>
     <string name="wallet_switcher_manage">管理</string>
     <string name="wallet_switcher_failed">无法打开该钱包。未做任何更改。</string>
+    <string name="wallet_switcher_digistamp_note">如果您在浏览器中使用 DigiStamp，它可能仍以您切换前的钱包登录。</string>
     <string name="wallet_manage_title">管理钱包</string>
     <string name="wallet_manage_rename">重命名</string>
     <string name="wallet_manage_move_up">上移</string>

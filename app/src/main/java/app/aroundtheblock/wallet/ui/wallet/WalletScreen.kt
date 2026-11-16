@@ -1283,6 +1283,14 @@ private fun OwnNodeHealthChip(modifier: Modifier = Modifier) {
  * this restored wallet before its own sync has proved it. Not spendable, not in the balance; gone
  * once the wallet has synced. Masked with the balance.
  */
+/**
+ * The "reported by" line's amount and server, both masked with the balance: an own node's host
+ * names the user's own machine.
+ */
+internal fun unverifiedQuickStartArgs(q: app.aroundtheblock.wallet.core.wallets.QuickStart, hidden: Boolean): List<String> =
+    listOf(WalletViewModel.formatSatoshisBare(q.unverifiedSat), q.sourceLabel)
+        .map { app.aroundtheblock.wallet.core.settings.maskedAmount(hidden, it) }
+
 @Composable
 private fun UnverifiedQuickStart(q: app.aroundtheblock.wallet.core.wallets.QuickStart, hidden: Boolean) {
     val mask = { v: String -> app.aroundtheblock.wallet.core.settings.maskedAmount(hidden, v) }
@@ -1291,7 +1299,7 @@ private fun UnverifiedQuickStart(q: app.aroundtheblock.wallet.core.wallets.Quick
         modifier = Modifier.padding(top = 8.dp),
     ) {
         Text(
-            text = stringResource(R.string.quickstart_unverified, mask(WalletViewModel.formatSatoshisBare(q.unverifiedSat)), q.sourceLabel),
+            text = stringResource(R.string.quickstart_unverified, *unverifiedQuickStartArgs(q, hidden).toTypedArray()),
             style = MaterialTheme.typography.bodySmall,
             color = Color(0xFFFFC107),
             textAlign = TextAlign.Center,

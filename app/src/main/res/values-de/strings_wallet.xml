@@ -64,6 +64,7 @@
     <string name="verify_success_title">Bestätigt!</string>
     <string name="verify_retry_title">Versuchen wir es erneut</string>
     <string name="verify_success_body">Ihre Wiederherstellungsphrase ist sicher notiert. Richten Sie jetzt eine PIN ein.</string>
+    <string name="verify_success_body_add">Ihre Wiederherstellungsphrase ist sicher notiert. Ihre App-PIN schützt diese Wallet bereits.</string>
     <string name="verify_retry_body">Einige Antworten waren falsch. Bitte prüfen Sie Ihre Wiederherstellungsphrase und versuchen Sie es erneut.</string>
     <string name="verify_setup_pin">PIN einrichten</string>
     <string name="verify_try_again">Erneut versuchen</string>
@@ -779,6 +780,7 @@
     <string name="wallet_switcher_add">Wallet hinzufügen</string>
     <string name="wallet_switcher_manage">Verwalten</string>
     <string name="wallet_switcher_failed">Diese Wallet konnte nicht geöffnet werden. Es wurde nichts geändert.</string>
+    <string name="wallet_switcher_digistamp_note">Wenn Sie DigiStamp im Browser nutzen, sind Sie dort möglicherweise noch mit der Wallet angemeldet, von der Sie wechseln.</string>
     <string name="wallet_manage_title">Wallets verwalten</string>
     <string name="wallet_manage_rename">Umbenennen</string>
     <string name="wallet_manage_move_up">Nach oben</string>

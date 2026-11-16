@@ -56,6 +56,7 @@
     <string name="verify_success_title">Đã xác minh!</string>
     <string name="verify_retry_title">Hãy thử lại</string>
     <string name="verify_success_body">Cụm từ khôi phục của bạn đã được ghi lại an toàn. Bây giờ hãy thiết lập mã PIN.</string>
+    <string name="verify_success_body_add">Cụm từ khôi phục của bạn đã được ghi lại an toàn. Mã PIN của ứng dụng đã bảo vệ ví này.</string>
     <string name="verify_retry_body">Một số câu trả lời chưa đúng. Vui lòng kiểm tra lại cụm từ khôi phục và thử lại.</string>
     <string name="verify_setup_pin">Thiết lập mã PIN</string>
     <string name="verify_try_again">Thử lại</string>
@@ -766,6 +767,7 @@
     <string name="wallet_switcher_add">Thêm ví</string>
     <string name="wallet_switcher_manage">Quản lý</string>
     <string name="wallet_switcher_failed">Không thể mở ví đó. Không có gì thay đổi.</string>
+    <string name="wallet_switcher_digistamp_note">Nếu bạn dùng DigiStamp trong trình duyệt, nó có thể vẫn đăng nhập bằng ví bạn vừa chuyển đi.</string>
     <string name="wallet_manage_title">Quản lý ví</string>
     <string name="wallet_manage_rename">Đổi tên</string>
     <string name="wallet_manage_move_up">Lên trên</string>

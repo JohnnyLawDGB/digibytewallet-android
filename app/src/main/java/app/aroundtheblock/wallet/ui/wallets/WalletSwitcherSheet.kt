@@ -68,6 +68,15 @@ fun WalletSwitcherSheet(
             }
         }
 
+        // DigiStamp signs in through the external browser, whose session the app cannot end: a
+        // switch leaves it signed in as the wallet being left.
+        Text(
+            text = stringResource(R.string.wallet_switcher_digistamp_note),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+        )
+
         if (switchFailed) {
             Text(
                 text = stringResource(R.string.wallet_switcher_failed),

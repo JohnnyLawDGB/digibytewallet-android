@@ -56,6 +56,7 @@
     <string name="verify_success_title">Doğrulandı!</string>
     <string name="verify_retry_title">Tekrar deneyelim</string>
     <string name="verify_success_body">Kurtarma ifadeniz güvenle yazıldı. Şimdi bir PIN belirleyin.</string>
+    <string name="verify_success_body_add">Kurtarma ifadeniz güvenle yazıldı. Uygulama PIN\'iniz bu cüzdanı zaten koruyor.</string>
     <string name="verify_retry_body">Bazı yanıtlar yanlıştı. Lütfen kurtarma ifadenizi gözden geçirip tekrar deneyin.</string>
     <string name="verify_setup_pin">PIN belirle</string>
     <string name="verify_try_again">Tekrar dene</string>
@@ -771,6 +772,7 @@
     <string name="wallet_switcher_add">Cüzdan ekle</string>
     <string name="wallet_switcher_manage">Yönet</string>
     <string name="wallet_switcher_failed">Bu cüzdan açılamadı. Hiçbir şey değiştirilmedi.</string>
+    <string name="wallet_switcher_digistamp_note">DigiStamp\'i tarayıcınızda kullanıyorsanız, geçiş yaptığınız cüzdanla oturumunuz orada hâlâ açık olabilir.</string>
     <string name="wallet_manage_title">Cüzdanları yönet</string>
     <string name="wallet_manage_rename">Yeniden adlandır</string>
     <string name="wallet_manage_move_up">Yukarı taşı</string>

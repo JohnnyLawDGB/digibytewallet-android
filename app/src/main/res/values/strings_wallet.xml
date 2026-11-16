@@ -70,6 +70,7 @@
     <string name="verify_success_title">Verified!</string>
     <string name="verify_retry_title">Let\'s try again</string>
     <string name="verify_success_body">Your seed phrase is safely written down. Now let\'s set up a PIN.</string>
+    <string name="verify_success_body_add">Your seed phrase is safely written down. Your app PIN already protects this wallet.</string>
     <string name="verify_retry_body">Some answers were incorrect. Please review your seed phrase and try again.</string>
     <string name="verify_setup_pin">Set Up PIN</string>
     <string name="verify_try_again">Try Again</string>
@@ -909,6 +910,7 @@
     <string name="wallet_switcher_add">Add wallet</string>
     <string name="wallet_switcher_manage">Manage</string>
     <string name="wallet_switcher_failed">That wallet could not be opened. Nothing was changed.</string>
+    <string name="wallet_switcher_digistamp_note">If you use DigiStamp in your browser, it may still be signed in as the wallet you are switching from.</string>
     <string name="wallet_manage_title">Manage wallets</string>
     <string name="wallet_manage_rename">Rename</string>
     <string name="wallet_manage_move_up">Move up</string>

@@ -58,6 +58,7 @@
     <string name="verify_success_title">¡Verificado!</string>
     <string name="verify_retry_title">Intentémoslo de nuevo</string>
     <string name="verify_success_body">Tu frase de recuperación está anotada de forma segura. Ahora configura un PIN.</string>
+    <string name="verify_success_body_add">Tu frase de recuperación está anotada de forma segura. El PIN de la app ya protege esta billetera.</string>
     <string name="verify_retry_body">Algunas respuestas fueron incorrectas. Revisa tu frase de recuperación e inténtalo de nuevo.</string>
     <string name="verify_setup_pin">Configurar PIN</string>
     <string name="verify_try_again">Intentar de nuevo</string>
@@ -778,6 +779,7 @@
     <string name="wallet_switcher_add">Añadir billetera</string>
     <string name="wallet_switcher_manage">Administrar</string>
     <string name="wallet_switcher_failed">No se pudo abrir esa billetera. No se cambió nada.</string>
+    <string name="wallet_switcher_digistamp_note">Si usas DigiStamp en tu navegador, puede seguir con la sesión iniciada con la billetera que dejas.</string>
     <string name="wallet_manage_title">Administrar billeteras</string>
     <string name="wallet_manage_rename">Renombrar</string>
     <string name="wallet_manage_move_up">Subir</string>

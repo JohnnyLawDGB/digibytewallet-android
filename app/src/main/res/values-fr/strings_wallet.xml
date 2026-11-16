@@ -54,6 +54,7 @@
     <string name="verify_success_title">Vérifié !</string>
     <string name="verify_retry_title">Réessayons</string>
     <string name="verify_success_body">Votre phrase de récupération est notée en lieu sûr. Configurons maintenant un code PIN.</string>
+    <string name="verify_success_body_add">Votre phrase de récupération est notée en lieu sûr. Le code PIN de l\'app protège déjà ce portefeuille.</string>
     <string name="verify_retry_body">Certaines réponses étaient incorrectes. Veuillez revoir votre phrase de récupération et réessayer.</string>
     <string name="verify_setup_pin">Configurer le code PIN</string>
     <string name="verify_try_again">Réessayer</string>
@@ -756,6 +757,7 @@
     <string name="wallet_switcher_add">Ajouter un portefeuille</string>
     <string name="wallet_switcher_manage">Gérer</string>
     <string name="wallet_switcher_failed">Ce portefeuille n’a pas pu être ouvert. Rien n’a été modifié.</string>
+    <string name="wallet_switcher_digistamp_note">Si vous utilisez DigiStamp dans votre navigateur, vous y êtes peut-être encore connecté avec le portefeuille que vous quittez.</string>
     <string name="wallet_manage_title">Gérer les portefeuilles</string>
     <string name="wallet_manage_rename">Renommer</string>
     <string name="wallet_manage_move_up">Monter</string>

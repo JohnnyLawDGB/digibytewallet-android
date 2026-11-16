@@ -56,6 +56,7 @@
     <string name="verify_success_title">Na-verify!</string>
     <string name="verify_retry_title">Subukan nating muli</string>
     <string name="verify_success_body">Ligtas nang naisulat ang iyong recovery phrase. Ngayon, mag-set up ng PIN.</string>
+    <string name="verify_success_body_add">Ligtas nang naisulat ang iyong recovery phrase. Pinoprotektahan na ng PIN ng app ang wallet na ito.</string>
     <string name="verify_retry_body">May mga maling sagot. Pakisuri ang iyong recovery phrase at subukan ulit.</string>
     <string name="verify_setup_pin">Mag-set up ng PIN</string>
     <string name="verify_try_again">Subukan ulit</string>
@@ -771,6 +772,7 @@
     <string name="wallet_switcher_add">Magdagdag ng wallet</string>
     <string name="wallet_switcher_manage">Pamahalaan</string>
     <string name="wallet_switcher_failed">Hindi mabuksan ang wallet na iyon. Walang binago.</string>
+    <string name="wallet_switcher_digistamp_note">Kung gumagamit ka ng DigiStamp sa iyong browser, maaaring naka-sign in pa rin ito bilang wallet na iniwan mo.</string>
     <string name="wallet_manage_title">Pamahalaan ang mga wallet</string>
     <string name="wallet_manage_rename">Palitan ang pangalan</string>
     <string name="wallet_manage_move_up">Itaas</string>
