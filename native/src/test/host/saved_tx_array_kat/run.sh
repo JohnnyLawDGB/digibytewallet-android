@@ -57,24 +57,61 @@ PENDING_SEAMS="$(grep -c "#ifndef SAVED_TX_PENDING_LOAD_UNFIXED" "$BRIDGE_DIR/jn
 # sources, loadSerializedTransactions and restoreWalletFromBytes are each called exactly once, from
 # restoreFromDisk, the load first; restoreFromDisk neither creates nor recovers a wallet. (Comments do not
 # count: they never write the receiver, NativeBridge.)
+#
+# restoreFromDisk reaches native through WalletManager's constructor seams, so a JVM test can drive it:
+# loadTxNative and restoreNative. The one app call of each native entry must therefore be that seam's
+# default, forwarding its arguments unchanged; no production construction may replace the default; and
+# the seam itself is invoked once in WalletManager, from restoreFromDisk, the load first. Then the
+# order below is the order of the real native calls, not of two renamed lambdas.
 WALLET_KT="$REPO_ROOT/core/src/main/java/app/aroundtheblock/wallet/core/WalletManager.kt"
 KT_SITES="$BUILD_DIR/kt_sites.txt"
 grep -rnF --include=*.kt -e "NativeBridge.loadSerializedTransactions(" -e "NativeBridge.restoreWalletFromBytes(" \
     "$REPO_ROOT/core/src/main" "$REPO_ROOT/app/src/main" > "$KT_SITES"
 for call in loadSerializedTransactions restoreWalletFromBytes; do
     n="$(grep -cF "NativeBridge.$call(" "$KT_SITES")"
-    [ "$n" -eq 1 ] || { sed 's/^/   | /' "$KT_SITES"; gate_fail "NativeBridge.$call is called from $n places in the app; expected 1 (restoreFromDisk)."; }
+    [ "$n" -eq 1 ] || { sed 's/^/   | /' "$KT_SITES"; gate_fail "NativeBridge.$call is called from $n places in the app; expected 1 (restoreFromDisk's seam)."; }
+done
+# seam_default <seam>: the seam's constructor parameter, from `private val <seam>:` through the lines
+# that continue it (a line ending in `=` continues on the next). Prints "<first line>:<text>".
+seam_default() {
+    awk -v seam="$1" '
+        !on && $0 ~ ("^[[:space:]]*private val " seam ":") { on = 1; first = NR; text = "" }
+        on { text = text " " $0; if ($0 !~ /=[[:space:]]*$/) { print first ":" text; exit } }' "$WALLET_KT"
+}
+# <seam> <native call> <ERE the whole default must match>
+for spec in \
+    'loadTxNative|loadSerializedTransactions|\{ *NativeBridge\.loadSerializedTransactions\( *it *\) *\}' \
+    'restoreNative|restoreWalletFromBytes|\{ *([a-z]+) *, *([a-z]+) *, *([a-z]+) *-> *NativeBridge\.restoreWalletFromBytes\( *\1 *, *\2 *, *\3 *\) *\}'; do
+    seam="${spec%%|*}"; rest="${spec#*|}"; call="${rest%%|*}"; re="${rest#*|}"
+    def="$(seam_default "$seam")"
+    [ -n "$def" ] || gate_fail "the seam $seam was not found in WalletManager.kt's constructor (private val $seam:). Re-anchor the gate."
+    first="${def%%:*}"; text="${def#*:}"
+    <<<"$text" grep -qE "$re" ||
+        gate_fail "the seam $seam's default is not NativeBridge.$call with its arguments forwarded unchanged:$text"
+    # the app's one NativeBridge.$call site is this default (its first line, or the line it continues on)
+    site="$(grep -F "NativeBridge.$call(" "$KT_SITES")"
+    site_file="${site%%:*}"; site_line="$(cut -d: -f2 <<<"$site")"
+    [ "$site_file" = "$WALLET_KT" ] && [ "$site_line" -ge "$first" ] && [ "$site_line" -le "$((first + 1))" ] ||
+        gate_fail "the app's NativeBridge.$call call ($site) is not the default of the seam $seam (WalletManager.kt:$first)."
+    # no production construction swaps the default (a named argument `$seam = ...`)
+    if grep -rnE --include=*.kt "\b$seam[[:space:]]*=" "$REPO_ROOT/core/src/main" "$REPO_ROOT/app/src/main"; then
+        gate_fail "a production construction passes its own $seam, so restoreFromDisk would not reach NativeBridge.$call."
+    fi
+    # the seam is invoked exactly once in WalletManager (outside comments)
+    n="$(grep -vE '^[[:space:]]*(//|\*|/\*)' "$WALLET_KT" | grep -oE "\b$seam\(" | wc -l)"
+    [ "$n" -eq 1 ] || gate_fail "the seam $seam is invoked $n times in WalletManager.kt; expected 1 (restoreFromDisk)."
 done
 # restoreFromDisk's body, braces matched.
 RESTORE_KT="$(awk '!on && /fun restoreFromDisk\(/ { on = 1 }
                    on { print; o = gsub(/\{/, "{"); c = gsub(/\}/, "}"); d += o - c; if (o > 0) seen = 1; if (seen && d <= 0) exit }' "$WALLET_KT")"
 [ -n "$RESTORE_KT" ] || gate_fail "restoreFromDisk was not found in WalletManager.kt. Re-anchor the gate."
-LOAD_AT="$(<<<"$RESTORE_KT" grep -nF "NativeBridge.loadSerializedTransactions(" | cut -d: -f1)"
-BUILD_AT="$(<<<"$RESTORE_KT" grep -nF "NativeBridge.restoreWalletFromBytes(" | cut -d: -f1)"
-[ -n "$LOAD_AT" ] && [ -n "$BUILD_AT" ] && [ "$LOAD_AT" -lt "$BUILD_AT" ] ||
-    gate_fail "restoreFromDisk must call loadSerializedTransactions and then restoreWalletFromBytes (load at '${LOAD_AT}', build at '${BUILD_AT}')."
-if <<<"$RESTORE_KT" grep -qE "NativeBridge\.(recoverWalletFromBytes|createWalletFromBytes)\("; then
-    gate_fail "restoreFromDisk calls recoverWalletFromBytes or createWalletFromBytes, which drop its own load."
+LOAD_AT="$(<<<"$RESTORE_KT" grep -nE '(^|[^[:alnum:]_.])loadTxNative\(' | grep -vE '^[0-9]+:[[:space:]]*(//|\*)' | cut -d: -f1)"
+BUILD_AT="$(<<<"$RESTORE_KT" grep -nE '(^|[^[:alnum:]_.])restoreNative\(' | grep -vE '^[0-9]+:[[:space:]]*(//|\*)' | cut -d: -f1)"
+[ -n "$LOAD_AT" ] && [ -n "$BUILD_AT" ] && [ "$(wc -w <<<"$LOAD_AT")" -eq 1 ] && [ "$(wc -w <<<"$BUILD_AT")" -eq 1 ] &&
+    [ "$LOAD_AT" -lt "$BUILD_AT" ] ||
+    gate_fail "restoreFromDisk must call loadSerializedTransactions (seam loadTxNative) and then restoreWalletFromBytes (seam restoreNative), once each (load at '${LOAD_AT}', build at '${BUILD_AT}')."
+if <<<"$RESTORE_KT" grep -vE '^[[:space:]]*(//|\*)' | grep -qE "NativeBridge\.(recoverWalletFromBytes|createWalletFromBytes)\(|(^|[^[:alnum:]_.])(recoverNative|createNative)\("; then
+    gate_fail "restoreFromDisk calls recoverWalletFromBytes or createWalletFromBytes (or their seams recoverNative/createNative), which drop its own load."
 fi
 
 # $1 out, rest: extra flags. KAT_BITS=32 builds -m32 (needs gcc-multilib).

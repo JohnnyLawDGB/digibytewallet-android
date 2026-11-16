@@ -34,7 +34,7 @@ SERIAL="${1:?usage: $0 <adb-serial> on|off|status [host:port]}"
 ACTION="${2:?usage: $0 <adb-serial> on|off|status [host:port]}"
 HOSTPORT="${3:-digiscope.me:12024}"
 PKG="${PKG:-app.aroundtheblock.wallet.debug}"   # run-as needs a debuggable build
-PREFS=shared_prefs/dgb_settings.xml   # mainnet: networkSuffix() is empty
+PREFS=shared_prefs/dgb_settings.xml   # one file for every wallet and network (CustomNode.PREFS; no suffix)
 
 adb_shell() { adb -s "$SERIAL" shell "$@"; }
 
