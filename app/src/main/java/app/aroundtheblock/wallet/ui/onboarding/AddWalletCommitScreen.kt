@@ -120,5 +120,7 @@ fun AddWalletCommitScreen(
 
 /** The name the add flow shows for [entry]: its own, or the default "Wallet <number>". */
 @Composable
-internal fun addFlowWalletName(entry: app.aroundtheblock.wallet.core.wallets.WalletEntry): String =
-    entry.name ?: stringResource(R.string.wallet_default_name, entry.number)
+internal fun addFlowWalletName(entry: app.aroundtheblock.wallet.core.wallets.WalletEntry): String {
+    val default = stringResource(R.string.wallet_default_name, entry.number)
+    return app.aroundtheblock.wallet.ui.wallets.shownName(entry) { default }
+}

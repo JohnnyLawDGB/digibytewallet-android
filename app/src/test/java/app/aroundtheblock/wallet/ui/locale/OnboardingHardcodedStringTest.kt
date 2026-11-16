@@ -86,6 +86,12 @@ class OnboardingHardcodedStringTest {
         "ui/onboarding/RecoveryDateScreen.kt",
         // Adding a wallet (onboarding in ADD mode): its last step, the one screen of its own.
         "ui/onboarding/AddWalletCommitScreen.kt",
+        // The wallet switcher: the chip on the Wallet tab, its sheet, Manage, and removing a wallet.
+        "ui/wallets/WalletsViewModel.kt",
+        "ui/wallets/WalletChip.kt",
+        "ui/wallets/WalletSwitcherSheet.kt",
+        "ui/wallets/ManageWalletsScreen.kt",
+        "ui/wallets/RemoveWalletDialog.kt",
         // AppNavigation is deliberately NOT here. It is a router: ~100 of its literals are route
         // names and argument keys, so an every-literal scan would need an allow-list longer than
         // the file and would stop meaning anything. Its user-visible text is three toast/label
@@ -112,6 +118,8 @@ class OnboardingHardcodedStringTest {
         "dgb_settings", "digiid://", "connection refused", "backstop wipe failed",
         // KS-BIND: the no-screen-lock notice's pref keys.
         "ksb_no_lock_notice_due", "ksb_no_lock_notice_ack",
+        // The wallet switcher's last-known balance reader: a prefs file and its keys.
+        "dgb_sync_data", "has_synced", "last_balance", "last_dd_balance",
         // Ticker, network name and unit — brand-class, never translated (see strings_wallet.xml).
         "DGB", "TESTNET", "USD",
         // Composites of already-localised parts plus a ticker or a bare number.

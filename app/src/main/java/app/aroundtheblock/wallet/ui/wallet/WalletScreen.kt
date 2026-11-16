@@ -54,8 +54,15 @@ fun WalletScreen(
     /** Opens the reconcile / full-rebuild screen — both recovery paths for an
      *  abandoned compact-filter band (see [AbandonedBandBanner]). */
     onNavigateReconcile: () -> Unit = {},
-    viewModel: WalletViewModel = hiltViewModel()
+    /** The switcher sheet's Add wallet and Manage. */
+    onNavigateAddWallet: () -> Unit = {},
+    onNavigateManageWallets: () -> Unit = {},
+    viewModel: WalletViewModel = hiltViewModel(),
+    walletsViewModel: app.aroundtheblock.wallet.ui.wallets.WalletsViewModel = hiltViewModel(),
 ) {
+    val walletRows by walletsViewModel.rows.collectAsStateWithLifecycle()
+    val canAddWallet by walletsViewModel.canAdd.collectAsStateWithLifecycle()
+    var showWalletSheet by remember { mutableStateOf(false) }
     val balance by viewModel.balance.collectAsStateWithLifecycle()
     val ddBalance by viewModel.ddBalance.collectAsStateWithLifecycle()
     val balanceHidden by viewModel.balanceHidden.collectAsStateWithLifecycle()
@@ -104,6 +111,25 @@ fun WalletScreen(
             .background(MaterialTheme.colorScheme.background),
         contentPadding = PaddingValues(bottom = 16.dp)
     ) {
+        // ── Wallet chip: the running wallet's name; opens the switcher ────
+        item {
+            val running = walletRows.firstOrNull { it.active }
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(DigiByteNavy)
+                    .padding(top = 8.dp, start = 16.dp, end = 16.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (running != null) {
+                    app.aroundtheblock.wallet.ui.wallets.WalletChip(
+                        name = running.shownName,
+                        onClick = { walletsViewModel.refresh(); showWalletSheet = true },
+                    )
+                }
+            }
+        }
+
         // ── Hero balance card ─────────────────────────────────────────────
         item {
             Box(
@@ -377,6 +403,19 @@ fun WalletScreen(
             }
         }
     }
+    }
+
+    // Opened by the wallet chip; outside the LazyColumn for the same reason as the currency picker.
+    if (showWalletSheet) {
+        app.aroundtheblock.wallet.ui.wallets.WalletSwitcherSheet(
+            rows = walletRows,
+            canAdd = canAddWallet,
+            hidden = balanceHidden,
+            onSwitch = { id -> walletsViewModel.switchTo(id) },
+            onAdd = { showWalletSheet = false; onNavigateAddWallet() },
+            onManage = { showWalletSheet = false; onNavigateManageWallets() },
+            onDismiss = { showWalletSheet = false },
+        )
     }
 
     // Opened by tapping the equivalent line under the balance. Rendered here rather than inside

@@ -447,8 +447,14 @@ fun AppNavigation(
                     // autostart=true: the banner's button is labelled "Scan for missing
                     // transactions", so tapping it must START the scan, not just open the
                     // screen that has another button on it.
-                    onNavigateReconcile = { navController.navigate("settings_reconcile?autostart=true") }
+                    onNavigateReconcile = { navController.navigate("settings_reconcile?autostart=true") },
+                    onNavigateAddWallet = { navController.navigate(onboardingRoute(OnboardingMode.ADD)) },
+                    onNavigateManageWallets = { navController.navigate("manage_wallets") },
                 )
+            }
+
+            composable("manage_wallets") {
+                app.aroundtheblock.wallet.ui.wallets.ManageWalletsScreen(onBack = { navController.popBackStack() })
             }
 
             composable(Screen.Digistamp.route) {
