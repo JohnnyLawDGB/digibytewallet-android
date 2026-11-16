@@ -27,6 +27,10 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
@@ -245,6 +249,9 @@ fun MnemonicInputScreen(
     }
 }
 
+/** Space kept between the focused word (with its suggestions) and the top of the keyboard. */
+private val KEYBOARD_GAP = 16.dp
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun WordInputField(
@@ -262,22 +269,45 @@ private fun WordInputField(
         else emptyList()
     }
 
-    // Brings the focused field into view when the soft keyboard appears.
+    // Brings the focused field AND its suggestions into view above the soft keyboard.
     // Doing it on focus alone fires BEFORE the keyboard finishes animating
     // up, so the requested position is wrong by the time IME is fully
     // visible — we re-trigger every time the IME bottom inset changes
     // (initial show, autocomplete state changes, configuration changes).
+    //
+    // The requester sits on the Column that holds the field and the suggestion list, not on
+    // the text field, and the request is repeated when the suggestions change. The suggestions
+    // appear only after typing, below the field, with no focus or inset change to re-trigger a
+    // request on the field alone. Measured on a Pixel 6 profile (API 36, Gboard, 1080x2400):
+    // from word 9 of 24 on, the focused field was brought flush to the viewport bottom at
+    // [..,1197][..,1365] and the suggestions began at y=1355, so all four sat under the
+    // keyboard (top 1428) and could not be tapped.
+    //
+    // The requested rect extends [KEYBOARD_GAP] below the column, so the field and its
+    // suggestions stop short of the keyboard instead of touching its top edge.
     val bringIntoView = remember { BringIntoViewRequester() }
     val scope = rememberCoroutineScope()
     val imeBottomPx = keyboardBottomPx()
+    val gapPx = with(LocalDensity.current) { KEYBOARD_GAP.toPx() }
+    var size by remember { mutableStateOf(IntSize.Zero) }
+    val bringFieldIntoView: suspend () -> Unit = {
+        if (size == IntSize.Zero) bringIntoView.bringIntoView()
+        else bringIntoView.bringIntoView(
+            Rect(0f, 0f, size.width.toFloat(), size.height.toFloat() + gapPx)
+        )
+    }
 
-    LaunchedEffect(isFocused, imeBottomPx) {
+    LaunchedEffect(isFocused, imeBottomPx, suggestions, size) {
         if (isFocused && imeBottomPx > 0) {
-            bringIntoView.bringIntoView()
+            bringFieldIntoView()
         }
     }
 
-    Column(modifier = modifier) {
+    Column(
+        modifier = modifier
+            .onSizeChanged { size = it }
+            .bringIntoViewRequester(bringIntoView)
+    ) {
         OutlinedTextField(
             value = value,
             onValueChange = { input ->
@@ -287,13 +317,12 @@ private fun WordInputField(
             modifier = Modifier
                 .fillMaxWidth()
                 .semantics { password() }
-                .bringIntoViewRequester(bringIntoView)
                 .onFocusChanged { state ->
                     if (state.isFocused) {
                         onFocused()
                         // Initial fire — covers the case where the keyboard
                         // is already up (focus moves between fields).
-                        scope.launch { bringIntoView.bringIntoView() }
+                        scope.launch { bringFieldIntoView() }
                     }
                 },
             singleLine = true,
