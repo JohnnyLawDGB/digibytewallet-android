@@ -133,7 +133,7 @@ Dandelion and Tor. Wallets differ only in how they are used.
   - watched addresses, outgoing txs, birth height, the asset backfill/heal state, the CF ledger,
     saved transactions, abandonment, reconcile and history rebuild;
   - the Hub session and Digi-ID history.
-- **Shared:**
+- **Shared** (chain data from step 2 on; in step 1 it is per wallet, see below):
   - chain data: filter headers, block checkpoints, ChainTip;
   - peer caches;
   - display currency, price settings, language;
@@ -142,8 +142,8 @@ Dandelion and Tor. Wallets differ only in how they are used.
   - the PIN store.
 
 **Chain data in step 1 is per wallet (decided, builder check 2026-11-16).**
-- In step 1, saved blocks, the filter-header chain and the CF ledger stay per wallet, under the
-  wallet suffix. Each wallet syncs on its own while it is active. A wallet switched back to
+- In step 1, saved blocks, the filter-header chain, the CF ledger and ChainTip (it lives in
+  `dgb_sync_data`) stay per wallet, under the wallet suffix. Each wallet syncs on its own while it is active. A wallet switched back to
   catches up from where it stopped, as the app does today after days closed. A new wallet starts
   from its birth checkpoint, as a restore does today.
 - So `clearSyncData()` runs only for the new wallet's own stores. It never clears another
@@ -163,21 +163,26 @@ Dandelion and Tor. Wallets differ only in how they are used.
 **Restore.**
 - The wallet asks for the birth date, as today, and back-scans with compact filters from that date.
   This is the default and is private.
-- **Quick start (decided, builder check 2026-11-16).** Own-node pairing (`dgbnode://`) is P2P only
-  and cannot look up UTXOs by address. So quick start uses the existing custom endpoint setting
-  `custom_rpc_endpoint` (the "Use my own node" field of Scan for missing funds), and is offered
-  only when that setting is set.
+- **Quick start (decided, builder check 2026-11-16; amended at pre-flight F10).** Own-node pairing
+  (`dgbnode://`) is P2P only and cannot look up UTXOs by address. So the own-node quick start uses
+  the existing custom endpoint setting `custom_rpc_endpoint` (the "Use my own node" field of Scan
+  for missing funds), and is offered only when that setting is set. With it set, the choices are
+  the own node and digiscope.me; without it, digiscope.me only. Skipping is the default and one
+  tap.
 - **The quick-start balance is display-only,** labelled "not yet verified". It is not spendable
   and is not counted in the wallet's balance until the compact-filter back-scan proves the
   outputs. This keeps the counting rule ("a row counts iff the native wallet holds that exact
   output"), and nothing unproven reaches the send path.
-- digiscope.me is offered only as an explicit choice. Its screen says the wallet's addresses go to
-  that server and that the server can link this wallet to the user's others. This is the same
-  disclosure family as "Scan for missing funds".
+- digiscope.me is offered only as an explicit opt-in. Its screen says the wallet's addresses are
+  sent to digiscope.me and that this can link the wallet to the user's other wallets. This is the
+  same disclosure family as "Scan for missing funds".
 
 **Remove a wallet.**
 - The user confirms by typing the wallet's name, after a warning to back up the phrase first.
 - Removal erases only that wallet's per-wallet stores and Keystore aliases.
+- Removing the **active** wallet marks it as being removed, makes another wallet active and
+  restarts. The next launch erases it before the database or the sync service opens, so the live
+  database is never deleted under the running process (pre-flight F8).
 - Removing the last wallet is the existing full wipe and fresh start.
 
 **One PIN.**
