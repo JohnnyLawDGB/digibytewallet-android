@@ -129,6 +129,23 @@ class WalletsViewModelTest {
         assertEquals(b, vm().onlyWalletId.value)
     }
 
+    @Test fun `rename hands the registry the default-name resolver`() {
+        every { registry.rename(WalletIds.LEGACY, "x", any()) } answers {
+            assertEquals("Wallet 2", thirdArg<(Int) -> String>()(2))
+            true
+        }
+        assertTrue(vm().rename(WalletIds.LEGACY, "x"))
+    }
+
+    @Test fun `an unreadable last balance shows as never synced`() {
+        val vm = WalletsViewModel(
+            registry, switcher, removal, testnet = false,
+            lastKnown = { error("unreadable") }, defaultName = { n -> "Wallet $n" },
+            runningId = WalletIds.LEGACY, restart = {}, afterWipe = { false }, io = dispatcher,
+        )
+        assertEquals(listOf<Long?>(null, null), vm.rows.value.map { it.lastBalanceSat })
+    }
+
     @Test fun `the wallet this process runs is the active row`() {
         assertEquals(listOf(true, false), vm().rows.value.map { it.active })
     }

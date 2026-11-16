@@ -107,11 +107,27 @@ class WalletRegistryTest {
         val r = registry()
         val b = reserved(r)
         val c = reserved(r)
-        assertTrue(r.rename(b.id, " Savings "))
+        assertTrue(r.rename(b.id, " Savings ", ::walletN))
         assertEquals("Savings", r.find(b.id)!!.name)
-        assertFalse(r.rename(c.id, "savings"))
-        assertFalse(r.rename(c.id, ""))
-        assertFalse(r.rename(c.id, "x".repeat(33)))
+        assertFalse(r.rename(c.id, "savings", ::walletN))
+        assertFalse(r.rename(c.id, "", ::walletN))
+        assertFalse(r.rename(c.id, "x".repeat(33), ::walletN))
+    }
+
+    private fun walletN(n: Int) = "Wallet $n"
+
+    @Test
+    fun `a name may not be another wallet's shown default name`() {
+        val r = registry()
+        val b = reserved(r)
+        val c = reserved(r)
+        assertEquals(2, b.number)
+        // b is unnamed and shown as "Wallet 2"; c may not take that name in any case.
+        assertFalse(r.rename(c.id, "wallet 2", ::walletN))
+        assertFalse(r.rename("legacy", " Wallet 2 ", ::walletN))
+        assertNull(r.find(c.id)!!.name)
+        // A wallet's own default is not another wallet's name.
+        assertTrue(r.rename(c.id, walletN(c.number), ::walletN))
     }
 
     @Test

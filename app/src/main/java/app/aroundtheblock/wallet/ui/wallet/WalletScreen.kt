@@ -95,6 +95,12 @@ fun WalletScreen(
     // Report RESUMED state so the poll loop's active-screen readiness nudge only
     // fires while the user is actually looking at this screen — never in the
     // background or behind a pushed-over destination. Pairs with [shouldWakePeers].
+    // A rename or reorder in Manage shows on the chip when this tab comes back.
+    LifecycleResumeEffect(walletsViewModel) {
+        walletsViewModel.refresh()
+        onPauseOrDispose { }
+    }
+
     LifecycleResumeEffect(viewModel) {
         viewModel.setScreenActive(true)
         onPauseOrDispose { viewModel.setScreenActive(false) }

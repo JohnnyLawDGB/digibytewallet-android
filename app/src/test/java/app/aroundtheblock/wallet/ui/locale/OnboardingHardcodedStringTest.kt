@@ -119,7 +119,7 @@ class OnboardingHardcodedStringTest {
         // KS-BIND: the no-screen-lock notice's pref keys.
         "ksb_no_lock_notice_due", "ksb_no_lock_notice_ack",
         // The wallet switcher's last-known balance reader: a prefs file and its keys.
-        "dgb_sync_data", "has_synced", "last_balance", "last_dd_balance",
+        "dgb_sync_data", "has_synced", "last_balance", "last_dd_balance", "WalletsViewModel",
         // Ticker, network name and unit — brand-class, never translated (see strings_wallet.xml).
         "DGB", "TESTNET", "USD",
         // Composites of already-localised parts plus a ticker or a bare number.

@@ -138,13 +138,17 @@ class WalletRegistry(
         return save(doc)
     }
 
-    fun rename(id: String, name: String): Boolean = synchronized(MUTATION_LOCK) {
+    /**
+     * [defaultName] is the localised "Wallet <number>" an unnamed wallet is shown by: a new name may
+     * not equal any other wallet's SHOWN name, its default included, or two rows would read the same.
+     */
+    fun rename(id: String, name: String, defaultName: (Int) -> String): Boolean = synchronized(MUTATION_LOCK) {
         val doc = load()
         val target = if (id == WalletIds.LEGACY) legacyEntry(doc) else doc.entries.firstOrNull { it.id == id }
         if (target == null) return false
         val others = (listOf(legacyEntry(doc)) + doc.entries)
             .filter { it.id != id && (target.testnet == null || it.testnet == null || it.testnet == target.testnet) }
-            .mapNotNull { it.name }
+            .map { it.name ?: defaultName(it.number) }
         if (!validName(name, others)) return false
         val trimmed = name.trim()
         if (id == WalletIds.LEGACY) {

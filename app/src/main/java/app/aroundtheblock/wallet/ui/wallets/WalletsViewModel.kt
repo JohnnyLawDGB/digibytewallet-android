@@ -2,6 +2,7 @@ package app.aroundtheblock.wallet.ui.wallets
 
 import android.app.Application
 import android.content.Context
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.aroundtheblock.wallet.AppRestart
@@ -140,7 +141,13 @@ class WalletsViewModel internal constructor(
 
     private fun read(): Snapshot {
         val rows = registry.list(testnet).map { e ->
-            val known = runCatching { lastKnown(WalletScope(e.id, e.testnet ?: testnet)) }.getOrDefault(LastKnown(null, null))
+            val known = try {
+                lastKnown(WalletScope(e.id, e.testnet ?: testnet))
+            } catch (t: Throwable) {
+                // The class only: no wallet id, no balance.
+                runCatching { Log.w(TAG, "last-known balance unreadable (${t.javaClass.simpleName})") }
+                LastKnown(null, null)
+            }
             WalletRow(
                 id = e.id,
                 shownName = shownName(e, defaultName),
@@ -156,8 +163,8 @@ class WalletsViewModel internal constructor(
 
     fun switchTo(id: String): WalletSwitcher.Result = switcher.switchTo(id)
 
-    /** False when the name is empty, too long or another wallet's (the registry decides). */
-    fun rename(id: String, name: String): Boolean = registry.rename(id, name).also { if (it) refresh() }
+    /** False when the name is empty, too long or another wallet's shown name, its default included (the registry decides). */
+    fun rename(id: String, name: String): Boolean = registry.rename(id, name, defaultName).also { if (it) refresh() }
 
     /** Moves [id] one place: -1 up, +1 down. False at either end. */
     fun move(id: String, delta: Int): Boolean {
@@ -195,5 +202,6 @@ class WalletsViewModel internal constructor(
     private companion object {
         /** Process-wide: the sheet and the Manage screen hold different instances. */
         val removalRunning = MutableStateFlow(false)
+        const val TAG = "WalletsViewModel"
     }
 }
