@@ -56,6 +56,7 @@ class WalletSessionAfterWipeTest {
         val aliases = present.toMutableSet()
         override fun contains(alias: String) = alias in aliases
         override fun delete(alias: String) { aliases.remove(alias) }
+        override fun aliases(): List<String> = aliases.toList()
     }
 
     /** One device: its stores, its keystore, its native session, and the order things happened in. */

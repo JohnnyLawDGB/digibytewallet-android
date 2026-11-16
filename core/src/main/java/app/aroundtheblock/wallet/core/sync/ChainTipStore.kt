@@ -34,19 +34,21 @@ object ChainTipStore {
     private const val PREFS_NAME = "dgb_sync_data"
     private const val KEY_TIP = "last_chain_tip"
 
-    /** Mirrors the persisted value so the UI refresh loop doesn't hit prefs on every tick. */
-    @Volatile private var cached: Long = -1L
+    /**
+     * Mirrors the persisted value of each wallet so the UI refresh loop doesn't hit prefs on every
+     * tick. Keyed by scope: one wallet's tip is never read, written or left behind as another's.
+     */
+    private val cached = java.util.concurrent.ConcurrentHashMap<WalletScope, Long>()
 
     private fun prefs(ctx: Context, scope: WalletScope) =
         ctx.getSharedPreferences(WalletStores.prefsName(PREFS_NAME, scope), Context.MODE_PRIVATE)
 
     /** Last remembered tip, or [ChainTipPolicy.UNKNOWN_TIP] if none has been stored yet. */
     fun read(ctx: Context, scope: WalletScope = ActiveWallet.scope(ctx)): Long {
-        val c = cached
-        if (c >= 0L) return c
+        cached[scope]?.let { return it }
         val stored = runCatching { prefs(ctx, scope).getLong(KEY_TIP, ChainTipPolicy.UNKNOWN_TIP) }
             .getOrDefault(ChainTipPolicy.UNKNOWN_TIP)
-        cached = stored
+        cached[scope] = stored
         return stored
     }
 
@@ -60,7 +62,7 @@ object ChainTipStore {
      */
     fun record(ctx: Context, candidate: Long, scope: WalletScope = ActiveWallet.scope(ctx)): Boolean {
         if (!ChainTipPolicy.shouldPersistTip(candidate, read(ctx, scope))) return false
-        cached = candidate
+        cached[scope] = candidate
         runCatching { prefs(ctx, scope).edit().putLong(KEY_TIP, candidate).apply() }
         return true
     }
@@ -72,6 +74,11 @@ object ChainTipStore {
      * [record]. Exposed for tests too, which need a clean slate between cases.
      */
     fun invalidateCache() {
-        cached = -1L
+        cached.clear()
+    }
+
+    /** [invalidateCache] for one wallet only: what removing that wallet drops, leaving every other's. */
+    fun invalidateCache(scope: WalletScope) {
+        cached.remove(scope)
     }
 }

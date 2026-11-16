@@ -12,6 +12,7 @@ import app.aroundtheblock.wallet.core.sync.SavedBlockStore
 import app.aroundtheblock.wallet.core.sync.SavedTransactionsStore
 import app.aroundtheblock.wallet.core.wallets.StoreScope
 import app.aroundtheblock.wallet.core.wallets.WalletScope
+import app.aroundtheblock.wallet.core.wallets.WalletStores
 import app.aroundtheblock.wallet.core.wallets.storageSuffix
 
 /**
@@ -115,16 +116,40 @@ data class WipeReport(val seedGone: Boolean, val everythingCleared: Boolean) {
     val verified: Boolean get() = seedGone && everythingCleared
 }
 
-/** The two Keystore operations the eraser needs, behind a seam so it runs on a plain JVM. */
+/** The Keystore operations the erasers need, behind a seam so they run on a plain JVM. */
 internal interface KeystoreAliases {
     fun contains(alias: String): Boolean
     fun delete(alias: String)
+    /** Every alias the Keystore holds now. */
+    fun aliases(): List<String>
 }
 
 internal object AndroidKeystoreAliases : KeystoreAliases {
     private fun keyStore() = java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
     override fun contains(alias: String): Boolean = keyStore().containsAlias(alias)
     override fun delete(alias: String) { keyStore().deleteEntry(alias) }
+    override fun aliases(): List<String> = keyStore().aliases().toList()
+}
+
+/**
+ * After a write to [store] that did not land, put [held] — what the view showed before that
+ * write, which is what the file still holds — back into the view. The rewrite carries the same
+ * content the file has, so whether or not it lands, the file and this process agree.
+ */
+internal fun readWhatTheFileHolds(tag: String, name: String, store: SharedPreferences, held: Map<String, *>) {
+    val editor = store.edit().clear()
+    for ((key, value) in held) {
+        when (value) {
+            is String -> editor.putString(key, value)
+            is Long -> editor.putLong(key, value)
+            is Int -> editor.putInt(key, value)
+            is Boolean -> editor.putBoolean(key, value)
+            is Float -> editor.putFloat(key, value)
+            is Set<*> -> editor.putStringSet(key, value.filterIsInstance<String>().toSet())
+        }
+    }
+    val rewritten = editor.commit()
+    Log.w(tag, "$name: write not confirmed; this process reads what the file holds (rewrite landed=$rewritten)")
 }
 
 /**
@@ -158,29 +183,8 @@ class AndroidWalletDataEraser internal constructor(
         val store = context.getSharedPreferences(name, Context.MODE_PRIVATE)
         val held = store.all
         val landed = store.edit().clear().commit()
-        if (!landed) readWhatTheFileHolds(name, store, held)
+        if (!landed) readWhatTheFileHolds(TAG, name, store, held)
         landed
-    }
-
-    /**
-     * After a write to [store] that did not land, put [held] — what the view showed before that
-     * write, which is what the file still holds — back into the view. The rewrite carries the same
-     * content the file has, so whether or not it lands, the file and this process agree.
-     */
-    private fun readWhatTheFileHolds(name: String, store: SharedPreferences, held: Map<String, *>) {
-        val editor = store.edit().clear()
-        for ((key, value) in held) {
-            when (value) {
-                is String -> editor.putString(key, value)
-                is Long -> editor.putLong(key, value)
-                is Int -> editor.putInt(key, value)
-                is Boolean -> editor.putBoolean(key, value)
-                is Float -> editor.putFloat(key, value)
-                is Set<*> -> editor.putStringSet(key, value.filterIsInstance<String>().toSet())
-            }
-        }
-        val rewritten = editor.commit()
-        Log.w(TAG, "$name: write not confirmed; this process reads what the file holds (rewrite landed=$rewritten)")
     }
 
     /** [clearPrefs] for [base] on EVERY network. All are attempted even when one refuses. */
@@ -301,9 +305,10 @@ class AndroidWalletDataEraser internal constructor(
         val scanFloor = step("scan floor") {
             val settings = context.getSharedPreferences("dgb_settings", Context.MODE_PRIVATE)
             val held = settings.all
-            val landed = settings.edit().remove("cf_birth_height").commit()
+            // This full wipe is the legacy wallet's: its floor key (`cf_birth_height`).
+            val landed = settings.edit().remove(WalletStores.cfBirthHeightKey(WalletScope.legacy(false))).commit()
             // As clearPrefs: a write that did not land leaves this process reading the file.
-            if (!landed) readWhatTheFileHolds("dgb_settings", settings, held)
+            if (!landed) readWhatTheFileHolds(TAG, "dgb_settings", settings, held)
             landed
         }
         return filterPeers && dandelionPeers && reconcile && assetBackfill && assetHeal && diag && logTag && scanFloor

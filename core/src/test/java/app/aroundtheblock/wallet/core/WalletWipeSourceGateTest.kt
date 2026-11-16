@@ -17,6 +17,12 @@ class WalletWipeSourceGateTest {
 
     private val eraser = File("src/main/java/app/aroundtheblock/wallet/core/WalletDataEraser.kt")
 
+    /** Every file whose writes an erase reports: the full wipe's and the one-wallet removal's. */
+    private val scanned = listOf(
+        eraser,
+        File("src/main/java/app/aroundtheblock/wallet/core/wallets/WalletStoreEraser.kt"),
+    )
+
     /**
      * Code only, one logical statement per entry: comments are dropped, and a line that
      * continues the previous one (leading `.`/`&&`/`||`/`?:`, or a previous line left open by
@@ -52,22 +58,28 @@ class WalletWipeSourceGateTest {
     }
 
     @Test fun `the scan sees the eraser's writes at all`() {
-        assertTrue("cannot find ${eraser.path}", eraser.isFile)
-        val commits = statements(eraser).count { it.contains(".commit()") }
-        assertTrue("scanner found no commit() in the eraser — it is blind, not clean", commits >= 1)
+        for (file in scanned) {
+            assertTrue("cannot find ${file.path}", file.isFile)
+            val commits = statements(file).count { it.contains(".commit()") }
+            assertTrue("scanner found no commit() in ${file.name} — it is blind, not clean", commits >= 1)
+        }
     }
 
     @Test fun `the eraser never discards a commit result`() {
-        val discarded = statements(eraser).filter(::discardsCommit)
-        assertEquals(
-            "write results that reach nobody in ${eraser.name}:\n" + discarded.joinToString("\n"),
-            0, discarded.size,
-        )
+        for (file in scanned) {
+            val discarded = statements(file).filter(::discardsCommit)
+            assertEquals(
+                "write results that reach nobody in ${file.name}:\n" + discarded.joinToString("\n"),
+                0, discarded.size,
+            )
+        }
     }
 
     @Test fun `the eraser never uses an unchecked asynchronous write`() {
-        val async = statements(eraser).filter { it.contains(".apply()") }
-        assertTrue("apply() has no result to check:\n" + async.joinToString("\n"), async.isEmpty())
+        for (file in scanned) {
+            val async = statements(file).filter { it.contains(".apply()") }
+            assertTrue("apply() has no result to check in ${file.name}:\n" + async.joinToString("\n"), async.isEmpty())
+        }
     }
 
     /**

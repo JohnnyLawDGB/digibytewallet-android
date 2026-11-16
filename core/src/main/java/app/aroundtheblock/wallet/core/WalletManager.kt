@@ -184,6 +184,10 @@ class WalletManager @Suppress("LongParameterList") constructor(
     private val peerCountNative: () -> Int = { NativeBridge.getPeerCount() },
     private val loadTxNative: (records: ByteArray) -> Int = { NativeBridge.loadSerializedTransactions(it) },
     private val sleep: (millis: Long) -> Unit = { Thread.sleep(it) },
+    // Read-back of every store of a scope (prefs incl. the seed record, files, database files, the
+    // floor key; not Keystore aliases). Injectable for the same reason as the above.
+    private val storesLeft: (WalletScope) -> Boolean =
+        { app.aroundtheblock.wallet.core.wallets.WalletStoreEraser(context).storesLeft(it) },
 ) {
     // Sessions running for the wallet in this process (the sync service), stopped by every wipe
     // before it erases anything. See [WalletSessionStop].
@@ -347,15 +351,15 @@ class WalletManager @Suppress("LongParameterList") constructor(
      * wallet other than the one this process runs is added; it is loaded by [restoreFromDisk] once
      * it is the active wallet.
      *
-     * False, and nothing written (no key made either), when the scope already holds a record or
-     * sync data: a record is never stored over a wallet's existing state.
+     * False, and nothing written (no key made either), when any store of the scope is still present
+     * ([app.aroundtheblock.wallet.core.wallets.WalletStoreEraser.storesLeft]): a record is never
+     * stored over a wallet's existing state. A leftover Keystore alias does not block it.
      *
      * @param passphrase NFKD UTF-8 bytes, or null. The CALLER owns and zeroes them; see [createWallet].
      */
     fun storeRecordOnly(mnemonic: String, passphrase: ByteArray?, creationTimeSecs: Long, origin: WalletOrigin): Boolean {
         if (passphrase != null && (passphrase.size > Bip39Passphrase.MAX_BYTES || Bip39Passphrase.hasNul(passphrase))) return false
-        val syncPrefs = context.getSharedPreferences(WalletStores.prefsName("dgb_sync_data", scope), Context.MODE_PRIVATE)
-        if (prefs.all.isNotEmpty() || syncPrefs.all.isNotEmpty()) {
+        if (storesLeft(scope)) {
             android.util.Log.w("WalletManager", "wallet record not stored: its scope already holds state")
             return false
         }

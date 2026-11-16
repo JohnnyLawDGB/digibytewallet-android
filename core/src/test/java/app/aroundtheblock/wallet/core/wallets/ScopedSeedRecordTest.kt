@@ -6,6 +6,7 @@ import app.aroundtheblock.wallet.core.FakeVault
 import app.aroundtheblock.wallet.core.InMemoryPrefsFactory
 import app.aroundtheblock.wallet.core.RecordingPrefs
 import app.aroundtheblock.wallet.core.WalletManager
+import app.aroundtheblock.wallet.core.asKeystoreAliases
 import app.aroundtheblock.wallet.core.keyStoreManagerOver
 import app.aroundtheblock.wallet.core.keyTestContext
 import io.mockk.every
@@ -64,6 +65,8 @@ class ScopedSeedRecordTest {
             every { it.getSharedPreferences(seedPrefsB, any()) } returns seedStoreB
         }
         var restoredWith: ByteArray? = null
+        // The production read-back over this harness: a prefs file is "left" when it holds something.
+        val eraser = WalletStoreEraser(ctx, vault.asKeystoreAliases(), { true }, { name -> prefs.prefsFor(name).all.isNotEmpty() })
 
         fun walletManager(
             createNative: (ByteArray, ByteArray?) -> Boolean = { _, _ -> fail("native create called"); false },
@@ -88,6 +91,7 @@ class ScopedSeedRecordTest {
             peerCountNative = { 0 },
             loadTxNative = { 0 },
             sleep = { },
+            storesLeft = eraser::storesLeft,
         )
     }
 

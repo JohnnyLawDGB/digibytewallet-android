@@ -422,7 +422,7 @@ object HistoryRebuildOnUpgrade {
     /** A recorded floor (height or time) not yet carried into the scan start. */
     fun floorPending(context: Context, scope: WalletScope = ActiveWallet.scope(context)): Boolean = statePrefs(context, scope).getBoolean(KEY_FLOOR_PENDING, false)
 
-    /** The floor has been carried into `cf_birth_height`; forget the height and the pending marker.
+    /** The floor has been carried into the wallet's floor key ([WalletStores.cfBirthHeightKey] of [scope]); forget the height and the pending marker.
      *  The floor time stays: it keeps the header anchor low on later loads. */
     fun clearFloorHint(context: Context, scope: WalletScope = ActiveWallet.scope(context)) {
         statePrefs(context, scope).edit().remove(KEY_FLOOR_HINT).remove(KEY_FLOOR_PENDING).commit()
@@ -529,7 +529,7 @@ object HistoryRebuildOnUpgrade {
  * network: the tx cache, the filter-header chain, the saved block headers, `has_synced`,
  * `last_balance`, `last_dd_balance`, the CF scan ledger and its surfaced band. Shared by the manual
  * [app.aroundtheblock.wallet.core.WalletManager.rebuildFromChainRescan] and [HistoryRebuildOnUpgrade] so the two
- * cannot drift. It does NOT touch recorded sends ([OutgoingTxStore]) or `cf_birth_height`; the
+ * cannot drift. It does NOT touch recorded sends ([OutgoingTxStore]) or the wallet's floor key ([WalletStores.cfBirthHeightKey]); the
  * manual path handles those itself. Synchronous (`commit`): callers may end the process next.
  * Returns false when the prefs commit did not land or a store file is still on disk.
  */

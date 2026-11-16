@@ -340,6 +340,7 @@ class WalletWipeTest {
         val aliases = present.toMutableSet()
         override fun contains(alias: String) = alias in aliases
         override fun delete(alias: String) { aliases.remove(alias) }
+        override fun aliases(): List<String> = aliases.toList()
     }
 
     private inner class Device {

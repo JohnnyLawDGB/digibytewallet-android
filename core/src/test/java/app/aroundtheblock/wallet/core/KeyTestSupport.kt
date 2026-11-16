@@ -61,6 +61,17 @@ internal class FakeVault(val events: MutableList<String> = mutableListOf()) : Ke
     }
 }
 
+/**
+ * [vault] seen as the erasers' [KeystoreAliases], so an eraser and a [KeyStoreManager]
+ * ([keyStoreManagerOver]) share one set of keys. Calls go through the vault, so they are logged
+ * in its [FakeVault.events] and fail as its [FakeVault.failure] says.
+ */
+internal fun FakeVault.asKeystoreAliases(): KeystoreAliases = object : KeystoreAliases {
+    override fun contains(alias: String): Boolean = this@asKeystoreAliases.contains(alias)
+    override fun delete(alias: String) = this@asKeystoreAliases.delete(alias)
+    override fun aliases(): List<String> = keys.keys.toList()
+}
+
 /** A Keystore failure that says nothing about any key: the Keystore could not be asked just now. */
 internal class KeystoreHiccup : java.security.ProviderException("keystore busy")
 

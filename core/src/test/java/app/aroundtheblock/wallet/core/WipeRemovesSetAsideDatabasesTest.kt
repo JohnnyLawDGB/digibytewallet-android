@@ -58,6 +58,7 @@ class WipeRemovesSetAsideDatabasesTest {
         val aliases = present.toMutableSet()
         override fun contains(alias: String) = alias in aliases
         override fun delete(alias: String) { aliases.remove(alias) }
+        override fun aliases(): List<String> = aliases.toList()
     }
 
     /** A file the legacy literal password opens, but damaged: the opener sets it aside as corrupt. */
