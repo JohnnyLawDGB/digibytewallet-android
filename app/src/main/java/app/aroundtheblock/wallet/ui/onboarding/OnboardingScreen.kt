@@ -32,8 +32,12 @@ fun OnboardingScreen(
 ) {
     var selectedWordCount by remember { mutableIntStateOf(12) }
     val adding = viewModel.mode == OnboardingMode.ADD
-    // ADD mode: a network already at the cap offers no add (PENDING adds count toward it).
-    val canAdd = remember { !adding || viewModel.canAddWallet() }
+    // ADD mode: a network already at the cap offers no add (PENDING adds count toward it). Read off
+    // the main thread; until it answers, the buttons wait (null) rather than show the cap.
+    val canAddAnswer by produceState<Boolean?>(initialValue = if (adding) null else true) {
+        if (adding) value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { viewModel.canAddWallet() }
+    }
+    val canAdd = canAddAnswer == true
 
     Box(
         modifier = Modifier
@@ -98,7 +102,7 @@ fun OnboardingScreen(
 
             Spacer(modifier = Modifier.height(32.dp))
 
-            if (!canAdd) {
+            if (canAddAnswer == false) {
                 Text(
                     text = stringResource(
                         R.string.wallet_add_cap,

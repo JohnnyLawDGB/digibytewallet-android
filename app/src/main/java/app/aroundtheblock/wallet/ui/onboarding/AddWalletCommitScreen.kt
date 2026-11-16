@@ -85,11 +85,11 @@ fun AddWalletCommitScreen(
                     Text(stringResource(R.string.wallet_add_saving), color = Color(0xFFB0BEC5), textAlign = TextAlign.Center)
                 }
                 is AddResult.Duplicate -> {
-                    val shown = r.existing.name ?: stringResource(R.string.wallet_default_name, r.existing.number)
+                    val shown = addFlowWalletName(r.existing)
                     Text(stringResource(R.string.wallet_add_duplicate, shown), color = Color.White, textAlign = TextAlign.Center)
                     Spacer(Modifier.height(24.dp))
                     Button(
-                        onClick = { viewModel.switchTo(r.existing.id) },
+                        onClick = { if (viewModel.switchTo(r.existing.id) != WalletSwitcher.Result.RESTARTING) leave() },
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp),
                     ) { Text(stringResource(R.string.wallet_add_duplicate_switch, shown)) }
@@ -117,3 +117,8 @@ fun AddWalletCommitScreen(
         }
     }
 }
+
+/** The name the add flow shows for [entry]: its own, or the default "Wallet <number>". */
+@Composable
+internal fun addFlowWalletName(entry: app.aroundtheblock.wallet.core.wallets.WalletEntry): String =
+    entry.name ?: stringResource(R.string.wallet_default_name, entry.number)

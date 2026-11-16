@@ -188,7 +188,7 @@ fun MnemonicInputScreen(
             }
 
             duplicate?.let { existing ->
-                val shown = existing.name ?: stringResource(R.string.wallet_default_name, existing.number)
+                val shown = addFlowWalletName(existing)
                 Spacer(Modifier.height(8.dp))
                 Text(
                     text = stringResource(R.string.wallet_add_duplicate, shown),
@@ -198,7 +198,13 @@ fun MnemonicInputScreen(
                     modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedButton(
-                    onClick = { viewModel.switchTo(existing.id) },
+                    onClick = {
+                        // The phrase of the wallet already running answers ALREADY_ACTIVE: nothing to
+                        // restart into, so the add flow is left instead of the button doing nothing.
+                        if (viewModel.switchTo(existing.id) != app.aroundtheblock.wallet.WalletSwitcher.Result.RESTARTING) {
+                            if (!navController.popBackStack(ONBOARDING_ROUTE, inclusive = true)) navController.navigateUp()
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                     shape = RoundedCornerShape(12.dp),
                 ) {
