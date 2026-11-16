@@ -809,4 +809,22 @@
     <string name="seedview_warn_body">Quiconque connaît ces mots peut voler vos fonds.</string>
     <string name="seedview_words_title">Votre phrase de récupération de %1$d mots</string>
     <string name="seedview_write_down">Notez ces mots dans l’ordre et conservez-les en lieu sûr.</string>
+
+    <!-- Quick start of a restored wallet (multi-wallet step 1, Task 15) -->
+    <string name="quickstart_title">Afficher le solde plus tôt ?</string>
+    <string name="quickstart_body">Ce portefeuille retrouvera son historique en privé sur ce téléphone pendant la synchronisation, ce qui peut prendre du temps. Vous pouvez plutôt demander son solde à un serveur dès maintenant. Ce montant n’est pas vérifié et ne peut pas être dépensé tant que la synchronisation ne l’a pas prouvé.</string>
+    <string name="quickstart_skip">Passer et synchroniser en privé</string>
+    <string name="quickstart_own_node">Interroger mon propre nœud (%1$s)</string>
+    <string name="quickstart_own_node_note">Votre nœud reçoit les adresses de ce portefeuille. Rien n’est envoyé à digiscope.me.</string>
+    <string name="quickstart_digiscope">Interroger digiscope.me</string>
+    <string name="quickstart_digiscope_disclosure">Les adresses de ce portefeuille seront envoyées à digiscope.me. digiscope.me pourra alors relier ce portefeuille à vos autres portefeuilles.</string>
+    <string name="quickstart_digiscope_confirm">Envoyer les adresses à digiscope.me</string>
+    <string name="quickstart_running">Recherche du solde…</string>
+    <string name="quickstart_found">%2$s indique %1$s DGB, pas encore vérifié.</string>
+    <string name="quickstart_found_dd">Et %1$s DigiDollar, pas encore vérifié.</string>
+    <string name="quickstart_failed">La recherche n’a pas répondu. Le portefeuille trouvera quand même son solde en se synchronisant.</string>
+    <string name="quickstart_continue">Continuer</string>
+    <string name="quickstart_unverified">%1$s DGB indiqués par %2$s, pas encore vérifiés</string>
+    <string name="quickstart_unverified_dd">%1$s DigiDollar indiqués, pas encore vérifiés</string>
+    <string name="quickstart_unverified_sub">Non dépensable et non compté dans votre solde tant que la synchronisation ne l’a pas prouvé.</string>
 </resources>

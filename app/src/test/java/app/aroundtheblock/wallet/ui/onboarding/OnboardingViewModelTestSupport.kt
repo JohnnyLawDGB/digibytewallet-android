@@ -23,8 +23,10 @@ internal fun onboardingViewModel(
     registry: WalletRegistry = mockk(relaxed = true),
     provisioner: WalletProvisioner = mockk(relaxed = true),
     switcher: WalletSwitcher = mockk(relaxed = true),
+    quickStartScans: QuickStartScans = mockk(relaxed = true),
+    context: Context = mockk(relaxed = true),
 ): OnboardingViewModel = OnboardingViewModel(
     walletManager, pinManager, scanService,
     SavedStateHandle(mapOf("mode" to if (mode == OnboardingMode.ADD) "add" else "first_run")),
-    provisioner, switcher, registry, mockk<Context>(relaxed = true),
+    provisioner, switcher, registry, context, quickStartScans,
 )

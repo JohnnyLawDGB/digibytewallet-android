@@ -829,4 +829,22 @@
     <string name="seedview_warn_body">Qualquer pessoa com estas palavras pode roubar seus fundos.</string>
     <string name="seedview_words_title">Sua frase de recuperação de %1$d palavras</string>
     <string name="seedview_write_down">Anote estas palavras em ordem e guarde-as em local seguro.</string>
+
+    <!-- Quick start of a restored wallet (multi-wallet step 1, Task 15) -->
+    <string name="quickstart_title">Mostrar o saldo mais cedo?</string>
+    <string name="quickstart_body">Esta carteira encontrará seu histórico de forma privada neste celular durante a sincronização, o que pode demorar. Em vez disso, você pode pedir o saldo a um servidor agora. O valor não é verificado e não pode ser gasto até que a sincronização o comprove.</string>
+    <string name="quickstart_skip">Pular e sincronizar em privado</string>
+    <string name="quickstart_own_node">Perguntar ao meu próprio nó (%1$s)</string>
+    <string name="quickstart_own_node_note">Seu nó recebe os endereços desta carteira. Nada é enviado ao digiscope.me.</string>
+    <string name="quickstart_digiscope">Perguntar ao digiscope.me</string>
+    <string name="quickstart_digiscope_disclosure">Isto envia os endereços desta carteira ao digiscope.me. O digiscope.me poderá então vincular esta carteira às suas outras carteiras.</string>
+    <string name="quickstart_digiscope_confirm">Enviar os endereços ao digiscope.me</string>
+    <string name="quickstart_running">Consultando o saldo…</string>
+    <string name="quickstart_found">%2$s informa %1$s DGB, ainda não verificado.</string>
+    <string name="quickstart_found_dd">E %1$s DigiDollar, ainda não verificado.</string>
+    <string name="quickstart_failed">A consulta não respondeu. A carteira ainda encontrará seu saldo durante a sincronização.</string>
+    <string name="quickstart_continue">Continuar</string>
+    <string name="quickstart_unverified">%1$s DGB informado por %2$s, ainda não verificado</string>
+    <string name="quickstart_unverified_dd">%1$s DigiDollar informado, ainda não verificado</string>
+    <string name="quickstart_unverified_sub">Não pode ser gasto e não entra no seu saldo até a sincronização comprovar.</string>
 </resources>

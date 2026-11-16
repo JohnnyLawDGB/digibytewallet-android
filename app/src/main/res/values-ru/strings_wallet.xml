@@ -836,4 +836,22 @@
     <string name="seedview_warn_body">Любой, кто знает эти слова, может украсть ваши средства.</string>
     <string name="seedview_words_title">Ваша фраза восстановления из %1$d слов</string>
     <string name="seedview_write_down">Запишите эти слова по порядку и храните в надёжном месте.</string>
+
+    <!-- Quick start of a restored wallet (multi-wallet step 1, Task 15) -->
+    <string name="quickstart_title">Показать баланс раньше?</string>
+    <string name="quickstart_body">Этот кошелёк найдёт свою историю приватно на этом телефоне во время синхронизации, что может занять время. Вместо этого можно прямо сейчас запросить его баланс у сервера. Эта сумма не проверена и не может быть потрачена, пока синхронизация её не подтвердит.</string>
+    <string name="quickstart_skip">Пропустить и синхронизировать приватно</string>
+    <string name="quickstart_own_node">Спросить мой собственный узел (%1$s)</string>
+    <string name="quickstart_own_node_note">Ваш узел получит адреса этого кошелька. На digiscope.me ничего не отправляется.</string>
+    <string name="quickstart_digiscope">Спросить digiscope.me</string>
+    <string name="quickstart_digiscope_disclosure">Адреса этого кошелька будут отправлены на digiscope.me. После этого digiscope.me сможет связать этот кошелёк с другими вашими кошельками.</string>
+    <string name="quickstart_digiscope_confirm">Отправить адреса на digiscope.me</string>
+    <string name="quickstart_running">Запрашиваем баланс…</string>
+    <string name="quickstart_found">%2$s сообщает: %1$s DGB, ещё не проверено.</string>
+    <string name="quickstart_found_dd">И %1$s DigiDollar, ещё не проверено.</string>
+    <string name="quickstart_failed">Запрос не получил ответа. Кошелёк всё равно найдёт свой баланс при синхронизации.</string>
+    <string name="quickstart_continue">Продолжить</string>
+    <string name="quickstart_unverified">%1$s DGB по данным %2$s, ещё не проверено</string>
+    <string name="quickstart_unverified_dd">%1$s DigiDollar по данным сервера, ещё не проверено</string>
+    <string name="quickstart_unverified_sub">Нельзя потратить и не входит в баланс, пока синхронизация это не подтвердит.</string>
 </resources>

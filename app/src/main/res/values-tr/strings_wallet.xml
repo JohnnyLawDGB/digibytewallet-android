@@ -822,4 +822,22 @@
     <string name="seedview_warn_body">Bu kelimelere sahip olan herkes paranı çalabilir.</string>
     <string name="seedview_words_title">%1$d kelimelik Kurtarma İfaden</string>
     <string name="seedview_write_down">Bu kelimeleri sırasıyla yaz ve güvenli bir yerde sakla.</string>
+
+    <!-- Quick start of a restored wallet (multi-wallet step 1, Task 15) -->
+    <string name="quickstart_title">Bakiye daha erken gösterilsin mi?</string>
+    <string name="quickstart_body">Bu cüzdan, eşitlenirken geçmişini bu telefonda gizli olarak bulur; bu biraz zaman alabilir. Bunun yerine bakiyesini şimdi bir sunucuya sorabilirsiniz. Bu tutar doğrulanmamıştır ve eşitleme kanıtlayana kadar harcanamaz.</string>
+    <string name="quickstart_skip">Atla ve gizli eşitle</string>
+    <string name="quickstart_own_node">Kendi düğümüme sor (%1$s)</string>
+    <string name="quickstart_own_node_note">Düğümünüz bu cüzdanın adreslerini alır. digiscope.me adresine hiçbir şey gönderilmez.</string>
+    <string name="quickstart_digiscope">digiscope.me\'ye sor</string>
+    <string name="quickstart_digiscope_disclosure">Bu, bu cüzdanın adreslerini digiscope.me\'ye gönderir. digiscope.me daha sonra bu cüzdanı diğer cüzdanlarınızla ilişkilendirebilir.</string>
+    <string name="quickstart_digiscope_confirm">Adresleri digiscope.me\'ye gönder</string>
+    <string name="quickstart_running">Bakiye sorgulanıyor…</string>
+    <string name="quickstart_found">%2$s, %1$s DGB bildiriyor; henüz doğrulanmadı.</string>
+    <string name="quickstart_found_dd">Ve %1$s DigiDollar; henüz doğrulanmadı.</string>
+    <string name="quickstart_failed">Sorgu yanıt vermedi. Cüzdan eşitlenirken bakiyesini yine de bulacaktır.</string>
+    <string name="quickstart_continue">Devam</string>
+    <string name="quickstart_unverified">%2$s tarafından bildirilen %1$s DGB, henüz doğrulanmadı</string>
+    <string name="quickstart_unverified_dd">%1$s DigiDollar bildirildi, henüz doğrulanmadı</string>
+    <string name="quickstart_unverified_sub">Eşitleme kanıtlayana kadar harcanamaz ve bakiyenize dahil edilmez.</string>
 </resources>

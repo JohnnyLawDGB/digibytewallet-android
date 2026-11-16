@@ -17,6 +17,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
@@ -66,6 +67,8 @@ fun WalletScreen(
     val balance by viewModel.balance.collectAsStateWithLifecycle()
     val ddBalance by viewModel.ddBalance.collectAsStateWithLifecycle()
     val balanceHidden by viewModel.balanceHidden.collectAsStateWithLifecycle()
+    // A restored wallet's quick start: shown beneath the balance, never in it, until sync proves it.
+    val unverified by viewModel.unverified.collectAsStateWithLifecycle()
     val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
     val fiatBalance by viewModel.fiatBalance.collectAsStateWithLifecycle()
     val transactions by viewModel.transactions.collectAsStateWithLifecycle()
@@ -169,6 +172,8 @@ fun WalletScreen(
                         onFiatTap = if (pricesShown) ({ showCurrencyPicker = true }) else null,
                         onDigiDollarTap = onNavigateReceiveDigiDollar,
                     )
+
+                    unverified?.let { q -> UnverifiedQuickStart(q, balanceHidden) }
 
                     Spacer(modifier = Modifier.height(8.dp))
 
@@ -1269,6 +1274,41 @@ private fun OwnNodeHealthChip(modifier: Modifier = Modifier) {
             text = stringResource(R.string.wallet_own_node_serving),
             style = MaterialTheme.typography.labelSmall,
             color = Color(0xFF6FCF97),
+        )
+    }
+}
+
+/**
+ * The quick start's figure, beneath the balance and never part of it: what a server reported for
+ * this restored wallet before its own sync has proved it. Not spendable, not in the balance; gone
+ * once the wallet has synced. Masked with the balance.
+ */
+@Composable
+private fun UnverifiedQuickStart(q: app.aroundtheblock.wallet.core.wallets.QuickStart, hidden: Boolean) {
+    val mask = { v: String -> app.aroundtheblock.wallet.core.settings.maskedAmount(hidden, v) }
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.padding(top = 8.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.quickstart_unverified, mask(WalletViewModel.formatSatoshisBare(q.unverifiedSat)), q.sourceLabel),
+            style = MaterialTheme.typography.bodySmall,
+            color = Color(0xFFFFC107),
+            textAlign = TextAlign.Center,
+        )
+        q.unverifiedDdCents?.let { cents ->
+            Text(
+                text = stringResource(R.string.quickstart_unverified_dd, mask(WalletViewModel.formatDigiDollar(cents))),
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFFFFC107),
+                textAlign = TextAlign.Center,
+            )
+        }
+        Text(
+            text = stringResource(R.string.quickstart_unverified_sub),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
+            textAlign = TextAlign.Center,
         )
     }
 }

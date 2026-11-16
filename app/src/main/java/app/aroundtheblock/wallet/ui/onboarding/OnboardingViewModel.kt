@@ -15,6 +15,10 @@ import app.aroundtheblock.wallet.core.wallets.WalletEntry
 import app.aroundtheblock.wallet.core.wallets.WalletOrigin
 import app.aroundtheblock.wallet.core.wallets.WalletProvisioner
 import app.aroundtheblock.wallet.core.wallets.WalletRegistry
+import app.aroundtheblock.wallet.core.wallets.QuickStart
+import app.aroundtheblock.wallet.core.wallets.QuickStartStore
+import app.aroundtheblock.wallet.core.wallets.WalletScope
+import app.aroundtheblock.wallet.core.recovery.RecoveryScanService
 import app.aroundtheblock.wallet.WalletSwitcher
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
@@ -41,6 +45,7 @@ class OnboardingViewModel @Inject constructor(
     private val switcher: WalletSwitcher,
     private val registry: WalletRegistry,
     @ApplicationContext private val appContext: Context,
+    private val quickStartScans: QuickStartScans,
 ) : ViewModel() {
 
     /** The flow these screens run: the route argument of the onboarding entry this ViewModel belongs to. */
@@ -124,6 +129,8 @@ class OnboardingViewModel @Inject constructor(
         cancelRecoveryScan()
         _scanResults.value = app.aroundtheblock.wallet.core.recovery.RecoveryScanService.State.Idle
         _passphraseVerdict.value = null
+        quickStartKept = null
+        _quickStart.value = QuickStartUi.Idle
     }
 
     /** Set the recovery timestamp mapped from the date picker. */
@@ -165,44 +172,103 @@ class OnboardingViewModel @Inject constructor(
      *  app's own address formats privately on the phone. The user starts it from
      *  RecoveryScanScreen after being told what it sends. */
     fun runRecoveryScan() {
-        val phrase = _mnemonic.joinToString(" ")
-        if (phrase.isBlank()) {
-            _scanResults.value = app.aroundtheblock.wallet.core.recovery.RecoveryScanService
-                .State.Failed("No mnemonic entered")
-            return
-        }
-        cancelRecoveryScan()
-        val generation = scanGeneration
-        _scanResults.value = app.aroundtheblock.wallet.core.recovery.RecoveryScanService
-            .State.Scanning("Deriving addresses…")
         val hadPassphrase = _passphrase != null
-        scanJob = viewModelScope.launch {
-            // A copy for the scan, zeroed straight after; _passphrase itself lives until the
-            // wallet is restored.
-            val passBytes = _passphrase?.copyOf()
-            val result = try {
-                recoveryScanService.scan(phrase, passBytes)
-            } finally {
-                passBytes?.fill(0)
-            }
-
+        _scanResults.value = RecoveryScanService.State.Scanning("Deriving addresses…")
+        runScan(recoveryScanService) { result ->
             // NO second, passphrase-less scan here. Re-scanning without the passphrase would answer
             // "is it a typo?", but it sends a SECOND wallet's addresses to the backend from the same
             // IP — and the people who use a passphrase include those who keep a decoy wallet on the
             // bare phrase. That would link the two at DigiScope, which is exactly what a hidden
             // wallet exists to prevent, and the user only agreed to send THIS phrase's addresses.
             // The screen says plainly what an empty passphrase result can mean instead.
-            if (generation != scanGeneration) return@launch   // the phrase changed: not this scan's answer to give
             _passphraseVerdict.value =
-                if (hadPassphrase && result is app.aroundtheblock.wallet.core.recovery.RecoveryScanService.State.Done) {
+                if (hadPassphrase && result is RecoveryScanService.State.Done) {
                     app.aroundtheblock.wallet.core.recovery.PassphraseScanVerdict.of(
                         withPassphraseSat = result.totalBalanceSat,
                         withoutPassphraseSat = null,
                         incomplete = result.anyBackendUnreachable || result.cappedProfileLabels.isNotEmpty(),
                     )
                 } else null
-
             _scanResults.value = result
+        }
+    }
+
+    /**
+     * The one scan routine: [service] over the entered phrase and a copy of the passphrase, zeroed
+     * straight after (the held passphrase lives until the wallet is written). [onDone] is called
+     * on the main thread with the answer, only while [scanGeneration] still names the phrase it
+     * was started for. A blank phrase answers [RecoveryScanService.State.Failed] at once.
+     */
+    private fun runScan(service: RecoveryScanService, onDone: (RecoveryScanService.State) -> Unit) {
+        val phrase = _mnemonic.joinToString(" ")
+        if (phrase.isBlank()) {
+            onDone(RecoveryScanService.State.Failed("No mnemonic entered"))
+            return
+        }
+        cancelRecoveryScan()
+        val generation = scanGeneration
+        scanJob = viewModelScope.launch {
+            val passBytes = _passphrase?.copyOf()
+            val result = try {
+                service.scan(phrase, passBytes)
+            } finally {
+                passBytes?.fill(0)
+            }
+            if (generation != scanGeneration) return@launch   // the phrase changed: not this scan's answer to give
+            onDone(result)
+        }
+    }
+
+    // ── Quick start (ADD mode, restore) ──────────────────────────────────────
+
+    private val _quickStart = MutableStateFlow<QuickStartUi>(QuickStartUi.Idle)
+
+    /** The quick start as QuickStartScreen shows it. */
+    val quickStart: StateFlow<QuickStartUi> = _quickStart.asStateFlow()
+
+    /** What the quick start found, held for [commitAdd] to store with the new wallet. Display only. */
+    private var quickStartKept: QuickStart? = null
+
+    /** What the quick start screen offers. Reads the own-node setting, so off the main thread. */
+    suspend fun quickStartOffer(): QuickStartOffer = withContext(Dispatchers.IO) {
+        val endpoint = runCatching { quickStartScans.customEndpoint() }.getOrNull()
+        QuickStartOffer(quickStartChoices(endpoint), endpoint?.let(::quickStartHost))
+    }
+
+    /**
+     * The opt-in quick start of a wallet being added by restore: sends this wallet's own address
+     * formats to [source] and keeps what it reports, DISPLAY ONLY, for [commitAdd] to store with the
+     * new wallet. Nothing it finds is ever spendable or part of a balance; the compact-filter sync
+     * proves the wallet's outputs itself. Started only from QuickStartScreen, by the user's choice.
+     */
+    fun runQuickStart(source: QuickStartSource) {
+        check(mode == OnboardingMode.ADD) { "the quick start runs only when adding a wallet" }
+        if (_quickStart.value == QuickStartUi.Running) return
+        quickStartKept = null
+        val built = quickStartScans.serviceFor(source)
+        if (built == null) {
+            _quickStart.value = QuickStartUi.Failed
+            return
+        }
+        val (service, label) = built
+        _quickStart.value = QuickStartUi.Running
+        runScan(service) { result ->
+            // An answer with any path unanswered would show less than the wallet holds as if it
+            // were all: no figure rather than a confident wrong one.
+            if (result !is RecoveryScanService.State.Done || result.anyBackendUnreachable) {
+                _quickStart.value = QuickStartUi.Failed
+                return@runScan
+            }
+            // Every profile scanned is native (BIP84 and BIP86), so the total is the native total;
+            // nativeResult alone would be BIP84 only and drop the taproot coins.
+            val found = QuickStart(
+                unverifiedSat = result.totalBalanceSat,
+                unverifiedDdCents = result.digiDollar?.cents,
+                sourceLabel = label,
+                atSecs = System.currentTimeMillis() / 1000,
+            )
+            quickStartKept = found
+            _quickStart.value = QuickStartUi.Found(found)
         }
     }
 
@@ -407,6 +473,17 @@ class OnboardingViewModel @Inject constructor(
                 clearPassphrase()
                 wipeMnemonicFromMemory()
                 addInFlight = false
+            }
+            // The quick start's figure goes to the new wallet's own store once it exists, before the
+            // switch (which the screen starts from addResult). Display only: a failed write loses
+            // a "not yet verified" line, nothing else.
+            val kept = quickStartKept
+            quickStartKept = null
+            if (result is AddResult.Added && kept != null) {
+                val stored = withContext(NonCancellable + Dispatchers.IO) {
+                    runCatching { QuickStartStore.write(appContext, WalletScope(result.entry.id, net), kept) }.getOrDefault(false)
+                }
+                if (!stored) android.util.Log.w("OnboardingVM", "quick start not stored for the added wallet")
             }
             _uiState.value = if (result is AddResult.Added) OnboardingUiState.WalletCreated else OnboardingUiState.Error("Wallet add failed")
             _addResult.value = result

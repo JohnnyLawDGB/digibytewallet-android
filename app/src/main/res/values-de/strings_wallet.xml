@@ -830,4 +830,22 @@
     <string name="seedview_warn_body">Wer diese Wörter kennt, kann dein Guthaben stehlen.</string>
     <string name="seedview_words_title">Deine Wiederherstellungsphrase mit %1$d Wörtern</string>
     <string name="seedview_write_down">Schreibe diese Wörter der Reihe nach auf und bewahre sie sicher auf.</string>
+
+    <!-- Quick start of a restored wallet (multi-wallet step 1, Task 15) -->
+    <string name="quickstart_title">Guthaben früher anzeigen?</string>
+    <string name="quickstart_body">Diese Wallet findet ihren Verlauf beim Synchronisieren privat auf diesem Telefon, was eine Weile dauern kann. Stattdessen kannst du jetzt einen Server nach ihrem Guthaben fragen. Der Betrag ist nicht bestätigt und kann erst ausgegeben werden, wenn die Synchronisierung ihn belegt.</string>
+    <string name="quickstart_skip">Überspringen und privat synchronisieren</string>
+    <string name="quickstart_own_node">Meinen eigenen Node fragen (%1$s)</string>
+    <string name="quickstart_own_node_note">Dein Node erhält die Adressen dieser Wallet. An digiscope.me wird nichts gesendet.</string>
+    <string name="quickstart_digiscope">digiscope.me fragen</string>
+    <string name="quickstart_digiscope_disclosure">Damit werden die Adressen dieser Wallet an digiscope.me gesendet. digiscope.me kann diese Wallet dann mit deinen anderen Wallets in Verbindung bringen.</string>
+    <string name="quickstart_digiscope_confirm">Adressen an digiscope.me senden</string>
+    <string name="quickstart_running">Guthaben wird abgefragt…</string>
+    <string name="quickstart_found">%2$s meldet %1$s DGB, noch nicht bestätigt.</string>
+    <string name="quickstart_found_dd">Und %1$s DigiDollar, noch nicht bestätigt.</string>
+    <string name="quickstart_failed">Die Abfrage hat nicht geantwortet. Die Wallet findet ihr Guthaben trotzdem beim Synchronisieren.</string>
+    <string name="quickstart_continue">Weiter</string>
+    <string name="quickstart_unverified">%1$s DGB laut %2$s, noch nicht bestätigt</string>
+    <string name="quickstart_unverified_dd">%1$s DigiDollar gemeldet, noch nicht bestätigt</string>
+    <string name="quickstart_unverified_sub">Nicht ausgebbar und nicht in deinem Guthaben, bis die Synchronisierung es belegt.</string>
 </resources>

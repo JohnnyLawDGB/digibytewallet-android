@@ -32,7 +32,7 @@ import java.util.concurrent.TimeUnit
  *
  * We request both in a single round-trip to minimize client→server latency.
  */
-class DgbNodeClient(
+class DgbNodeClient internal constructor(
     private val context: Context,
     /**
      * The client every request is derived from. Required, with no default: in the app it is the
@@ -41,8 +41,20 @@ class DgbNodeClient(
      * started with Tor on would leave from the device's own address.
      */
     private val baseClient: OkHttpClient,
+    /** True for [digiScopeOnly]: every request goes to [DEFAULT_BASE_URL], whatever own node is set. */
+    private val digiScopeOnly: Boolean,
 ) {
+    constructor(context: Context, baseClient: OkHttpClient) : this(context, baseClient, false)
+
     companion object {
+        /**
+         * A client that always asks DigiScope ([DEFAULT_BASE_URL], pinned), whatever
+         * `custom_rpc_endpoint` holds: a lookup the user addressed to DigiScope never reaches their
+         * own node, and the own node's address never appears in it.
+         */
+        fun digiScopeOnly(context: Context, client: OkHttpClient): DgbNodeClient =
+            DgbNodeClient(context, client, true)
+
         const val DEFAULT_BASE_URL = "https://api.digiscope.me/api"
         private const val PREFS_NAME = "dgb_reconcile"
         private const val KEY_CUSTOM_ENDPOINT = "custom_rpc_endpoint"
@@ -123,9 +135,13 @@ class DgbNodeClient(
         Context.MODE_PRIVATE,
     )
 
-    /** The active endpoint. Defaults to digiscope.me; can be user-overridden. */
+    /** The active endpoint. Defaults to digiscope.me; can be user-overridden (never for [digiScopeOnly]). */
     fun endpoint(): String =
-        prefs.getString(KEY_CUSTOM_ENDPOINT, null)?.trimEnd('/') ?: DEFAULT_BASE_URL
+        if (digiScopeOnly) DEFAULT_BASE_URL else customEndpoint() ?: DEFAULT_BASE_URL
+
+    /** The user's own node (`custom_rpc_endpoint`, trimmed, without a trailing slash), or null when none is set. */
+    fun customEndpoint(): String? =
+        prefs.getString(KEY_CUSTOM_ENDPOINT, null)?.trim()?.trimEnd('/')?.takeIf { it.isNotEmpty() }
 
     fun setCustomEndpoint(url: String?) {
         prefs.edit().apply {

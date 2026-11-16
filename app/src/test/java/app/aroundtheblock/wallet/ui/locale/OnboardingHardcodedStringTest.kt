@@ -89,6 +89,8 @@ class OnboardingHardcodedStringTest {
         "ui/onboarding/RecoveryDateScreen.kt",
         // Adding a wallet (onboarding in ADD mode): its last step, the one screen of its own.
         "ui/onboarding/AddWalletCommitScreen.kt",
+        // The restored wallet's opt-in quick start: a privacy disclosure (what is sent, and to whom).
+        "ui/onboarding/QuickStartScreen.kt",
         // The wallet switcher: the chip on the Wallet tab, its sheet, Manage, and removing a wallet.
         "ui/wallets/WalletsViewModel.kt",
         "ui/wallets/WalletChip.kt",

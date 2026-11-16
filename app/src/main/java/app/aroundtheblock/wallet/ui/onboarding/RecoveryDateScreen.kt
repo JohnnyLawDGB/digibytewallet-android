@@ -206,9 +206,10 @@ fun RecoveryDateScreen(
                             }
                         }
                     } else {
-                        // ADD mode: no restore of the running wallet and no PIN setup. The commit
-                        // step writes only the new wallet's record, with the date just stored.
-                        navController.navigate(ADD_COMMIT_ROUTE) { launchSingleTop = true }
+                        // ADD mode: no restore of the running wallet and no PIN setup. The optional
+                        // quick start comes first (skipping is its default); then the commit step
+                        // writes only the new wallet's record, with the date just stored.
+                        navController.navigate(QUICK_START_ROUTE) { launchSingleTop = true }
                     }
                 },
                 enabled = selectedOption != null,

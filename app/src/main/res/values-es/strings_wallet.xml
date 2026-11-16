@@ -831,4 +831,22 @@
     <string name="seedview_warn_body">Cualquiera con estas palabras puede robar tus fondos.</string>
     <string name="seedview_words_title">Tu frase de recuperación de %1$d palabras</string>
     <string name="seedview_write_down">Anota estas palabras en orden y guárdalas en un lugar seguro.</string>
+
+    <!-- Quick start of a restored wallet (multi-wallet step 1, Task 15) -->
+    <string name="quickstart_title">¿Mostrar el saldo antes?</string>
+    <string name="quickstart_body">Esta billetera encontrará su historial de forma privada en este teléfono mientras se sincroniza, lo que puede tardar. En su lugar, puedes pedir ahora su saldo a un servidor. La cifra no está verificada y no se puede gastar hasta que la sincronización la compruebe.</string>
+    <string name="quickstart_skip">Omitir y sincronizar en privado</string>
+    <string name="quickstart_own_node">Preguntar a mi propio nodo (%1$s)</string>
+    <string name="quickstart_own_node_note">Tu nodo recibe las direcciones de esta billetera. No se envía nada a digiscope.me.</string>
+    <string name="quickstart_digiscope">Preguntar a digiscope.me</string>
+    <string name="quickstart_digiscope_disclosure">Esto envía las direcciones de esta billetera a digiscope.me. Entonces digiscope.me podrá vincular esta billetera con tus otras billeteras.</string>
+    <string name="quickstart_digiscope_confirm">Enviar las direcciones a digiscope.me</string>
+    <string name="quickstart_running">Consultando el saldo…</string>
+    <string name="quickstart_found">%2$s informa %1$s DGB, aún sin verificar.</string>
+    <string name="quickstart_found_dd">Y %1$s DigiDollar, aún sin verificar.</string>
+    <string name="quickstart_failed">La consulta no respondió. La billetera igualmente encontrará su saldo al sincronizarse.</string>
+    <string name="quickstart_continue">Continuar</string>
+    <string name="quickstart_unverified">%1$s DGB informados por %2$s, aún sin verificar</string>
+    <string name="quickstart_unverified_dd">%1$s DigiDollar informados, aún sin verificar</string>
+    <string name="quickstart_unverified_sub">No se puede gastar ni cuenta en tu saldo hasta que la sincronización lo compruebe.</string>
 </resources>

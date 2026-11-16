@@ -52,12 +52,30 @@ class WalletViewModel @Inject constructor(
     private val dgbNodeClient: app.aroundtheblock.wallet.core.reconcile.DgbNodeClient,
 ) : ViewModel() {
 
+    /** The wallet this process runs. */
+    private val activeScope = app.aroundtheblock.wallet.core.wallets.ActiveWallet.scope(application)
+
     private val prefs = application.getSharedPreferences(
-        app.aroundtheblock.wallet.core.wallets.WalletStores.prefsName(
-            "dgb_sync_data", app.aroundtheblock.wallet.core.wallets.ActiveWallet.scope(application),
-        ),
+        app.aroundtheblock.wallet.core.wallets.WalletStores.prefsName("dgb_sync_data", activeScope),
         0,
     )
+
+    /**
+     * What a restored wallet's opt-in quick start found, until its own sync has finished once.
+     * DISPLAY ONLY, shown beneath the balance as "not yet verified": it is never added to [balance],
+     * never stored as `last_balance`, and never reaches the send path. The only reader of
+     * QuickStartStore (QuickStartGateTest).
+     */
+    private val _unverified = MutableStateFlow<app.aroundtheblock.wallet.core.wallets.QuickStart?>(null)
+    val unverified: StateFlow<app.aroundtheblock.wallet.core.wallets.QuickStart?> = _unverified.asStateFlow()
+
+    /** Clears the quick start once this wallet has synced; otherwise publishes what is stored. */
+    private fun refreshUnverified() {
+        val store = app.aroundtheblock.wallet.core.wallets.QuickStartStore
+        _unverified.value = runCatching {
+            if (store.clearIfSynced(application, activeScope)) null else store.read(application, activeScope)
+        }.getOrNull()
+    }
 
     /** Live balance in satoshis — polls C core every 5 seconds.
      *  Initialized from last-known snapshot so the UI isn't blank on restart. */
@@ -560,6 +578,7 @@ class WalletViewModel @Inject constructor(
     init {
         adoptLegacyCurrencyIfUnset()
         fetchPricePeriodically()
+        viewModelScope.launch(Dispatchers.IO) { refreshUnverified() }
         pollNativeBalance()
         loadRecoveryTimestamp()
         // The stable sync-target tip ([_externalTip]) is now derived natively in
@@ -640,6 +659,9 @@ class WalletViewModel @Inject constructor(
         // harmless background wait — matches refresh()'s dispatcher.
         viewModelScope.launch(Dispatchers.IO) {
             while (true) {
+                // The quick start's line goes once this wallet's own sync has finished.
+                if (_unverified.value != null) refreshUnverified()
+
                 // Poll balance
                 val nativeBalance = NativeBridge.getBalance()
                 if (nativeBalance != _balance.value) {

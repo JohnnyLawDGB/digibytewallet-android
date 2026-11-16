@@ -815,4 +815,22 @@
     <string name="seedview_warn_body">Siapa pun yang memiliki kata-kata ini dapat mencuri dana Anda.</string>
     <string name="seedview_words_title">Frasa Pemulihan %1$d kata Anda</string>
     <string name="seedview_write_down">Tulis kata-kata ini secara berurutan dan simpan dengan aman.</string>
+
+    <!-- Quick start of a restored wallet (multi-wallet step 1, Task 15) -->
+    <string name="quickstart_title">Tampilkan saldo lebih cepat?</string>
+    <string name="quickstart_body">Dompet ini akan menemukan riwayatnya secara pribadi di ponsel ini saat sinkronisasi, yang bisa memakan waktu. Sebagai gantinya, Anda dapat menanyakan saldonya ke server sekarang. Angka ini belum diverifikasi dan tidak dapat dibelanjakan sampai sinkronisasi membuktikannya.</string>
+    <string name="quickstart_skip">Lewati dan sinkronkan secara pribadi</string>
+    <string name="quickstart_own_node">Tanya node saya sendiri (%1$s)</string>
+    <string name="quickstart_own_node_note">Node Anda menerima alamat dompet ini. Tidak ada yang dikirim ke digiscope.me.</string>
+    <string name="quickstart_digiscope">Tanya digiscope.me</string>
+    <string name="quickstart_digiscope_disclosure">Ini mengirim alamat dompet ini ke digiscope.me. Setelah itu digiscope.me dapat mengaitkan dompet ini dengan dompet Anda yang lain.</string>
+    <string name="quickstart_digiscope_confirm">Kirim alamat ke digiscope.me</string>
+    <string name="quickstart_running">Mencari saldo…</string>
+    <string name="quickstart_found">%2$s melaporkan %1$s DGB, belum diverifikasi.</string>
+    <string name="quickstart_found_dd">Dan %1$s DigiDollar, belum diverifikasi.</string>
+    <string name="quickstart_failed">Pencarian tidak menjawab. Dompet tetap akan menemukan saldonya saat sinkronisasi.</string>
+    <string name="quickstart_continue">Lanjutkan</string>
+    <string name="quickstart_unverified">%1$s DGB dilaporkan oleh %2$s, belum diverifikasi</string>
+    <string name="quickstart_unverified_dd">%1$s DigiDollar dilaporkan, belum diverifikasi</string>
+    <string name="quickstart_unverified_sub">Tidak dapat dibelanjakan dan tidak masuk saldo Anda sampai sinkronisasi membuktikannya.</string>
 </resources>

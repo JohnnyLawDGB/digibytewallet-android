@@ -815,4 +815,22 @@
     <string name="seedview_warn_body">この単語を知っている人は誰でも資金を盗めます。</string>
     <string name="seedview_words_title">%1$d 語のリカバリーフレーズ</string>
     <string name="seedview_write_down">この単語を順番どおりに書き留め、安全に保管してください。</string>
+
+    <!-- Quick start of a restored wallet (multi-wallet step 1, Task 15) -->
+    <string name="quickstart_title">残高を早く表示しますか？</string>
+    <string name="quickstart_body">このウォレットは同期しながら、この端末上で非公開に履歴を見つけます。時間がかかる場合があります。代わりに、今すぐサーバーに残高を問い合わせることもできます。この金額は未確認で、同期で証明されるまで使えません。</string>
+    <string name="quickstart_skip">スキップして非公開で同期</string>
+    <string name="quickstart_own_node">自分のノードに問い合わせる（%1$s）</string>
+    <string name="quickstart_own_node_note">あなたのノードがこのウォレットのアドレスを受け取ります。digiscope.me には何も送信されません。</string>
+    <string name="quickstart_digiscope">digiscope.me に問い合わせる</string>
+    <string name="quickstart_digiscope_disclosure">このウォレットのアドレスを digiscope.me に送信します。digiscope.me はこのウォレットをあなたの他のウォレットと結び付けられるようになります。</string>
+    <string name="quickstart_digiscope_confirm">アドレスを digiscope.me に送信</string>
+    <string name="quickstart_running">残高を確認しています…</string>
+    <string name="quickstart_found">%2$s の報告：%1$s DGB（未確認）</string>
+    <string name="quickstart_found_dd">および %1$s DigiDollar（未確認）</string>
+    <string name="quickstart_failed">問い合わせに応答がありませんでした。ウォレットは同期しながら残高を見つけます。</string>
+    <string name="quickstart_continue">続ける</string>
+    <string name="quickstart_unverified">%2$s の報告：%1$s DGB（未確認）</string>
+    <string name="quickstart_unverified_dd">%1$s DigiDollar の報告（未確認）</string>
+    <string name="quickstart_unverified_sub">同期で証明されるまで使えず、残高にも含まれません。</string>
 </resources>

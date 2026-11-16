@@ -815,4 +815,22 @@
     <string name="seedview_warn_body">Bất kỳ ai có những từ này đều có thể lấy cắp tiền của bạn.</string>
     <string name="seedview_words_title">Cụm từ khôi phục %1$d từ của bạn</string>
     <string name="seedview_write_down">Hãy ghi các từ này theo đúng thứ tự và cất giữ an toàn.</string>
+
+    <!-- Quick start of a restored wallet (multi-wallet step 1, Task 15) -->
+    <string name="quickstart_title">Hiển thị số dư sớm hơn?</string>
+    <string name="quickstart_body">Ví này sẽ tìm lịch sử của nó một cách riêng tư trên điện thoại này khi đồng bộ, việc này có thể mất một lúc. Thay vào đó, bạn có thể hỏi máy chủ số dư của nó ngay bây giờ. Con số này chưa được xác minh và không thể chi tiêu cho đến khi quá trình đồng bộ chứng minh.</string>
+    <string name="quickstart_skip">Bỏ qua và đồng bộ riêng tư</string>
+    <string name="quickstart_own_node">Hỏi nút của riêng tôi (%1$s)</string>
+    <string name="quickstart_own_node_note">Nút của bạn nhận các địa chỉ của ví này. Không có gì được gửi tới digiscope.me.</string>
+    <string name="quickstart_digiscope">Hỏi digiscope.me</string>
+    <string name="quickstart_digiscope_disclosure">Thao tác này gửi các địa chỉ của ví này tới digiscope.me. Khi đó digiscope.me có thể liên kết ví này với các ví khác của bạn.</string>
+    <string name="quickstart_digiscope_confirm">Gửi các địa chỉ tới digiscope.me</string>
+    <string name="quickstart_running">Đang tra cứu số dư…</string>
+    <string name="quickstart_found">%2$s báo %1$s DGB, chưa được xác minh.</string>
+    <string name="quickstart_found_dd">Và %1$s DigiDollar, chưa được xác minh.</string>
+    <string name="quickstart_failed">Tra cứu không phản hồi. Ví vẫn sẽ tìm thấy số dư khi đồng bộ.</string>
+    <string name="quickstart_continue">Tiếp tục</string>
+    <string name="quickstart_unverified">%2$s báo %1$s DGB, chưa được xác minh</string>
+    <string name="quickstart_unverified_dd">Báo %1$s DigiDollar, chưa được xác minh</string>
+    <string name="quickstart_unverified_sub">Không thể chi tiêu và không tính vào số dư cho đến khi đồng bộ chứng minh.</string>
 </resources>

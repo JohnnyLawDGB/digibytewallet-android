@@ -960,4 +960,22 @@
     <string name="seedview_warn_body">Anyone with these words can steal your funds.</string>
     <string name="seedview_words_title">Your %1$d-word Recovery Phrase</string>
     <string name="seedview_write_down">Write these words down in order and store them safely.</string>
+
+    <!-- Quick start of a restored wallet (multi-wallet step 1, Task 15) -->
+    <string name="quickstart_title">Show the balance sooner?</string>
+    <string name="quickstart_body">This wallet will find its history privately on this phone as it syncs, which can take a while. You can instead ask a server for its balance now. The figure is not verified and cannot be spent until the sync proves it.</string>
+    <string name="quickstart_skip">Skip and sync privately</string>
+    <string name="quickstart_own_node">Ask my own node (%1$s)</string>
+    <string name="quickstart_own_node_note">Your node receives this wallet\'s addresses. Nothing is sent to digiscope.me.</string>
+    <string name="quickstart_digiscope">Ask digiscope.me</string>
+    <string name="quickstart_digiscope_disclosure">This sends this wallet\'s addresses to digiscope.me. digiscope.me can then link this wallet to your other wallets.</string>
+    <string name="quickstart_digiscope_confirm">Send the addresses to digiscope.me</string>
+    <string name="quickstart_running">Looking up the balance…</string>
+    <string name="quickstart_found">%2$s reports %1$s DGB, not yet verified.</string>
+    <string name="quickstart_found_dd">And %1$s DigiDollar, not yet verified.</string>
+    <string name="quickstart_failed">The lookup did not answer. The wallet will still find its balance as it syncs.</string>
+    <string name="quickstart_continue">Continue</string>
+    <string name="quickstart_unverified">%1$s DGB reported by %2$s, not yet verified</string>
+    <string name="quickstart_unverified_dd">%1$s DigiDollar reported, not yet verified</string>
+    <string name="quickstart_unverified_sub">Not spendable and not in your balance until the sync proves it.</string>
 </resources>

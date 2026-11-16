@@ -815,4 +815,22 @@
     <string name="seedview_warn_body">任何人拿到这些单词都能盗走你的资金。</string>
     <string name="seedview_words_title">你的 %1$d 词助记词</string>
     <string name="seedview_write_down">请按顺序抄下这些单词并妥善保管。</string>
+
+    <!-- Quick start of a restored wallet (multi-wallet step 1, Task 15) -->
+    <string name="quickstart_title">更快显示余额？</string>
+    <string name="quickstart_body">此钱包会在同步时在本机上私密地查找其历史记录，这可能需要一段时间。您也可以现在向服务器查询其余额。该数字未经验证，在同步证实之前不可花费。</string>
+    <string name="quickstart_skip">跳过并私密同步</string>
+    <string name="quickstart_own_node">询问我自己的节点（%1$s）</string>
+    <string name="quickstart_own_node_note">您的节点将收到此钱包的地址。不会向 digiscope.me 发送任何内容。</string>
+    <string name="quickstart_digiscope">询问 digiscope.me</string>
+    <string name="quickstart_digiscope_disclosure">这会将此钱包的地址发送到 digiscope.me。之后 digiscope.me 可以将此钱包与您的其他钱包关联起来。</string>
+    <string name="quickstart_digiscope_confirm">将地址发送到 digiscope.me</string>
+    <string name="quickstart_running">正在查询余额…</string>
+    <string name="quickstart_found">%2$s 报告 %1$s DGB，尚未验证。</string>
+    <string name="quickstart_found_dd">以及 %1$s DigiDollar，尚未验证。</string>
+    <string name="quickstart_failed">查询没有响应。钱包同步时仍会找到其余额。</string>
+    <string name="quickstart_continue">继续</string>
+    <string name="quickstart_unverified">%2$s 报告 %1$s DGB，尚未验证</string>
+    <string name="quickstart_unverified_dd">报告 %1$s DigiDollar，尚未验证</string>
+    <string name="quickstart_unverified_sub">在同步证实之前不可花费，也不计入您的余额。</string>
 </resources>

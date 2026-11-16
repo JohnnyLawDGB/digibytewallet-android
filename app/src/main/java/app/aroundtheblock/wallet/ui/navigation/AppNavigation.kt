@@ -326,6 +326,14 @@ fun AppNavigation(
                 RecoveryDateScreen(navController = navController, viewModel = sharedViewModel)
             }
 
+            composable(QUICK_START_ROUTE) { backStackEntry ->
+                val parentEntry = remember(backStackEntry) {
+                    navController.getBackStackEntry(ONBOARDING_ROUTE)
+                }
+                val sharedViewModel: app.aroundtheblock.wallet.ui.onboarding.OnboardingViewModel = hiltViewModel(parentEntry)
+                app.aroundtheblock.wallet.ui.onboarding.QuickStartScreen(navController = navController, viewModel = sharedViewModel)
+            }
+
             composable(ADD_COMMIT_ROUTE) { backStackEntry ->
                 val parentEntry = remember(backStackEntry) {
                     navController.getBackStackEntry(ONBOARDING_ROUTE)

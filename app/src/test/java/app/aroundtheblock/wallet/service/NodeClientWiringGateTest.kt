@@ -38,9 +38,24 @@ class NodeClientWiringGateTest {
                 .filterNot { gate.code.substring(0, it.range.first).trimEnd().endsWith("class") }
                 .map { file.path to it.arguments }
         }
-        val outside = constructions.filterNot { (path, _) -> path.endsWith("di/AppModule.kt") }
+        // The one other construction: DgbNodeClient.digiScopeOnly, the quick start's DigiScope-only
+        // client, built inside the class from the client its caller passes (Task 15).
+        val (factory, rest) = constructions.partition { (path, _) -> path.endsWith("core/reconcile/DgbNodeClient.kt") }
+        assertEquals("the class builds itself other than through digiScopeOnly: $factory", listOf(listOf("context", "client", "true")), factory.map { it.second })
+        val outside = rest.filterNot { (path, _) -> path.endsWith("di/AppModule.kt") }
         assertTrue("the reconcile client is constructed outside the provider: $outside", outside.isEmpty())
-        assertEquals("the provider must construct the reconcile client exactly once", 1, constructions.size)
-        assertEquals("the provider does not pass the injected client", listOf("context", "client"), constructions.single().second)
+        assertEquals("the provider must construct the reconcile client exactly once", 1, rest.size)
+        assertEquals("the provider does not pass the injected client", listOf("context", "client"), rest.single().second)
+    }
+
+    /** The DigiScope-only client is built from the injected shared client, as the provider's is. */
+    @Test fun `the digiscope-only client is built from the injected client`() {
+        val callers = sources().flatMap { file ->
+            val gate = KotlinSourceGate.of(file.readText())
+            gate.calls("DgbNodeClient.digiScopeOnly").map { file.name to it.arguments }
+        }
+        assertEquals("scanner is blind or a second caller was added: $callers", listOf("QuickStartScans.kt" to listOf("context", "client")), callers)
+        val scans = File("src/main/java/app/aroundtheblock/wallet/ui/onboarding/QuickStartScans.kt").readText()
+        assertTrue("QuickStartScans does not take the injected client", Regex("""@Inject\s+constructor\([^)]*private val client: OkHttpClient""").containsMatchIn(scans))
     }
 }
