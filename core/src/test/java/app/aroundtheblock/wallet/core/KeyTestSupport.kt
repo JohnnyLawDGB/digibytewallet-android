@@ -69,23 +69,25 @@ internal const val BOUND_ALIAS = KeyStoreManager.KEY_ALIAS + KeyStoreManager.AUT
 internal const val DB_ALIAS = "dgb_db_passphrase"
 
 /**
- * A [KeyStoreManager] whose keys live in [vault]: the legacy seed key under [LEGACY_ALIAS], the
- * auth-bound one under [BOUND_ALIAS]. [authBound] false is a device where binding is unavailable.
+ * A [KeyStoreManager] whose keys live in [vault]: the legacy seed key under [alias] (by default
+ * [LEGACY_ALIAS]), the auth-bound one under [alias] + `_v2` (by default [BOUND_ALIAS]), as the real
+ * [KeyStoreManager] names them. [authBound] false is a device where binding is unavailable.
  */
-internal fun keyStoreManagerOver(vault: FakeVault, authBound: Boolean = true): KeyStoreManager {
+internal fun keyStoreManagerOver(vault: FakeVault, authBound: Boolean = true, alias: String = LEGACY_ALIAS): KeyStoreManager {
+    val bound = alias + KeyStoreManager.AUTH_ALIAS_SUFFIX
     val ksm = mockk<KeyStoreManager>()
-    every { ksm.createKey() } answers { vault.createUnboundKey(LEGACY_ALIAS) }
-    every { ksm.encrypt(any()) } answers { vault.encrypt(LEGACY_ALIAS, firstArg()) }
-    every { ksm.decrypt(any()) } answers { vault.decrypt(LEGACY_ALIAS, firstArg()) }
-    every { ksm.createAuthBoundKey() } answers { if (authBound) { vault.createUnboundKey(BOUND_ALIAS); true } else false }
-    every { ksm.hasAuthBoundKey() } answers { BOUND_ALIAS in vault.keys }
-    every { ksm.authBoundKeyExists() } answers { BOUND_ALIAS in vault.keys }
-    every { ksm.encryptAuthBound(any()) } answers { vault.encrypt(BOUND_ALIAS, firstArg()) }
-    every { ksm.decryptAuthBound(any()) } answers { vault.decrypt(BOUND_ALIAS, firstArg()) }
-    every { ksm.deleteLegacyKey() } answers { vault.delete(LEGACY_ALIAS) }
-    every { ksm.deleteKey() } answers { vault.delete(LEGACY_ALIAS); vault.delete(BOUND_ALIAS) }
+    every { ksm.createKey() } answers { vault.createUnboundKey(alias) }
+    every { ksm.encrypt(any()) } answers { vault.encrypt(alias, firstArg()) }
+    every { ksm.decrypt(any()) } answers { vault.decrypt(alias, firstArg()) }
+    every { ksm.createAuthBoundKey() } answers { if (authBound) { vault.createUnboundKey(bound); true } else false }
+    every { ksm.hasAuthBoundKey() } answers { bound in vault.keys }
+    every { ksm.authBoundKeyExists() } answers { bound in vault.keys }
+    every { ksm.encryptAuthBound(any()) } answers { vault.encrypt(bound, firstArg()) }
+    every { ksm.decryptAuthBound(any()) } answers { vault.decrypt(bound, firstArg()) }
+    every { ksm.deleteLegacyKey() } answers { vault.delete(alias) }
+    every { ksm.deleteKey() } answers { vault.delete(alias); vault.delete(bound) }
     every { ksm.isDeviceSecure() } returns authBound
-    every { ksm.isKeyValid() } answers { LEGACY_ALIAS in vault.keys }
+    every { ksm.isKeyValid() } answers { alias in vault.keys }
     return ksm
 }
 

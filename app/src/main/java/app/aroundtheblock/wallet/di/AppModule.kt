@@ -17,6 +17,10 @@ import app.aroundtheblock.wallet.core.digiid.DigiIdManager
 import app.aroundtheblock.wallet.core.ipfs.AssetMetadataService
 import app.aroundtheblock.wallet.core.ipfs.IpfsClient
 import app.aroundtheblock.wallet.core.security.*
+import app.aroundtheblock.wallet.core.wallets.ActiveWallet
+import app.aroundtheblock.wallet.core.wallets.WalletManagerFactory
+import app.aroundtheblock.wallet.core.wallets.WalletRegistry
+import app.aroundtheblock.wallet.core.wallets.WalletStores
 import okhttp3.OkHttpClient
 import javax.inject.Singleton
 
@@ -28,7 +32,20 @@ object AppModule {
     fun provideTorManager(@ApplicationContext context: Context): TorManager = TorManager(context)
 
     @Provides @Singleton
-    fun provideKeyStoreManager(@ApplicationContext context: Context): KeyStoreManager = KeyStoreManager(context)
+    fun provideKeyStoreManager(@ApplicationContext context: Context): KeyStoreManager =
+        KeyStoreManager(context, WalletStores.keyAlias(ActiveWallet.scope(context)))
+
+    @Provides @Singleton
+    fun provideWalletRegistry(@ApplicationContext context: Context): WalletRegistry = ActiveWallet.registry(context)
+
+    /** A [WalletManager] over another wallet's scope and aliases, for storing its record (adding a wallet). */
+    @Provides @Singleton
+    fun provideWalletManagerFactory(
+        @ApplicationContext context: Context,
+        um: UtxoManager,
+    ): WalletManagerFactory = WalletManagerFactory { scope ->
+        WalletManager(context, KeyStoreManager(context, WalletStores.keyAlias(scope)), um, scope = scope)
+    }
 
     @Provides @Singleton
     fun providePinManager(@ApplicationContext context: Context): PinManager = PinManager(context)
@@ -122,6 +139,8 @@ object AppModule {
         WalletManager(
             context, ksm, um, assetManager = am, identitySessions = identitySessions,
             markErasureOwed = { app.aroundtheblock.wallet.FreshStartAfterWipe.markErasureOwed(context) },
+            // The same wallet the KeyStoreManager above and every store resolve to.
+            scope = ActiveWallet.scope(context),
         )
 
     /**

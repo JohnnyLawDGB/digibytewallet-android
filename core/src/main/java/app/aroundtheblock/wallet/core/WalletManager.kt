@@ -26,6 +26,7 @@ import app.aroundtheblock.wallet.core.security.seedKeyStatusFor
 import app.aroundtheblock.wallet.core.security.boundKeyStateOnFailure
 import app.aroundtheblock.wallet.core.security.neverOpens
 import app.aroundtheblock.wallet.core.wallets.StoreScope
+import app.aroundtheblock.wallet.core.wallets.WalletOrigin
 import app.aroundtheblock.wallet.core.wallets.WalletScope
 import app.aroundtheblock.wallet.core.wallets.WalletStores
 import app.aroundtheblock.wallet.core.wallets.storageSuffix
@@ -91,6 +92,12 @@ private const val KEY_FINGERPRINT_V2 = "seed_fingerprint_v2"
 private const val KEY_ORIGIN = "wallet_origin"
 private const val ORIGIN_CREATED = "created"
 private const val ORIGIN_RESTORED = "restored"
+/** The network of a wallet other than `legacy`: [NETWORK_MAINNET] or [NETWORK_TESTNET], so the wallet
+ *  registry can be rebuilt from the records on disk (ActiveWallet). Not written for `legacy`, whose
+ *  record is the one 4.1.4 wrote and serves both networks. */
+private const val KEY_NETWORK = "wallet_network"
+private const val NETWORK_MAINNET = "mainnet"
+private const val NETWORK_TESTNET = "testnet"
 
 /** The version this release writes the seed record at: written whole, in one commit, saying whether it has a passphrase. */
 private const val SEED_RECORD_VERSION = 1
@@ -101,7 +108,7 @@ private val LEGACY_ENVELOPE_FIELDS = listOf("encrypted_seed", "encrypted_seed_iv
 
 /** Every field of the seed record. */
 private val SEED_RECORD_FIELDS = V2_ENVELOPE_FIELDS + LEGACY_ENVELOPE_FIELDS +
-    listOf(KEY_CREATION_TIME, KEY_RECORD_VERSION, KEY_HAS_PASSPHRASE, KEY_FINGERPRINT_V1, KEY_FINGERPRINT_V2, KEY_ORIGIN)
+    listOf(KEY_CREATION_TIME, KEY_RECORD_VERSION, KEY_HAS_PASSPHRASE, KEY_FINGERPRINT_V1, KEY_FINGERPRINT_V2, KEY_ORIGIN, KEY_NETWORK)
 
 /**
  * The creation time handed to native on a restore. Native picks the header anchor (and
@@ -170,6 +177,13 @@ class WalletManager @Suppress("LongParameterList") constructor(
     // The wallet this manager reads and writes. Every store call below passes it, so none falls
     // back to the process's active wallet.
     private val scope: WalletScope = WalletScope.legacy(isTestnet(context)),
+    // The native calls of restoreFromDisk and its waits, injectable for the same reason as the above.
+    private val restoreNative: (mnemonic: ByteArray, creationTime: Long, passphrase: ByteArray?) -> Boolean =
+        { m, t, p -> NativeBridge.restoreWalletFromBytes(m, t, p) },
+    private val stopSyncNative: () -> Unit = { NativeBridge.stopSync() },
+    private val peerCountNative: () -> Int = { NativeBridge.getPeerCount() },
+    private val loadTxNative: (records: ByteArray) -> Int = { NativeBridge.loadSerializedTransactions(it) },
+    private val sleep: (millis: Long) -> Unit = { Thread.sleep(it) },
 ) {
     // Sessions running for the wallet in this process (the sync service), stopped by every wipe
     // before it erases anything. See [WalletSessionStop].
@@ -328,6 +342,46 @@ class WalletManager @Suppress("LongParameterList") constructor(
     }
 
     /**
+     * Store a wallet's record — one checked write, as [createWallet] — WITHOUT loading the wallet:
+     * nothing native is created, recovered or rescanned, and no sync data is cleared. This is how a
+     * wallet other than the one this process runs is added; it is loaded by [restoreFromDisk] once
+     * it is the active wallet.
+     *
+     * False, and nothing written (no key made either), when the scope already holds a record or
+     * sync data: a record is never stored over a wallet's existing state.
+     *
+     * @param passphrase NFKD UTF-8 bytes, or null. The CALLER owns and zeroes them; see [createWallet].
+     */
+    fun storeRecordOnly(mnemonic: String, passphrase: ByteArray?, creationTimeSecs: Long, origin: WalletOrigin): Boolean {
+        if (passphrase != null && (passphrase.size > Bip39Passphrase.MAX_BYTES || Bip39Passphrase.hasNul(passphrase))) return false
+        val syncPrefs = context.getSharedPreferences(WalletStores.prefsName("dgb_sync_data", scope), Context.MODE_PRIVATE)
+        if (prefs.all.isNotEmpty() || syncPrefs.all.isNotEmpty()) {
+            android.util.Log.w("WalletManager", "wallet record not stored: its scope already holds state")
+            return false
+        }
+        val mnemonicBytes = mnemonic.toByteArray(Charsets.UTF_8)
+        try {
+            val sealed = sealForNewRecord(mnemonicBytes, passphrase) ?: return false
+            val originValue = when (origin) {
+                WalletOrigin.CREATED -> ORIGIN_CREATED
+                WalletOrigin.RESTORED -> ORIGIN_RESTORED
+            }
+            val stored = storeSeedRecord(sealed, mnemonicBytes, passphrase, creationTimeSecs, originValue)
+            // A stored wallet that is not loaded is a locked one, as [init] reads it on the next start.
+            if (stored) _walletState.value = WalletState.Locked
+            return stored
+        } finally {
+            mnemonicBytes.fill(0)
+        }
+    }
+
+    /** The record's identity ([SeedFingerprint.v2] of the derived seed), or null when it holds none. */
+    fun recordIdentity(): String? = prefs.getString(KEY_FINGERPRINT_V2, null)
+
+    /** The record's mnemonic-based fingerprint (v1, records from before the derived identity), or null. */
+    fun recordFingerprintV1(): String? = prefs.getString(KEY_FINGERPRINT_V1, null)
+
+    /**
      * Restore wallet from persisted encrypted seed on app restart.
      * Stops any running sync first to avoid use-after-free crashes.
      * Returns true if the wallet was successfully restored.
@@ -370,18 +424,18 @@ class WalletManager @Suppress("LongParameterList") constructor(
             // CRITICAL: stop sync before replacing the wallet — the peer manager's
             // background threads are using the old wallet pointer. Freeing it
             // while they're running causes SIGSEGV.
-            NativeBridge.stopSync()
+            stopSyncNative()
             // Wait for peer manager threads to fully drain. 200ms was insufficient —
             // SIGSEGV crashes were observed on the DefaultDispatch thread after the
             // old wallet was freed. Poll peer count to confirm disconnection, with
             // a hard cap to avoid hanging.
             var waitMs = 0
-            while (NativeBridge.getPeerCount() > 0 && waitMs < 2000) {
-                Thread.sleep(100)
+            while (peerCountNative() > 0 && waitMs < 2000) {
+                sleep(100)
                 waitMs += 100
             }
             // Extra settle time for threads that may be mid-callback
-            Thread.sleep(300)
+            sleep(300)
 
             // Only clear saved blocks/peers if the seed has changed (e.g. after
             // uninstall/reinstall with a different mnemonic). On normal app restarts
@@ -465,7 +519,7 @@ class WalletManager @Suppress("LongParameterList") constructor(
                 var loaded = 0
                 try {
                     if (savedTx.size >= 4) {
-                        loaded = NativeBridge.loadSerializedTransactions(savedTx)
+                        loaded = loadTxNative(savedTx)
                         android.util.Log.i("WalletManager", "Loaded $loaded saved transactions for restore")
                     } else {
                         android.util.Log.w("WalletManager", "Unreadable transaction checkpoint — the restore continues without it")
@@ -494,7 +548,7 @@ class WalletManager @Suppress("LongParameterList") constructor(
             // After a one-time history rebuild the anchor goes no later than the oldest record
             // the discarded cache held (creationTimeForRestore); otherwise unchanged.
             val restoreTime = creationTimeForRestore(creationTime, HistoryRebuildOnUpgrade.floorTime(context, scope = scope))
-            val success = NativeBridge.restoreWalletFromBytes(seedBytes, restoreTime, storedPass)
+            val success = restoreNative(seedBytes, restoreTime, storedPass)
             if (success) {
                 _walletState.value = WalletState.Unlocked
                 // A passphrase stored with a NUL opened the wallet of the part before it; record that (R13).
@@ -1285,6 +1339,7 @@ class WalletManager @Suppress("LongParameterList") constructor(
             .putBoolean(KEY_HAS_PASSPHRASE, sealed.passphrase != null)
             .putInt(KEY_RECORD_VERSION, SEED_RECORD_VERSION)
             .putString(KEY_ORIGIN, origin)
+        if (!scope.isLegacy) edit.putString(KEY_NETWORK, if (scope.testnet) NETWORK_TESTNET else NETWORK_MAINNET)
         val landed = edit.commit()
         val readsBack = landed &&
             prefs.getInt(KEY_RECORD_VERSION, 0) == SEED_RECORD_VERSION &&
