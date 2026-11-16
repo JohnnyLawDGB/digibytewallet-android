@@ -10,7 +10,6 @@ import app.aroundtheblock.wallet.core.IdentitySessionWipe
 import app.aroundtheblock.wallet.core.digiscope.DigiScopeClient
 import app.aroundtheblock.wallet.core.hub.HubWebSocket
 import app.aroundtheblock.wallet.ui.digistamp.DigistampWebViewHost
-import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -37,6 +36,8 @@ class IdentitySessionEraser internal constructor(
     private val endHubSession: () -> Boolean,
     private val endWebSession: () -> Boolean,
     private val onMainThread: (() -> Boolean) -> Boolean,
+    /** The wipe leaves the web data owned by no wallet ([WebSessionIsolation.markWiped]). */
+    private val markWebDataWiped: () -> Boolean = { true },
 ) : IdentitySessionWipe {
 
     constructor(
@@ -51,12 +52,17 @@ class IdentitySessionEraser internal constructor(
         },
         endWebSession = { clearWebSession(context.applicationContext) },
         onMainThread = ::runOnMainThread,
+        markWebDataWiped = { WebSessionIsolation.markWiped(context) },
     )
 
     override fun eraseIdentitySessions(): Boolean {
+        // First, and whatever the clear below does: the clear of the cookie jar is asynchronous, so
+        // the next launch's synchronous delete (WebSessionIsolation) is what a new seed made as
+        // `legacy` again relies on, and it runs only for an owner that is not the active wallet.
+        val owner = attempt("web session owner", markWebDataWiped)
         val hub = attempt("hub session", endHubSession)
         val web = attempt("web session") { onMainThread(endWebSession) }
-        return hub && web
+        return owner && hub && web
     }
 
     /** Only the web-session part of [eraseIdentitySessions], on the main thread: a wallet switch
@@ -91,16 +97,10 @@ class IdentitySessionEraser internal constructor(
             flushCookies = { CookieManager.getInstance().flush() },
             clearWebStorage = { WebStorage.getInstance().deleteAllData() },
             removeSessionFiles = {
-                webViewDirs(context).map { !it.exists() || (it.deleteRecursively() && !it.exists()) }.all { it }
+                WebSessionIsolation.webDataDirs(context.dataDir, context.cacheDir)
+                    .map { !it.exists() || (it.deleteRecursively() && !it.exists()) }.all { it }
             },
         ).end()
-
-        /** Where the platform keeps an app's WebView profile and its cache. Named, not asked
-         *  for through getDir(), which would create the directory it is about to remove. */
-        fun webViewDirs(context: Context): List<File> = listOf(
-            File(context.dataDir, "app_webview"),
-            File(context.cacheDir, "WebView"),
-        )
 
         fun runOnMainThread(block: () -> Boolean): Boolean {
             if (Looper.myLooper() == Looper.getMainLooper()) return block()

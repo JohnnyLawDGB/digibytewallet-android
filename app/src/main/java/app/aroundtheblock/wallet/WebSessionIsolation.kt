@@ -42,15 +42,36 @@ internal class WebSessionIsolation(
         private const val LEGACY = app.aroundtheblock.wallet.core.wallets.WalletIds.LEGACY
         const val PREFS = "dgb_web_session_owner"
         const val KEY_OWNER = "owner_wallet_id"
+        /**
+         * The owner a full wipe leaves ([markWiped]). No wallet id is ever this, so the next launch
+         * always clears the web data, even for a new seed made as `legacy` again. Not a removal: an
+         * absent owner with only legacy is adopted without clearing (the upgrade rule above).
+         */
+        const val OWNER_WIPED = "wiped"
+
+        /** The full wipe's part: the web data now belongs to no wallet. True only when the write landed. */
+        fun markWiped(context: Context): Boolean {
+            val app = context.applicationContext ?: context
+            return app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_OWNER, OWNER_WIPED).commit()
+        }
 
         @Volatile
         var verified: Boolean = false
             internal set
 
-        /** Every WebView profile directory the platform may use, including per-process suffixed ones. */
+        /**
+         * THE list of where the platform keeps an app's WebView data: every profile directory,
+         * including per-process suffixed ones, its caches and the HTTP auth database. The launch
+         * isolation and the wipe's fallback file removal (IdentitySessionEraser) both use it. Named,
+         * not asked for through getDir(), which would create the directory it is about to remove.
+         */
         fun webDataDirs(dataDir: File, cacheDir: File): List<File> =
             (dataDir.listFiles { f -> f.name.startsWith("app_webview") }?.toList() ?: emptyList()) +
-                File(cacheDir, "WebView")
+                listOf(
+                    File(cacheDir, "WebView"),
+                    File(cacheDir, "org.chromium.android_webview"),
+                    File(dataDir, "databases/http_auth.db"),
+                )
 
         fun isolateAtLaunch(context: Context) {
             val app = context.applicationContext ?: context

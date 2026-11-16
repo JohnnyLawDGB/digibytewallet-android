@@ -46,6 +46,23 @@ class IdentitySessionEraserTest {
         }
     }
 
+    @Test fun `the wipe marks the web data wiped, and a mark that does not land is reported`() {
+        var marked = 0
+        assertTrue(IdentitySessionEraser({ true }, { true }, inline, markWebDataWiped = { marked++; true }).eraseIdentitySessions())
+        assertEquals(1, marked)
+        for (mark in listOf<() -> Boolean>({ false }, { throw IllegalStateException() })) {
+            var webRan = false
+            assertFalse(IdentitySessionEraser({ true }, { webRan = true; true }, inline, markWebDataWiped = mark).eraseIdentitySessions())
+            assertTrue("the web session was skipped", webRan)
+        }
+    }
+
+    @Test fun `a switch ends the web session without marking it wiped`() {
+        var marked = 0
+        assertTrue(IdentitySessionEraser({ true }, { true }, inline, markWebDataWiped = { marked++; true }).endWebSessionOnly())
+        assertEquals(0, marked)
+    }
+
     @Test fun `a web session that cannot be ended is reported`() {
         assertFalse(IdentitySessionEraser({ true }, { false }, inline).eraseIdentitySessions())
         assertFalse(IdentitySessionEraser({ true }, { throw IllegalStateException() }, inline).eraseIdentitySessions())

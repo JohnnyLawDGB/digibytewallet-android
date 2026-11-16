@@ -64,4 +64,43 @@ class WebSessionIsolationTest {
         val names = WebSessionIsolation.webDataDirs(data, cache).map { it.name }
         assertTrue(names.containsAll(listOf("app_webview", "app_webview_proc", "WebView")) && "other" !in names)
     }
+
+    @Test fun `the web data list covers the Chromium cache and the HTTP auth database`() {
+        val data = tmp.newFolder("data2"); val cache = tmp.newFolder("cache2")
+        val dirs = WebSessionIsolation.webDataDirs(data, cache)
+        assertTrue(File(cache, "org.chromium.android_webview") in dirs)
+        assertTrue(File(data, "databases/http_auth.db") in dirs)
+    }
+
+    /** After a full wipe a new seed may be created as legacy again: owner == active must not let the
+     *  wiped seed's DigiStamp session through. The wipe leaves the sentinel, never the old owner. */
+    @Test fun `after a wipe the next launch clears the web data even for legacy`() {
+        val dir = webDir(); var owner: String? = "legacy"
+        val eraser = IdentitySessionEraser({ true }, { true }, { it() }, markWebDataWiped = { owner = WebSessionIsolation.OWNER_WIPED; true })
+
+        assertTrue(eraser.eraseIdentitySessions())
+        assertEquals(WebSessionIsolation.OWNER_WIPED, owner)
+        assertTrue(WebSessionIsolation({ owner }, { owner = it; true }, { listOf(dir) }, "legacy", { true }).run())
+        assertFalse("the wiped seed's web data survived the next launch", dir.exists())
+        assertEquals("legacy", owner)
+    }
+
+    @Test fun `the sentinel is no wallet id`() {
+        assertFalse(app.aroundtheblock.wallet.core.wallets.WalletIds.isValid(WebSessionIsolation.OWNER_WIPED))
+    }
+
+    @Test fun `marking the web data wiped writes the sentinel with a checked commit`() {
+        val editor = io.mockk.mockk<android.content.SharedPreferences.Editor>()
+        io.mockk.every { editor.putString(any(), any()) } returns editor
+        io.mockk.every { editor.commit() } returns true
+        val prefs = io.mockk.mockk<android.content.SharedPreferences> { io.mockk.every { edit() } returns editor }
+        val ctx = io.mockk.mockk<android.content.Context>(relaxed = true)
+        io.mockk.every { ctx.applicationContext } returns ctx
+        io.mockk.every { ctx.getSharedPreferences(WebSessionIsolation.PREFS, any()) } returns prefs
+
+        assertTrue(WebSessionIsolation.markWiped(ctx))
+        io.mockk.verify { editor.putString(WebSessionIsolation.KEY_OWNER, WebSessionIsolation.OWNER_WIPED) }
+        io.mockk.every { editor.commit() } returns false
+        assertFalse("a write that did not land was reported", WebSessionIsolation.markWiped(ctx))
+    }
 }
