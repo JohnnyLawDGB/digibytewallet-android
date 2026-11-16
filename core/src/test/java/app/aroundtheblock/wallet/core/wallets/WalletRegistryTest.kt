@@ -90,6 +90,17 @@ class WalletRegistryTest {
     }
 
     @Test
+    fun `a READY wallet whose record is gone is not listed and cannot be made active`() {
+        // The switcher lists list(): it must never offer a wallet there is nothing left of.
+        val r = registry()
+        val b = reserved(r)
+        val c = reserved(r)
+        missingRecords += b.id
+        assertEquals(listOf("legacy", c.id), r.list(false).map { it.id })
+        assertFalse(r.setActive(false, b.id))
+    }
+
+    @Test
     fun `an unreadable registry is rebuilt from the seed records on disk`() {
         prefs.seed("registry", "{not json")
         recordsOnDisk = listOf("0123456789abcdef" to false, "fedcba9876543210" to null)

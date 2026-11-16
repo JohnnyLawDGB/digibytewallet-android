@@ -74,6 +74,17 @@ class StoreSuffixSourceGateTest {
         )
     }
 
+    /** The seed record's network field: one key and two values, defined once, in [WalletStores]. */
+    @Test fun `the seed record's network key is spelled only in WalletStores`() {
+        val spelled = sources()
+            .filter { f -> !f.invariantSeparatorsPath.endsWith("wallets/WalletStores.kt") }
+            .filter { f -> f.readText().contains("\"wallet_network\"") }
+            .map { it.path }
+        assertTrue("\"wallet_network\" spelled outside WalletStores:\n" + spelled.joinToString("\n"), spelled.isEmpty())
+        assertTrue(WalletStores.NETWORK_KEY == "wallet_network")
+        assertTrue(WalletStores.NETWORK_MAINNET == "mainnet" && WalletStores.NETWORK_TESTNET == "testnet")
+    }
+
     @Test fun `the scan sees store opens at all`() {
         val opens = sources().sumOf { f -> statements(f).count { it.contains("getSharedPreferences(") } }
         assertTrue("scanner found only $opens getSharedPreferences( statements — it is blind, not clean", opens >= 30)

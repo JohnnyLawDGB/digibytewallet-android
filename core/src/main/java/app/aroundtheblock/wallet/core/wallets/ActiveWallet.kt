@@ -10,8 +10,6 @@ object ActiveWallet {
     private val lock = Any()
     private var cached: Pair<Context, WalletScope>? = null
 
-    private const val NETWORK_KEY = "wallet_network"
-
     /** Resolved once per application context (by identity), then cached. */
     fun scope(context: Context): WalletScope {
         val app = context.applicationContext ?: context
@@ -46,7 +44,8 @@ object ActiveWallet {
     fun everyWalletId(context: Context, aliases: () -> List<String>): List<String> {
         val app = context.applicationContext ?: context
         val registry = registry(app)
-        val registered = (registry.list(false) + registry.list(true) + registry.incomplete()).map { it.id }
+        // Every entry, its record present or not (list() shows only wallets whose record exists).
+        val registered = registry.allEntryIds() + registry.incomplete().map { it.id }
         val onDisk = recordsOnDisk(app).map { it.first }
         val keyed = runCatching { aliases() }.getOrDefault(emptyList()).mapNotNull(WalletStores::walletIdOfAlias)
         return (listOf(WalletIds.LEGACY) + registered + onDisk + keyed).distinct()
@@ -57,9 +56,13 @@ object ActiveWallet {
         return files.mapNotNull { f ->
             val id = WalletStores.walletIdOfSeedPrefsFile(f.name) ?: return@mapNotNull null
             val prefs = app.getSharedPreferences(WalletStores.seedRecordPrefs(WalletScope(id, false)), Context.MODE_PRIVATE)
-            id to when (val v = prefs.all[NETWORK_KEY]) {
+            id to when (val v = prefs.all[WalletStores.NETWORK_KEY]) {
                 is Boolean -> v
-                is String -> when (v.lowercase()) { "testnet" -> true; "mainnet" -> false; else -> null }
+                is String -> when (v.lowercase()) {
+                    WalletStores.NETWORK_TESTNET -> true
+                    WalletStores.NETWORK_MAINNET -> false
+                    else -> null
+                }
                 else -> null
             }
         }.sortedBy { it.first }

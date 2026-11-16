@@ -239,6 +239,8 @@ class WalletProvisionerTest {
         d.installLegacy()
         repeat(7) {
             val e = d.registry.reserve(false, WalletOrigin.CREATED, 1L)!!
+            // A READY wallet is listed only while its record exists.
+            d.prefs.prefsFor(WalletStores.seedRecordPrefs(WalletScope(e.id, false))).seed("encrypted_seed_v2", "x")
             assertTrue(d.registry.complete(e.id, makeActive = false))
         }
         assertEquals(8, d.registry.list(false).size)

@@ -94,12 +94,8 @@ private const val KEY_FINGERPRINT_V2 = "seed_fingerprint_v2"
 private const val KEY_ORIGIN = "wallet_origin"
 private const val ORIGIN_CREATED = "created"
 private const val ORIGIN_RESTORED = "restored"
-/** The network of a wallet other than `legacy`: [NETWORK_MAINNET] or [NETWORK_TESTNET], so the wallet
- *  registry can be rebuilt from the records on disk (ActiveWallet). Not written for `legacy`, whose
- *  record is the one 4.1.4 wrote and serves both networks. */
-private const val KEY_NETWORK = "wallet_network"
-private const val NETWORK_MAINNET = "mainnet"
-private const val NETWORK_TESTNET = "testnet"
+/** The network of a wallet other than `legacy` ([WalletStores.NETWORK_KEY]). */
+private const val KEY_NETWORK = WalletStores.NETWORK_KEY
 
 /** The version this release writes the seed record at: written whole, in one commit, saying whether it has a passphrase. */
 private const val SEED_RECORD_VERSION = 1
@@ -150,6 +146,10 @@ class WalletManager @Suppress("LongParameterList") constructor(
     // cannot see those, so the app module supplies it (AppModule). Defaulted so pure-JVM
     // constructions keep compiling; the default has nothing to end and says so truthfully.
     private val identitySessions: IdentitySessionWipe = IdentitySessionWipe { true },
+    // Every wallet's Hub session is revoked on the server, best effort, before the wipe erases the
+    // tokens (AppModule wires DigiScopeClient.revokeStoredSession). Nothing to revoke by default.
+    private val hubRevoke: app.aroundtheblock.wallet.core.digiscope.HubSessionRevoke =
+        app.aroundtheblock.wallet.core.digiscope.HubSessionRevoke.NONE,
     /**
      * Marks the erasure owed, durably, BEFORE a wipe erases anything (4.1.2 row 24): a process death in
      * the seconds the wipe runs used to leave the Hub token, the DB key and the database with no retry
@@ -1048,6 +1048,9 @@ class WalletManager @Suppress("LongParameterList") constructor(
             .all { it }
         // Stop sync and disconnect peers before destroying wallet.
         val quiesced = attempt("native quiesce") { quiesceNative(); true }
+        // Before anything is erased, while every token is still readable: ask the server to end each
+        // wallet's Hub session. Best effort, and not part of the report.
+        revokeHubSessions()
         // Phase 1, every seed record of every wallet FIRST (the ordering invariant above).
         val records = eraseEveryRecord()
         val others = records.others
@@ -1096,7 +1099,42 @@ class WalletManager @Suppress("LongParameterList") constructor(
             seedGone = seedGone,
             everythingCleared = sessionsStopped && quiesced && storesCleared.all { it },
         )
+        // Last, so nothing of this run writes one back: a verified wipe leaves no file name that
+        // says another wallet existed (duress), nor the emptied registry and legacy seed record.
+        if (report.verified) records.listed?.let(::deleteWalletNamedPrefsFiles)
         return report
+    }
+
+    /** [hubRevoke] for every wallet on the device. Never throws; the wipe does not wait on it. */
+    private fun revokeHubSessions() {
+        val ids = try {
+            (listOf(WalletIds.LEGACY) + allWalletIds()).filter(WalletIds::isValid).distinct()
+        } catch (t: Throwable) {
+            android.util.Log.w("WalletManager", "wipe: Hub sessions not revoked (${t.javaClass.simpleName})")
+            return
+        }
+        // The Hub stores are not network-suffixed: one scope per wallet names them.
+        ids.forEach { id -> wipeStep("hub revoke") { hubRevoke.revoke(WalletScope(id, testnet = false)); true } }
+    }
+
+    /**
+     * After a verified wipe: delete every preferences file whose name carries one of [listed]'s ids
+     * (the emptied stores the per-wallet erase deleted and anything written back since), plus the
+     * registry `dgb_wallets` and legacy's seed record `dgb_wallet_seed`, which the wipe clears and
+     * leaves. Best effort, logged by count only: what they held is already gone.
+     */
+    private fun deleteWalletNamedPrefsFiles(listed: Set<String>) {
+        val ids = listed.filter { it != WalletIds.LEGACY }
+        val legacyRecord = WalletStores.seedRecordPrefs(WalletScope.legacy(false))
+        val names = try {
+            java.io.File(context.dataDir, "shared_prefs").list().orEmpty().map { it.removeSuffix(".bak").removeSuffix(".xml") }.toSet()
+        } catch (t: Throwable) {
+            android.util.Log.w("WalletManager", "wipe: shared_prefs not listed (${t.javaClass.simpleName})")
+            return
+        }
+        val targets = names.filter { name -> name == WalletRegistry.PREFS || name == legacyRecord || ids.any { name.contains(it) } }
+        val left = targets.count { name -> !wipeStep("delete a preferences file") { context.deleteSharedPreferences(name) } }
+        if (left > 0) android.util.Log.w("WalletManager", "wipe: $left preferences files not deleted")
     }
 
     /** A wipe step: one that throws has not reported success. Logged by exception class only. */
@@ -1452,7 +1490,7 @@ class WalletManager @Suppress("LongParameterList") constructor(
             .putBoolean(KEY_HAS_PASSPHRASE, sealed.passphrase != null)
             .putInt(KEY_RECORD_VERSION, SEED_RECORD_VERSION)
             .putString(KEY_ORIGIN, origin)
-        if (!scope.isLegacy) edit.putString(KEY_NETWORK, if (scope.testnet) NETWORK_TESTNET else NETWORK_MAINNET)
+        if (!scope.isLegacy) edit.putString(KEY_NETWORK, if (scope.testnet) WalletStores.NETWORK_TESTNET else WalletStores.NETWORK_MAINNET)
         val landed = edit.commit()
         val readsBack = landed &&
             prefs.getInt(KEY_RECORD_VERSION, 0) == SEED_RECORD_VERSION &&

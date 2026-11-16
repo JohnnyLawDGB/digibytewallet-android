@@ -154,9 +154,12 @@ object AppModule {
         um: UtxoManager,
         am: AssetManager,
         identitySessions: app.aroundtheblock.wallet.IdentitySessionEraser,
+        digiScopeClient: dagger.Lazy<DigiScopeClient>,
     ): WalletManager =
         WalletManager(
             context, ksm, um, assetManager = am, identitySessions = identitySessions,
+            // Taken lazily: only a wipe needs the Hub client.
+            hubRevoke = hubSessionRevoke(digiScopeClient),
             markErasureOwed = { app.aroundtheblock.wallet.FreshStartAfterWipe.markErasureOwed(context) },
             // The same wallet the KeyStoreManager above and every store resolve to.
             scope = ActiveWallet.scope(context),
@@ -173,12 +176,18 @@ object AppModule {
         eraser: WalletStoreEraser,
         walletManager: WalletManager,
         pinManager: PinManager,
+        digiScopeClient: dagger.Lazy<DigiScopeClient>,
     ): WalletRemoval = WalletRemoval(
         registry,
         eraser,
         activeScope = ActiveWallet.scope(context),
         wipeAll = { walletManager.wipeThenReleasePin(pinManager) },
+        revokeHub = hubSessionRevoke(digiScopeClient),
     )
+
+    /** A wallet's Hub session ended on the server before its token is erased (wipe and removal). */
+    private fun hubSessionRevoke(client: dagger.Lazy<DigiScopeClient>) =
+        app.aroundtheblock.wallet.core.digiscope.HubSessionRevoke { scope -> client.get().revokeStoredSession(scope) }
 
     /** Wallet switching: persist the active id, end the web session, restart (Task 9). */
     @Provides @Singleton

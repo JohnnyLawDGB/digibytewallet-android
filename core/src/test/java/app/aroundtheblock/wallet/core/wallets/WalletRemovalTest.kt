@@ -6,6 +6,8 @@ import app.aroundtheblock.wallet.core.FakeVault
 import app.aroundtheblock.wallet.core.InMemoryPrefsFactory
 import app.aroundtheblock.wallet.core.WipeReport
 import app.aroundtheblock.wallet.core.asKeystoreAliases
+import app.aroundtheblock.wallet.core.digiscope.HubSessionRevoke
+import app.aroundtheblock.wallet.core.digiscope.HubTokenStore
 import app.aroundtheblock.wallet.core.sync.ChainTipStore
 import app.aroundtheblock.wallet.core.wipeTestContext
 import io.mockk.every
@@ -84,9 +86,15 @@ class WalletRemovalTest {
         fun eraser(release: () -> Boolean = releaseLegacyDbWrap) =
             WalletStoreEraser(ctx, vault.asKeystoreAliases(), release, { name -> prefs.prefsFor(name).all.isNotEmpty() })
 
-        fun removal(active: WalletScope, eraser: WalletStoreEraser = eraser(), registry: WalletRegistry = this.registry) = WalletRemoval(
+        fun removal(
+            active: WalletScope,
+            eraser: WalletStoreEraser = eraser(),
+            registry: WalletRegistry = this.registry,
+            revokeHub: HubSessionRevoke = HubSessionRevoke.NONE,
+        ) = WalletRemoval(
             registry, eraser, active,
             wipeAll = { wipes++; WipeReport(seedGone = true, everythingCleared = true) },
+            revokeHub = revokeHub,
         )
 
         fun housekeeping(release: () -> Boolean = releaseLegacyDbWrap) = WalletHousekeeping(registry, eraser(release))
@@ -146,6 +154,27 @@ class WalletRemovalTest {
         assertFalse(d.eraser().anythingLeft(WalletScope(b, false)))
         assertNull(d.registry.find(b))
         assertEquals(listOf("legacy", c), d.registry.list(false).map { it.id })
+    }
+
+    @Test fun `removing a wallet that is not running revokes its Hub session first, and a failed revoke does not stop it`() = runBlocking {
+        val d = Device()
+        d.installLegacy()
+        val b = d.addWallet(false)
+        val c = d.addWallet(false)
+        val scopeB = WalletScope(b, false)
+        d.prefs.prefsFor(WalletStores.prefsName(HubTokenStore.LEGACY_PREFS_NAME, scopeB)).seed(HubTokenStore.KEY_JWT, "b-jwt")
+        val seen = mutableListOf<Pair<WalletScope, String?>>()
+        val revoke = HubSessionRevoke { scope ->
+            // Asked while the token is still in the wallet's store.
+            seen += scope to d.prefs.prefsFor(WalletStores.prefsName(HubTokenStore.LEGACY_PREFS_NAME, scope)).getString(HubTokenStore.KEY_JWT, null)
+        }
+
+        assertEquals(RemoveResult.Removed, d.removal(active = legacyMain, revokeHub = revoke).remove(b, "Wallet 2", "Wallet 2"))
+        assertEquals(listOf(scopeB to "b-jwt"), seen)
+
+        val failing = HubSessionRevoke { throw java.io.IOException("offline") }
+        assertEquals(RemoveResult.Removed, d.removal(active = legacyMain, revokeHub = failing).remove(c, "Wallet 3", "Wallet 3"))
+        assertFalse(d.eraser().anythingLeft(WalletScope(c, false)))
     }
 
     @Test fun `removing the active wallet moves the active id, erases nothing, and the next launch erases it`() = runBlocking {

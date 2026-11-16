@@ -200,7 +200,8 @@ class WalletStoreEraser internal constructor(
     private fun clearAndDelete(name: String): Boolean = step("erase $name") {
         val store = context.getSharedPreferences(name, Context.MODE_PRIVATE)
         val held = store.all
-        val landed = store.edit().clear().commit()
+        // An empty store is not committed: a commit to a store with no file creates one.
+        val landed = held.isEmpty() || store.edit().clear().commit()
         if (!landed) {
             readWhatTheFileHolds(TAG, name, store, held)
             return@step false
@@ -213,8 +214,11 @@ class WalletStoreEraser internal constructor(
     private fun clearReconcileKeepingEndpoint(name: String): Boolean = step("erase $name") {
         val store = context.getSharedPreferences(name, Context.MODE_PRIVATE)
         val held = store.all
+        val walletKeys = held.keys.filter { it != WalletStores.SHARED_RECONCILE_KEY }
+        // Nothing of the wallet's in it: no commit, which on a missing file would create an empty one.
+        if (walletKeys.isEmpty()) return@step true
         val editor = store.edit()
-        held.keys.filter { it != WalletStores.SHARED_RECONCILE_KEY }.forEach { editor.remove(it) }
+        walletKeys.forEach { editor.remove(it) }
         val landed = editor.commit()
         if (!landed) readWhatTheFileHolds(TAG, name, store, held)
         landed && !walletKeysLeftIn(name)
@@ -226,6 +230,7 @@ class WalletStoreEraser internal constructor(
     /** ONE key of the shared `dgb_settings`: the scope's scan floor. */
     private fun removeFloorKey(scope: WalletScope): Boolean = step("scan floor") {
         val store = settings()
+        if (!store.contains(WalletStores.cfBirthHeightKey(scope))) return@step true
         val held = store.all
         val landed = store.edit().remove(WalletStores.cfBirthHeightKey(scope)).commit()
         if (!landed) readWhatTheFileHolds(TAG, SETTINGS, store, held)

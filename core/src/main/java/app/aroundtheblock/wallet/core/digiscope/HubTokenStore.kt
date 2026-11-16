@@ -73,9 +73,13 @@ class HubTokenStore internal constructor(
         guarded("save") { secure.edit().putString(KEY_JWT, token).commit() }
     }
 
+    /**
+     * A store without the token is not written: a commit to a store whose file is gone (a wipe
+     * deleted it) writes an empty file back under that wallet's name.
+     */
     fun clear() {
-        guarded("clear") { secure.edit().remove(KEY_JWT).commit() }
-        legacy.edit().remove(KEY_JWT).commit()
+        guarded("clear") { if (secure.contains(KEY_JWT)) secure.edit().remove(KEY_JWT).commit() }
+        if (legacy.contains(KEY_JWT)) legacy.edit().remove(KEY_JWT).commit()
     }
 
     /**
@@ -90,11 +94,12 @@ class HubTokenStore internal constructor(
      * removal did not land.
      */
     fun clearConfirmed(): Boolean {
+        // As [clear]: a store without the token is not written.
         val secureCleared = guarded("clear") {
-            secure.edit().remove(KEY_JWT).commit() && !secure.contains(KEY_JWT)
+            (!secure.contains(KEY_JWT) || secure.edit().remove(KEY_JWT).commit()) && !secure.contains(KEY_JWT)
         } ?: runCatching { !secure.contains(KEY_JWT) }.getOrDefault(true)
         val legacyCleared = runCatching {
-            legacy.edit().remove(KEY_JWT).commit() && !legacy.contains(KEY_JWT)
+            (!legacy.contains(KEY_JWT) || legacy.edit().remove(KEY_JWT).commit()) && !legacy.contains(KEY_JWT)
         }.getOrDefault(false)
         return secureCleared && legacyCleared
     }

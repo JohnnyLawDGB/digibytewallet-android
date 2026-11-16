@@ -156,7 +156,7 @@ class HubTokenStoreTest {
     fun `a secure store that answers and keeps the token is not confirmed`() {
         // The other direction: a store that is usable and whose write did not land must still
         // report "not confirmed", so the case above cannot be turned into a blanket yes.
-        val keeps = HubTokenStore(legacy, { RejectingWritePrefs() })
+        val keeps = HubTokenStore(legacy, { TokenKeepingPrefs() })
         legacy.edit().putString(HubTokenStore.KEY_JWT, "stale").commit()
 
         assertFalse("a write that did not land is not a token that is gone", keeps.clearConfirmed())
@@ -181,6 +181,12 @@ class HubTokenStoreTest {
     }
 
     /** Accepts edits but reports every commit as failed and stores nothing. */
+    /** [RejectingWritePrefs] that holds a token: every write refused, so the token stays. */
+    private class TokenKeepingPrefs(private val inner: RejectingWritePrefs = RejectingWritePrefs()) : SharedPreferences by inner {
+        override fun contains(key: String?): Boolean = key == HubTokenStore.KEY_JWT
+        override fun getString(key: String?, defValue: String?): String? = if (key == HubTokenStore.KEY_JWT) "kept" else defValue
+    }
+
     private class RejectingWritePrefs : SharedPreferences by FakeSharedPreferences() {
         override fun edit(): SharedPreferences.Editor = object : SharedPreferences.Editor {
             override fun putString(key: String, value: String?) = this

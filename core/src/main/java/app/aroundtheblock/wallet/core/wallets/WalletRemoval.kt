@@ -2,6 +2,7 @@ package app.aroundtheblock.wallet.core.wallets
 
 import android.util.Log
 import app.aroundtheblock.wallet.core.WipeReport
+import app.aroundtheblock.wallet.core.digiscope.HubSessionRevoke
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -51,6 +52,8 @@ class WalletRemoval(
     /** The wallet this process runs. */
     private val activeScope: WalletScope,
     private val wipeAll: suspend () -> WipeReport,
+    /** Ends a removed wallet's Hub session on the server, best effort, before its token is erased. */
+    private val revokeHub: HubSessionRevoke = HubSessionRevoke.NONE,
 ) {
     /**
      * [typedName] must equal the entry's shown name (trimmed, exact).
@@ -76,8 +79,15 @@ class WalletRemoval(
         }
         if (entry == null) return notMarked(id)
         if (id == activeScope.walletId) return RemoveResult.RemovedRestartNeeded
+        val scope = WalletScope(id, entry.testnet == true)
+        // While its token is still readable. Its outcome decides nothing.
+        try {
+            revokeHub.revoke(scope)
+        } catch (e: Exception) {
+            Log.w(TAG, "Hub session not revoked (${e.javaClass.simpleName})")
+        }
         return try {
-            val report = eraser.erase(WalletScope(id, entry.testnet == true))
+            val report = eraser.erase(scope)
             when {
                 report.verified && registry.drop(id) -> RemoveResult.Removed
                 report.dbKeyHeldLegacyKey -> RemoveResult.DatabaseKeyStillOnLegacy

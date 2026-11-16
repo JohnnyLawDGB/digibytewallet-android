@@ -54,6 +54,9 @@ class WalletRegistry(
 
     fun list(testnet: Boolean): List<WalletEntry> = readyOn(testnet, load())
 
+    /** Every entry's id, in any state, whether or not its record exists: what a wipe must look for. */
+    fun allEntryIds(): List<String> = load().entries.map { it.id }
+
     fun incomplete(): List<WalletEntry> {
         val doc = load()
         val all = doc.entries.filter { it.state != EntryState.READY } +
@@ -186,16 +189,23 @@ class WalletRegistry(
         WalletIds.LEGACY, doc.legacyName, 1, null, 0L, WalletOrigin.CREATED, doc.legacyOrder, doc.legacyState,
     )
 
-    /** READY wallets of [testnet] by order; legacy only while its record exists. */
+    /**
+     * READY wallets of [testnet] by order, each only while its record exists: the switcher lists
+     * these, and must never offer a wallet there is nothing left of.
+     */
     private fun readyOn(testnet: Boolean, doc: Doc): List<WalletEntry> {
         val legacy = legacyEntry(doc).takeIf { it.state == EntryState.READY && legacyRecordExists() }
-        return (listOfNotNull(legacy) + doc.entries.filter { it.testnet == testnet && it.state == EntryState.READY })
-            .sortedBy { it.order }
+        val others = doc.entries.filter { it.testnet == testnet && it.state == EntryState.READY && holdsRecord(it.id) }
+        return (listOfNotNull(legacy) + others).sortedBy { it.order }
     }
 
-    /** Entries that hold a slot on [testnet]: READY and PENDING (legacy while its record exists). */
+    /**
+     * Entries that hold a slot on [testnet]: every READY and PENDING entry (legacy while its record
+     * exists). A READY entry whose record is gone still holds its slot until it is dropped.
+     */
     private fun occupied(testnet: Boolean, doc: Doc): List<WalletEntry> =
-        readyOn(testnet, doc) + doc.entries.filter { it.testnet == testnet && it.state == EntryState.PENDING }
+        listOfNotNull(legacyEntry(doc).takeIf { it.state == EntryState.READY && legacyRecordExists() }) +
+            doc.entries.filter { it.testnet == testnet && (it.state == EntryState.READY || it.state == EntryState.PENDING) }
 
     private fun canReserve(testnet: Boolean, doc: Doc) = occupied(testnet, doc).size < MAX_PER_NETWORK
 

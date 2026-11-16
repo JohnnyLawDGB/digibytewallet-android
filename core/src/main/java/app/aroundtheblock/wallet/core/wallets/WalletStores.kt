@@ -23,6 +23,14 @@ object WalletStores {
     /** The key in dgb_reconcile<net> that belongs to the device, not to the wallet. */
     const val SHARED_RECONCILE_KEY = "custom_rpc_endpoint"
 
+    /**
+     * The seed record's network field, written for every wallet but `legacy` (whose record is the one
+     * 4.1.4 wrote and serves both networks), so the registry can be rebuilt from the records on disk.
+     */
+    const val NETWORK_KEY = "wallet_network"
+    const val NETWORK_MAINNET = "mainnet"
+    const val NETWORK_TESTNET = "testnet"
+
     private const val SEED_PREFS = "dgb_wallet_seed"
     private const val KEY_ALIAS_BASE = "dgb_wallet_master"
     private const val CF_BIRTH_KEY = "cf_birth_height"

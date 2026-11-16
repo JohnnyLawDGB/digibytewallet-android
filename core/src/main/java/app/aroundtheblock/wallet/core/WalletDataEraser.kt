@@ -169,7 +169,18 @@ class AndroidWalletDataEraser internal constructor(
     private val hubTokenStore: () -> HubTokenStore,
 ) : WalletDataEraser {
 
-    constructor(context: Context) : this(context, AndroidKeystoreAliases, { HubTokenStore(context) })
+    /**
+     * The Hub session step erases LEGACY's stores (`dgb_digiscope`, `dgb_hub_session`), never the
+     * active wallet's: with another wallet active, the store `HubTokenStore(context)` resolves is
+     * that wallet's (erased by `WalletStoreEraser`), and legacy's token would survive for the next
+     * wallet made as `legacy` to inherit. The Hub stores are not network-suffixed, so one scope
+     * names them on both networks.
+     */
+    constructor(context: Context) : this(
+        context,
+        AndroidKeystoreAliases,
+        { HubTokenStore(context, WalletScope.legacy(false)) },
+    )
 
     /**
      * Clear one preferences file: true only when the write LANDED. The in-memory view of a
@@ -185,6 +196,8 @@ class AndroidWalletDataEraser internal constructor(
     private fun clearPrefs(name: String): Boolean = step("clear $name") {
         val store = context.getSharedPreferences(name, Context.MODE_PRIVATE)
         val held = store.all
+        // Nothing to clear: no commit, which on a store with no file would create an empty one.
+        if (held.isEmpty()) return@step true
         val landed = store.edit().clear().commit()
         if (!landed) readWhatTheFileHolds(TAG, name, store, held)
         landed
@@ -311,7 +324,9 @@ class AndroidWalletDataEraser internal constructor(
             val settings = context.getSharedPreferences("dgb_settings", Context.MODE_PRIVATE)
             val held = settings.all
             // This full wipe is the legacy wallet's: its floor key (`cf_birth_height`).
-            val landed = settings.edit().remove(WalletStores.cfBirthHeightKey(WalletScope.legacy(false))).commit()
+            val floorKey = WalletStores.cfBirthHeightKey(WalletScope.legacy(false))
+            if (!settings.contains(floorKey)) return@step true
+            val landed = settings.edit().remove(floorKey).commit()
             // As clearPrefs: a write that did not land leaves this process reading the file.
             if (!landed) readWhatTheFileHolds(TAG, "dgb_settings", settings, held)
             landed
