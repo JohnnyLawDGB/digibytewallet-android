@@ -21,6 +21,10 @@ internal fun activeWalletShownName(context: Context): String? {
     return shownName(entry) { n -> LocaleController.wrap(context).getString(R.string.wallet_default_name, n) }
 }
 
+/** How many wallets the running network has: the notification title names the wallet only when there are several. */
+internal fun activeWalletCount(context: Context): Int =
+    ActiveWallet.registry(context).list(ActiveWallet.scope(context).testnet).size
+
 /** [activeWalletShownName] for a screen: null until read, and when there is nothing to show. */
 @Composable
 internal fun rememberActiveWalletName(): String? {

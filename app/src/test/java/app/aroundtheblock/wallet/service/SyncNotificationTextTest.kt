@@ -50,4 +50,19 @@ class SyncNotificationTextTest {
             assertFalse("literal left in SyncService.kt: $lit", src.contains(lit))
         }
     }
+
+    @Test fun `the lock screen version carries the app name only`() {
+        assertEquals("HoldFast", publicNotificationTitle("HoldFast"))
+        for (count in 1..3) {
+            assertFalse(publicNotificationTitle("HoldFast").contains("Savings"))
+            assertTrue(notificationTitle("HoldFast", "Savings", count, ::fmt).startsWith(publicNotificationTitle("HoldFast")))
+        }
+    }
+
+    @Test fun `the notification is private with a public version`() {
+        val src = File("src/main/java/app/aroundtheblock/wallet/service/SyncService.kt").readText()
+        assertTrue(src.contains("VISIBILITY_PRIVATE"))
+        assertTrue(src.contains(".setPublicVersion(publicVersion)"))
+        assertTrue(src.contains("publicNotificationTitle("))
+    }
 }

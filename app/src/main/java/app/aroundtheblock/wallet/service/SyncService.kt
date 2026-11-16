@@ -4115,17 +4115,19 @@ class SyncService : Service() {
                 localised.resources.getQuantityString(app.aroundtheblock.wallet.R.plurals.sync_notif_syncing, peers, pct, peers)
             override fun viaTor() = localised.getString(app.aroundtheblock.wallet.R.string.sync_notif_via_tor)
         })
-        val title = notificationTitle(
-            appName = getString(app.aroundtheblock.wallet.R.string.app_name_display),
-            walletName = activeWalletName(localised),
-            walletCount = walletCount(),
-            format = { app, wallet -> "$app · $wallet" },
-        )
+        val title = notificationTitleNow()
+        // The lock screen shows the public version: the app name alone, with no wallet name, peer count or progress.
+        val publicVersion = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle(publicNotificationTitle(getString(app.aroundtheblock.wallet.R.string.app_name_display)))
+            .setSmallIcon(android.R.drawable.ic_popup_sync)
+            .build()
         val indeterminate = pct == 0 && peerCount == 0
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(contentText)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPublicVersion(publicVersion)
             .setSmallIcon(android.R.drawable.ic_popup_sync)
             .setProgress(100, pct, indeterminate)
             .setOngoing(true)
@@ -4143,20 +4145,31 @@ class SyncService : Service() {
             .build()
     }
 
-    /** The running wallet's shown name; "" when the registry cannot say (the title then shows the app name alone). */
-    private fun activeWalletName(localised: android.content.Context): String = try {
-        val scope = app.aroundtheblock.wallet.core.wallets.ActiveWallet.scope(this)
-        app.aroundtheblock.wallet.core.wallets.ActiveWallet.registry(this).find(scope.walletId)
-            ?.let { e -> e.name ?: localised.getString(app.aroundtheblock.wallet.R.string.wallet_default_name, e.number) } ?: ""
-    } catch (_: Exception) {
-        ""
-    }
+    /**
+     * The notification title, resolved once per service start (a wallet switch restarts the process).
+     * Builds only read this; until the off-main read finishes the title is the plain app name.
+     */
+    @Volatile private var cachedNotificationTitle: String? = null
+    private val titleResolving = java.util.concurrent.atomic.AtomicBoolean(false)
 
-    private fun walletCount(): Int = try {
-        val scope = app.aroundtheblock.wallet.core.wallets.ActiveWallet.scope(this)
-        app.aroundtheblock.wallet.core.wallets.ActiveWallet.registry(this).list(scope.testnet).size
-    } catch (_: Exception) {
-        1
+    private fun notificationTitleNow(): String {
+        cachedNotificationTitle?.let { return it }
+        val appName = getString(app.aroundtheblock.wallet.R.string.app_name_display)
+        if (titleResolving.compareAndSet(false, true)) {
+            serviceScope.launch(Dispatchers.IO) {
+                cachedNotificationTitle = try {
+                    notificationTitle(
+                        appName = appName,
+                        walletName = app.aroundtheblock.wallet.ui.wallets.activeWalletShownName(this@SyncService) ?: "",
+                        walletCount = app.aroundtheblock.wallet.ui.wallets.activeWalletCount(this@SyncService),
+                        format = { app, wallet -> "$app · $wallet" },
+                    )
+                } catch (_: Exception) {
+                    appName
+                }
+            }
+        }
+        return appName
     }
 
     private fun updateNotification(progress: Float, peerCount: Int) {
@@ -4534,3 +4547,6 @@ internal fun notificationText(pct: Int, peerCount: Int, viaTor: Boolean, strings
     }
     return if (viaTor) base + strings.viaTor() else base
 }
+
+/** The lock-screen title: the app name only, whatever the wallet count (a wallet name is user-chosen and private). */
+internal fun publicNotificationTitle(appName: String): String = appName
