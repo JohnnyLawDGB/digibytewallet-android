@@ -67,6 +67,9 @@ class OnboardingHardcodedStringTest {
         "ui/asset/TransferRuleCard.kt",
         "ui/recovery/RecoverFundsScreen.kt",
         "ui/settings/NetworkInfoScreen.kt",
+        // Multi-wallet step 1: the Hub names the wallet it is signed in as; the recovery phrase screen names its wallet.
+        "ui/hub/ProfileView.kt",
+        "ui/settings/SeedViewScreen.kt",
         "ui/settings/AboutScreen.kt",
         "ui/settings/SecuritySettingsScreen.kt",
         "ui/settings/DisplaySettingsScreen.kt",
@@ -175,6 +178,9 @@ class OnboardingHardcodedStringTest {
         // Restore: a word field's label is its 1-based position number, and a scanned path's
         // balance is a value plus the ticker — neither has a sentence to translate.
         "\${index + 1}", "\${fmt.format(dgb)} DGB",
+        // Hub handle sheet and recovery phrase grid: a truncated address, a lazy-grid item key and a
+        // word's 1-based position number.
+        "\${address.take(10)}…\${address.takeLast(8)}", "passphrase", "\${idx + 1}.",
     )
 
     private val quoted = Regex("\"([^\"\\n]{2,})\"")

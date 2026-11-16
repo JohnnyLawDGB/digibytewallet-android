@@ -804,4 +804,36 @@
     <string name="wallet_remove_db_key_kept">Кошелёк убран из списка. Часть его данных можно стереть только после перезапуска приложения, и это произойдёт само.</string>
     <string name="wallet_remove_failed">Кошелёк убран из списка, но стёрт не полностью. Остальное будет стёрто при следующем запуске приложения.</string>
     <string name="wallet_remove_not_removed">Кошелёк не удалён. Ничего не изменено.</string>
+    <string name="hub_signed_in_wallet">Вход выполнен с кошельком %1$s</string>
+    <string name="seedview_wallet_name">Кошелёк: %1$s</string>
+    <string name="hub_handle_field_label">Псевдоним</string>
+    <string name="hub_handle_field_hint">напр. DigiByte_Fan</string>
+    <string name="hub_handle_check">Проверить</string>
+    <string name="hub_handle_register">Зарегистрировать</string>
+    <string name="seedview_title">Фраза восстановления</string>
+    <string name="seedview_done_hide">Готово — скрыть фразу</string>
+    <plurals name="sync_notif_synced">
+        <item quantity="one">Синхронизировано — подключён %1$d узел</item>
+        <item quantity="few">Синхронизировано — подключено %1$d узла</item>
+        <item quantity="many">Синхронизировано — подключено %1$d узлов</item>
+        <item quantity="other">Синхронизировано — подключено %1$d узла</item>
+    </plurals>
+    <plurals name="sync_notif_syncing">
+        <item quantity="one">Синхронизация %1$d%% — %2$d узел</item>
+        <item quantity="few">Синхронизация %1$d%% — %2$d узла</item>
+        <item quantity="many">Синхронизация %1$d%% — %2$d узлов</item>
+        <item quantity="other">Синхронизация %1$d%% — %2$d узла</item>
+    </plurals>
+    <string name="sync_notif_connecting">Подключение к узлам…</string>
+    <string name="sync_notif_via_tor">" · через Tor"</string>
+    <string name="hub_handle_title">Выберите псевдоним</string>
+    <string name="hub_handle_intro">Ваша псевдонимная личность в сообществе. От 3 до 20 символов: только буквы, цифры и подчёркивание.</string>
+    <string name="hub_handle_available_desc">Доступно</string>
+    <string name="hub_handle_taken_desc">Занято</string>
+    <string name="hub_handle_is_available">Псевдоним @%1$s свободен!</string>
+    <string name="hub_handle_tap_check">Нажмите «Проверить», чтобы узнать, свободен ли он</string>
+    <string name="seedview_warn_title">Никому не сообщайте фразу восстановления</string>
+    <string name="seedview_warn_body">Любой, кто знает эти слова, может украсть ваши средства.</string>
+    <string name="seedview_words_title">Ваша фраза восстановления из %1$d слов</string>
+    <string name="seedview_write_down">Запишите эти слова по порядку и храните в надёжном месте.</string>
 </resources>

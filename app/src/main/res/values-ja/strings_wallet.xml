@@ -789,4 +789,30 @@
     <string name="wallet_remove_db_key_kept">ウォレットは一覧から外れました。一部はアプリの再起動後にのみ消去でき、これは自動で行われます。</string>
     <string name="wallet_remove_failed">ウォレットは一覧から外れましたが、完全には消去されていません。残りは次回アプリの起動時に消去されます。</string>
     <string name="wallet_remove_not_removed">ウォレットは削除されませんでした。何も変更されていません。</string>
+    <string name="hub_signed_in_wallet">ウォレット %1$s でサインイン中</string>
+    <string name="seedview_wallet_name">ウォレット: %1$s</string>
+    <string name="hub_handle_field_label">ハンドル</string>
+    <string name="hub_handle_field_hint">例: DigiByte_Fan</string>
+    <string name="hub_handle_check">確認</string>
+    <string name="hub_handle_register">登録</string>
+    <string name="seedview_title">リカバリーフレーズ</string>
+    <string name="seedview_done_hide">完了 — フレーズを隠す</string>
+    <plurals name="sync_notif_synced">
+        <item quantity="other">同期済み — %1$d 件のピアに接続中</item>
+    </plurals>
+    <plurals name="sync_notif_syncing">
+        <item quantity="other">同期中 %1$d%% — ピア %2$d 件</item>
+    </plurals>
+    <string name="sync_notif_connecting">ピアに接続中…</string>
+    <string name="sync_notif_via_tor">" · Tor 経由"</string>
+    <string name="hub_handle_title">ハンドルを選択</string>
+    <string name="hub_handle_intro">コミュニティでの匿名のIDです。3〜20文字、英数字とアンダースコアのみ使えます。</string>
+    <string name="hub_handle_available_desc">使用できます</string>
+    <string name="hub_handle_taken_desc">使用済み</string>
+    <string name="hub_handle_is_available">@%1$s は使用できます！</string>
+    <string name="hub_handle_tap_check">「確認」をタップして使用可否を確かめます</string>
+    <string name="seedview_warn_title">リカバリーフレーズは絶対に共有しないでください</string>
+    <string name="seedview_warn_body">この単語を知っている人は誰でも資金を盗めます。</string>
+    <string name="seedview_words_title">%1$d 語のリカバリーフレーズ</string>
+    <string name="seedview_write_down">この単語を順番どおりに書き留め、安全に保管してください。</string>
 </resources>

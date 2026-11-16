@@ -799,4 +799,34 @@
     <string name="wallet_remove_db_key_kept">A carteira saiu da lista. Uma parte só pode ser apagada quando o app reiniciar, e isso acontece sozinho.</string>
     <string name="wallet_remove_failed">A carteira saiu da lista, mas não foi totalmente apagada. O restante é apagado na próxima vez que o app iniciar.</string>
     <string name="wallet_remove_not_removed">A carteira não foi removida. Nada foi alterado.</string>
+    <string name="hub_signed_in_wallet">Conectado com a carteira %1$s</string>
+    <string name="seedview_wallet_name">Carteira: %1$s</string>
+    <string name="hub_handle_field_label">Apelido</string>
+    <string name="hub_handle_field_hint">ex.: DigiByte_Fan</string>
+    <string name="hub_handle_check">Verificar</string>
+    <string name="hub_handle_register">Registrar</string>
+    <string name="seedview_title">Frase de recuperação</string>
+    <string name="seedview_done_hide">Concluído — Ocultar frase</string>
+    <plurals name="sync_notif_synced">
+        <item quantity="one">Sincronizado — %1$d par conectado</item>
+        <item quantity="many">Sincronizado — %1$d de pares conectados</item>
+        <item quantity="other">Sincronizado — %1$d pares conectados</item>
+    </plurals>
+    <plurals name="sync_notif_syncing">
+        <item quantity="one">Sincronizando %1$d%% — %2$d par</item>
+        <item quantity="many">Sincronizando %1$d%% — %2$d de pares</item>
+        <item quantity="other">Sincronizando %1$d%% — %2$d pares</item>
+    </plurals>
+    <string name="sync_notif_connecting">Conectando a pares…</string>
+    <string name="sync_notif_via_tor">" · via Tor"</string>
+    <string name="hub_handle_title">Escolha seu apelido</string>
+    <string name="hub_handle_intro">Sua identidade pseudônima na comunidade. De 3 a 20 caracteres, apenas letras, números e sublinhado.</string>
+    <string name="hub_handle_available_desc">Disponível</string>
+    <string name="hub_handle_taken_desc">Indisponível</string>
+    <string name="hub_handle_is_available">@%1$s está disponível!</string>
+    <string name="hub_handle_tap_check">Toque em \"Verificar\" para checar a disponibilidade</string>
+    <string name="seedview_warn_title">Nunca compartilhe sua frase de recuperação</string>
+    <string name="seedview_warn_body">Qualquer pessoa com estas palavras pode roubar seus fundos.</string>
+    <string name="seedview_words_title">Sua frase de recuperação de %1$d palavras</string>
+    <string name="seedview_write_down">Anote estas palavras em ordem e guarde-as em local seguro.</string>
 </resources>

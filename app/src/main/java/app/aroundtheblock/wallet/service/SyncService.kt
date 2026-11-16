@@ -4106,16 +4106,25 @@ class SyncService : Service() {
 
     private fun buildNotification(progress: Float, peerCount: Int): Notification {
         val pct = (progress * 100).toInt()
-        val torSuffix = if (torProxyActive) " · via Tor" else ""
-        val contentText = when {
-            pct >= 100 -> "Synced — $peerCount peer${if (peerCount != 1) "s" else ""} connected$torSuffix"
-            peerCount == 0 -> "Connecting to peers…$torSuffix"
-            else -> "Syncing $pct% — $peerCount peer${if (peerCount != 1) "s" else ""}$torSuffix"
-        }
+        val localised = app.aroundtheblock.wallet.ui.locale.LocaleController.wrap(this)
+        val contentText = notificationText(pct, peerCount, torProxyActive, object : NotificationStrings {
+            override fun synced(peers: Int) =
+                localised.resources.getQuantityString(app.aroundtheblock.wallet.R.plurals.sync_notif_synced, peers, peers)
+            override fun connecting() = localised.getString(app.aroundtheblock.wallet.R.string.sync_notif_connecting)
+            override fun syncing(pct: Int, peers: Int) =
+                localised.resources.getQuantityString(app.aroundtheblock.wallet.R.plurals.sync_notif_syncing, peers, pct, peers)
+            override fun viaTor() = localised.getString(app.aroundtheblock.wallet.R.string.sync_notif_via_tor)
+        })
+        val title = notificationTitle(
+            appName = getString(app.aroundtheblock.wallet.R.string.app_name_display),
+            walletName = activeWalletName(localised),
+            walletCount = walletCount(),
+            format = { app, wallet -> "$app · $wallet" },
+        )
         val indeterminate = pct == 0 && peerCount == 0
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(getString(app.aroundtheblock.wallet.R.string.app_name_display))
+            .setContentTitle(title)
             .setContentText(contentText)
             .setSmallIcon(android.R.drawable.ic_popup_sync)
             .setProgress(100, pct, indeterminate)
@@ -4132,6 +4141,22 @@ class SyncService : Service() {
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .build()
+    }
+
+    /** The running wallet's shown name; "" when the registry cannot say (the title then shows the app name alone). */
+    private fun activeWalletName(localised: android.content.Context): String = try {
+        val scope = app.aroundtheblock.wallet.core.wallets.ActiveWallet.scope(this)
+        app.aroundtheblock.wallet.core.wallets.ActiveWallet.registry(this).find(scope.walletId)
+            ?.let { e -> e.name ?: localised.getString(app.aroundtheblock.wallet.R.string.wallet_default_name, e.number) } ?: ""
+    } catch (_: Exception) {
+        ""
+    }
+
+    private fun walletCount(): Int = try {
+        val scope = app.aroundtheblock.wallet.core.wallets.ActiveWallet.scope(this)
+        app.aroundtheblock.wallet.core.wallets.ActiveWallet.registry(this).list(scope.testnet).size
+    } catch (_: Exception) {
+        1
     }
 
     private fun updateNotification(progress: Float, peerCount: Int) {
@@ -4482,4 +4507,30 @@ class SyncService : Service() {
         /** [flushFilterHeaders]' default: nothing to write between the ledger and the headers. */
         private val NOTHING_BEFORE_HEADERS: () -> Unit = {}
     }
+}
+
+/** The notification title: the app name, with the active wallet's name once there is more than one wallet. */
+internal fun notificationTitle(
+    appName: String,
+    walletName: String,
+    walletCount: Int,
+    format: (String, String) -> String,
+): String = if (walletCount > 1 && walletName.isNotEmpty()) format(appName, walletName) else appName
+
+/** The notification's strings, resolved in the user's language (plurals by peer count). */
+internal interface NotificationStrings {
+    fun synced(peers: Int): String
+    fun connecting(): String
+    fun syncing(pct: Int, peers: Int): String
+    fun viaTor(): String
+}
+
+/** The notification text: synced at 100%, connecting with no peers, otherwise the progress; plus the Tor suffix. */
+internal fun notificationText(pct: Int, peerCount: Int, viaTor: Boolean, strings: NotificationStrings): String {
+    val base = when {
+        pct >= 100 -> strings.synced(peerCount)
+        peerCount == 0 -> strings.connecting()
+        else -> strings.syncing(pct, peerCount)
+    }
+    return if (viaTor) base + strings.viaTor() else base
 }

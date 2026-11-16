@@ -794,4 +794,32 @@
     <string name="wallet_remove_db_key_kept">वॉलेट सूची से हट गया है। इसका एक हिस्सा ऐप के फिर से शुरू होने पर ही मिटाया जा सकता है, और यह अपने आप होता है।</string>
     <string name="wallet_remove_failed">वॉलेट सूची से हट गया है, लेकिन पूरी तरह नहीं मिटा। बाकी हिस्सा अगली बार ऐप शुरू होने पर मिटा दिया जाएगा।</string>
     <string name="wallet_remove_not_removed">वॉलेट नहीं हटाया गया। कुछ भी नहीं बदला गया।</string>
+    <string name="hub_signed_in_wallet">वॉलेट %1$s से साइन इन हैं</string>
+    <string name="seedview_wallet_name">वॉलेट: %1$s</string>
+    <string name="hub_handle_field_label">हैंडल</string>
+    <string name="hub_handle_field_hint">जैसे DigiByte_Fan</string>
+    <string name="hub_handle_check">जाँचें</string>
+    <string name="hub_handle_register">पंजीकरण करें</string>
+    <string name="seedview_title">रिकवरी फ़्रेज़</string>
+    <string name="seedview_done_hide">हो गया — फ़्रेज़ छिपाएँ</string>
+    <plurals name="sync_notif_synced">
+        <item quantity="one">सिंक हो गया — %1$d पीयर जुड़ा है</item>
+        <item quantity="other">सिंक हो गया — %1$d पीयर जुड़े हैं</item>
+    </plurals>
+    <plurals name="sync_notif_syncing">
+        <item quantity="one">सिंक हो रहा है %1$d%% — %2$d पीयर</item>
+        <item quantity="other">सिंक हो रहा है %1$d%% — %2$d पीयर</item>
+    </plurals>
+    <string name="sync_notif_connecting">पीयर से जुड़ रहा है…</string>
+    <string name="sync_notif_via_tor">" · Tor के माध्यम से"</string>
+    <string name="hub_handle_title">अपना हैंडल चुनें</string>
+    <string name="hub_handle_intro">समुदाय में आपकी छद्मनामी पहचान। 3-20 वर्ण, केवल अक्षर, अंक और अंडरस्कोर।</string>
+    <string name="hub_handle_available_desc">उपलब्ध</string>
+    <string name="hub_handle_taken_desc">पहले से लिया हुआ</string>
+    <string name="hub_handle_is_available">@%1$s उपलब्ध है!</string>
+    <string name="hub_handle_tap_check">उपलब्धता जाँचने के लिए \"जाँचें\" पर टैप करें</string>
+    <string name="seedview_warn_title">अपना रिकवरी फ़्रेज़ कभी साझा न करें</string>
+    <string name="seedview_warn_body">इन शब्दों वाला कोई भी व्यक्ति आपके फंड चुरा सकता है।</string>
+    <string name="seedview_words_title">आपका %1$d-शब्दों वाला रिकवरी फ़्रेज़</string>
+    <string name="seedview_write_down">इन शब्दों को क्रम से लिखें और सुरक्षित रखें।</string>
 </resources>

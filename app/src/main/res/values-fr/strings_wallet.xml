@@ -779,4 +779,34 @@
     <string name="wallet_remove_db_key_kept">Le portefeuille ne figure plus dans la liste. Une partie ne peut être effacée qu’au redémarrage de l’application, ce qui se fait automatiquement.</string>
     <string name="wallet_remove_failed">Le portefeuille ne figure plus dans la liste mais n’a pas été entièrement effacé. Le reste sera effacé au prochain démarrage de l’application.</string>
     <string name="wallet_remove_not_removed">Le portefeuille n’a pas été supprimé. Rien n’a été modifié.</string>
+    <string name="hub_signed_in_wallet">Connecté avec le portefeuille %1$s</string>
+    <string name="seedview_wallet_name">Portefeuille : %1$s</string>
+    <string name="hub_handle_field_label">Pseudo</string>
+    <string name="hub_handle_field_hint">p. ex. DigiByte_Fan</string>
+    <string name="hub_handle_check">Vérifier</string>
+    <string name="hub_handle_register">Enregistrer</string>
+    <string name="seedview_title">Phrase de récupération</string>
+    <string name="seedview_done_hide">Terminé — Masquer la phrase</string>
+    <plurals name="sync_notif_synced">
+        <item quantity="one">Synchronisé — %1$d pair connecté</item>
+        <item quantity="many">Synchronisé — %1$d de pairs connectés</item>
+        <item quantity="other">Synchronisé — %1$d pairs connectés</item>
+    </plurals>
+    <plurals name="sync_notif_syncing">
+        <item quantity="one">Synchronisation %1$d%% — %2$d pair</item>
+        <item quantity="many">Synchronisation %1$d%% — %2$d de pairs</item>
+        <item quantity="other">Synchronisation %1$d%% — %2$d pairs</item>
+    </plurals>
+    <string name="sync_notif_connecting">Connexion aux pairs…</string>
+    <string name="sync_notif_via_tor">" · via Tor"</string>
+    <string name="hub_handle_title">Choisissez votre pseudo</string>
+    <string name="hub_handle_intro">Votre identité pseudonyme dans la communauté. 3 à 20 caractères, lettres, chiffres et tiret bas uniquement.</string>
+    <string name="hub_handle_available_desc">Disponible</string>
+    <string name="hub_handle_taken_desc">Déjà pris</string>
+    <string name="hub_handle_is_available">@%1$s est disponible !</string>
+    <string name="hub_handle_tap_check">Touchez « Vérifier » pour contrôler la disponibilité</string>
+    <string name="seedview_warn_title">Ne partagez jamais votre phrase de récupération</string>
+    <string name="seedview_warn_body">Quiconque connaît ces mots peut voler vos fonds.</string>
+    <string name="seedview_words_title">Votre phrase de récupération de %1$d mots</string>
+    <string name="seedview_write_down">Notez ces mots dans l’ordre et conservez-les en lieu sûr.</string>
 </resources>

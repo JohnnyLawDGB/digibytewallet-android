@@ -802,4 +802,32 @@
     <string name="wallet_remove_db_key_kept">Die Wallet ist nicht mehr in der Liste. Ein Teil davon kann erst nach einem Neustart der App gelöscht werden, und das geschieht automatisch.</string>
     <string name="wallet_remove_failed">Die Wallet ist nicht mehr in der Liste, wurde aber nicht vollständig gelöscht. Der Rest wird beim nächsten Start der App gelöscht.</string>
     <string name="wallet_remove_not_removed">Die Wallet wurde nicht entfernt. Es wurde nichts geändert.</string>
+    <string name="hub_signed_in_wallet">Angemeldet mit Wallet %1$s</string>
+    <string name="seedview_wallet_name">Wallet: %1$s</string>
+    <string name="hub_handle_field_label">Benutzername</string>
+    <string name="hub_handle_field_hint">z. B. DigiByte_Fan</string>
+    <string name="hub_handle_check">Prüfen</string>
+    <string name="hub_handle_register">Registrieren</string>
+    <string name="seedview_title">Wiederherstellungsphrase</string>
+    <string name="seedview_done_hide">Fertig — Phrase ausblenden</string>
+    <plurals name="sync_notif_synced">
+        <item quantity="one">Synchronisiert — %1$d Peer verbunden</item>
+        <item quantity="other">Synchronisiert — %1$d Peers verbunden</item>
+    </plurals>
+    <plurals name="sync_notif_syncing">
+        <item quantity="one">Synchronisiere %1$d%% — %2$d Peer</item>
+        <item quantity="other">Synchronisiere %1$d%% — %2$d Peers</item>
+    </plurals>
+    <string name="sync_notif_connecting">Verbinde mit Peers…</string>
+    <string name="sync_notif_via_tor">" · über Tor"</string>
+    <string name="hub_handle_title">Wähle deinen Benutzernamen</string>
+    <string name="hub_handle_intro">Deine pseudonyme Community-Identität. 3–20 Zeichen, nur Buchstaben, Ziffern und Unterstriche.</string>
+    <string name="hub_handle_available_desc">Verfügbar</string>
+    <string name="hub_handle_taken_desc">Vergeben</string>
+    <string name="hub_handle_is_available">@%1$s ist verfügbar!</string>
+    <string name="hub_handle_tap_check">Tippe auf „Prüfen“, um die Verfügbarkeit zu testen</string>
+    <string name="seedview_warn_title">Gib deine Wiederherstellungsphrase niemals weiter</string>
+    <string name="seedview_warn_body">Wer diese Wörter kennt, kann dein Guthaben stehlen.</string>
+    <string name="seedview_words_title">Deine Wiederherstellungsphrase mit %1$d Wörtern</string>
+    <string name="seedview_write_down">Schreibe diese Wörter der Reihe nach auf und bewahre sie sicher auf.</string>
 </resources>

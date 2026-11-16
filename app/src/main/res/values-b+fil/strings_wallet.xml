@@ -794,4 +794,32 @@
     <string name="wallet_remove_db_key_kept">Wala na sa listahan ang wallet. May bahagi nitong mabubura lang kapag nag-restart ang app, at kusang mangyayari iyon.</string>
     <string name="wallet_remove_failed">Wala na sa listahan ang wallet pero hindi pa ito ganap na nabura. Mabubura ang natitira sa susunod na pagbukas ng app.</string>
     <string name="wallet_remove_not_removed">Hindi naalis ang wallet. Walang binago.</string>
+    <string name="hub_signed_in_wallet">Naka-sign in gamit ang wallet na %1$s</string>
+    <string name="seedview_wallet_name">Wallet: %1$s</string>
+    <string name="hub_handle_field_label">Handle</string>
+    <string name="hub_handle_field_hint">hal. DigiByte_Fan</string>
+    <string name="hub_handle_check">Suriin</string>
+    <string name="hub_handle_register">Irehistro</string>
+    <string name="seedview_title">Recovery Phrase</string>
+    <string name="seedview_done_hide">Tapos na — Itago ang Phrase</string>
+    <plurals name="sync_notif_synced">
+        <item quantity="one">Naka-sync — %1$d peer ang nakakonekta</item>
+        <item quantity="other">Naka-sync — %1$d peer ang nakakonekta</item>
+    </plurals>
+    <plurals name="sync_notif_syncing">
+        <item quantity="one">Nagsi-sync %1$d%% — %2$d peer</item>
+        <item quantity="other">Nagsi-sync %1$d%% — %2$d peer</item>
+    </plurals>
+    <string name="sync_notif_connecting">Kumokonekta sa mga peer…</string>
+    <string name="sync_notif_via_tor">" · sa pamamagitan ng Tor"</string>
+    <string name="hub_handle_title">Piliin ang Iyong Handle</string>
+    <string name="hub_handle_intro">Ang iyong pseudonymous na pagkakakilanlan sa komunidad. 3-20 character, letra, numero at underscore lamang.</string>
+    <string name="hub_handle_available_desc">Available</string>
+    <string name="hub_handle_taken_desc">Kinuha na</string>
+    <string name="hub_handle_is_available">Available ang @%1$s!</string>
+    <string name="hub_handle_tap_check">I-tap ang \"Suriin\" para tingnan kung available</string>
+    <string name="seedview_warn_title">Huwag ibahagi ang iyong recovery phrase</string>
+    <string name="seedview_warn_body">Maaaring nakawin ng sinumang may hawak ng mga salitang ito ang iyong pondo.</string>
+    <string name="seedview_words_title">Ang iyong %1$d-salitang Recovery Phrase</string>
+    <string name="seedview_write_down">Isulat ang mga salitang ito ayon sa pagkakasunod-sunod at itago nang ligtas.</string>
 </resources>

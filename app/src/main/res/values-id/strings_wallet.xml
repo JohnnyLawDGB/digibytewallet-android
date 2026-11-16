@@ -789,4 +789,30 @@
     <string name="wallet_remove_db_key_kept">Dompet sudah tidak ada di daftar. Sebagian hanya dapat dihapus setelah aplikasi dimulai ulang, dan itu terjadi dengan sendirinya.</string>
     <string name="wallet_remove_failed">Dompet sudah tidak ada di daftar tetapi belum terhapus seluruhnya. Sisanya dihapus saat aplikasi dimulai berikutnya.</string>
     <string name="wallet_remove_not_removed">Dompet tidak dihapus. Tidak ada yang diubah.</string>
+    <string name="hub_signed_in_wallet">Masuk dengan dompet %1$s</string>
+    <string name="seedview_wallet_name">Dompet: %1$s</string>
+    <string name="hub_handle_field_label">Nama panggilan</string>
+    <string name="hub_handle_field_hint">mis. DigiByte_Fan</string>
+    <string name="hub_handle_check">Periksa</string>
+    <string name="hub_handle_register">Daftar</string>
+    <string name="seedview_title">Frasa Pemulihan</string>
+    <string name="seedview_done_hide">Selesai — Sembunyikan Frasa</string>
+    <plurals name="sync_notif_synced">
+        <item quantity="other">Tersinkron — %1$d peer terhubung</item>
+    </plurals>
+    <plurals name="sync_notif_syncing">
+        <item quantity="other">Menyinkronkan %1$d%% — %2$d peer</item>
+    </plurals>
+    <string name="sync_notif_connecting">Menghubungkan ke peer…</string>
+    <string name="sync_notif_via_tor">" · melalui Tor"</string>
+    <string name="hub_handle_title">Pilih Nama Panggilan Anda</string>
+    <string name="hub_handle_intro">Identitas komunitas anonim Anda. 3-20 karakter, hanya huruf, angka, dan garis bawah.</string>
+    <string name="hub_handle_available_desc">Tersedia</string>
+    <string name="hub_handle_taken_desc">Sudah dipakai</string>
+    <string name="hub_handle_is_available">@%1$s tersedia!</string>
+    <string name="hub_handle_tap_check">Ketuk \"Periksa\" untuk memeriksa ketersediaan</string>
+    <string name="seedview_warn_title">Jangan pernah membagikan frasa pemulihan Anda</string>
+    <string name="seedview_warn_body">Siapa pun yang memiliki kata-kata ini dapat mencuri dana Anda.</string>
+    <string name="seedview_words_title">Frasa Pemulihan %1$d kata Anda</string>
+    <string name="seedview_write_down">Tulis kata-kata ini secara berurutan dan simpan dengan aman.</string>
 </resources>

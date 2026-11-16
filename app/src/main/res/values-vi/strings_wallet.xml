@@ -789,4 +789,30 @@
     <string name="wallet_remove_db_key_kept">Ví đã khỏi danh sách. Một phần chỉ có thể xóa khi ứng dụng khởi động lại, và việc đó tự diễn ra.</string>
     <string name="wallet_remove_failed">Ví đã khỏi danh sách nhưng chưa được xóa hết. Phần còn lại sẽ được xóa vào lần khởi động ứng dụng tới.</string>
     <string name="wallet_remove_not_removed">Ví chưa bị xóa. Không có gì thay đổi.</string>
+    <string name="hub_signed_in_wallet">Đã đăng nhập bằng ví %1$s</string>
+    <string name="seedview_wallet_name">Ví: %1$s</string>
+    <string name="hub_handle_field_label">Biệt danh</string>
+    <string name="hub_handle_field_hint">vd. DigiByte_Fan</string>
+    <string name="hub_handle_check">Kiểm tra</string>
+    <string name="hub_handle_register">Đăng ký</string>
+    <string name="seedview_title">Cụm từ khôi phục</string>
+    <string name="seedview_done_hide">Xong — Ẩn cụm từ</string>
+    <plurals name="sync_notif_synced">
+        <item quantity="other">Đã đồng bộ — %1$d peer đang kết nối</item>
+    </plurals>
+    <plurals name="sync_notif_syncing">
+        <item quantity="other">Đang đồng bộ %1$d%% — %2$d peer</item>
+    </plurals>
+    <string name="sync_notif_connecting">Đang kết nối với các peer…</string>
+    <string name="sync_notif_via_tor">" · qua Tor"</string>
+    <string name="hub_handle_title">Chọn biệt danh của bạn</string>
+    <string name="hub_handle_intro">Danh tính ẩn danh của bạn trong cộng đồng. 3-20 ký tự, chỉ gồm chữ, số và dấu gạch dưới.</string>
+    <string name="hub_handle_available_desc">Có thể dùng</string>
+    <string name="hub_handle_taken_desc">Đã có người dùng</string>
+    <string name="hub_handle_is_available">@%1$s có thể dùng!</string>
+    <string name="hub_handle_tap_check">Chạm \"Kiểm tra\" để xác minh biệt danh có dùng được không</string>
+    <string name="seedview_warn_title">Không bao giờ chia sẻ cụm từ khôi phục của bạn</string>
+    <string name="seedview_warn_body">Bất kỳ ai có những từ này đều có thể lấy cắp tiền của bạn.</string>
+    <string name="seedview_words_title">Cụm từ khôi phục %1$d từ của bạn</string>
+    <string name="seedview_write_down">Hãy ghi các từ này theo đúng thứ tự và cất giữ an toàn.</string>
 </resources>

@@ -932,4 +932,32 @@
     <string name="wallet_remove_db_key_kept">The wallet is off the list. Part of it can only be erased once the app restarts, and that happens on its own.</string>
     <string name="wallet_remove_failed">The wallet is off the list but was not fully erased. The rest is erased the next time the app starts.</string>
     <string name="wallet_remove_not_removed">The wallet was not removed. Nothing was changed.</string>
+    <string name="hub_signed_in_wallet">Signed in with wallet %1$s</string>
+    <string name="seedview_wallet_name">Wallet: %1$s</string>
+    <string name="hub_handle_field_label">Handle</string>
+    <string name="hub_handle_field_hint">e.g. DigiByte_Fan</string>
+    <string name="hub_handle_check">Check</string>
+    <string name="hub_handle_register">Register</string>
+    <string name="seedview_title">Recovery Phrase</string>
+    <string name="seedview_done_hide">Done — Hide Phrase</string>
+    <plurals name="sync_notif_synced">
+        <item quantity="one">Synced — %1$d peer connected</item>
+        <item quantity="other">Synced — %1$d peers connected</item>
+    </plurals>
+    <plurals name="sync_notif_syncing">
+        <item quantity="one">Syncing %1$d%% — %2$d peer</item>
+        <item quantity="other">Syncing %1$d%% — %2$d peers</item>
+    </plurals>
+    <string name="sync_notif_connecting">Connecting to peers…</string>
+    <string name="sync_notif_via_tor">" · via Tor"</string>
+    <string name="hub_handle_title">Choose Your Handle</string>
+    <string name="hub_handle_intro">Your pseudonymous community identity. 3-20 characters, alphanumeric and underscore only.</string>
+    <string name="hub_handle_available_desc">Available</string>
+    <string name="hub_handle_taken_desc">Taken</string>
+    <string name="hub_handle_is_available">@%1$s is available!</string>
+    <string name="hub_handle_tap_check">Tap \"Check\" to verify availability</string>
+    <string name="seedview_warn_title">Never share your recovery phrase</string>
+    <string name="seedview_warn_body">Anyone with these words can steal your funds.</string>
+    <string name="seedview_words_title">Your %1$d-word Recovery Phrase</string>
+    <string name="seedview_write_down">Write these words down in order and store them safely.</string>
 </resources>
