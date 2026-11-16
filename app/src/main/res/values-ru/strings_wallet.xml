@@ -758,4 +758,16 @@
     <string name="sec_seed_key_no_lock">Не привязан: на этом телефоне нет блокировки экрана. Установите её в настройках Android.</string>
     <string name="sec_seed_key_lock_removed">Блокировку экрана удалили после настройки этого кошелька, поэтому его ключ больше не открывается, даже с новой блокировкой. Пока кошелёк ещё открыт, проверьте, что фраза восстановления записана, или переведите средства сейчас: при следующем запуске приложения кошельку понадобится фраза восстановления.</string>
     <string name="sec_seed_key_cannot_bind">Не привязан: ключ от прежней блокировки экрана больше не работает, поэтому ключ этого кошелька нельзя привязать в этой установке. Если стереть кошелёк и восстановить его по фразе восстановления, ключ будет привязан.</string>
+
+    <!-- Multi-wallet: adding a wallet through onboarding (ADD mode). -->
+    <string name="wallet_default_name">Кошелёк %1$d</string>
+    <string name="wallet_add_title">Добавить кошелёк</string>
+    <string name="wallet_add_create">Создать новый кошелёк</string>
+    <string name="wallet_add_restore">Восстановить кошелёк по фразе восстановления</string>
+    <string name="wallet_add_pin_note">PIN-код приложения защищает все кошельки. Новый задавать не нужно.</string>
+    <string name="wallet_add_duplicate">Эта фраза восстановления уже есть в приложении как «%1$s».</string>
+    <string name="wallet_add_duplicate_switch">Открыть %1$s</string>
+    <string name="wallet_add_cap">В этой сети уже %1$d кошельков. Удалите один, чтобы добавить другой.</string>
+    <string name="wallet_add_saving">Добавление кошелька…</string>
+    <string name="wallet_add_failed">Не удалось добавить кошелёк. Ничего не изменено.</string>
 </resources>

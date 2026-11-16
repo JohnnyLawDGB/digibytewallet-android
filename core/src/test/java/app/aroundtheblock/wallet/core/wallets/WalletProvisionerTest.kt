@@ -295,4 +295,80 @@ class WalletProvisionerTest {
         assertEquals(blocks, File(d.root, "files/saved_blocks.bin").readBytes().toList())
         assertNotNull(d.prefs.prefsFor("dgb_wallet_seed").getString("encrypted_seed_v2", null))
     }
+
+    // -- an add the user leaves, and an add that throws (Task 12 rulings 2 and 3) ---------------
+
+    @Test fun `an abandoned add leaves no entry and no alias`() {
+        val d = Device()
+        d.installLegacy()
+        val entry = d.prepared()
+        assertTrue("prepareSeedKey made no alias", d.masterAliasesOf(entry.id).isNotEmpty())
+
+        assertTrue(d.provisioner.abandon(entry.id))
+
+        assertNull(d.registry.find(entry.id))
+        assertTrue(d.registry.incomplete().isEmpty())
+        assertEquals(emptyList<String>(), d.masterAliasesOf(entry.id))
+        assertTrue("the slot is free again", d.registry.canReserve(false))
+    }
+
+    @Test fun `abandon never touches a wallet that is not being added`() {
+        val d = Device()
+        d.installLegacy()
+        val added = (d.provisioner.add(d.prepared(), phraseB, null, 1L) as AddResult.Added).entry
+        val before = d.prefsSnapshot()
+        val keys = d.vault.keys.keys.toSet()
+
+        assertFalse(d.provisioner.abandon(added.id))
+        assertFalse(d.provisioner.abandon(WalletIds.LEGACY))
+        assertFalse(d.provisioner.abandon("0123456789abcdef"))
+
+        assertEquals(before, d.prefsSnapshot())
+        assertEquals(keys, d.vault.keys.keys.toSet())
+        assertEquals(EntryState.READY, d.registry.find(added.id)!!.state)
+    }
+
+    @Test fun `a derivation that throws fails the add and leaves nothing`() {
+        val d = Device()
+        d.installLegacy()
+        val provisioner = WalletProvisioner(d.registry, d.factory, d.eraser, { _, _ -> throw IllegalStateException("jni") })
+        val entry = provisioner.prepareSeedKey(false, WalletOrigin.RESTORED)!!.first
+
+        assertEquals(AddResult.Failed, provisioner.add(entry, phraseB, null, 1L))
+
+        assertNull(d.registry.find(entry.id))
+        assertFalse(d.eraser.anythingLeft(WalletScope(entry.id, false)))
+        assertNull("a duplicate check that throws answers none", provisioner.duplicateOf(false, phraseA, null))
+    }
+
+    @Test fun `an eraser that throws keeps the entry for the next launch instead of escaping`() {
+        val d = Device()
+        d.installLegacy()
+        val eraser = mockk<WalletStoreEraser> {
+            every { erase(any()) } throws IllegalStateException("disk")
+            every { anythingLeft(any()) } throws IllegalStateException("disk")
+        }
+        val provisioner = WalletProvisioner(d.registry, d.factory, eraser, { _, _ -> null })
+        val entry = provisioner.prepareSeedKey(false, WalletOrigin.RESTORED)!!.first
+
+        assertEquals(AddResult.Failed, provisioner.add(entry, phraseB, null, 1L))
+        assertFalse(provisioner.abandon(entry.id))
+
+        assertEquals("housekeeping erases it at the next launch", listOf(entry.id), d.registry.incomplete().map { it.id })
+    }
+
+    @Test fun `a seed key probe that throws still prepares the add`() {
+        val d = Device()
+        d.installLegacy()
+        val factory = WalletManagerFactory { scope ->
+            if (scope.isLegacy) d.factory.forScope(scope)
+            else mockk<WalletManager> { every { prepareSeedKeyForNewRecord() } throws IllegalStateException("keystore") }
+        }
+        val provisioner = WalletProvisioner(d.registry, factory, d.eraser, d.deriveSeed)
+
+        val (entry, readiness) = provisioner.prepareSeedKey(false, WalletOrigin.CREATED)!!
+
+        assertEquals(app.aroundtheblock.wallet.core.security.SeedKeyReadiness.UNAVAILABLE, readiness)
+        assertEquals(EntryState.PENDING, d.registry.find(entry.id)!!.state)
+    }
 }

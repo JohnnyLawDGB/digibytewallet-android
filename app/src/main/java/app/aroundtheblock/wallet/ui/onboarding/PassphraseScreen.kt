@@ -117,8 +117,15 @@ fun PassphraseScreen(
                     // Committed straight to the shared ViewModel so the value never travels
                     // through a navigation argument or a saved-state bundle.
                     viewModel.setPassphrase(passphrase)
-                    navController.navigate("pin_setup") {
-                        popUpTo("seed_verify") { inclusive = true }
+                    // ADD mode sets no PIN: the app PIN already protects every wallet.
+                    if (viewModel.mode == OnboardingMode.FIRST_RUN) {
+                        navController.navigate("pin_setup") {
+                            popUpTo("seed_verify") { inclusive = true }
+                        }
+                    } else {
+                        navController.navigate(ADD_COMMIT_ROUTE) {
+                            popUpTo("seed_verify") { inclusive = true }
+                        }
                     }
                 },
                 enabled = ready,

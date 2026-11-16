@@ -748,4 +748,16 @@
     <string name="sec_seed_key_no_lock">Hindi nakatali: walang screen lock ang teleponong ito. Magtakda nito sa mga setting ng Android.</string>
     <string name="sec_seed_key_lock_removed">Inalis ang screen lock matapos i-set up ang wallet na ito, kaya hindi na bumubukas ang susi nito, kahit may bagong lock. Habang bukas pa ang wallet, tiyaking nakasulat ang recovery phrase mo, o ilipat na ngayon ang pondo mo: sa susunod na pagbukas ng app, kakailanganin ng wallet ang recovery phrase nito.</string>
     <string name="sec_seed_key_cannot_bind">Hindi nakatali: hindi na gumagana ang susing naiwan mula sa dating screen lock, kaya hindi maitatali ang susi ng wallet na ito sa install na ito. Natatali ito kapag binura ang wallet at ibinalik mula sa recovery phrase nito.</string>
+
+    <!-- Multi-wallet: adding a wallet through onboarding (ADD mode). -->
+    <string name="wallet_default_name">Wallet %1$d</string>
+    <string name="wallet_add_title">Magdagdag ng wallet</string>
+    <string name="wallet_add_create">Gumawa ng bagong wallet</string>
+    <string name="wallet_add_restore">I-restore ang wallet mula sa recovery phrase nito</string>
+    <string name="wallet_add_pin_note">Pinoprotektahan ng PIN ng app ang bawat wallet. Hindi ka magtatakda ng bago.</string>
+    <string name="wallet_add_duplicate">Nasa app na ang recovery phrase na ito bilang “%1$s”.</string>
+    <string name="wallet_add_duplicate_switch">Buksan ang %1$s</string>
+    <string name="wallet_add_cap">May %1$d wallet na ang network na ito. Mag-alis ng isa para makapagdagdag ng iba.</string>
+    <string name="wallet_add_saving">Idinadagdag ang wallet…</string>
+    <string name="wallet_add_failed">Hindi naidagdag ang wallet. Walang binago.</string>
 </resources>

@@ -886,4 +886,16 @@
     <string name="sec_seed_key_no_lock">Not tied: this phone has no screen lock. Set one in Android settings.</string>
     <string name="sec_seed_key_lock_removed">The screen lock was removed after this wallet was set up, so its key no longer opens, even with a new lock. While the wallet is still open, check that your recovery phrase is written down, or move your funds now: the next time the app starts, the wallet will need its recovery phrase.</string>
     <string name="sec_seed_key_cannot_bind">Not tied: a key left from an earlier screen lock no longer works, so this wallet’s key cannot be tied on this install. Wiping the wallet and restoring it from its recovery phrase ties it.</string>
+
+    <!-- Multi-wallet: adding a wallet through onboarding (ADD mode). -->
+    <string name="wallet_default_name">Wallet %1$d</string>
+    <string name="wallet_add_title">Add a wallet</string>
+    <string name="wallet_add_create">Create a new wallet</string>
+    <string name="wallet_add_restore">Restore a wallet from its recovery phrase</string>
+    <string name="wallet_add_pin_note">Your app PIN protects every wallet. You do not set a new one.</string>
+    <string name="wallet_add_duplicate">This recovery phrase is already in the app as “%1$s”.</string>
+    <string name="wallet_add_duplicate_switch">Open %1$s</string>
+    <string name="wallet_add_cap">This network already has %1$d wallets. Remove one to add another.</string>
+    <string name="wallet_add_saving">Adding the wallet…</string>
+    <string name="wallet_add_failed">The wallet could not be added. Nothing was changed.</string>
 </resources>

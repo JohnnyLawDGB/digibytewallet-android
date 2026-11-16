@@ -743,4 +743,16 @@
     <string name="sec_seed_key_no_lock">結び付けられていません：このスマートフォンには画面ロックがありません。Android の設定で設定してください。</string>
     <string name="sec_seed_key_lock_removed">このウォレットの設定後に画面ロックが解除されたため、新しいロックを設定しても、その鍵はもう開けません。ウォレットが開いているうちに、復元フレーズが書き留めてあるか確認するか、今すぐ資金を移動してください。次にアプリが起動したとき、ウォレットには復元フレーズが必要です。</string>
     <string name="sec_seed_key_cannot_bind">結び付けられていません：以前の画面ロックの鍵が使えなくなっているため、このインストールではこのウォレットの鍵を結び付けられません。ウォレットを消去し、復元フレーズから復元すると結び付けられます。</string>
+
+    <!-- Multi-wallet: adding a wallet through onboarding (ADD mode). -->
+    <string name="wallet_default_name">ウォレット %1$d</string>
+    <string name="wallet_add_title">ウォレットを追加</string>
+    <string name="wallet_add_create">新しいウォレットを作成</string>
+    <string name="wallet_add_restore">リカバリーフレーズからウォレットを復元</string>
+    <string name="wallet_add_pin_note">アプリの PIN がすべてのウォレットを保護します。新しい PIN を設定する必要はありません。</string>
+    <string name="wallet_add_duplicate">このリカバリーフレーズは「%1$s」としてすでにアプリにあります。</string>
+    <string name="wallet_add_duplicate_switch">%1$s を開く</string>
+    <string name="wallet_add_cap">このネットワークにはすでに %1$d 個のウォレットがあります。追加するには 1 つ削除してください。</string>
+    <string name="wallet_add_saving">ウォレットを追加しています…</string>
+    <string name="wallet_add_failed">ウォレットを追加できませんでした。何も変更されていません。</string>
 </resources>

@@ -748,4 +748,16 @@
     <string name="sec_seed_key_no_lock">Bağlı değil: bu telefonda ekran kilidi yok. Android ayarlarından bir tane belirleyin.</string>
     <string name="sec_seed_key_lock_removed">Bu cüzdan kurulduktan sonra ekran kilidi kaldırıldı, bu yüzden anahtarı yeni bir kilitle bile artık açılmıyor. Cüzdan hâlâ açıkken kurtarma ifadenizin yazılı olduğunu kontrol edin veya fonlarınızı şimdi taşıyın: uygulama bir sonraki başlayışında cüzdanın kurtarma ifadesine ihtiyacı olacak.</string>
     <string name="sec_seed_key_cannot_bind">Bağlı değil: önceki bir ekran kilidinden kalan anahtar artık çalışmıyor, bu yüzden bu cüzdanın anahtarı bu kurulumda bağlanamıyor. Cüzdanı silip kurtarma ifadesinden geri yüklemek onu bağlar.</string>
+
+    <!-- Multi-wallet: adding a wallet through onboarding (ADD mode). -->
+    <string name="wallet_default_name">Cüzdan %1$d</string>
+    <string name="wallet_add_title">Cüzdan ekle</string>
+    <string name="wallet_add_create">Yeni cüzdan oluştur</string>
+    <string name="wallet_add_restore">Kurtarma ifadesinden cüzdan geri yükle</string>
+    <string name="wallet_add_pin_note">Uygulama PIN\'iniz tüm cüzdanları korur. Yeni bir PIN belirlemezsiniz.</string>
+    <string name="wallet_add_duplicate">Bu kurtarma ifadesi uygulamada zaten “%1$s” olarak var.</string>
+    <string name="wallet_add_duplicate_switch">%1$s cüzdanını aç</string>
+    <string name="wallet_add_cap">Bu ağda zaten %1$d cüzdan var. Başka bir tane eklemek için birini kaldırın.</string>
+    <string name="wallet_add_saving">Cüzdan ekleniyor…</string>
+    <string name="wallet_add_failed">Cüzdan eklenemedi. Hiçbir şey değiştirilmedi.</string>
 </resources>

@@ -66,7 +66,7 @@ class UnlockScreenStoredWalletGateTest {
         assertEquals("the screen does not ask on entry whether a wallet is stored", 1, nothingStored.size)
         val branch = nothingStored.single()
         val onboarding = screen.calls("navController.navigate", branch)
-        assertEquals("with nothing stored the screen does not go to onboarding", listOf(listOf("\"onboarding\"")), onboarding.map { it.arguments })
+        assertEquals("with nothing stored the screen does not go to onboarding", listOf(listOf("onboardingRoute(OnboardingMode.FIRST_RUN)")), onboarding.map { it.arguments })
         val clears = screen.trailingBlock(onboarding.single())?.let { KotlinSourceGate.squeeze(screen.written.substring(it)) }
         assertEquals("onboarding is not reached with the screen cleared behind it", "{ popUpTo(0) { inclusive = true } }", clears)
         assertTrue("the screen goes on after sending its owner to onboarding", squeezed(branch).endsWith("return@LaunchedEffect }"))

@@ -241,7 +241,7 @@ fun PinSetupScreen(
                             // funds on non-native paths; otherwise go straight to wallet.
                             val dest = if (pendingLegacyRecovery) "recover_funds" else "wallet"
                             navController.navigate(dest) {
-                                popUpTo("onboarding") { inclusive = true }
+                                popUpTo(ONBOARDING_ROUTE) { inclusive = true }
                             }
                         }
                     },
@@ -249,7 +249,7 @@ fun PinSetupScreen(
                         // Same routing logic as onEnable.
                         val dest = if (pendingLegacyRecovery) "recover_funds" else "wallet"
                         navController.navigate(dest) {
-                            popUpTo("onboarding") { inclusive = true }
+                            popUpTo(ONBOARDING_ROUTE) { inclusive = true }
                         }
                     }
                 )

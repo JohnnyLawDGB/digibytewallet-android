@@ -743,4 +743,16 @@
     <string name="sec_seed_key_no_lock">未绑定：此手机未设置屏幕锁定。请在 Android 设置中设置。</string>
     <string name="sec_seed_key_lock_removed">此钱包设置后屏幕锁定被移除，因此即使设置了新的锁定，其密钥也无法再打开。趁钱包仍处于打开状态，请确认已记下恢复短语，或立即转移您的资金：下次应用启动时，钱包将需要其恢复短语。</string>
     <string name="sec_seed_key_cannot_bind">未绑定：以前屏幕锁定留下的密钥已失效，因此此钱包的密钥无法在本次安装中绑定。清除钱包并用恢复短语恢复即可绑定。</string>
+
+    <!-- Multi-wallet: adding a wallet through onboarding (ADD mode). -->
+    <string name="wallet_default_name">钱包 %1$d</string>
+    <string name="wallet_add_title">添加钱包</string>
+    <string name="wallet_add_create">创建新钱包</string>
+    <string name="wallet_add_restore">用助记词恢复钱包</string>
+    <string name="wallet_add_pin_note">应用 PIN 保护所有钱包，无需设置新的 PIN。</string>
+    <string name="wallet_add_duplicate">此助记词已在应用中，名为“%1$s”。</string>
+    <string name="wallet_add_duplicate_switch">打开 %1$s</string>
+    <string name="wallet_add_cap">此网络已有 %1$d 个钱包。请先移除一个再添加。</string>
+    <string name="wallet_add_saving">正在添加钱包…</string>
+    <string name="wallet_add_failed">无法添加钱包。未做任何更改。</string>
 </resources>

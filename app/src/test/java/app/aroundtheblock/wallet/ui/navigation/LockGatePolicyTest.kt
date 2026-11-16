@@ -1,6 +1,10 @@
 package app.aroundtheblock.wallet.ui.navigation
 
 import app.aroundtheblock.wallet.core.WalletState
+import app.aroundtheblock.wallet.ui.onboarding.ADD_COMMIT_ROUTE
+import app.aroundtheblock.wallet.ui.onboarding.ONBOARDING_ROUTE
+import app.aroundtheblock.wallet.ui.onboarding.OnboardingMode
+import app.aroundtheblock.wallet.ui.onboarding.onboardingRoute
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -115,6 +119,18 @@ class LockGatePolicyTest {
         val SETUP = listOf("onboarding", "seed_display/12", "seed_verify", "seed_passphrase",
             "mnemonic_input", "recovery_scan", "recovery_date", "pin_setup")
     }
+
+    /**
+     * A PIN of today's behaviour, green before and after the add flow landed: `add_wallet_commit`
+     * is not a pre-wallet route, so a lock while a wallet is being added goes to unlock like any
+     * wallet screen. It guards against a later edit adding the add routes to PRE_WALLET_ROUTES,
+     * which would leave the add flow open on a locked app (F21).
+     */
+    @Test fun `a lock during an add routes to unlock`() {
+        assertTrue(shouldRouteToUnlock(WalletState.Locked, hasPin = true, currentRoute = "add_wallet_commit", walletStored = true))
+        assertTrue(shouldRouteToUnlock(WalletState.Locked, hasPin = true, currentRoute = ADD_COMMIT_ROUTE, walletStored = true))
+        assertTrue(shouldRouteToUnlock(WalletState.Locked, hasPin = true, currentRoute = ONBOARDING_ROUTE, walletStored = true))
+    }
 }
 
 /**
@@ -213,7 +229,10 @@ class WipeRouteGatePolicyTest {
     @Test fun `the ordinary starts are unchanged`() {
         org.junit.Assert.assertEquals("unlock", startDestinationFor(WalletState.Locked, true) { true }.route)
         org.junit.Assert.assertEquals(StartDecision("pin_setup", true), startDestinationFor(WalletState.Locked, true) { false })
-        org.junit.Assert.assertEquals("onboarding", startDestinationFor(WalletState.NoWallet, false) { error("no") }.route)
+        org.junit.Assert.assertEquals(
+            onboardingRoute(OnboardingMode.FIRST_RUN),
+            startDestinationFor(WalletState.NoWallet, false) { error("no") }.route,
+        )
     }
 
     /** Review of the repairs: with the store unreadable the lock counts a PIN as set (R10), so the store-unavailable

@@ -163,7 +163,7 @@ fun UnlockScreen(
                 // No wallet is left here for a credential to open, so onboarding; leaving this
                 // screen takes its error line with it, hence the notice.
                 app.aroundtheblock.wallet.ui.components.showWipeIncompleteNotice(context)
-                navController.navigate("onboarding") {
+                navController.navigate(onboardingRoute(OnboardingMode.FIRST_RUN)) {
                     popUpTo(0) { inclusive = true }
                 }
                 return
@@ -175,7 +175,7 @@ fun UnlockScreen(
                 }
                 if (nothingLeft) {
                     app.aroundtheblock.wallet.ui.components.showWipeIncompleteNotice(context)
-                    navController.navigate("onboarding") {
+                    navController.navigate(onboardingRoute(OnboardingMode.FIRST_RUN)) {
                         popUpTo(0) { inclusive = true }
                     }
                 } else {
@@ -290,7 +290,7 @@ fun UnlockScreen(
         // No wallet is stored for a credential to open, so onboarding — for instance when the task
         // is brought back, with this screen on it, in the fresh process a verified wipe started.
         if (!walletManager.hasSavedWallet()) {
-            navController.navigate("onboarding") {
+            navController.navigate(onboardingRoute(OnboardingMode.FIRST_RUN)) {
                 popUpTo(0) { inclusive = true }
             }
             return@LaunchedEffect

@@ -31,6 +31,9 @@ fun OnboardingScreen(
     viewModel: OnboardingViewModel = hiltViewModel()
 ) {
     var selectedWordCount by remember { mutableIntStateOf(12) }
+    val adding = viewModel.mode == OnboardingMode.ADD
+    // ADD mode: a network already at the cap offers no add (PENDING adds count toward it).
+    val canAdd = remember { !adding || viewModel.canAddWallet() }
 
     Box(
         modifier = Modifier
@@ -62,7 +65,7 @@ fun OnboardingScreen(
             Spacer(modifier = Modifier.height(48.dp))
 
             Text(
-                text = stringResource(R.string.onb_title),
+                text = stringResource(if (adding) R.string.wallet_add_title else R.string.onb_title),
                 style = MaterialTheme.typography.headlineMedium,
                 color = Color.White,
                 fontWeight = FontWeight.Bold,
@@ -72,7 +75,7 @@ fun OnboardingScreen(
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = stringResource(R.string.onb_tagline),
+                text = stringResource(if (adding) R.string.wallet_add_pin_note else R.string.onb_tagline),
                 style = MaterialTheme.typography.bodyMedium,
                 color = Color(0xFFB0BEC5),
                 textAlign = TextAlign.Center
@@ -95,12 +98,26 @@ fun OnboardingScreen(
 
             Spacer(modifier = Modifier.height(32.dp))
 
+            if (!canAdd) {
+                Text(
+                    text = stringResource(
+                        R.string.wallet_add_cap,
+                        app.aroundtheblock.wallet.core.wallets.WalletRegistry.MAX_PER_NETWORK,
+                    ),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color(0xFFFFCC66),
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+
             // Create wallet button
             Button(
                 onClick = {
                     viewModel.setWordCount(selectedWordCount)
                     navController.navigate("seed_display/$selectedWordCount")
                 },
+                enabled = canAdd,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp),
@@ -108,7 +125,7 @@ fun OnboardingScreen(
                 colors = ButtonDefaults.buttonColors(containerColor = DigiByteBlue)
             ) {
                 Text(
-                    text = stringResource(R.string.onb_create),
+                    text = stringResource(if (adding) R.string.wallet_add_create else R.string.onb_create),
                     fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold
                 )
@@ -129,6 +146,7 @@ fun OnboardingScreen(
             // anyone who wants fresh keys.
             OutlinedButton(
                 onClick = { navController.navigate("mnemonic_input") },
+                enabled = canAdd,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp),
@@ -137,7 +155,7 @@ fun OnboardingScreen(
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = DigiByteAccent)
             ) {
                 Text(
-                    text = stringResource(R.string.onb_recover),
+                    text = stringResource(if (adding) R.string.wallet_add_restore else R.string.onb_recover),
                     fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold
                 )

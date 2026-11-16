@@ -1,6 +1,8 @@
 package app.aroundtheblock.wallet.ui.navigation
 
 import app.aroundtheblock.wallet.core.WalletState
+import app.aroundtheblock.wallet.ui.onboarding.OnboardingMode
+import app.aroundtheblock.wallet.ui.onboarding.onboardingRoute
 
 /**
  * Routes that belong to the onboarding / first-unlock graph. "unlock" and the store-unavailable
@@ -140,7 +142,7 @@ const val PIN_STORE_UNAVAILABLE_ROUTE = "pin_store_unavailable"
  * [hasPin] is asked only when the store is available; a throw counts as unreadable.
  */
 fun startDestinationFor(walletState: WalletState, storeAvailable: Boolean, hasPin: () -> Boolean): StartDecision {
-    if (walletState is WalletState.NoWallet) return StartDecision("onboarding", restoreForLostPin = false)
+    if (walletState is WalletState.NoWallet) return StartDecision(onboardingRoute(OnboardingMode.FIRST_RUN), restoreForLostPin = false)
     val pinSet: Boolean? = if (!storeAvailable) null else try { hasPin() } catch (_: Exception) { null }
     return when {
         pinSet == null -> StartDecision(PIN_STORE_UNAVAILABLE_ROUTE, restoreForLostPin = false)

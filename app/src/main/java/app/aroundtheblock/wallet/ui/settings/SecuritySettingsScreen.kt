@@ -106,7 +106,7 @@ fun SecuritySettingsScreen(
     val wipeResult by viewModel.wipeResult.collectAsStateWithLifecycle()
     LaunchedEffect(wipeResult) {
         if (wipeResult is WipeResult.Success) {
-            navController.navigate("onboarding") {
+            navController.navigate(app.aroundtheblock.wallet.ui.onboarding.onboardingRoute(app.aroundtheblock.wallet.ui.onboarding.OnboardingMode.FIRST_RUN)) {
                 popUpTo(0) { inclusive = true }
             }
         }

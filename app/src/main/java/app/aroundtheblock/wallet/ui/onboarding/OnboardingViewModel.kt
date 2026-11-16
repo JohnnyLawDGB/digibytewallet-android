@@ -1,5 +1,7 @@
 package app.aroundtheblock.wallet.ui.onboarding
 
+import android.content.Context
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -7,8 +9,17 @@ import app.aroundtheblock.wallet.core.WalletManager
 import app.aroundtheblock.wallet.core.prepareSeedKeyThenPrompt
 import app.aroundtheblock.wallet.core.bridge.NativeBridge
 import app.aroundtheblock.wallet.core.security.PinManager
+import app.aroundtheblock.wallet.core.wallets.ActiveWallet
+import app.aroundtheblock.wallet.core.wallets.AddResult
+import app.aroundtheblock.wallet.core.wallets.WalletEntry
+import app.aroundtheblock.wallet.core.wallets.WalletOrigin
+import app.aroundtheblock.wallet.core.wallets.WalletProvisioner
+import app.aroundtheblock.wallet.core.wallets.WalletRegistry
+import app.aroundtheblock.wallet.WalletSwitcher
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -25,7 +36,21 @@ class OnboardingViewModel @Inject constructor(
     private val walletManager: WalletManager,
     private val pinManager: PinManager,
     private val recoveryScanService: app.aroundtheblock.wallet.core.recovery.RecoveryScanService,
+    savedStateHandle: SavedStateHandle,
+    private val provisioner: WalletProvisioner,
+    private val switcher: WalletSwitcher,
+    private val registry: WalletRegistry,
+    @ApplicationContext private val appContext: Context,
 ) : ViewModel() {
+
+    /** The flow these screens run: the route argument of the onboarding entry this ViewModel belongs to. */
+    val mode: OnboardingMode = OnboardingMode.of(savedStateHandle.get<String>(ONBOARDING_MODE_ARG))
+
+    /** The network this process runs; an added wallet joins it. */
+    private val testnet: Boolean get() = ActiveWallet.scope(appContext).testnet
+
+    /** How the wallet being added came about: set by [generateMnemonic] and [setRecoveryMnemonic]. */
+    private var _origin: WalletOrigin = WalletOrigin.CREATED
 
     // In-memory mnemonic — cleared after wallet creation
     private var _mnemonic: List<String> = emptyList()
@@ -81,6 +106,7 @@ class OnboardingViewModel @Inject constructor(
             }
             if (result != null) {
                 _mnemonic = result.trim().split(" ")
+                _origin = WalletOrigin.CREATED
                 _uiState.value = OnboardingUiState.MnemonicReady
             } else {
                 _uiState.value = OnboardingUiState.Error("Failed to generate mnemonic")
@@ -91,6 +117,7 @@ class OnboardingViewModel @Inject constructor(
     /** Set mnemonic from recovery input (splits on whitespace). */
     fun setRecoveryMnemonic(phrase: String) {
         _mnemonic = phrase.trim().split("\\s+".toRegex())
+        _origin = WalletOrigin.RESTORED
         // A scan answers for the phrase it was run on. Going back and entering another phrase must
         // not leave the old answer on screen, nor let it steer the post-restore sweep prompt — and
         // a scan still running for the old phrase must not deliver its answer afterwards.
@@ -196,6 +223,8 @@ class OnboardingViewModel @Inject constructor(
      * PIN it already saved is never left without the wallet record it was saved for.
      */
     fun createWallet(seedKeyPrompt: (suspend () -> Unit)?, onResult: (Boolean) -> Unit) {
+        // This writes the RUNNING wallet's record. ADD mode writes only the new wallet's, through commitAdd.
+        check(mode == OnboardingMode.FIRST_RUN) { "createWallet runs only on the first run" }
         val phrase = _mnemonic.joinToString(" ")
         // This create's own copy: clearing the screen's copy (onCleared) never changes the bytes a
         // create in progress is using, and this one is zeroed however the create ends.
@@ -234,6 +263,8 @@ class OnboardingViewModel @Inject constructor(
 
     /** As [recoverWallet], with the KS-BIND seed-key step first, in the same coroutine (see [createWallet]). */
     fun recoverWallet(seedKeyPrompt: (suspend () -> Unit)?, onResult: (Boolean) -> Unit) {
+        // ADD mode never reaches this: it writes only the new wallet's record, through commitAdd.
+        check(mode == OnboardingMode.FIRST_RUN) { "recoverWallet runs only on the first run" }
         val phrase = _mnemonic.joinToString(" ")
         val ts = _recoveryTimestamp
         // This restore's own copy, as in createWallet.
@@ -254,7 +285,12 @@ class OnboardingViewModel @Inject constructor(
                     // is routed to PIN setup, not the unlock screen. Done inside
                     // the worker dispatcher so the Keystore-backed prefs write
                     // never lands on the main thread.
-                    pinManager.clearPin()
+                    // Only with no wallet record on the device: a PIN that protects another
+                    // wallet (testnet wallets left after removing the only mainnet one) is not
+                    // stale, and clearing it would leave those wallets unprotected (F31).
+                    if (!registry.anyRecordExists()) {
+                        pinManager.clearPin()
+                    }
                     walletManager.recoverWallet(phrase, ts, pass)
                 }
             } catch (e: CancellationException) {
@@ -282,6 +318,99 @@ class OnboardingViewModel @Inject constructor(
             wipeMnemonicFromMemory()
             _uiState.value = if (success) OnboardingUiState.WalletCreated else OnboardingUiState.Error("Recovery failed")
             onResult(success)
+        }
+    }
+
+    // ── ADD mode ─────────────────────────────────────────────────────────────
+
+    /** True while the network has room for one more wallet (PENDING adds count, F31). */
+    fun canAddWallet(): Boolean = runCatching { registry.canReserve(testnet) }.getOrDefault(false)
+
+    /**
+     * The wallet already in the app that the entered phrase + passphrase opens, or null (also when
+     * it cannot be told: [commitAdd] checks again). Derives a seed, so call it off the main thread.
+     */
+    fun checkDuplicate(): WalletEntry? {
+        val phrase = _mnemonic.joinToString(" ")
+        if (phrase.isBlank()) return null
+        val pass = _passphrase?.copyOf()
+        return try {
+            provisioner.duplicateOf(testnet, phrase, pass)
+        } catch (e: Exception) {
+            null
+        } finally {
+            pass?.fill(0)
+        }
+    }
+
+    /** Restart into [id] (an added wallet, or the one a duplicate phrase already opens). */
+    fun switchTo(id: String): WalletSwitcher.Result = switcher.switchTo(id)
+
+    private val _addResult = MutableStateFlow<AddResult?>(null)
+
+    /** The answer of the one [commitAdd] this flow runs; null until it has answered. */
+    val addResult: StateFlow<AddResult?> = _addResult.asStateFlow()
+
+    /** One add at a time: the commit step starts it once, and a second call while it runs does nothing. Main thread only. */
+    private var addInFlight = false
+
+    /**
+     * ADD mode's write: reserves the new wallet's entry and seed key, prompts for the device
+     * credential when the key needs it (in this one coroutine, as [recoverWallet] does), then writes
+     * only the new wallet's record ([WalletProvisioner.add]). The running wallet, its record and the
+     * app PIN are never touched. The phrase and passphrase are wiped however it ends.
+     *
+     * Whatever happens between the reservation and the add's answer (a throw, or this ViewModel
+     * being cleared because the user left) abandons the reservation, so it holds no slot or alias.
+     */
+    fun commitAdd(seedKeyPrompt: (suspend () -> Unit)?, onResult: (AddResult) -> Unit) {
+        check(mode == OnboardingMode.ADD) { "commitAdd runs only in ADD mode" }
+        if (addInFlight || _addResult.value != null) return
+        addInFlight = true
+        val phrase = _mnemonic.joinToString(" ")
+        val pass = _passphrase?.copyOf()
+        val origin = _origin
+        val creationTime = if (origin == WalletOrigin.RESTORED) _recoveryTimestamp else System.currentTimeMillis() / 1000
+        val net = testnet
+        viewModelScope.launch {
+            _uiState.value = OnboardingUiState.Loading
+            var reserved: WalletEntry? = null
+            var answered = false
+            val result = try {
+                if (phrase.isBlank()) {
+                    AddResult.Failed
+                } else {
+                    // Noted inside the block: a cancellation that lands while it runs still knows what to give back.
+                    val prepared = withContext(Dispatchers.IO) {
+                        provisioner.prepareSeedKey(net, origin).also { reserved = it?.first }
+                    }
+                    if (prepared == null) {
+                        AddResult.CapReached
+                    } else {
+                        prepareSeedKeyThenPrompt(prepare = { prepared.second }, prompt = seedKeyPrompt)
+                        withContext(Dispatchers.Default) { provisioner.add(prepared.first, phrase, pass, creationTime) }
+                            .also { answered = true }
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                AddResult.Failed
+            } finally {
+                // The add erases its own scope on every answer but Added; before an answer the
+                // reservation is this ViewModel's to give back, also when it is being cleared.
+                val left = reserved
+                if (left != null && !answered) {
+                    withContext(NonCancellable + Dispatchers.IO) { provisioner.abandon(left.id) }
+                }
+                pass?.fill(0)
+                clearPassphrase()
+                wipeMnemonicFromMemory()
+                addInFlight = false
+            }
+            _uiState.value = if (result is AddResult.Added) OnboardingUiState.WalletCreated else OnboardingUiState.Error("Wallet add failed")
+            _addResult.value = result
+            onResult(result)
         }
     }
 

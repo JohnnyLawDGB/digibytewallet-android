@@ -755,4 +755,16 @@
     <string name="sec_seed_key_no_lock">No vinculada: este teléfono no tiene bloqueo de pantalla. Configura uno en los ajustes de Android.</string>
     <string name="sec_seed_key_lock_removed">Se quitó el bloqueo de pantalla después de configurar esta billetera, así que su clave ya no abre, ni siquiera con un bloqueo nuevo. Mientras la billetera siga abierta, comprueba que tienes anotada tu frase de recuperación o mueve tus fondos ahora: la próxima vez que se inicie la app, la billetera necesitará su frase de recuperación.</string>
     <string name="sec_seed_key_cannot_bind">No vinculada: una clave de un bloqueo de pantalla anterior ya no funciona, así que la clave de esta billetera no puede vincularse en esta instalación. Borrar la billetera y restaurarla con su frase de recuperación la vincula.</string>
+
+    <!-- Multi-wallet: adding a wallet through onboarding (ADD mode). -->
+    <string name="wallet_default_name">Billetera %1$d</string>
+    <string name="wallet_add_title">Añadir una billetera</string>
+    <string name="wallet_add_create">Crear una billetera nueva</string>
+    <string name="wallet_add_restore">Restaurar una billetera con su frase de recuperación</string>
+    <string name="wallet_add_pin_note">El PIN de la app protege todas las billeteras. No configuras uno nuevo.</string>
+    <string name="wallet_add_duplicate">Esta frase de recuperación ya está en la app como «%1$s».</string>
+    <string name="wallet_add_duplicate_switch">Abrir %1$s</string>
+    <string name="wallet_add_cap">Esta red ya tiene %1$d billeteras. Quita una para añadir otra.</string>
+    <string name="wallet_add_saving">Añadiendo la billetera…</string>
+    <string name="wallet_add_failed">No se pudo añadir la billetera. No se cambió nada.</string>
 </resources>

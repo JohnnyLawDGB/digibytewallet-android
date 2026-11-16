@@ -753,4 +753,16 @@
     <string name="sec_seed_key_no_lock">Não vinculada: este celular não tem bloqueio de tela. Defina um nas configurações do Android.</string>
     <string name="sec_seed_key_lock_removed">O bloqueio de tela foi removido depois que esta carteira foi configurada, então a chave dela não abre mais, mesmo com um novo bloqueio. Enquanto a carteira ainda está aberta, confira se a frase de recuperação está anotada ou mova seus fundos agora: na próxima vez que o app iniciar, a carteira vai precisar da frase de recuperação.</string>
     <string name="sec_seed_key_cannot_bind">Não vinculada: uma chave de um bloqueio de tela anterior não funciona mais, então a chave desta carteira não pode ser vinculada nesta instalação. Apagar a carteira e restaurá-la pela frase de recuperação faz o vínculo.</string>
+
+    <!-- Multi-wallet: adding a wallet through onboarding (ADD mode). -->
+    <string name="wallet_default_name">Carteira %1$d</string>
+    <string name="wallet_add_title">Adicionar uma carteira</string>
+    <string name="wallet_add_create">Criar uma nova carteira</string>
+    <string name="wallet_add_restore">Restaurar uma carteira pela frase de recuperação</string>
+    <string name="wallet_add_pin_note">O PIN do app protege todas as carteiras. Você não define um novo.</string>
+    <string name="wallet_add_duplicate">Esta frase de recuperação já está no app como “%1$s”.</string>
+    <string name="wallet_add_duplicate_switch">Abrir %1$s</string>
+    <string name="wallet_add_cap">Esta rede já tem %1$d carteiras. Remova uma para adicionar outra.</string>
+    <string name="wallet_add_saving">Adicionando a carteira…</string>
+    <string name="wallet_add_failed">Não foi possível adicionar a carteira. Nada foi alterado.</string>
 </resources>

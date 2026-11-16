@@ -84,6 +84,8 @@ class OnboardingHardcodedStringTest {
         "ui/onboarding/MnemonicInputScreen.kt",
         "ui/onboarding/RecoveryScanScreen.kt",
         "ui/onboarding/RecoveryDateScreen.kt",
+        // Adding a wallet (onboarding in ADD mode): its last step, the one screen of its own.
+        "ui/onboarding/AddWalletCommitScreen.kt",
         // AppNavigation is deliberately NOT here. It is a router: ~100 of its literals are route
         // names and argument keys, so an every-literal scan would need an allow-list longer than
         // the file and would stop meaning anything. Its user-visible text is three toast/label
@@ -97,6 +99,9 @@ class OnboardingHardcodedStringTest {
         "seed_display/{wordCount}", "seed_display/\$selectedWordCount",
         "settings_security", "settings_network", "settings_display", "settings_reconcile",
         "settings_about",
+        // Onboarding's mode argument and the add flow's routes (OnboardingRoutes.kt).
+        "onboarding?mode={mode}", "onboarding?mode=", "first_run", "add",
+        "add_wallet_commit", "restore_quick_start",
     )
 
     /** Compose animation labels, log tags, and format fragments. */

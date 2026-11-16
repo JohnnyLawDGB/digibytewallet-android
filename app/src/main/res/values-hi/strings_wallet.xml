@@ -748,4 +748,16 @@
     <string name="sec_seed_key_no_lock">नहीं जुड़ी: इस फ़ोन में स्क्रीन लॉक नहीं है। Android सेटिंग्स में एक सेट करें।</string>
     <string name="sec_seed_key_lock_removed">यह वॉलेट सेट होने के बाद स्क्रीन लॉक हटा दिया गया, इसलिए इसकी कुंजी अब नहीं खुलती, नया लॉक लगाने पर भी नहीं। जब तक वॉलेट खुला है, जाँच लें कि आपका रिकवरी वाक्यांश लिखा हुआ है, या अभी अपनी राशि दूसरी जगह भेज दें: अगली बार ऐप शुरू होने पर वॉलेट को उसके रिकवरी वाक्यांश की ज़रूरत होगी।</string>
     <string name="sec_seed_key_cannot_bind">नहीं जुड़ी: पिछले स्क्रीन लॉक से बची एक कुंजी अब काम नहीं करती, इसलिए इस इंस्टॉल पर इस वॉलेट की कुंजी नहीं जोड़ी जा सकती। वॉलेट मिटाकर उसे रिकवरी वाक्यांश से फिर से बहाल करने पर यह जुड़ जाती है।</string>
+
+    <!-- Multi-wallet: adding a wallet through onboarding (ADD mode). -->
+    <string name="wallet_default_name">वॉलेट %1$d</string>
+    <string name="wallet_add_title">वॉलेट जोड़ें</string>
+    <string name="wallet_add_create">नया वॉलेट बनाएँ</string>
+    <string name="wallet_add_restore">रिकवरी वाक्यांश से वॉलेट पुनर्प्राप्त करें</string>
+    <string name="wallet_add_pin_note">आपका ऐप PIN हर वॉलेट की सुरक्षा करता है। आपको नया PIN सेट नहीं करना है।</string>
+    <string name="wallet_add_duplicate">यह रिकवरी वाक्यांश ऐप में पहले से “%1$s” के रूप में है।</string>
+    <string name="wallet_add_duplicate_switch">%1$s खोलें</string>
+    <string name="wallet_add_cap">इस नेटवर्क पर पहले से %1$d वॉलेट हैं। नया जोड़ने के लिए एक हटाएँ।</string>
+    <string name="wallet_add_saving">वॉलेट जोड़ा जा रहा है…</string>
+    <string name="wallet_add_failed">वॉलेट नहीं जोड़ा जा सका। कुछ भी नहीं बदला गया।</string>
 </resources>

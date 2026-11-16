@@ -743,4 +743,16 @@
     <string name="sec_seed_key_no_lock">Tidak terikat: ponsel ini tidak memiliki kunci layar. Atur di pengaturan Android.</string>
     <string name="sec_seed_key_lock_removed">Kunci layar dihapus setelah dompet ini disiapkan, sehingga kuncinya tidak dapat dibuka lagi, bahkan dengan kunci layar baru. Selagi dompet masih terbuka, pastikan frasa pemulihan Anda sudah tercatat, atau pindahkan dana Anda sekarang: saat aplikasi berikutnya dimulai, dompet akan memerlukan frasa pemulihannya.</string>
     <string name="sec_seed_key_cannot_bind">Tidak terikat: kunci dari kunci layar sebelumnya tidak berfungsi lagi, sehingga kunci dompet ini tidak dapat diikat pada instalasi ini. Menghapus dompet lalu memulihkannya dari frasa pemulihannya akan mengikatnya.</string>
+
+    <!-- Multi-wallet: adding a wallet through onboarding (ADD mode). -->
+    <string name="wallet_default_name">Dompet %1$d</string>
+    <string name="wallet_add_title">Tambah dompet</string>
+    <string name="wallet_add_create">Buat dompet baru</string>
+    <string name="wallet_add_restore">Pulihkan dompet dari frasa pemulihannya</string>
+    <string name="wallet_add_pin_note">PIN aplikasi melindungi setiap dompet. Anda tidak perlu mengatur PIN baru.</string>
+    <string name="wallet_add_duplicate">Frasa pemulihan ini sudah ada di aplikasi sebagai “%1$s”.</string>
+    <string name="wallet_add_duplicate_switch">Buka %1$s</string>
+    <string name="wallet_add_cap">Jaringan ini sudah memiliki %1$d dompet. Hapus satu untuk menambah yang lain.</string>
+    <string name="wallet_add_saving">Menambahkan dompet…</string>
+    <string name="wallet_add_failed">Dompet tidak dapat ditambahkan. Tidak ada yang diubah.</string>
 </resources>

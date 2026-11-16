@@ -756,4 +756,16 @@
     <string name="sec_seed_key_no_lock">Nicht gebunden: Dieses Telefon hat keine Displaysperre. Legen Sie in den Android-Einstellungen eine fest.</string>
     <string name="sec_seed_key_lock_removed">Die Displaysperre wurde entfernt, nachdem diese Wallet eingerichtet wurde, daher öffnet ihr Schlüssel nicht mehr, auch nicht mit einer neuen Sperre. Solange die Wallet noch offen ist: Prüfen Sie, ob Ihre Wiederherstellungsphrase notiert ist, oder verschieben Sie Ihr Guthaben jetzt. Beim nächsten Start der App braucht die Wallet ihre Wiederherstellungsphrase.</string>
     <string name="sec_seed_key_cannot_bind">Nicht gebunden: Ein Schlüssel aus einer früheren Displaysperre funktioniert nicht mehr, daher kann der Schlüssel dieser Wallet in dieser Installation nicht gebunden werden. Wenn Sie die Wallet löschen und mit ihrer Wiederherstellungsphrase wiederherstellen, wird er gebunden.</string>
+
+    <!-- Multi-wallet: adding a wallet through onboarding (ADD mode). -->
+    <string name="wallet_default_name">Wallet %1$d</string>
+    <string name="wallet_add_title">Wallet hinzufügen</string>
+    <string name="wallet_add_create">Neue Wallet erstellen</string>
+    <string name="wallet_add_restore">Wallet aus ihrer Wiederherstellungsphrase wiederherstellen</string>
+    <string name="wallet_add_pin_note">Ihre App-PIN schützt jede Wallet. Sie legen keine neue fest.</string>
+    <string name="wallet_add_duplicate">Diese Wiederherstellungsphrase ist bereits als „%1$s“ in der App.</string>
+    <string name="wallet_add_duplicate_switch">%1$s öffnen</string>
+    <string name="wallet_add_cap">Dieses Netzwerk hat bereits %1$d Wallets. Entfernen Sie eine, um eine weitere hinzuzufügen.</string>
+    <string name="wallet_add_saving">Wallet wird hinzugefügt…</string>
+    <string name="wallet_add_failed">Die Wallet konnte nicht hinzugefügt werden. Es wurde nichts geändert.</string>
 </resources>

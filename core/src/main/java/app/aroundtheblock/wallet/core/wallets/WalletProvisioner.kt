@@ -43,19 +43,42 @@ class WalletProvisioner(
      * cannot be derived; [add] then refuses). Zeroes what it derives. Caller owns [passphrase].
      */
     fun duplicateOf(testnet: Boolean, mnemonic: String, passphrase: ByteArray?): WalletEntry? =
-        (match(testnet, mnemonic, passphrase) as? Match.Of)?.entry
+        (matchOrUnknown(testnet, mnemonic, passphrase) as? Match.Of)?.entry
 
     /**
      * Reserves the new wallet's entry (PENDING, holding a slot toward the cap) and prepares its seed
      * key (KS-BIND) before [add], with the contract of `WalletManager.prepareSeedKeyForNewRecord`.
      * Null at the cap, with nothing written. The PENDING entry and the key it may have made are
-     * erased by [add] when it does not complete, and by [WalletHousekeeping] at the next launch when
-     * [add] is never called.
+     * erased by [add] when it does not complete, by [abandon] when the user leaves before [add], and
+     * by [WalletHousekeeping] at the next launch when neither runs.
+     *
+     * A probe that throws reads as [SeedKeyReadiness.UNAVAILABLE], as `prepareSeedKeyThenPrompt`
+     * reads it: the record is then sealed under the legacy key, and the reservation is returned so
+     * the caller still owns it (and abandons it) rather than an exception leaving it behind.
      */
     fun prepareSeedKey(testnet: Boolean, origin: WalletOrigin): Pair<WalletEntry, SeedKeyReadiness>? {
         val entry = registry.reserve(testnet, origin, nowSecs()) ?: return null
-        val readiness = managerFactory.forScope(scopeOf(entry)).prepareSeedKeyForNewRecord()
+        val readiness = try {
+            managerFactory.forScope(scopeOf(entry)).prepareSeedKeyForNewRecord()
+        } catch (t: Throwable) {
+            Log.w(TAG, "new record key probe: ${t.javaClass.simpleName}")
+            SeedKeyReadiness.UNAVAILABLE
+        }
         return entry to readiness
+    }
+
+    /**
+     * The user left an add after [prepareSeedKey] and before [add]: erase what the reservation
+     * made and drop its entry, so it holds no slot toward the cap and no alias until the next launch.
+     * Acts only on a PENDING entry; any other id (a READY wallet, legacy, one not listed) is left
+     * untouched. True when the entry is gone. Never throws.
+     */
+    fun abandon(id: String): Boolean {
+        if (id == WalletIds.LEGACY) return false
+        val entry = try { registry.find(id) } catch (t: Throwable) { null } ?: return false
+        if (entry.state != EntryState.PENDING) return false
+        abandon(entry, scopeOf(entry))
+        return try { registry.find(id) == null } catch (t: Throwable) { false }
     }
 
     /**
@@ -69,7 +92,7 @@ class WalletProvisioner(
     fun add(entry: WalletEntry, mnemonic: String, passphrase: ByteArray?, creationTimeSecs: Long): AddResult {
         val testnet = entry.testnet ?: return AddResult.Failed
         val scope = scopeOf(entry)
-        when (val m = match(testnet, mnemonic, passphrase)) {
+        when (val m = matchOrUnknown(testnet, mnemonic, passphrase)) {
             is Match.Of -> {
                 abandon(entry, scope)
                 return AddResult.Duplicate(m.entry)
@@ -87,12 +110,19 @@ class WalletProvisioner(
             Log.w(TAG, "wallet record: ${t.javaClass.simpleName}")
             false
         }
-        if (!stored || !registry.complete(entry.id, makeActive = true)) {
+        val completed = stored && try {
+            registry.complete(entry.id, makeActive = true)
+        } catch (t: Throwable) {
+            Log.w(TAG, "wallet entry: ${t.javaClass.simpleName}")
+            false
+        }
+        if (!completed) {
             Log.w(TAG, "wallet not added (record stored=$stored)")
             abandon(entry, scope)
             return AddResult.Failed
         }
-        return AddResult.Added(registry.find(entry.id) ?: entry.copy(state = EntryState.READY))
+        val ready = entry.copy(state = EntryState.READY)
+        return AddResult.Added(runCatching { registry.find(entry.id) }.getOrNull() ?: ready)
     }
 
     /**
@@ -101,12 +131,26 @@ class WalletProvisioner(
      * instead of the scope being orphaned with no entry naming it.
      */
     private fun abandon(entry: WalletEntry, scope: WalletScope) {
-        val report = eraser.erase(scope)
-        if (report.verified || !eraser.anythingLeft(scope)) {
-            registry.drop(entry.id)
+        // A throw anywhere here reads as "something may be left": the entry stays PENDING.
+        val gone = try {
+            eraser.erase(scope).verified || !eraser.anythingLeft(scope)
+        } catch (t: Throwable) {
+            Log.w(TAG, "abandoned add erase: ${t.javaClass.simpleName}")
+            false
+        }
+        if (gone) {
+            try { registry.drop(entry.id) } catch (t: Throwable) { Log.w(TAG, "abandoned add drop: ${t.javaClass.simpleName}") }
         } else {
             Log.w(TAG, "an abandoned add left state behind; erased at the next launch")
         }
+    }
+
+    /** [match], with a throw (the JNI derivation, a record read) read as [Match.Unknown]: no answer. */
+    private fun matchOrUnknown(testnet: Boolean, mnemonic: String, passphrase: ByteArray?): Match = try {
+        match(testnet, mnemonic, passphrase)
+    } catch (t: Throwable) {
+        Log.w(TAG, "duplicate check: ${t.javaClass.simpleName}")
+        Match.Unknown
     }
 
     private fun match(testnet: Boolean, mnemonic: String, passphrase: ByteArray?): Match {

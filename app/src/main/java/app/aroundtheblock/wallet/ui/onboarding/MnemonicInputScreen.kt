@@ -64,6 +64,10 @@ fun MnemonicInputScreen(
     var passphrase by remember { mutableStateOf("") }
     var focusedField by remember { mutableIntStateOf(-1) }
     val context = LocalContext.current
+    // ADD mode: the wallet this phrase already opens, when it is in the app; and one check at a time.
+    var duplicate by remember { mutableStateOf<app.aroundtheblock.wallet.core.wallets.WalletEntry?>(null) }
+    var checkingDuplicate by remember { mutableStateOf(false) }
+    val addScope = rememberCoroutineScope()
 
     Box(
         modifier = Modifier
@@ -183,10 +187,30 @@ fun MnemonicInputScreen(
                 )
             }
 
+            duplicate?.let { existing ->
+                val shown = existing.name ?: stringResource(R.string.wallet_default_name, existing.number)
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = stringResource(R.string.wallet_add_duplicate, shown),
+                    color = Color(0xFFFFCC66),
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedButton(
+                    onClick = { viewModel.switchTo(existing.id) },
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    Text(stringResource(R.string.wallet_add_duplicate_switch, shown))
+                }
+            }
+
             Spacer(Modifier.height(24.dp))
 
             Button(
                 onClick = {
+                    duplicate = null
                     val phrase = wordStates.toList().joinToString(" ").trim()
                     val phraseWords = phrase.split(" ")
 
@@ -227,10 +251,30 @@ fun MnemonicInputScreen(
 
                     viewModel.setRecoveryMnemonic(normalizedPhrase)
                     viewModel.setPassphrase(enteredPassphrase)
-                    // Next: the restore-privately screen, where the user may opt in to the
-                    // other-formats scan, then the wallet-birth date.
-                    navController.navigate("recovery_scan")
+                    if (viewModel.mode == OnboardingMode.FIRST_RUN) {
+                        // Next: the restore-privately screen, where the user may opt in to the
+                        // other-formats scan, then the wallet-birth date.
+                        navController.navigate("recovery_scan")
+                    } else {
+                        // ADD mode: a phrase the app already holds opens that wallet instead. Then
+                        // straight to the birth date: the recovery scan's disclosure does not say a
+                        // lookup links this wallet to the others, so it is not offered here (F9).
+                        if (checkingDuplicate) return@Button
+                        checkingDuplicate = true
+                        addScope.launch {
+                            val existing = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                                viewModel.checkDuplicate()
+                            }
+                            checkingDuplicate = false
+                            if (existing != null) {
+                                duplicate = existing
+                            } else {
+                                navController.navigate("recovery_date")
+                            }
+                        }
+                    }
                 },
+                enabled = !checkingDuplicate,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp),
