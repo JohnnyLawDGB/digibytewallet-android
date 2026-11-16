@@ -121,6 +121,10 @@ class WalletRegistry(
 
     fun anyRecordExists(): Boolean = legacyRecordExists() || recordsOnDisk().any { (id, _) -> holdsRecord(id) }
 
+    /** Any non-legacy wallet: an entry in any state, or a sealed seed record on disk. */
+    fun hasNonLegacyWallet(): Boolean =
+        load().entries.isNotEmpty() || recordsOnDisk().any { (id, _) -> holdsRecord(id) }
+
     fun drop(id: String): Boolean = synchronized(MUTATION_LOCK) {
         val doc = load()
         if (id == WalletIds.LEGACY) {

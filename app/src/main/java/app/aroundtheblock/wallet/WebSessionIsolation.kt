@@ -18,11 +18,16 @@ internal class WebSessionIsolation(
     private val writeOwner: (String) -> Boolean,
     private val webDataDirs: () -> List<File>,
     private val activeId: String,
+    /** True when no wallet other than legacy exists in any form (entries or records on disk). */
+    private val onlyLegacyExists: () -> Boolean = { false },
 ) {
     /** True when the web data is known to belong to [activeId]. */
     fun run(): Boolean {
         val owner = readOwner()
         if (owner == activeId) return true
+        // Upgrade: before multi-wallet only legacy could have made this session, so adopt it as
+        // owner without a logout. Any other wallet present keeps the fail-closed clear below.
+        if (owner == null && activeId == LEGACY && onlyLegacyExists()) return writeOwner(activeId)
         val dirs = webDataDirs()
         val gone = dirs.all { !it.exists() || (it.deleteRecursively() && !it.exists()) }
         if (!gone) {
@@ -34,6 +39,7 @@ internal class WebSessionIsolation(
 
     companion object {
         private const val TAG = "WebSessionIsolation"
+        private const val LEGACY = app.aroundtheblock.wallet.core.wallets.WalletIds.LEGACY
         const val PREFS = "dgb_web_session_owner"
         const val KEY_OWNER = "owner_wallet_id"
 
@@ -54,6 +60,7 @@ internal class WebSessionIsolation(
                 writeOwner = { prefs.edit().putString(KEY_OWNER, it).commit() },
                 webDataDirs = { webDataDirs(app.dataDir, app.cacheDir) },
                 activeId = ActiveWallet.scope(app).walletId,
+                onlyLegacyExists = { !ActiveWallet.registry(app).hasNonLegacyWallet() },
             ).run()
         }
     }

@@ -31,6 +31,24 @@ class WebSessionIsolationTest {
         assertFalse(dir.exists()); assertEquals("B", owner)
     }
 
+    @Test fun `upgrade with only legacy adopts it as owner without deleting`() {
+        val dir = webDir(); var owner: String? = null
+        assertTrue(WebSessionIsolation({ owner }, { owner = it; true }, { listOf(dir) }, "legacy", { true }).run())
+        assertTrue(File(dir, "Cookies").exists()); assertEquals("legacy", owner)
+    }
+
+    @Test fun `absent owner with another wallet present clears even if legacy is active`() {
+        val dir = webDir(); var owner: String? = null
+        assertTrue(WebSessionIsolation({ owner }, { owner = it; true }, { listOf(dir) }, "legacy", { false }).run())
+        assertFalse(dir.exists()); assertEquals("legacy", owner)
+    }
+
+    @Test fun `absent owner with only legacy but another wallet active clears`() {
+        val dir = webDir(); var owner: String? = null
+        assertTrue(WebSessionIsolation({ owner }, { owner = it; true }, { listOf(dir) }, "B", { true }).run())
+        assertFalse(dir.exists())
+    }
+
     @Test fun `a delete that cannot be verified leaves the owner and refuses`() {
         val dir = webDir(); var owner: String? = "A"
         val stuck = object : File(dir.path) {
