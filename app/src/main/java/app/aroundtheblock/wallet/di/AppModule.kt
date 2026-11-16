@@ -21,6 +21,7 @@ import app.aroundtheblock.wallet.core.wallets.ActiveWallet
 import app.aroundtheblock.wallet.core.wallets.WalletManagerFactory
 import app.aroundtheblock.wallet.core.wallets.WalletProvisioner
 import app.aroundtheblock.wallet.core.wallets.WalletRegistry
+import app.aroundtheblock.wallet.core.wallets.WalletRemoval
 import app.aroundtheblock.wallet.core.wallets.WalletStoreEraser
 import app.aroundtheblock.wallet.core.wallets.WalletStores
 import okhttp3.OkHttpClient
@@ -160,6 +161,24 @@ object AppModule {
             // The same wallet the KeyStoreManager above and every store resolve to.
             scope = ActiveWallet.scope(context),
         )
+
+    /**
+     * Removing one wallet. The running wallet is only marked (the caller restarts and housekeeping
+     * erases it at the next launch); the last wallet on the device is the full wipe.
+     */
+    @Provides @Singleton
+    fun provideWalletRemoval(
+        @ApplicationContext context: Context,
+        registry: WalletRegistry,
+        eraser: WalletStoreEraser,
+        walletManager: WalletManager,
+        pinManager: PinManager,
+    ): WalletRemoval = WalletRemoval(
+        registry,
+        eraser,
+        activeScope = ActiveWallet.scope(context),
+        wipeAll = { walletManager.wipeThenReleasePin(pinManager) },
+    )
 
     /** Wallet switching: persist the active id, end the web session, restart (Task 9). */
     @Provides @Singleton
