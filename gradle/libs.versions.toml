@@ -55,7 +55,7 @@ composeBom = "2024.12.01"
 # 2.59+ requires AGP 9 (and Gradle 9.1+).
 hilt = "2.58"
 # androidx.hilt — versioned independently of Dagger/Hilt above.
-androidxHilt = "1.2.0"
+androidxHilt = "1.4.0"
 room = "2.8.5"
 lifecycle = "2.8.7"
 camerax = "1.4.1"
