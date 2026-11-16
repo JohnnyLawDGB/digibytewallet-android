@@ -29,7 +29,6 @@ prefs dgb_outgoing_tx fixture_marker=s:dgb_outgoing_tx
 prefs dgb_asset_backfill fixture_marker=s:dgb_asset_backfill
 prefs dgb_asset_heal fixture_marker=s:dgb_asset_heal
 prefs dgb_diag fixture_marker=s:dgb_diag
-prefs dgb_quickstart fixture_marker=s:dgb_quickstart
 prefs dgb_digiscope fixture_marker=s:dgb_digiscope
 prefs dgb_hub_session fixture_marker=s:dgb_hub_session
 prefs dgb_sync_data has_synced=b:true
@@ -42,3 +41,7 @@ file wallet.db-wal 53514c01deadbeef
 file wallet.db-shm 53514c02deadbeef
 file wallet.db-journal 53514c03deadbeef
 prefs dgb_sync_data bip84_migrated=b:true
+prefs dgb_db_key encrypted_key=s:0a0b0c0d0e0f
+prefs dgb_db_key encrypted_key_iv=s:010203040506
+prefs dgb_db_key db_key_alias=s:dgb_db_passphrase
+file no_backup/dgb_pin_store.bin 44505331deadbeef00

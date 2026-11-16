@@ -32,8 +32,9 @@ import org.junit.rules.TemporaryFolder
  * values, then the launch-time reads of this build run over it. Nothing may change, the wallet
  * resolves as `legacy` and is the only registry entry.
  *
- * The fixture lists the stores of 4.1.4 by the names it used; [the fixture covers every listed store]
- * ties it to [WalletStores] so a store added later cannot escape this test.
+ * The fixture lists the stores of 4.1.4 by the names it used; the test "the fixture covers every
+ * listed store" ties it to [WalletStores] so a store added later cannot escape this test. A store new
+ * since 4.1.4 is exempted by name in [NEW_SINCE_414], so a launch that creates it is judged as new.
  */
 class UpgradeFrom414Test {
 
@@ -54,6 +55,9 @@ class UpgradeFrom414Test {
         unmockkStatic(Log::class)
         ActiveWallet.resetForTest()
     }
+
+    /** Stores of [WalletStores] that 4.1.4 never had: absent from the fixture, and a launch creating one is a write. */
+    private val NEW_SINCE_414 = setOf("dgb_quickstart")
 
     private val phrase = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
 
@@ -79,7 +83,7 @@ class UpgradeFrom414Test {
                     }
                     prefs += Triple(parts[1], key, value)
                 }
-                "file" -> files += parts[1] to parts[2].chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+                "file" -> files += parts[1] to parts[2].also { require(it.length % 2 == 0) { "odd hex in fixture: $line" } }.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
                 else -> error("bad fixture line: $line")
             }
         }
@@ -90,7 +94,7 @@ class UpgradeFrom414Test {
         val vault = FakeVault()
         val prefs = InMemoryPrefsFactory()
         val root: File = tmp.newFolder()
-        val ctx: Context = keyTestContext(prefs, root)
+        val ctx: Context = keyTestContext(prefs, root).also { every { it.noBackupFilesDir } returns File(root, "no_backup") }
         private val dbDir = File(root, "databases")
         private val filesDir = File(root, "files")
 
@@ -98,12 +102,19 @@ class UpgradeFrom414Test {
             val fx = fixture()
             fx.prefs.forEach { (name, key, value) -> prefs.prefsFor(name).seed(key, value) }
             fx.files.forEach { (name, bytes) ->
-                val dir = if (name.startsWith("wallet.db")) dbDir else filesDir
-                File(dir, name).writeBytes(bytes)
+                val target = when {
+                    name.startsWith("wallet.db") -> File(dbDir, name)
+                    name.startsWith("no_backup/") -> File(root, name)
+                    else -> File(filesDir, name)
+                }
+                target.parentFile!!.mkdirs()
+                target.writeBytes(bytes)
             }
             // The wallet's record: a phrase sealed under the auth-bound key, as 4.1.4 left it.
             vault.createUnboundKey(LEGACY_ALIAS)
             vault.createUnboundKey(BOUND_ALIAS)
+            vault.createUnboundKey("dgb_db_passphrase")
+            vault.createUnboundKey("dgb_pin_store_key")
             val enc = vault.encrypt(BOUND_ALIAS, phrase.toByteArray())
             prefs.prefsFor("dgb_wallet_seed").apply {
                 seed("encrypted_seed_v2", hex(enc.ciphertext))
@@ -143,7 +154,7 @@ class UpgradeFrom414Test {
         for (testnet in listOf(false, true)) {
             val s = WalletScope.legacy(testnet)
             val listed = WalletStores.WALLET_AND_NETWORK_PREFS + WalletStores.WALLET_PREFS + WalletStores.NETWORK_PREFS
-            for (base in listed - "dgb_wallet_seed") {
+            for (base in listed - "dgb_wallet_seed" - NEW_SINCE_414) {
                 assertTrue("fixture lacks prefs $base on testnet=$testnet", WalletStores.prefsName(base, s) in prefsNames)
             }
             for (base in WalletStores.WALLET_AND_NETWORK_FILES) {
@@ -158,7 +169,7 @@ class UpgradeFrom414Test {
         val prefsBefore = install.prefsSnapshot()
         val filesBefore = install.fileSnapshot()
         val aliasesBefore = install.vault.keys.keys.toSet()
-        assertEquals(setOf("dgb_wallet_master", "dgb_wallet_master_v2"), aliasesBefore)
+        assertEquals(setOf("dgb_wallet_master", "dgb_wallet_master_v2", "dgb_db_passphrase", "dgb_pin_store_key"), aliasesBefore)
         assertEquals(21_000_000L, prefsBefore.getValue("dgb_settings")["cf_birth_height"])
 
         // The launch-time reads, in production order.
