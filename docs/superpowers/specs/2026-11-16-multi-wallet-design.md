@@ -4,7 +4,7 @@ Status: for owner approval (2026-11-16); builder-checked. Follow-on, separate de
 
 > **Step 1 disposition (2026-11-16).** Plan: `docs/superpowers/plans/2026-11-16-multi-wallet-step1.md`.
 > The pre-flight conflict scan found 32 defects in the plan against this spec; rulings **F1-F32**
-> are recorded by number in `.superpowers/sdd/2026-11-16-multi-wallet-step1/preflight.md`
+> are recorded by number in `docs/superpowers/specs/2026-11-16-multi-wallet-step1-rulings.md`
 > (F10 as modified by the owner: quick start offers DigiScope only as an explicit opt-in that
 > states the addresses are sent and that it links the user's wallets). The spec text already
 > carries the three rulings that changed a decided point and this banner does not restate them.
@@ -34,7 +34,7 @@ Status: for owner approval (2026-11-16); builder-checked. Follow-on, separate de
 >   the opt-in screen above, skip being the default. An own-node choice pins the endpoint it
 >   showed (`ownNodeOnly`, no fall-through to DigiScope). A capped scan shows no figure.
 > - Rename rejects another wallet's shown default name.
-> - Machine-written warnings in 12 locales (wipe, removal, backup) need a native-speaker review
+> - Machine-written warnings in the non-English locales (wipe, removal, backup) need a native-speaker review
 >   before release.
 
 
