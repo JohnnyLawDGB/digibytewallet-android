@@ -27,16 +27,17 @@ import okhttp3.CertificatePinner
  *     openssl x509 -pubkey -noout | openssl pkey -pubin -outform der | \
  *     openssl dgst -sha256 -binary | openssl enc -base64
  *
- * Captured 2026-10-29 from the live chain (the leaf was renewed on a new key on 2026-10-09; the
- * 2026-08-23 leaf pin is retired). Leaf valid to 2027-01-07.
+ * Captured 2026-11-16 from the live chain. The leaf was renewed on a new key on 2026-11-15 and the
+ * intermediate moved from YE2 to YE1; both outgoing values are retired, as is the 2026-08-23 leaf.
+ * The ISRG backups kept the host reachable through that renewal. Leaf valid to 2027-02-13.
  */
 object DigistampPins {
     const val HOST = "assets.digistamp.co"
 
-    /** Current live chain (leaf + Let's Encrypt intermediate YE2) and the ISRG backups above it. */
+    /** Current live chain (leaf + Let's Encrypt intermediate YE1) and the ISRG backups above it. */
     val PINS = listOf(
-        "sha256/4QRqLjH49bkWbXdyanK3jENaFwUIqL2Lr+bXn1Y9Bcw=", // leaf, CN=assets.digistamp.co
-        "sha256/s/tdAOmUzd8syaTuqfgGvFcn6DzA5Cmb+Vby1ST+U3Y=", // intermediate, Let's Encrypt YE2
+        "sha256/xE7728UUKiYra6OrpskzYbD6XjX5dk++KBIBkSgbshY=", // leaf, CN=assets.digistamp.co
+        "sha256/brzvtCELCIZUo4sD/qPX0ccRtPsd3DY6RfmxpOU9oB4=", // intermediate, Let's Encrypt YE1
         "sha256/sCkq5UWXjg+7mKu9lMhhYF5bGLsy7VI/UNW3tccdR7w=", // backup, ISRG Root YE
         "sha256/diGVwiVYbubAI3RW4hB9xU8e/CH2GnkuvVFZE8zmgzI=", // backup, ISRG Root X2
         "sha256/C5+lpZ7tcVwmwQIMcRtPbsQtWLABXhQzejna0wHFr8M=", // backup, ISRG Root X1
@@ -45,6 +46,8 @@ object DigistampPins {
     /** Pins that were live in the past and must never be re-added. */
     val RETIRED_PINS = listOf(
         "sha256/APmRUNe9kpbMkhWTnrdA/3y7EIwNGI9MmDKb/DId08I=", // leaf until the 2026-10-09 renewal
+        "sha256/4QRqLjH49bkWbXdyanK3jENaFwUIqL2Lr+bXn1Y9Bcw=", // leaf until the 2026-11-15 renewal
+        "sha256/s/tdAOmUzd8syaTuqfgGvFcn6DzA5Cmb+Vby1ST+U3Y=", // Let's Encrypt YE2, until the 2026-11-15 renewal moved to YE1
     )
 
     /**

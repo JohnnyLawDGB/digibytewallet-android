@@ -20,11 +20,16 @@ class DigistampPinsTest {
         assertTrue(DigistampPins.RETIRED_PINS.contains("sha256/APmRUNe9kpbMkhWTnrdA/3y7EIwNGI9MmDKb/DId08I="))
     }
 
-    @Test fun `pins are the 2026-10-29 live leaf and intermediate plus the ISRG backups`() {
+    @Test fun `the 2026-11-15 renewal's outgoing leaf and YE2 intermediate are retired`() {
+        assertTrue(DigistampPins.RETIRED_PINS.contains("sha256/4QRqLjH49bkWbXdyanK3jENaFwUIqL2Lr+bXn1Y9Bcw="))
+        assertTrue(DigistampPins.RETIRED_PINS.contains("sha256/s/tdAOmUzd8syaTuqfgGvFcn6DzA5Cmb+Vby1ST+U3Y="))
+    }
+
+    @Test fun `pins are the 2026-11-16 live leaf and intermediate plus the ISRG backups`() {
         assertEquals(
             listOf(
-                "sha256/4QRqLjH49bkWbXdyanK3jENaFwUIqL2Lr+bXn1Y9Bcw=",
-                "sha256/s/tdAOmUzd8syaTuqfgGvFcn6DzA5Cmb+Vby1ST+U3Y=",
+                "sha256/xE7728UUKiYra6OrpskzYbD6XjX5dk++KBIBkSgbshY=",
+                "sha256/brzvtCELCIZUo4sD/qPX0ccRtPsd3DY6RfmxpOU9oB4=",
                 "sha256/sCkq5UWXjg+7mKu9lMhhYF5bGLsy7VI/UNW3tccdR7w=",
                 "sha256/diGVwiVYbubAI3RW4hB9xU8e/CH2GnkuvVFZE8zmgzI=",
                 "sha256/C5+lpZ7tcVwmwQIMcRtPbsQtWLABXhQzejna0wHFr8M=",

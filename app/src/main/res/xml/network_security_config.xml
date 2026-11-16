@@ -12,15 +12,15 @@
       WebView traffic too, so one declaration protects both the pages and the API calls.
 
       The same pins as app.aroundtheblock.wallet.core.network.DigistampPins.PINS (leaf, Let's Encrypt
-      YE2, and the ISRG Root YE / X2 / X1 backups), in the same order. PlatformPinSetParityTest fails
+      YE1, and the ISRG Root YE / X2 / X1 backups), in the same order. PlatformPinSetParityTest fails
       when the two differ, or when a retired pin is listed here. No expiration attribute: an expired
-      pin-set stops pinning, which would fail open. Captured 2026-10-29, re-checked live 2026-11-08.
+      pin-set stops pinning, which would fail open. Captured 2026-11-16 after the 2026-11-15 renewal (new key, YE2 to YE1).
     -->
     <domain-config cleartextTrafficPermitted="false">
         <domain includeSubdomains="false">assets.digistamp.co</domain>
         <pin-set>
-            <pin digest="SHA-256">4QRqLjH49bkWbXdyanK3jENaFwUIqL2Lr+bXn1Y9Bcw=</pin>
-            <pin digest="SHA-256">s/tdAOmUzd8syaTuqfgGvFcn6DzA5Cmb+Vby1ST+U3Y=</pin>
+            <pin digest="SHA-256">xE7728UUKiYra6OrpskzYbD6XjX5dk++KBIBkSgbshY=</pin>
+            <pin digest="SHA-256">brzvtCELCIZUo4sD/qPX0ccRtPsd3DY6RfmxpOU9oB4=</pin>
             <pin digest="SHA-256">sCkq5UWXjg+7mKu9lMhhYF5bGLsy7VI/UNW3tccdR7w=</pin>
             <pin digest="SHA-256">diGVwiVYbubAI3RW4hB9xU8e/CH2GnkuvVFZE8zmgzI=</pin>
             <pin digest="SHA-256">C5+lpZ7tcVwmwQIMcRtPbsQtWLABXhQzejna0wHFr8M=</pin>
