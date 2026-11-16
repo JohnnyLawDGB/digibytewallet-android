@@ -84,7 +84,7 @@ class WalletRemovalTest {
         fun eraser(release: () -> Boolean = releaseLegacyDbWrap) =
             WalletStoreEraser(ctx, vault.asKeystoreAliases(), release, { name -> prefs.prefsFor(name).all.isNotEmpty() })
 
-        fun removal(active: WalletScope, eraser: WalletStoreEraser = eraser()) = WalletRemoval(
+        fun removal(active: WalletScope, eraser: WalletStoreEraser = eraser(), registry: WalletRegistry = this.registry) = WalletRemoval(
             registry, eraser, active,
             wipeAll = { wipes++; WipeReport(seedGone = true, everythingCleared = true) },
         )
@@ -254,5 +254,67 @@ class WalletRemovalTest {
         assertEquals(before, d.everything())
         assertEquals(0, d.wipes)
         assertEquals(EntryState.READY, d.registry.find(b)!!.state)
+    }
+
+    @Test fun `removing a mainnet wallet while only testnet wallets remain is not the full wipe`() = runBlocking {
+        val d = Device()
+        val b = d.addWallet(false, makeActive = true)
+        val t = d.addWallet(true)
+
+        assertEquals(RemoveResult.Removed, d.removal(active = WalletScope(t, true)).remove(b, "Wallet 1", "Wallet 1"))
+
+        assertEquals(0, d.wipes)
+        assertNull(d.registry.find(b))
+        assertEquals(listOf(t), d.registry.list(true).map { it.id })
+        assertFalse(d.eraser().anythingLeft(WalletScope(b, false)))
+    }
+
+    @Test fun `removing the only READY wallet while another is REMOVING is the full wipe`() = runBlocking {
+        val d = Device()
+        d.installLegacy()
+        val b = d.addWallet(false)
+        assertTrue(d.registry.markRemoving(b))
+
+        val result = d.removal(active = legacyMain).remove("legacy", "Wallet 1", "Wallet 1")
+
+        assertTrue("$result", result is RemoveResult.WipedEverything)
+        assertEquals(1, d.wipes)
+    }
+
+    @Test fun `a refused mark removes nothing and says so`() = runBlocking {
+        val d = Device()
+        d.installLegacy()
+        val b = d.addWallet(false)
+        val refusing = spyk(d.registry)
+        every { refusing.markRemoving(any()) } returns false
+        val before = d.everything()
+
+        assertEquals(RemoveResult.NotRemoved, d.removal(active = legacyMain, registry = refusing).remove(b, "Wallet 2", "Wallet 2"))
+
+        assertEquals(before, d.everything())
+        assertEquals(EntryState.READY, d.registry.find(b)!!.state)
+    }
+
+    @Test fun `an unknown wallet removes nothing`() = runBlocking {
+        val d = Device()
+        d.installLegacy()
+        d.addWallet(false)
+        val before = d.everything()
+
+        assertEquals(RemoveResult.NotRemoved, d.removal(active = legacyMain).remove("00000000deadbeef", "Wallet 9", "Wallet 9"))
+
+        assertEquals(before, d.everything())
+    }
+
+    @Test fun `a second submit of a removal already marked is left to housekeeping`() = runBlocking {
+        val d = Device()
+        d.installLegacy()
+        val b = d.addWallet(false)
+        assertTrue(d.registry.markRemoving(b))
+        val refusing = spyk(d.registry)
+        every { refusing.markRemoving(any()) } returns false
+
+        assertEquals(RemoveResult.Incomplete, d.removal(active = legacyMain, registry = refusing).remove(b, "Wallet 2", "Wallet 2"))
+        assertEquals(EntryState.REMOVING, d.registry.find(b)!!.state)
     }
 }

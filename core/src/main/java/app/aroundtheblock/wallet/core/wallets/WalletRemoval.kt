@@ -2,6 +2,7 @@ package app.aroundtheblock.wallet.core.wallets
 
 import android.util.Log
 import app.aroundtheblock.wallet.core.WipeReport
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -22,8 +23,14 @@ sealed class RemoveResult {
     /** Legacy, kept REMOVING: the database password's record still depends on its key. Housekeeping retries at each launch. */
     object DatabaseKeyStillOnLegacy : RemoveResult()
 
-    /** The erase did not verify (or did not run to the end); housekeeping finishes it at the next launch. */
+    /**
+     * The wallet is marked REMOVING (unlisted) but its erase did not verify or did not run to the
+     * end; housekeeping finishes it at the next launch.
+     */
     object Incomplete : RemoveResult()
+
+    /** Nothing was written: the wallet is unchanged and still listed. The user can retry. */
+    object NotRemoved : RemoveResult()
 
     /** The typed name is not the wallet's shown name. Nothing was written. */
     object NameMismatch : RemoveResult()
@@ -45,7 +52,10 @@ class WalletRemoval(
     private val activeScope: WalletScope,
     private val wipeAll: suspend () -> WipeReport,
 ) {
-    /** [typedName] must equal the entry's shown name (trimmed, exact). */
+    /**
+     * [typedName] must equal the entry's shown name (trimmed, exact).
+     * Callers must not run an add and a remove concurrently: the last-wallet check is outside the registry lock.
+     */
     suspend fun remove(id: String, typedName: String, shownName: String): RemoveResult {
         if (shownName.isBlank() || typedName.trim() != shownName.trim()) return RemoveResult.NameMismatch
 
@@ -55,14 +65,18 @@ class WalletRemoval(
         return withContext(Dispatchers.IO) { markThenErase(id) }
     }
 
-    private fun markThenErase(id: String): RemoveResult = try {
-        val entry = registry.find(id)
-        if (entry == null || !registry.markRemoving(id)) {
-            Log.w(TAG, "the wallet could not be marked for removal")
-            RemoveResult.Incomplete
-        } else if (id == activeScope.walletId) {
-            RemoveResult.RemovedRestartNeeded
-        } else {
+    private fun markThenErase(id: String): RemoveResult {
+        val entry = try {
+            registry.find(id)?.takeIf { registry.markRemoving(id) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "marking for removal failed (${e.javaClass.simpleName})")
+            null
+        }
+        if (entry == null) return notMarked(id)
+        if (id == activeScope.walletId) return RemoveResult.RemovedRestartNeeded
+        return try {
             val report = eraser.erase(WalletScope(id, entry.testnet == true))
             when {
                 report.verified && registry.drop(id) -> RemoveResult.Removed
@@ -72,10 +86,20 @@ class WalletRemoval(
                     RemoveResult.Incomplete
                 }
             }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "removal did not complete (${e.javaClass.simpleName}); finished at the next launch")
+            RemoveResult.Incomplete
         }
-    } catch (e: Exception) {
-        Log.w(TAG, "removal did not complete (${e.javaClass.simpleName}); finished at the next launch")
-        RemoveResult.Incomplete
+    }
+
+    /** The mark did not land in this call. Already REMOVING (a double submit) is housekeeping's to finish. */
+    private fun notMarked(id: String): RemoveResult {
+        val state = try { registry.find(id)?.state } catch (_: Exception) { null }
+        if (state == EntryState.REMOVING) return RemoveResult.Incomplete
+        Log.w(TAG, "the wallet could not be marked for removal; nothing was written")
+        return RemoveResult.NotRemoved
     }
 
     private companion object {
