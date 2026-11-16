@@ -54,6 +54,9 @@ object WalletStores {
     fun keyAlias(scope: WalletScope): String =
         KEY_ALIAS_BASE + storageSuffix(scope, StoreScope.WALLET)
 
+    /** The auth-bound (_v2) alias of the same wallet's seed key. */
+    fun keyAliasV2(scope: WalletScope): String = keyAlias(scope) + V2
+
     fun cfBirthHeightKey(scope: WalletScope): String =
         CF_BIRTH_KEY + storageSuffix(scope, StoreScope.WALLET)
 
