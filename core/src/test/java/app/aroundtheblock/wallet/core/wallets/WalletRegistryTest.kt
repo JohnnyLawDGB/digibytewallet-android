@@ -2,6 +2,10 @@ package app.aroundtheblock.wallet.core.wallets
 
 import app.aroundtheblock.wallet.core.InMemoryPrefs
 import app.aroundtheblock.wallet.core.InMemoryPrefsFactory
+import android.content.SharedPreferences
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -153,5 +157,47 @@ class WalletRegistryTest {
         assertFalse(registry().anyRecordExists())
         recordsOnDisk = listOf("0123456789abcdef" to true)
         assertTrue(registry().anyRecordExists())
+    }
+
+    @Test
+    fun `a rebuilt registry lists only ids whose record exists`() {
+        // An empty seed prefs file left on disk (a removal that died after clearing it) is not a wallet.
+        prefs.seed("registry", "{not json")
+        recordsOnDisk = listOf("0123456789abcdef" to false, "fedcba9876543210" to false)
+        missingRecords += "fedcba9876543210"
+        assertEquals(listOf("legacy", "0123456789abcdef"), registry().list(false).map { it.id })
+    }
+
+    @Test
+    fun `an empty seed prefs file alone does not mean a wallet exists`() {
+        legacyRecord = false
+        recordsOnDisk = listOf("0123456789abcdef" to false)
+        missingRecords += "0123456789abcdef"
+        assertFalse(registry().anyRecordExists())
+    }
+
+    /**
+     * Two registry instances over one prefs file (ActiveWallet.registry builds one per call). The
+     * first reader is held until a second reader arrives (or 500 ms pass): unserialised, both
+     * read the same registry and the second commit drops the first one's entry.
+     */
+    @Test
+    fun `concurrent mutations from two registry instances lose nothing`() {
+        val paused = AtomicBoolean(false)
+        val secondReader = CountDownLatch(1)
+        val gated = object : SharedPreferences by prefs {
+            override fun getString(key: String?, defValue: String?): String? {
+                if (paused.compareAndSet(false, true)) secondReader.await(500, TimeUnit.MILLISECONDS) else secondReader.countDown()
+                return prefs.getString(key, defValue)
+            }
+        }
+        fun instance() = WalletRegistry(gated, { true }, { emptyList() })
+        val reserved = java.util.Collections.synchronizedList(mutableListOf<WalletEntry?>())
+        val threads = List(2) { Thread { reserved += instance().reserve(false, WalletOrigin.CREATED, 1L) } }
+        threads.forEach { it.start() }
+        threads.forEach { it.join(5_000) }
+
+        assertEquals(2, reserved.filterNotNull().size)
+        assertEquals(reserved.filterNotNull().map { it.id }.toSet(), registry().incomplete().map { it.id }.toSet())
     }
 }

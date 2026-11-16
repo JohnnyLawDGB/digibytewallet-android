@@ -19,7 +19,9 @@ import app.aroundtheblock.wallet.core.ipfs.IpfsClient
 import app.aroundtheblock.wallet.core.security.*
 import app.aroundtheblock.wallet.core.wallets.ActiveWallet
 import app.aroundtheblock.wallet.core.wallets.WalletManagerFactory
+import app.aroundtheblock.wallet.core.wallets.WalletProvisioner
 import app.aroundtheblock.wallet.core.wallets.WalletRegistry
+import app.aroundtheblock.wallet.core.wallets.WalletStoreEraser
 import app.aroundtheblock.wallet.core.wallets.WalletStores
 import okhttp3.OkHttpClient
 import javax.inject.Singleton
@@ -46,6 +48,22 @@ object AppModule {
     ): WalletManagerFactory = WalletManagerFactory { scope ->
         WalletManager(context, KeyStoreManager(context, WalletStores.keyAlias(scope)), um, scope = scope)
     }
+
+    /** Erases one wallet's scope (adding a wallet that does not complete; removing one). */
+    @Provides @Singleton
+    fun provideWalletStoreEraser(@ApplicationContext context: Context): WalletStoreEraser = WalletStoreEraser(context)
+
+    @Provides @Singleton
+    fun provideWalletProvisioner(
+        registry: WalletRegistry,
+        walletManagerFactory: WalletManagerFactory,
+        eraser: WalletStoreEraser,
+    ): WalletProvisioner = WalletProvisioner(
+        registry,
+        walletManagerFactory,
+        eraser,
+        deriveSeed = { m, p -> app.aroundtheblock.wallet.core.bridge.NativeBridge.mnemonicToSeed(m, p) },
+    )
 
     @Provides @Singleton
     fun providePinManager(@ApplicationContext context: Context): PinManager = PinManager(context)

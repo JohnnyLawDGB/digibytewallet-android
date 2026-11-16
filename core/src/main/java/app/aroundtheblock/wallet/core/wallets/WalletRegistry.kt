@@ -27,6 +27,9 @@ data class WalletEntry(
  * The list of wallets and the active one per network. The whole registry is one JSON string under
  * one key, so every change is a single atomic `commit()`. Keeps no state between calls: every call
  * reads and parses [prefs] afresh, and reading never writes.
+ *
+ * Every change (read, modify, commit) holds one process-wide lock, so instances over the same
+ * prefs (ActiveWallet.registry builds one per call) cannot lose each other's updates.
  */
 class WalletRegistry(
     private val prefs: SharedPreferences,
@@ -68,7 +71,7 @@ class WalletRegistry(
 
     fun activeId(testnet: Boolean): String = activeId(testnet, load())
 
-    fun setActive(testnet: Boolean, id: String): Boolean {
+    fun setActive(testnet: Boolean, id: String): Boolean = synchronized(MUTATION_LOCK) {
         val doc = load()
         if (readyOn(testnet, doc).none { it.id == id }) return false
         doc.setActive(testnet, id)
@@ -77,7 +80,7 @@ class WalletRegistry(
 
     fun canReserve(testnet: Boolean): Boolean = canReserve(testnet, load())
 
-    fun reserve(testnet: Boolean, origin: WalletOrigin, nowSecs: Long): WalletEntry? {
+    fun reserve(testnet: Boolean, origin: WalletOrigin, nowSecs: Long): WalletEntry? = synchronized(MUTATION_LOCK) {
         val doc = load()
         if (!canReserve(testnet, doc)) return null
         var id = WalletIds.newId(random)
@@ -90,7 +93,7 @@ class WalletRegistry(
         return entry.takeIf { save(doc) }
     }
 
-    fun complete(id: String, makeActive: Boolean): Boolean {
+    fun complete(id: String, makeActive: Boolean): Boolean = synchronized(MUTATION_LOCK) {
         val doc = load()
         val i = doc.entries.indexOfFirst { it.id == id }
         if (i < 0 || doc.entries[i].state != EntryState.PENDING) return false
@@ -100,7 +103,7 @@ class WalletRegistry(
         return save(doc)
     }
 
-    fun markRemoving(id: String): Boolean {
+    fun markRemoving(id: String): Boolean = synchronized(MUTATION_LOCK) {
         val doc = load()
         // Which networks name this wallet as active is read before the state changes.
         val activeOn = listOf(false, true).filter { activeId(it, doc) == id }
@@ -116,9 +119,9 @@ class WalletRegistry(
         return save(doc)
     }
 
-    fun anyRecordExists(): Boolean = legacyRecordExists() || recordsOnDisk().isNotEmpty()
+    fun anyRecordExists(): Boolean = legacyRecordExists() || recordsOnDisk().any { (id, _) -> holdsRecord(id) }
 
-    fun drop(id: String): Boolean {
+    fun drop(id: String): Boolean = synchronized(MUTATION_LOCK) {
         val doc = load()
         if (id == WalletIds.LEGACY) {
             // Legacy has no array entry; its record going away is what unlists it.
@@ -131,7 +134,7 @@ class WalletRegistry(
         return save(doc)
     }
 
-    fun rename(id: String, name: String): Boolean {
+    fun rename(id: String, name: String): Boolean = synchronized(MUTATION_LOCK) {
         val doc = load()
         val target = if (id == WalletIds.LEGACY) legacyEntry(doc) else doc.entries.firstOrNull { it.id == id }
         if (target == null) return false
@@ -148,7 +151,7 @@ class WalletRegistry(
         return save(doc)
     }
 
-    fun reorder(testnet: Boolean, ids: List<String>): Boolean {
+    fun reorder(testnet: Boolean, ids: List<String>): Boolean = synchronized(MUTATION_LOCK) {
         val doc = load()
         val current = readyOn(testnet, doc).map { it.id }
         if (ids.size != current.size || ids.toSet() != current.toSet()) return false
@@ -166,6 +169,10 @@ class WalletRegistry(
     // -- helpers ------------------------------------------------------------------------------
 
     private fun legacyRecordExists(): Boolean = recordExists(WalletScope.legacy(false))
+
+    /** A non-legacy [id]'s seed record holds a sealed seed (the record is one file for both networks). */
+    private fun holdsRecord(id: String): Boolean =
+        WalletIds.isValid(id) && id != WalletIds.LEGACY && recordExists(WalletScope(id, false))
 
     private fun legacyEntry(doc: Doc) = WalletEntry(
         WalletIds.LEGACY, doc.legacyName, 1, null, 0L, WalletOrigin.CREATED, doc.legacyOrder, doc.legacyState,
@@ -214,6 +221,8 @@ class WalletRegistry(
         var order = 1
         for ((id, testnet) in recordsOnDisk().distinctBy { it.first }) {
             if (!WalletIds.isValid(id) || id == WalletIds.LEGACY) continue
+            // An emptied seed prefs file left on disk is not a wallet.
+            if (!holdsRecord(id)) continue
             // A record that does not name its network goes on mainnet, the only network a user
             // can reach without the developer toggle.
             val net = testnet ?: false
@@ -294,6 +303,9 @@ class WalletRegistry(
 
     companion object {
         const val PREFS = "dgb_wallets"
+
+        /** Serialises every read-modify-write of the registry in this process, across instances. */
+        private val MUTATION_LOCK = Any()
         const val MAX_PER_NETWORK = 8
         const val MAX_NAME_CHARS = 32
         private const val KEY = "registry"

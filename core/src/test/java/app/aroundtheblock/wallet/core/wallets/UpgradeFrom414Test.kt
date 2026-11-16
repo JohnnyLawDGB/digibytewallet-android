@@ -172,7 +172,8 @@ class UpgradeFrom414Test {
         assertEquals(setOf("dgb_wallet_master", "dgb_wallet_master_v2", "dgb_db_passphrase", "dgb_pin_store_key"), aliasesBefore)
         assertEquals(21_000_000L, prefsBefore.getValue("dgb_settings")["cf_birth_height"])
 
-        // The launch-time reads, in production order.
+        // The launch-time reads, in production order. Housekeeping runs first (DigiByteApp.onCreate).
+        assertEquals(0, WalletHousekeeping(install.ctx).run())
         val scope = ActiveWallet.scope(install.ctx)
         val listed = ActiveWallet.registry(install.ctx).list(false)
         val dbName = WalletStores.databaseName(scope)
