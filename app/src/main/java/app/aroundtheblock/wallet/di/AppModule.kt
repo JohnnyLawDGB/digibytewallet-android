@@ -161,6 +161,21 @@ object AppModule {
             scope = ActiveWallet.scope(context),
         )
 
+    /** Wallet switching: persist the active id, end the web session, restart (Task 9). */
+    @Provides @Singleton
+    fun provideWalletSwitcher(
+        @ApplicationContext context: Context,
+        registry: WalletRegistry,
+        identitySessions: app.aroundtheblock.wallet.IdentitySessionEraser,
+    ): app.aroundtheblock.wallet.WalletSwitcher =
+        app.aroundtheblock.wallet.WalletSwitcher(
+            registry = registry,
+            testnet = { ActiveWallet.scope(context).testnet },
+            currentId = { ActiveWallet.scope(context).walletId },
+            endWebSession = { identitySessions.endWebSessionOnly() },
+            restart = { app.aroundtheblock.wallet.AppRestart.restart(context) },
+        )
+
     /**
      * The app-side half of a wallet wipe (Hub login held in memory, DigiStamp web session),
      * handed to [WalletManager] so ONE wipe covers them whichever screen starts it. Both

@@ -59,6 +59,10 @@ class IdentitySessionEraser internal constructor(
         return hub && web
     }
 
+    /** Only the web-session part of [eraseIdentitySessions], on the main thread: a wallet switch
+     *  must not let wallet A's DigiStamp cookies greet wallet B. Hub is left alone (A's token is in A's store). */
+    fun endWebSessionOnly(): Boolean = attempt("web session") { onMainThread(endWebSession) }
+
     private fun attempt(what: String, block: () -> Boolean): Boolean = try {
         block().also { ok -> if (!ok) Log.w(TAG, "$what: not confirmed") }
     } catch (t: Throwable) {

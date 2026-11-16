@@ -50,12 +50,11 @@ class RebuildResultGateTest {
             val onFalseCode = gate.code.substring(onFalse.first, onFalse.last + 1)
 
             assertTrue("$where: the false branch does not leave the launch", Regex("""(?<!\w)return@launch(?!\w)""").containsMatchIn(onFalseCode))
-            assertTrue("$where: the false branch restarts the app", gate.calls("exit", onFalse).isEmpty())
-            assertTrue("$where: the false branch restarts the app", gate.calls("startActivity", onFalse).isEmpty())
+            assertTrue("$where: the false branch restarts the app", gate.calls("restart", onFalse).isEmpty())
             assertEquals("$where: the false branch does not resume sync", 1, gate.calls("requestSyncResumeNearTip", onFalse).size)
 
             // The restart follows the branch, so it runs only on true.
-            val exit = gate.calls("exit", launch).single()
+            val exit = gate.calls("restart", launch).single()
             assertTrue("$where: the restart comes before the branch on the answer", exit.range.first > onFalse.last)
         }
     }

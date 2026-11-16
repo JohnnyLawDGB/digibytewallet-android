@@ -159,11 +159,13 @@ object BootGuard {
      * task in onCreate, and eagerly after saved blocks load successfully). Resets
      * the counter so healthy boots never accumulate toward a wipe.
      */
-    fun markBootHealthy(context: Context) {
+    fun markBootHealthy(context: Context, sync: Boolean = false) {
         val p = prefs(context)
         if (p.getInt(KEY_PENDING, 0) != 0) {
             android.util.Log.i("BootGuard", "Boot healthy — clearing crash-loop counter")
-            p.edit().putInt(KEY_PENDING, 0).apply()
+            // sync: the caller is about to end the process, which could lose an apply().
+            val edit = p.edit().putInt(KEY_PENDING, 0)
+            if (sync) edit.commit() else edit.apply()
         }
     }
 
