@@ -41,10 +41,13 @@ class DgbNodeClient internal constructor(
      * started with Tor on would leave from the device's own address.
      */
     private val baseClient: OkHttpClient,
-    /** True for [digiScopeOnly]: every request goes to [DEFAULT_BASE_URL], whatever own node is set. */
-    private val digiScopeOnly: Boolean,
+    /**
+     * The one endpoint every request goes to, whatever `custom_rpc_endpoint` holds now, or null to
+     * read the setting per request. Set by [digiScopeOnly] and [ownNodeOnly].
+     */
+    private val pinnedEndpoint: String?,
 ) {
-    constructor(context: Context, baseClient: OkHttpClient) : this(context, baseClient, false)
+    constructor(context: Context, baseClient: OkHttpClient) : this(context, baseClient, null)
 
     companion object {
         /**
@@ -53,7 +56,19 @@ class DgbNodeClient internal constructor(
          * own node, and the own node's address never appears in it.
          */
         fun digiScopeOnly(context: Context, client: OkHttpClient): DgbNodeClient =
-            DgbNodeClient(context, client, true)
+            DgbNodeClient(context, client, DEFAULT_BASE_URL)
+
+        /**
+         * A client that always asks [endpoint], the own node the user picked, captured when they
+         * picked it: clearing or changing `custom_rpc_endpoint` afterwards never sends a later
+         * request to DigiScope. A blank [endpoint] is refused ([IllegalArgumentException]); there
+         * is no fallback.
+         */
+        fun ownNodeOnly(context: Context, client: OkHttpClient, endpoint: String): DgbNodeClient {
+            val pinned = endpoint.trim().trimEnd('/')
+            require(pinned.isNotEmpty()) { "no own node endpoint" }
+            return DgbNodeClient(context, client, pinned)
+        }
 
         const val DEFAULT_BASE_URL = "https://api.digiscope.me/api"
         private const val PREFS_NAME = "dgb_reconcile"
@@ -135,9 +150,9 @@ class DgbNodeClient internal constructor(
         Context.MODE_PRIVATE,
     )
 
-    /** The active endpoint. Defaults to digiscope.me; can be user-overridden (never for [digiScopeOnly]). */
+    /** The active endpoint. Defaults to digiscope.me; can be user-overridden; fixed for [digiScopeOnly] and [ownNodeOnly]. */
     fun endpoint(): String =
-        if (digiScopeOnly) DEFAULT_BASE_URL else customEndpoint() ?: DEFAULT_BASE_URL
+        pinnedEndpoint ?: customEndpoint() ?: DEFAULT_BASE_URL
 
     /** The user's own node (`custom_rpc_endpoint`, trimmed, without a trailing slash), or null when none is set. */
     fun customEndpoint(): String? =

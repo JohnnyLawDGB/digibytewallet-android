@@ -38,23 +38,38 @@ class NodeClientWiringGateTest {
                 .filterNot { gate.code.substring(0, it.range.first).trimEnd().endsWith("class") }
                 .map { file.path to it.arguments }
         }
-        // The one other construction: DgbNodeClient.digiScopeOnly, the quick start's DigiScope-only
-        // client, built inside the class from the client its caller passes (Task 15).
+        // The only other constructions: the two pinned factories inside the class, digiScopeOnly and
+        // ownNodeOnly, each from the client its caller passes (Task 15).
         val (factory, rest) = constructions.partition { (path, _) -> path.endsWith("core/reconcile/DgbNodeClient.kt") }
-        assertEquals("the class builds itself other than through digiScopeOnly: $factory", listOf(listOf("context", "client", "true")), factory.map { it.second })
+        assertEquals(
+            "the class builds itself other than through its two pinned factories: $factory",
+            listOf(listOf("context", "client", "DEFAULT_BASE_URL"), listOf("context", "client", "pinned")),
+            factory.map { it.second },
+        )
         val outside = rest.filterNot { (path, _) -> path.endsWith("di/AppModule.kt") }
         assertTrue("the reconcile client is constructed outside the provider: $outside", outside.isEmpty())
         assertEquals("the provider must construct the reconcile client exactly once", 1, rest.size)
         assertEquals("the provider does not pass the injected client", listOf("context", "client"), rest.single().second)
     }
 
-    /** The DigiScope-only client is built from the injected shared client, as the provider's is. */
-    @Test fun `the digiscope-only client is built from the injected client`() {
+    /**
+     * The pinned clients are built from the injected shared client, as the provider's is, and only
+     * by the quick start. Matched by name whatever the receiver (`DgbNodeClient.`, `Companion.`, none).
+     */
+    @Test fun `the pinned clients are built from the injected client`() {
         val callers = sources().flatMap { file ->
             val gate = KotlinSourceGate.of(file.readText())
-            gate.calls("DgbNodeClient.digiScopeOnly").map { file.name to it.arguments }
+            listOf("digiScopeOnly", "ownNodeOnly").flatMap { name -> gate.calls(name).map { Triple(file.name, name, it.arguments) } }
         }
-        assertEquals("scanner is blind or a second caller was added: $callers", listOf("QuickStartScans.kt" to listOf("context", "client")), callers)
+        assertEquals(
+            "scanner is blind or another caller was added: $callers",
+            setOf(
+                Triple("QuickStartScans.kt", "digiScopeOnly", listOf("context", "client")),
+                Triple("QuickStartScans.kt", "ownNodeOnly", listOf("context", "client", "endpoint")),
+            ),
+            callers.toSet(),
+        )
+        assertEquals("a pinned client is built twice: $callers", 2, callers.size)
         val scans = File("src/main/java/app/aroundtheblock/wallet/ui/onboarding/QuickStartScans.kt").readText()
         assertTrue("QuickStartScans does not take the injected client", Regex("""@Inject\s+constructor\([^)]*private val client: OkHttpClient""").containsMatchIn(scans))
     }

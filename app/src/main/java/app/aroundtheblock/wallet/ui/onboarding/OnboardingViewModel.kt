@@ -199,11 +199,11 @@ class OnboardingViewModel @Inject constructor(
      * on the main thread with the answer, only while [scanGeneration] still names the phrase it
      * was started for. A blank phrase answers [RecoveryScanService.State.Failed] at once.
      */
-    private fun runScan(service: RecoveryScanService, onDone: (RecoveryScanService.State) -> Unit) {
+    private fun runScan(service: RecoveryScanService, onDone: (RecoveryScanService.State) -> Unit): kotlinx.coroutines.Job? {
         val phrase = _mnemonic.joinToString(" ")
         if (phrase.isBlank()) {
             onDone(RecoveryScanService.State.Failed("No mnemonic entered"))
-            return
+            return null
         }
         cancelRecoveryScan()
         val generation = scanGeneration
@@ -217,6 +217,7 @@ class OnboardingViewModel @Inject constructor(
             if (generation != scanGeneration) return@launch   // the phrase changed: not this scan's answer to give
             onDone(result)
         }
+        return scanJob
     }
 
     // ── Quick start (ADD mode, restore) ──────────────────────────────────────
@@ -229,10 +230,26 @@ class OnboardingViewModel @Inject constructor(
     /** What the quick start found, held for [commitAdd] to store with the new wallet. Display only. */
     private var quickStartKept: QuickStart? = null
 
+    /** The own node shown by the last [quickStartOffer]: the only place an own-node lookup goes. Main thread. */
+    private var offeredOwnNode: String? = null
+
+    /** The running quick start's job. Its end with the state still Running (cancelled, or its answer no
+     *  longer this phrase's) puts the quick start back to Idle. */
+    @Volatile private var quickStartJob: kotlinx.coroutines.Job? = null
+
     /** What the quick start screen offers. Reads the own-node setting, so off the main thread. */
-    suspend fun quickStartOffer(): QuickStartOffer = withContext(Dispatchers.IO) {
-        val endpoint = runCatching { quickStartScans.customEndpoint() }.getOrNull()
-        QuickStartOffer(quickStartChoices(endpoint), endpoint?.let(::quickStartHost))
+    suspend fun quickStartOffer(): QuickStartOffer {
+        val endpoint = withContext(Dispatchers.IO) { runCatching { quickStartScans.customEndpoint() }.getOrNull() }
+        offeredOwnNode = endpoint
+        return QuickStartOffer(quickStartChoices(endpoint), endpoint?.let(::quickStartHost), endpoint)
+    }
+
+    /** Leaving the quick start while it runs: stops it, and nothing it finds afterwards is kept. */
+    fun cancelQuickStart() {
+        if (_quickStart.value == QuickStartUi.Running) cancelRecoveryScan()
+        quickStartJob = null
+        quickStartKept = null
+        _quickStart.value = QuickStartUi.Idle
     }
 
     /**
@@ -245,30 +262,41 @@ class OnboardingViewModel @Inject constructor(
         check(mode == OnboardingMode.ADD) { "the quick start runs only when adding a wallet" }
         if (_quickStart.value == QuickStartUi.Running) return
         quickStartKept = null
-        val built = quickStartScans.serviceFor(source)
+        val built = runCatching { quickStartScans.serviceFor(source, offeredOwnNode) }.getOrNull()
         if (built == null) {
             _quickStart.value = QuickStartUi.Failed
             return
         }
         val (service, label) = built
         _quickStart.value = QuickStartUi.Running
-        runScan(service) { result ->
-            // An answer with any path unanswered would show less than the wallet holds as if it
-            // were all: no figure rather than a confident wrong one.
-            if (result !is RecoveryScanService.State.Done || result.anyBackendUnreachable) {
+        val job = runScan(service) { result ->
+            if (result !is RecoveryScanService.State.Done || result.allBackendUnreachable) {
                 _quickStart.value = QuickStartUi.Failed
+                return@runScan
+            }
+            // An answer with any path unanswered, or cut short by the cap, could show less than the
+            // wallet holds as if it were all: no figure rather than a confident wrong one.
+            if (result.anyBackendUnreachable || result.cappedProfileLabels.isNotEmpty()) {
+                _quickStart.value = QuickStartUi.Incomplete
                 return@runScan
             }
             // Every profile scanned is native (BIP84 and BIP86), so the total is the native total;
             // nativeResult alone would be BIP84 only and drop the taproot coins.
             val found = QuickStart(
                 unverifiedSat = result.totalBalanceSat,
+                // Null today: scan() does not look up DigiDollar (only scanFromSeed does). Kept for when it does.
                 unverifiedDdCents = result.digiDollar?.cents,
                 sourceLabel = label,
                 atSecs = System.currentTimeMillis() / 1000,
             )
             quickStartKept = found
             _quickStart.value = QuickStartUi.Found(found)
+        } ?: return
+        quickStartJob = job
+        // Cancelled (runRecoveryScan and a new phrase share scanJob) or ended with no answer to give:
+        // not a dead end on "Running".
+        job.invokeOnCompletion {
+            if (quickStartJob === job && _quickStart.value == QuickStartUi.Running) _quickStart.value = QuickStartUi.Idle
         }
     }
 

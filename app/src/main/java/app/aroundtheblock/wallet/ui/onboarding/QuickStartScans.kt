@@ -26,8 +26,12 @@ internal fun quickStartHost(url: String): String? {
     return if (parsed.port != HttpUrl.defaultPort(parsed.scheme)) "${parsed.host}:${parsed.port}" else parsed.host
 }
 
-/** What the quick start screen offers: its choices, and the own node's host when one is set. */
-data class QuickStartOffer(val choices: List<QuickStartSource>, val ownNodeHost: String?)
+/**
+ * What the quick start screen offers: its choices, and the own node's host when one is set.
+ * [ownNodeEndpoint] is the endpoint as read for this offer: an own-node lookup goes to it and
+ * nowhere else, even if the setting changes afterwards.
+ */
+data class QuickStartOffer(val choices: List<QuickStartSource>, val ownNodeHost: String?, val ownNodeEndpoint: String? = null)
 
 /** The quick start as the screen shows it. */
 sealed class QuickStartUi {
@@ -35,7 +39,10 @@ sealed class QuickStartUi {
     data object Running : QuickStartUi()
     /** Display only: never spendable, never in the balance (see [QuickStart]). */
     data class Found(val quickStart: QuickStart) : QuickStartUi()
+    /** No answer at all. */
     data object Failed : QuickStartUi()
+    /** An answer with a path unanswered or cut short by the cap: no figure, as it may show less than the wallet holds. */
+    data object Incomplete : QuickStartUi()
 }
 
 /**
@@ -46,23 +53,25 @@ sealed class QuickStartUi {
 class QuickStartScans @Inject constructor(
     @ApplicationContext private val context: Context,
     private val client: OkHttpClient,
-    /** The app's reconcile client: its endpoint is the own node whenever one is set. */
+    /** The app's reconcile client, read only for the own-node setting. */
     private val nodeClient: DgbNodeClient,
 ) {
     /** The "Use my own node" endpoint of Scan for missing funds, or null. Reads prefs: off the main thread. */
     fun customEndpoint(): String? = nodeClient.customEndpoint()
 
     /**
-     * The lookup for [source] and the name of the server it asks, or null when it cannot be made:
-     * an own-node lookup with no own node set is refused, never sent to DigiScope instead.
+     * The lookup for [source] and the name of the server it asks, or null when it cannot be made.
+     * An own-node lookup goes only to [ownNodeEndpoint], the endpoint the user was shown when they
+     * chose it ([DgbNodeClient.ownNodeOnly]); with none it is refused, never sent to DigiScope.
      */
-    fun serviceFor(source: QuickStartSource): Pair<RecoveryScanService, String>? {
+    fun serviceFor(source: QuickStartSource, ownNodeEndpoint: String?): Pair<RecoveryScanService, String>? {
         val node: DgbNodeClient
         val label: String
         when (source) {
             QuickStartSource.OWN_NODE -> {
-                node = nodeClient
-                label = nodeClient.customEndpoint()?.let(::quickStartHost) ?: return null
+                val endpoint = ownNodeEndpoint?.takeIf { it.isNotBlank() } ?: return null
+                label = quickStartHost(endpoint) ?: return null
+                node = DgbNodeClient.ownNodeOnly(context, client, endpoint)
             }
             QuickStartSource.DIGISCOPE -> {
                 // Never the own node, whatever is set: the user addressed this to DigiScope.

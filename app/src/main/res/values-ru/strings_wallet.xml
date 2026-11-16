@@ -854,4 +854,6 @@
     <string name="quickstart_unverified">%1$s DGB по данным %2$s, ещё не проверено</string>
     <string name="quickstart_unverified_dd">%1$s DigiDollar по данным сервера, ещё не проверено</string>
     <string name="quickstart_unverified_sub">Нельзя потратить и не входит в баланс, пока синхронизация это не подтвердит.</string>
+    <string name="quickstart_running_skip">Продолжить, не дожидаясь</string>
+    <string name="quickstart_incomplete">Запрос не удалось завершить, поэтому сумма не показана. Кошелёк всё равно найдёт свой баланс при синхронизации.</string>
 </resources>

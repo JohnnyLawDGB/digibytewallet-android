@@ -840,4 +840,6 @@
     <string name="quickstart_unverified">%1$s DGB na iniulat ng %2$s, hindi pa beripikado</string>
     <string name="quickstart_unverified_dd">%1$s DigiDollar na iniulat, hindi pa beripikado</string>
     <string name="quickstart_unverified_sub">Hindi magagastos at hindi kasama sa iyong balanse hangga\'t hindi napapatunayan ng sync.</string>
+    <string name="quickstart_running_skip">Magpatuloy nang hindi naghihintay</string>
+    <string name="quickstart_incomplete">Hindi natapos ang paghahanap, kaya walang ipinapakitang halaga. Mahahanap pa rin ng wallet ang balanse nito habang nagsi-sync.</string>
 </resources>

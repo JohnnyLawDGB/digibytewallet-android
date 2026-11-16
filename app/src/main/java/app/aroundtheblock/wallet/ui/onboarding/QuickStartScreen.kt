@@ -125,6 +125,16 @@ fun QuickStartScreen(
                     CircularProgressIndicator(color = DigiByteAccent)
                     Spacer(Modifier.height(16.dp))
                     Body(stringResource(R.string.quickstart_running))
+                    Spacer(Modifier.height(24.dp))
+                    // Not a dead end: one tap stops the lookup and goes on to the commit step.
+                    OutlinedButton(
+                        onClick = {
+                            viewModel.cancelQuickStart()
+                            navController.navigate(ADD_COMMIT_ROUTE) { launchSingleTop = true }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                    ) { Text(stringResource(R.string.quickstart_running_skip)) }
                 }
 
                 is QuickStartUi.Found -> {
@@ -145,8 +155,8 @@ fun QuickStartScreen(
                     ) { Text(stringResource(R.string.quickstart_continue)) }
                 }
 
-                QuickStartUi.Failed -> {
-                    Body(stringResource(R.string.quickstart_failed))
+                QuickStartUi.Failed, QuickStartUi.Incomplete -> {
+                    Body(stringResource(if (state == QuickStartUi.Incomplete) R.string.quickstart_incomplete else R.string.quickstart_failed))
                     Spacer(Modifier.height(24.dp))
                     Button(
                         onClick = { navController.navigate(ADD_COMMIT_ROUTE) { launchSingleTop = true } },

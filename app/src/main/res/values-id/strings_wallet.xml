@@ -833,4 +833,6 @@
     <string name="quickstart_unverified">%1$s DGB dilaporkan oleh %2$s, belum diverifikasi</string>
     <string name="quickstart_unverified_dd">%1$s DigiDollar dilaporkan, belum diverifikasi</string>
     <string name="quickstart_unverified_sub">Tidak dapat dibelanjakan dan tidak masuk saldo Anda sampai sinkronisasi membuktikannya.</string>
+    <string name="quickstart_running_skip">Lanjutkan tanpa menunggu</string>
+    <string name="quickstart_incomplete">Pencarian tidak dapat diselesaikan, jadi tidak ada angka yang ditampilkan. Dompet tetap akan menemukan saldonya saat sinkronisasi.</string>
 </resources>

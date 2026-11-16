@@ -833,4 +833,6 @@
     <string name="quickstart_unverified">%2$s の報告：%1$s DGB（未確認）</string>
     <string name="quickstart_unverified_dd">%1$s DigiDollar の報告（未確認）</string>
     <string name="quickstart_unverified_sub">同期で証明されるまで使えず、残高にも含まれません。</string>
+    <string name="quickstart_running_skip">待たずに続ける</string>
+    <string name="quickstart_incomplete">問い合わせを完了できなかったため、金額は表示しません。ウォレットは同期しながら残高を見つけます。</string>
 </resources>

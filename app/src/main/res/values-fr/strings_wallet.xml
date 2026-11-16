@@ -827,4 +827,6 @@
     <string name="quickstart_unverified">%1$s DGB indiqués par %2$s, pas encore vérifiés</string>
     <string name="quickstart_unverified_dd">%1$s DigiDollar indiqués, pas encore vérifiés</string>
     <string name="quickstart_unverified_sub">Non dépensable et non compté dans votre solde tant que la synchronisation ne l’a pas prouvé.</string>
+    <string name="quickstart_running_skip">Continuer sans attendre</string>
+    <string name="quickstart_incomplete">La recherche n’a pas pu aboutir, aucun montant n’est donc affiché. Le portefeuille trouvera quand même son solde en se synchronisant.</string>
 </resources>
