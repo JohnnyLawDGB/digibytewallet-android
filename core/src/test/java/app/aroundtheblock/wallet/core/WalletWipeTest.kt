@@ -533,9 +533,10 @@ class WalletWipeTest {
             stillHere.prefs.prefsFor("dgb_wallet_seed").durable.containsKey("encrypted_seed_v2"),
         )
 
-        // And with no record left there is nothing for the owed wipe to hold a screen for: the flag
-        // goes, so onboarding can be offered and a wallet made from here on does not inherit it.
-        val nothingLeft = Device()
+        // And with no record and no seed key left there is nothing for the owed wipe to hold a screen
+        // for: the flag goes, so onboarding can be offered and a wallet made from here on does not
+        // inherit it.
+        val nothingLeft = Device().apply { keystore.aliases -= setOf(LEGACY_ALIAS, BOUND_ALIAS) }
         val store = trippedPinStore()
         val pin = PinManager(store)
 
@@ -610,7 +611,7 @@ class WalletWipeTest {
     /** Releasing an owed wipe that will not verify leaves secrets behind: their erasure stays owed. */
     @Test fun `releasing an owed wipe with no wallet left keeps the erasure owed`() = kotlinx.coroutines.runBlocking {
         var marked = 0
-        val wm = walletManager(eraser = RecordingEraser(), markErasureOwed = { marked++ })
+        val wm = walletManager(eraser = RecordingEraser(), markErasureOwed = { marked++ }, keystore = FakeKeystore())
         val released = wm.releaseOwedWipeIfNoWalletIsLeft(PinManager(trippedPinStore()))
         assertTrue(released)
         assertEquals(1, marked)

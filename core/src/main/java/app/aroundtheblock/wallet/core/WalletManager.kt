@@ -1039,12 +1039,7 @@ class WalletManager @Suppress("LongParameterList") constructor(
      * this directly but go through [wipeThenReleasePin], which decides about the PIN from it.
      */
     suspend fun wipeWallet(): WipeReport {
-        fun attempt(what: String, block: () -> Boolean): Boolean = try {
-            block()
-        } catch (t: Throwable) {
-            android.util.Log.e("WalletManager", "wipe: $what did not complete (${t.javaClass.simpleName})")
-            false
-        }
+        fun attempt(what: String, block: () -> Boolean): Boolean = wipeStep(what, block)
 
         // Stop what runs the wallet's session in this process, so nothing it holds is written
         // after the erase below. Each one is asked, whatever the one before it did.
@@ -1053,27 +1048,10 @@ class WalletManager @Suppress("LongParameterList") constructor(
             .all { it }
         // Stop sync and disconnect peers before destroying wallet.
         val quiesced = attempt("native quiesce") { quiesceNative(); true }
-        // Every wallet on the device, legacy always among them. An id set that cannot be read is a
-        // wipe that cannot say every record is gone: legacy is still erased, and the seed is not
-        // reported gone.
-        val listed: List<String>? = try {
-            (listOf(WalletIds.LEGACY) + allWalletIds()).filter(WalletIds::isValid).distinct()
-        } catch (t: Throwable) {
-            android.util.Log.e("WalletManager", "wipe: wallet ids not listed (${t.javaClass.simpleName})")
-            null
-        }
-        // Every wallet but legacy, whose stores [dataEraser] erases on both networks. A seed record
-        // is one file for both networks, so the network here only names it.
-        val others = listed.orEmpty().filter { it != WalletIds.LEGACY }.map { WalletScope(it, testnet = false) }
-        // Phase 1, every seed record FIRST (the ordering invariant above). The record is what holds
-        // the seed; the key only unwraps it. So the removal of every record is CONFIRMED first — each
-        // write landed (the in-memory view of a preferences file shows an edit whether or not it
-        // reached the disk, so the write result is part of the evidence) and no record of any wallet
-        // is readable any more — and only then does any key go.
-        val recordsErased = listOf(attempt("wallet record") { dataEraser.eraseSeedCiphertext() }) +
-            others.map { wallet -> attempt("wallet record") { scopeEraser.eraseRecord(wallet) } }
-        val recordGone = listed != null && recordsErased.all { it } &&
-            attempt("wallet record read-back") { (listOf(WalletScope.legacy(false)) + others).none(::holdsSeedRecord) }
+        // Phase 1, every seed record of every wallet FIRST (the ordering invariant above).
+        val records = eraseEveryRecord()
+        val others = records.others
+        val recordGone = records.gone
         // Phase 2, every seed key alias of every wallet, through the Keystore itself: [keyStoreManager]
         // is bound to this manager's wallet, and with another wallet active it would leave legacy's.
         // Legacy's key may still wrap the database password's record; the database and that record are
@@ -1118,9 +1096,7 @@ class WalletManager @Suppress("LongParameterList") constructor(
         )
         // READ-BACK, not "no step threw": the removal of every record is confirmed (above) and no
         // seed key alias of any wallet exists when the Keystore is asked again.
-        val seedGone = recordGone && attempt("wallet key read-back") {
-            keystoreAliases.aliases().none { WalletStores.walletIdOfAlias(it) != null }
-        }
+        val seedGone = seedOfEveryWalletGone(records)
 
         // The state says what is on the device: no wallet only when the seed is gone. Otherwise
         // the wallet still exists behind its PIN and its session has been stopped — Locked.
@@ -1133,6 +1109,56 @@ class WalletManager @Suppress("LongParameterList") constructor(
         )
         return report
     }
+
+    /** A wipe step: one that throws has not reported success. Logged by exception class only. */
+    private fun wipeStep(what: String, block: () -> Boolean): Boolean = try {
+        block()
+    } catch (t: Throwable) {
+        android.util.Log.e("WalletManager", "wipe: $what did not complete (${t.javaClass.simpleName})")
+        false
+    }
+
+    /**
+     * What [eraseEveryRecord] established: [gone] when every wallet was listed, every record's
+     * erase reported landed and no wallet's record reads back; [others] every wallet but legacy.
+     */
+    private class RecordsErased(val gone: Boolean, val others: List<WalletScope>)
+
+    /**
+     * Phase 1 of every wipe, over every wallet on the device (legacy always among them): erase each
+     * seed record, then read every one back. The record is what holds the seed; the key only unwraps
+     * it. So the removal of every record is CONFIRMED first — each write landed (the in-memory view
+     * of a preferences file shows an edit whether or not it reached the disk, so the write result is
+     * part of the evidence) and no record of any wallet is readable any more — and only then may any
+     * key go. An id set that cannot be read is one that cannot say every record is gone: legacy is
+     * still erased, and [RecordsErased.gone] is false.
+     */
+    private fun eraseEveryRecord(): RecordsErased {
+        val listed: List<String>? = try {
+            (listOf(WalletIds.LEGACY) + allWalletIds()).filter(WalletIds::isValid).distinct()
+        } catch (t: Throwable) {
+            android.util.Log.e("WalletManager", "wipe: wallet ids not listed (${t.javaClass.simpleName})")
+            null
+        }
+        // A seed record is one file for both networks, so the network here only names it.
+        val others = listed.orEmpty().filter { it != WalletIds.LEGACY }.map { WalletScope(it, testnet = false) }
+        val erased = listOf(wipeStep("wallet record") { dataEraser.eraseSeedCiphertext() }) +
+            others.map { wallet -> wipeStep("wallet record") { scopeEraser.eraseRecord(wallet) } }
+        val gone = listed != null && erased.all { it } &&
+            wipeStep("wallet record read-back") { (listOf(WalletScope.legacy(false)) + others).none(::holdsSeedRecord) }
+        return RecordsErased(gone, others)
+    }
+
+    /**
+     * THE definition of "the seed is gone", for every wallet at once: [records] says no wallet's
+     * record is left, and the Keystore, asked again, holds no seed key alias of any wallet. Both the
+     * wipe ([WipeReport.seedGone]) and the way out of an owed wipe ([releaseOwedWipeIfNoWalletIsLeft])
+     * decide by it.
+     */
+    private fun seedOfEveryWalletGone(records: RecordsErased): Boolean =
+        records.gone && wipeStep("wallet key read-back") {
+            keystoreAliases.aliases().none { WalletStores.walletIdOfAlias(it) != null }
+        }
 
     /**
      * The ONE sequence every wipe entry point runs (Settings, the unlock screen, the spend
@@ -1193,11 +1219,13 @@ class WalletManager @Suppress("LongParameterList") constructor(
      * never add up to a device that can no longer be opened at all. After the bound the screen
      * asks this and then acts on the answer:
      *
-     *  - **true** — no wallet record is on this device, so there is nothing left for the owed wipe
-     *    to hold the screen for. The flag is released (and only the flag: the PIN store is
+     *  - **true** — the seed of EVERY wallet is gone by the wipe's own definition
+     *    ([seedOfEveryWalletGone]: no wallet's record is readable and no wallet's seed key alias
+     *    remains), so there is nothing left for the owed wipe to hold the screen for. The flag is released (and only the flag: the PIN store is
      *    untouched, as after any wipe that could not be verified) so onboarding can be offered and
      *    a wallet made from here on does not inherit a wipe owed to its predecessor.
-     *  - **false** — a wallet record is still on this device, so the hold has nothing left to
+     *  - **false** — a record or a seed key of some wallet is still on this device (one PIN guards
+     *    every wallet, so it does not matter which), so the hold has nothing left to
      *    protect and the screen stands down and takes the PIN, which opens that wallet: a refused
      *    write leaves this process reading what the store's file still holds (see
      *    [AndroidWalletDataEraser]), so a load from the record finds it. The screen still acts on
@@ -1205,7 +1233,7 @@ class WalletManager @Suppress("LongParameterList") constructor(
      *    Either way the wipe stays owed: the launch backstop and each later entry to the unlock
      *    screen retry it.
      *
-     * The evidence is the store's own answer to the wipe's first step, asked once more, and not
+     * The evidence is the stores' own answer to the wipe's first step ([eraseEveryRecord]), asked once more, and not
      * the record read-back on its own. So only a store that TAKES the removal counts as a device
      * with no wallet left, and a store that still refuses its write keeps its owner on the unlock
      * screen — never at onboarding over a wallet that is still there.
@@ -1217,13 +1245,10 @@ class WalletManager @Suppress("LongParameterList") constructor(
     suspend fun releaseOwedWipeIfNoWalletIsLeft(
         pinManager: app.aroundtheblock.wallet.core.security.PinManager,
     ): Boolean = kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
-        val recordGone = try {
-            dataEraser.eraseSeedCiphertext() && !hasSavedWallet()
-        } catch (t: Throwable) {
-            android.util.Log.e("WalletManager", "wallet record not removable (${t.javaClass.simpleName})")
-            false // unknown is "still here": the screen stands down and the PIN decides
-        }
-        if (!recordGone) return@withContext false
+        // Every wallet's, by the wipe's own definition: one PIN guards them all, so a record or a key
+        // of ANY wallet still here is a wallet the owed wipe still holds the screen for. Unknown is
+        // "still here": the screen stands down and the PIN decides.
+        if (!seedOfEveryWalletGone(eraseEveryRecord())) return@withContext false
         // The flag goes, but the secrets the unverified wipes left (Hub token, DB key) are still owed
         // their erasure: the next launch finishes it (4.1.2 row 33).
         runCatching { markErasureOwed() }.onFailure {

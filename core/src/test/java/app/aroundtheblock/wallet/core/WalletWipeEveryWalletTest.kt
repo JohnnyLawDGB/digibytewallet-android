@@ -245,6 +245,35 @@ class WalletWipeEveryWalletTest {
         assertFalse("D's alias survived the wipe", WalletStores.keyAliasV2(scopeD) in d.vault.keys.keys)
     }
 
+    @Test fun `an owed wipe is released only when no wallet's record or key is left`() = runTest {
+        val d = Device(active = scopeB).apply { populateDevice() }
+        val recordC = WalletStores.seedRecordPrefs(scopeC)
+        d.prefs.refuseWritesTo(recordC)
+        val wm = d.walletManager()
+
+        // The owed wipe could not remove C's record: B (active) and legacy lost theirs, C did not,
+        // and no key went (phase 2 waits for every record).
+        assertFalse(wm.wipeThenReleasePin(d.pin).seedGone)
+        assertTrue("precondition: the wipe is owed", d.pin.isWipePending())
+        assertTrue("precondition: B's record is gone", d.prefs.prefsFor(WalletStores.seedRecordPrefs(scopeB)).all.isEmpty())
+
+        assertFalse("C's record is still on the device, yet the owed wipe was released", wm.releaseOwedWipeIfNoWalletIsLeft(d.pin))
+        assertTrue(d.pin.isWipePending())
+        assertTrue("C's record must survive", d.prefs.prefsFor(recordC).durable.containsKey("encrypted_seed_v2"))
+
+        // C's store takes the removal now, but every wallet's key is still in the Keystore.
+        d.prefs.prefsFor(recordC).refuseWrites = false
+        assertFalse("a wallet's key is still on the device, yet the owed wipe was released", wm.releaseOwedWipeIfNoWalletIsLeft(d.pin))
+        assertTrue(d.pin.isWipePending())
+        assertTrue("the way out erases C's record as the wipe's first step does", d.prefs.prefsFor(recordC).all.isEmpty())
+
+        // C is gone, record and key, and so is every other wallet's key: nothing is left to hold for.
+        d.vault.keys.keys.filter { WalletStores.walletIdOfAlias(it) != null }.forEach(d.vault::delete)
+        assertTrue(wm.releaseOwedWipeIfNoWalletIsLeft(d.pin))
+        assertFalse("the owed wipe was not released", d.pin.isWipePending())
+        assertTrue("the way out must not clear the PIN store", d.pin.hasPin())
+    }
+
     @Test fun `the production id set is the registry, the seed records on disk and the Keystore aliases`() {
         val prefs = InMemoryPrefsFactory()
         val root = tmp.newFolder()
