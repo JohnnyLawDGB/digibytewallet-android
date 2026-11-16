@@ -55,6 +55,10 @@ class DigiByteApp : Application(), Configuration.Provider, ImageLoaderFactory {
         // here, and its database cannot be deleted under a live one. A throw leaves it for next launch.
         runCatching { app.aroundtheblock.wallet.core.wallets.WalletHousekeeping(this).run() }
             .onFailure { android.util.Log.w("WalletHousekeeping", "launch housekeeping failed; retried next launch", it) }
+        // Before any WebView or CookieManager exists in this process: web data left by another wallet
+        // is deleted here, whether or not the switch's own clear finished before the process ended.
+        runCatching { WebSessionIsolation.isolateAtLaunch(this) }
+            .onFailure { android.util.Log.w("WebSessionIsolation", "launch isolation failed; web entry refused", it) }
         // This install's key for transaction log tags, before any log line names a transaction (4.1.3, review R7).
         runCatching { app.aroundtheblock.wallet.core.LogTag.init(this) { NativeBridge.setLogTagKey(it) } }
         // Before any service or worker can dial a peer: with Tor on, the core reaches peers

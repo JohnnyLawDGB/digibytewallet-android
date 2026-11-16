@@ -57,6 +57,11 @@ class WalletSwitcherTest {
         assertEquals(1, calls.count { it == "restart" })
     }
 
+    @Test fun `an unconfirmed web session end still restarts, isolation is the next launch's job`() {
+        assertEquals(WalletSwitcher.Result.RESTARTING, switcher(web = false).switchTo(b))
+        assertEquals(1, calls.count { it == "restart" })
+    }
+
     @Test fun `an unknown, pending or other-network wallet is refused`() {
         val s = switcher()
         every { registry.find("nope") } returns null
