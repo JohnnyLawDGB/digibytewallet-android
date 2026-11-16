@@ -2,6 +2,42 @@
 
 Status: for owner approval (2026-11-16); builder-checked. Follow-on, separate design: Coinomi-compatible Digi-ID.
 
+> **Step 1 disposition (2026-11-16).** Plan: `docs/superpowers/plans/2026-11-16-multi-wallet-step1.md`.
+> The pre-flight conflict scan found 32 defects in the plan against this spec; rulings **F1-F32**
+> are recorded by number in `.superpowers/sdd/2026-11-16-multi-wallet-step1/preflight.md`
+> (F10 as modified by the owner: quick start offers DigiScope only as an explicit opt-in that
+> states the addresses are sent and that it links the user's wallets). The spec text already
+> carries the three rulings that changed a decided point and this banner does not restate them.
+> Decisions made where the spec was silent or the code differed:
+> - Legacy: the existing wallet is `legacy` (testnet unset: its record serves both networks, so
+>   removing it removes both). A fresh install or a post-wipe first wallet is also `legacy`.
+>   Every legacy store name is the 4.1.4 name. `wallet_network` is written only for non-legacy records.
+> - Naming: `_<id>` goes before the network part; stores are classified WALLET, WALLET_AND_NETWORK
+>   or NETWORK in `WalletStores`. `dgb_diag` is per wallet; `dgb_log_tag` per install.
+>   `custom_rpc_endpoint` (in `dgb_reconcile`) stays device-wide: a legacy erase keeps that key.
+> - Chain data and ChainTip are per wallet in step 1. A switch is a process restart.
+> - Wipe: Settings -> Wipe Wallet wipes every wallet through one routine. The owed-wipe way out
+>   decides on all-wallet records gone, after attempting every listed alias; a key with no record
+>   does not block. Phase 2 deletes only listed wallets' aliases. "Last wallet" means the last on
+>   the device, across both networks.
+> - Removal: `RemoveResult.NotRemoved` (nothing written) vs `Incomplete` (REMOVING; housekeeping
+>   finishes). Removing legacy first releases the DB password's legacy wrap. No concurrent add/remove.
+> - Add: a cancelled add abandons its reserved slot; a duplicate cleans up its entry and alias.
+>   Add-mode restore never clears the app PIN.
+> - Web session: DigiStamp/WebView state is isolated by owner wallet at launch, before any WebView
+>   exists (`WebSessionIsolation`, `dgb_web_session_owner`; a full wipe writes the sentinel owner
+>   `wiped`; an upgrade with an absent owner adopts legacy rather than logging out). Fail closed otherwise.
+> - Notifications: no incoming-payment notification exists, so the wallet name goes on the sync
+>   foreground notification (localised, name read once off the main thread). It is private on the
+>   lock screen, with a public version that shows the app name only.
+> - Quick start: add mode only. Endpoint set -> [OWN_NODE, DIGISCOPE]; none -> [DIGISCOPE] behind
+>   the opt-in screen above, skip being the default. An own-node choice pins the endpoint it
+>   showed (`ownNodeOnly`, no fall-through to DigiScope). A capped scan shows no figure.
+> - Rename rejects another wallet's shown default name.
+> - Machine-written warnings in 12 locales (wipe, removal, backup) need a native-speaker review
+>   before release.
+
+
 ## Intent
 
 The owner keeps several DigiByte wallets for different purposes. For example, one is for Digi-ID
