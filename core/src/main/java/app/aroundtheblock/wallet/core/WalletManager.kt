@@ -1052,19 +1052,8 @@ class WalletManager @Suppress("LongParameterList") constructor(
         val records = eraseEveryRecord()
         val others = records.others
         val recordGone = records.gone
-        // Phase 2, every seed key alias of every wallet, through the Keystore itself: [keyStoreManager]
-        // is bound to this manager's wallet, and with another wallet active it would leave legacy's.
-        // Legacy's key may still wrap the database password's record; the database and that record are
-        // erased below, so nothing needs it unwrapped first.
-        if (recordGone) {
-            val seedAliases = try {
-                keystoreAliases.aliases().filter { WalletStores.walletIdOfAlias(it) != null }
-            } catch (t: Throwable) {
-                android.util.Log.e("WalletManager", "wipe: wallet keys not listed (${t.javaClass.simpleName})")
-                emptyList() // judged by the read-back below
-            }
-            seedAliases.forEach { alias -> attempt("wallet key") { keystoreAliases.delete(alias); true } }
-        }
+        // Phase 2, every listed wallet's seed key aliases, only once every record reads back gone.
+        if (recordGone) deleteSeedKeys(records)
         // Empty the UTXO table through the still-open handle BEFORE the database files are erased:
         // a write after the erase can create a file by name (a rollback journal) that the eraser's
         // read-back has already passed. Tidiness for this process only, not part of the report.
@@ -1120,9 +1109,10 @@ class WalletManager @Suppress("LongParameterList") constructor(
 
     /**
      * What [eraseEveryRecord] established: [gone] when every wallet was listed, every record's
-     * erase reported landed and no wallet's record reads back; [others] every wallet but legacy.
+     * erase reported landed and no wallet's record reads back; [listed] the wallet ids it erased
+     * (null when they could not be listed); [others] every wallet but legacy.
      */
-    private class RecordsErased(val gone: Boolean, val others: List<WalletScope>)
+    private class RecordsErased(val gone: Boolean, val listed: Set<String>?, val others: List<WalletScope>)
 
     /**
      * Phase 1 of every wipe, over every wallet on the device (legacy always among them): erase each
@@ -1146,14 +1136,34 @@ class WalletManager @Suppress("LongParameterList") constructor(
             others.map { wallet -> wipeStep("wallet record") { scopeEraser.eraseRecord(wallet) } }
         val gone = listed != null && erased.all { it } &&
             wipeStep("wallet record read-back") { (listOf(WalletScope.legacy(false)) + others).none(::holdsSeedRecord) }
-        return RecordsErased(gone, others)
+        return RecordsErased(gone, listed?.toSet(), others)
     }
 
     /**
-     * THE definition of "the seed is gone", for every wallet at once: [records] says no wallet's
-     * record is left, and the Keystore, asked again, holds no seed key alias of any wallet. Both the
-     * wipe ([WipeReport.seedGone]) and the way out of an owed wipe ([releaseOwedWipeIfNoWalletIsLeft])
-     * decide by it.
+     * Phase 2 of every wipe, once [records] is gone: delete every seed key alias the Keystore lists
+     * of a wallet in [RecordsErased.listed] — legacy's `dgb_wallet_master(_v2)` included — through
+     * the Keystore itself: [keyStoreManager] is bound to this manager's wallet, and with another
+     * wallet active it would leave legacy's. An alias of a wallet that was not listed is left: its
+     * record was never looked for, and the read-back ([seedOfEveryWalletGone]) counts it, so the
+     * retry lists it. Legacy's key may still wrap the database password's record; the database and
+     * that record are erased by the wipe, so nothing needs it unwrapped first. Each delete is
+     * attempted; what it established is the caller's read-back.
+     */
+    private fun deleteSeedKeys(records: RecordsErased) {
+        val listed = records.listed ?: return
+        val seedAliases = try {
+            keystoreAliases.aliases().filter { WalletStores.walletIdOfAlias(it) in listed }
+        } catch (t: Throwable) {
+            android.util.Log.e("WalletManager", "wipe: wallet keys not listed (${t.javaClass.simpleName})")
+            return
+        }
+        seedAliases.forEach { alias -> wipeStep("wallet key") { keystoreAliases.delete(alias); true } }
+    }
+
+    /**
+     * The wipe's definition of "the seed is gone" ([WipeReport.seedGone]), for every wallet at once:
+     * [records] says no wallet's record is left, and the Keystore, asked again, holds no seed key
+     * alias of any wallet, listed or not. A Keystore that cannot answer is "not gone".
      */
     private fun seedOfEveryWalletGone(records: RecordsErased): Boolean =
         records.gone && wipeStep("wallet key read-back") {
@@ -1219,13 +1229,15 @@ class WalletManager @Suppress("LongParameterList") constructor(
      * never add up to a device that can no longer be opened at all. After the bound the screen
      * asks this and then acts on the answer:
      *
-     *  - **true** — the seed of EVERY wallet is gone by the wipe's own definition
-     *    ([seedOfEveryWalletGone]: no wallet's record is readable and no wallet's seed key alias
-     *    remains), so there is nothing left for the owed wipe to hold the screen for. The flag is released (and only the flag: the PIN store is
+     *  - **true** — no record of ANY wallet is on this device (the wipe's own first step,
+     *    [eraseEveryRecord]), so there is nothing left for the owed wipe to hold the screen for.
+     *    Every listed wallet's seed key is deleted first, as the wipe's second step, but a key that
+     *    will not go, or a Keystore that cannot be listed, does not hold the screen: a key with no
+     *    record protects nothing. The flag is released (and only the flag: the PIN store is
      *    untouched, as after any wipe that could not be verified) so onboarding can be offered and
      *    a wallet made from here on does not inherit a wipe owed to its predecessor.
-     *  - **false** — a record or a seed key of some wallet is still on this device (one PIN guards
-     *    every wallet, so it does not matter which), so the hold has nothing left to
+     *  - **false** — a record of some wallet is still on this device (one PIN guards every wallet,
+     *    so it does not matter which), so the hold has nothing left to
      *    protect and the screen stands down and takes the PIN, which opens that wallet: a refused
      *    write leaves this process reading what the store's file still holds (see
      *    [AndroidWalletDataEraser]), so a load from the record finds it. The screen still acts on
@@ -1245,10 +1257,15 @@ class WalletManager @Suppress("LongParameterList") constructor(
     suspend fun releaseOwedWipeIfNoWalletIsLeft(
         pinManager: app.aroundtheblock.wallet.core.security.PinManager,
     ): Boolean = kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
-        // Every wallet's, by the wipe's own definition: one PIN guards them all, so a record or a key
-        // of ANY wallet still here is a wallet the owed wipe still holds the screen for. Unknown is
+        // Every wallet's record, by the wipe's own first step: one PIN guards them all, so a record of
+        // ANY wallet still here is a wallet the owed wipe still holds the screen for. Unknown is
         // "still here": the screen stands down and the PIN decides.
-        if (!seedOfEveryWalletGone(eraseEveryRecord())) return@withContext false
+        val records = eraseEveryRecord()
+        if (!records.gone) return@withContext false
+        // The keys are attempted, as the wipe's second step, but do not decide: a key with no record
+        // protects nothing, and one that will not go must not hold a device that has no wallet left
+        // at the unlock screen for ever (the PIN would open nothing). The owed erasure retries it.
+        deleteSeedKeys(records)
         // The flag goes, but the secrets the unverified wipes left (Hub token, DB key) are still owed
         // their erasure: the next launch finishes it (4.1.2 row 33).
         runCatching { markErasureOwed() }.onFailure {

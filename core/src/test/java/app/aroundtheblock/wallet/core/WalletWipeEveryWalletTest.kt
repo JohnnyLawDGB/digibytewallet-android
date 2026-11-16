@@ -95,7 +95,11 @@ class WalletWipeEveryWalletTest {
         val allIds: List<String> = listOf(legacy, idB, idC),
         /** An alias whose delete does nothing: the Keystore keeps it. */
         stuckAlias: String? = null,
+        /** The id set cannot be read. */
+        val idsThrow: Boolean = false,
     ) {
+        /** From now on the Keystore cannot list its aliases. */
+        var aliasesThrow = false
         val events = mutableListOf<String>()
         val vault = FakeVault(events)
         val prefs = InMemoryPrefsFactory(events)
@@ -108,6 +112,8 @@ class WalletWipeEveryWalletTest {
         val aliases: KeystoreAliases = vault.asKeystoreAliases().let { inner ->
             object : KeystoreAliases by inner {
                 override fun delete(alias: String) { if (alias != stuckAlias) inner.delete(alias) }
+                override fun aliases(): List<String> =
+                    if (aliasesThrow) throw KeystoreHiccup() else inner.aliases()
             }
         }
         val dataEraser = AndroidWalletDataEraser(ctx, aliases) {
@@ -129,7 +135,7 @@ class WalletWipeEveryWalletTest {
             scope = active,
             scopeEraser = scopeEraser,
             keystoreAliases = aliases,
-            allWalletIds = { allIds },
+            allWalletIds = { if (idsThrow) throw IllegalStateException("shared_prefs not listable") else allIds },
         )
 
         /** One wallet as a device holds it: record, aliases, every per-wallet store, its database. */
@@ -245,7 +251,7 @@ class WalletWipeEveryWalletTest {
         assertFalse("D's alias survived the wipe", WalletStores.keyAliasV2(scopeD) in d.vault.keys.keys)
     }
 
-    @Test fun `an owed wipe is released only when no wallet's record or key is left`() = runTest {
+    @Test fun `an owed wipe is not released while any wallet's record is left`() = runTest {
         val d = Device(active = scopeB).apply { populateDevice() }
         val recordC = WalletStores.seedRecordPrefs(scopeC)
         d.prefs.refuseWritesTo(recordC)
@@ -260,18 +266,69 @@ class WalletWipeEveryWalletTest {
         assertFalse("C's record is still on the device, yet the owed wipe was released", wm.releaseOwedWipeIfNoWalletIsLeft(d.pin))
         assertTrue(d.pin.isWipePending())
         assertTrue("C's record must survive", d.prefs.prefsFor(recordC).durable.containsKey("encrypted_seed_v2"))
+        assertTrue("no key may go while a record is left", WalletStores.keyAliasV2(scopeC) in d.vault.keys.keys)
 
-        // C's store takes the removal now, but every wallet's key is still in the Keystore.
+        // C's store takes the removal now: no record of any wallet is left, so the flag goes, and
+        // every listed wallet's key is deleted on the way out.
         d.prefs.prefsFor(recordC).refuseWrites = false
-        assertFalse("a wallet's key is still on the device, yet the owed wipe was released", wm.releaseOwedWipeIfNoWalletIsLeft(d.pin))
-        assertTrue(d.pin.isWipePending())
-        assertTrue("the way out erases C's record as the wipe's first step does", d.prefs.prefsFor(recordC).all.isEmpty())
-
-        // C is gone, record and key, and so is every other wallet's key: nothing is left to hold for.
-        d.vault.keys.keys.filter { WalletStores.walletIdOfAlias(it) != null }.forEach(d.vault::delete)
         assertTrue(wm.releaseOwedWipeIfNoWalletIsLeft(d.pin))
         assertFalse("the owed wipe was not released", d.pin.isWipePending())
+        assertTrue("the record of C is gone", d.prefs.prefsFor(recordC).all.isEmpty())
+        assertTrue("keys left: ${d.vault.keys.keys}", d.vault.keys.keys.none { WalletStores.walletIdOfAlias(it) != null })
         assertTrue("the way out must not clear the PIN store", d.pin.hasPin())
+    }
+
+    @Test fun `a key that will not go does not hold a device with no wallet record left`() = runTest {
+        // A key with no record protects nothing; a hold for it would keep the unlock screen on a PIN
+        // that opens nothing, with no way to onboarding.
+        for (unlistable in listOf(false, true)) {
+            val d = Device(active = scopeB, stuckAlias = WalletStores.keyAliasV2(scopeC)).apply { populateDevice() }
+            val wm = d.walletManager()
+            assertFalse("precondition: the stuck key keeps the wipe unverified", wm.wipeThenReleasePin(d.pin).seedGone)
+            assertTrue(d.pin.isWipePending())
+            d.aliasesThrow = unlistable
+
+            assertTrue("no wallet record is left (keystore unlistable=$unlistable), yet the owed wipe holds", wm.releaseOwedWipeIfNoWalletIsLeft(d.pin))
+            assertFalse(d.pin.isWipePending())
+            assertTrue("onboarding must be reachable: PIN setup creates the wallet", wm.pinSetupCreatesWallet())
+            assertTrue(d.pin.hasPin())
+        }
+    }
+
+    @Test fun `an alias of a wallet that was not listed is not deleted, and the seed is not gone`() = runTest {
+        // D holds a key but is not in the id set this run read: its record was never looked for.
+        val d = Device(allIds = listOf(legacy, idB, idC)).apply { populateDevice() }
+        d.vault.createUnboundKey(WalletStores.keyAliasV2(scopeD))
+
+        val report = d.walletManager().wipeThenReleasePin(d.pin)
+
+        assertTrue("an unlisted wallet's key was deleted", WalletStores.keyAliasV2(scopeD) in d.vault.keys.keys)
+        assertFalse("a key of some wallet is left, yet the seed was reported gone", report.seedGone)
+        assertTrue("the listed wallets' keys still go", WalletStores.keyAliasV2(scopeB) !in d.vault.keys.keys)
+        assertTrue(d.pin.hasPin())
+    }
+
+    @Test fun `a wipe that cannot list the wallets still erases legacy, deletes no key and says the seed is not gone`() = runTest {
+        val d = Device(idsThrow = true).apply { populateDevice() }
+
+        val report = d.walletManager().wipeThenReleasePin(d.pin)
+
+        assertTrue("legacy's record survived", d.prefs.prefsFor("dgb_wallet_seed").all.isEmpty())
+        assertTrue("a key was deleted: ${d.events}", d.events.none { it.startsWith("delete:dgb_wallet_master") })
+        assertFalse(report.seedGone)
+        assertFalse(report.verified)
+        assertTrue("the PIN store must be kept", d.pin.hasPin())
+    }
+
+    @Test fun `a Keystore that cannot list its aliases deletes no key and leaves the seed not gone`() = runTest {
+        val d = Device().apply { populateDevice(); aliasesThrow = true }
+
+        val report = d.walletManager().wipeThenReleasePin(d.pin)
+
+        assertEquals("every record still goes", emptyList<String>(), d.seedPrefsHoldingAKey())
+        assertTrue("a key was deleted: ${d.events}", d.events.none { it.startsWith("delete:dgb_wallet_master") })
+        assertFalse(report.seedGone)
+        assertTrue(d.pin.hasPin())
     }
 
     @Test fun `the production id set is the registry, the seed records on disk and the Keystore aliases`() {
