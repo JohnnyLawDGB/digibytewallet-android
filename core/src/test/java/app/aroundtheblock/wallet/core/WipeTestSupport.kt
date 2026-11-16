@@ -13,10 +13,15 @@ import java.io.File
  * `core` cannot see `app` test sources — and extended with the one thing a wipe test needs that
  * the original did not: a store whose `commit()` reports that the write did not land.
  */
-internal class InMemoryPrefsFactory {
+internal class InMemoryPrefsFactory(
+    /** When set, every landed `commit()` that clears a store appends `clear:<name>` here. */
+    private val events: MutableList<String>? = null,
+) {
     private val stores = LinkedHashMap<String, InMemoryPrefs>()
 
-    fun prefsFor(name: String): InMemoryPrefs = stores.getOrPut(name) { InMemoryPrefs() }
+    fun prefsFor(name: String): InMemoryPrefs = stores.getOrPut(name) {
+        InMemoryPrefs().also { p -> if (events != null) p.onClear = { events += "clear:$name" } }
+    }
 
     /** Every store name that was ever opened or seeded. */
     fun names(): Set<String> = stores.keys
@@ -35,6 +40,8 @@ internal class InMemoryPrefs : SharedPreferences {
     private val memory = LinkedHashMap<String, Any?>()
     val durable = LinkedHashMap<String, Any?>()
     var refuseWrites = false
+    /** Called when a `commit()` that clears this store lands. */
+    var onClear: (() -> Unit)? = null
 
     fun seed(key: String, value: Any?) { memory[key] = value; durable[key] = value }
 
@@ -67,6 +74,7 @@ internal class InMemoryPrefs : SharedPreferences {
             write(memory)
             if (refuseWrites) return false
             write(durable)
+            if (clearAll) onClear?.invoke()
             return true
         }
         override fun apply() { commit() }

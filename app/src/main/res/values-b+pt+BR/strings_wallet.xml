@@ -438,9 +438,9 @@
     <string name="sec_biometric_no">Não disponível neste dispositivo</string>
     <string name="sec_autolock">Tempo de bloqueio automático</string>
     <string name="sec_wipe_after">Apagar após %1$d PINs errados</string>
-    <string name="sec_wipe_after_on">Ativado: a carteira é apagada após %1$d PINs errados</string>
+    <string name="sec_wipe_after_on_all">Ativado: todas as carteiras são apagadas após %1$d PINs errados</string>
     <string name="sec_wipe_after_off">Desativado: proteção extra contra força bruta de PIN</string>
-    <string name="sec_wipe_after_body">Quando ativado, %1$d entradas de PIN incorretas consecutivas APAGARÃO PERMANENTEMENTE esta carteira (semente, chaves e histórico) deste dispositivo.\n\nIsso é irreversível no dispositivo. Seus fundos só podem ser recuperados com sua frase de recuperação.</string>
+    <string name="sec_wipe_after_body_all">Quando ativado, %1$d entradas de PIN incorretas seguidas APAGAM PERMANENTEMENTE todas as carteiras deste dispositivo: frases de recuperação, chaves e histórico.\n\nIsso não pode ser desfeito no dispositivo. Os fundos só podem ser recuperados com a frase de recuperação de cada carteira.</string>
     <string name="sec_wipe_after_ack">Minha frase de recuperação está salva</string>
     <string name="sec_wipe_after_enabled">Apagar após %1$d ativado</string>
     <string name="sec_recovery_phrase">Frase de recuperação</string>
@@ -451,7 +451,7 @@
     <string name="sec_danger_zone">Zona de perigo</string>
     <string name="sec_wipe_wallet">Apagar carteira</string>
     <string name="sec_wipe_wallet_sub">Remover todos os dados da carteira deste dispositivo</string>
-    <string name="sec_wipe_wallet_body">Isso não pode ser desfeito.\n\nTodos os dados da carteira, chaves e histórico de transações serão excluídos permanentemente deste dispositivo.\n\nConfirme que sua frase de recuperação está salva antes de continuar.</string>
+    <string name="sec_wipe_all_body">Isso não pode ser desfeito.\n\nTodas as carteiras deste dispositivo são excluídas: frases de recuperação, chaves e histórico de transações.\n\nConfirme que a frase de recuperação de cada carteira está salva antes de continuar.</string>
     <string name="sec_wipe_everything">Apagar tudo</string>
     <string name="sec_verify_pin">Verificar PIN atual</string>
     <string name="sec_verify_pin_sub">Digite seu PIN atual para continuar</string>

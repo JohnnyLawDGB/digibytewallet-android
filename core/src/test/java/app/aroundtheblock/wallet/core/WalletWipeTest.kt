@@ -15,7 +15,6 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkStatic
 import io.mockk.unmockkStatic
-import io.mockk.verify
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -64,7 +63,6 @@ class WalletWipeTest {
     private class RecordingEraser(
         private val refuses: Set<String> = emptySet(),
         private val throws: Set<String> = emptySet(),
-        private val seedKeyStillThere: Boolean = false,
     ) : WalletDataEraser {
         val calls = mutableListOf<String>()
         private fun step(name: String): Boolean {
@@ -81,19 +79,21 @@ class WalletWipeTest {
         override fun eraseDatabase() = step("db")
         override fun eraseLeftoverState() = step("leftover")
         override fun eraseHubSession() = step("hub")
-        override fun seedKeyAbsent() = !seedKeyStillThere
     }
 
     private val allSteps = listOf("seed", "sync", "bloom", "watched", "outgoing", "cfsync", "db", "leftover", "hub")
 
     private fun walletManager(
-        ctx: android.content.Context = mockk(relaxed = true),
+        // In-memory prefs, so the registry's clear (done by the manager itself) can land.
+        ctx: android.content.Context = wipeTestContext(InMemoryPrefsFactory(), tmp.newFolder()),
         eraser: WalletDataEraser,
         ksm: KeyStoreManager = mockk(relaxed = true),
         um: UtxoManager = mockk(relaxed = true),
         quiesce: () -> Unit = { /* no-op: keep the native lib out of this JVM test */ },
         identitySessions: IdentitySessionWipe = IdentitySessionWipe { true },
         markErasureOwed: () -> Unit = {},
+        // The legacy wallet's seed key aliases, the only wallet on this device.
+        keystore: KeystoreAliases = FakeKeystore(LEGACY_ALIAS, BOUND_ALIAS),
     ) = WalletManager(
         context = ctx,
         keyStoreManager = ksm,
@@ -102,6 +102,8 @@ class WalletWipeTest {
         quiesceNative = quiesce,
         identitySessions = identitySessions,
         markErasureOwed = markErasureOwed,
+        keystoreAliases = keystore,
+        allWalletIds = { listOf(app.aroundtheblock.wallet.core.wallets.WalletIds.LEGACY) },
     )
 
     /** A PIN store as it stands after the tenth wrong PIN with wipe-after-N on. */
@@ -118,11 +120,10 @@ class WalletWipeTest {
 
     @Test fun wipeClearsSeedDbWatchedOutgoingFilterHeadersSeedFirst() = runTest {
         val eraser = RecordingEraser()
-        val ksm = mockk<KeyStoreManager>(relaxed = true)
+        val keystore = FakeKeystore(LEGACY_ALIAS, BOUND_ALIAS)
         val um = mockk<UtxoManager>(relaxed = true)
-        // Relaxed context: WalletManager's init/field setup touches getSharedPreferences
-        // only; no native. AndroidWalletDataEraser is NOT constructed (we inject the fake).
-        val wm = walletManager(eraser = eraser, ksm = ksm, um = um)
+        // In-memory context: no native. AndroidWalletDataEraser is NOT constructed (we inject the fake).
+        val wm = walletManager(eraser = eraser, um = um, keystore = keystore)
 
         val report = wm.wipeWallet()
 
@@ -132,7 +133,7 @@ class WalletWipeTest {
         assertTrue("missing erase steps: ${eraser.calls}", eraser.calls.containsAll(allSteps))
         // UTXO cache + seed Keystore key destroyed.
         coVerify(exactly = 1) { um.clearAll() }
-        verify(exactly = 1) { ksm.deleteKey() }
+        assertEquals(emptySet<String>(), keystore.aliases)
         // State reset to no-wallet.
         assertTrue(wm.walletState.value is WalletState.NoWallet)
         assertTrue("a clean wipe must report itself verified: $report", report.verified)
@@ -147,24 +148,24 @@ class WalletWipeTest {
 
     @Test fun `a step that throws does not stop the steps after it`() = runTest {
         val eraser = RecordingEraser(throws = setOf("sync"))
-        val ksm = mockk<KeyStoreManager>(relaxed = true)
+        val keystore = FakeKeystore(LEGACY_ALIAS, BOUND_ALIAS)
 
-        val report = walletManager(eraser = eraser, ksm = ksm).wipeWallet()
+        val report = walletManager(eraser = eraser, keystore = keystore).wipeWallet()
 
         assertTrue("steps after the throwing one were skipped: ${eraser.calls}", eraser.calls.containsAll(allSteps))
-        verify(exactly = 1) { ksm.deleteKey() }
+        assertEquals(emptySet<String>(), keystore.aliases)
         assertFalse(report.verified)
     }
 
     @Test fun `a throwing quiesce does not abort the erasure`() = runTest {
         val eraser = RecordingEraser()
-        val ksm = mockk<KeyStoreManager>(relaxed = true)
-        val wm = walletManager(eraser = eraser, ksm = ksm, quiesce = { throw IllegalStateException("native layer unavailable") })
+        val keystore = FakeKeystore(LEGACY_ALIAS, BOUND_ALIAS)
+        val wm = walletManager(eraser = eraser, keystore = keystore, quiesce = { throw IllegalStateException("native layer unavailable") })
 
         val report = wm.wipeWallet()
 
         assertTrue("the erasure did not run: ${eraser.calls}", eraser.calls.containsAll(allSteps))
-        verify(exactly = 1) { ksm.deleteKey() }
+        assertEquals(emptySet<String>(), keystore.aliases)
         assertFalse("a wipe whose native session could not be stopped is not a verified wipe", report.verified)
     }
 
@@ -182,7 +183,8 @@ class WalletWipeTest {
     }
 
     @Test fun `a seed key alias that is still present means the seed is not gone`() = runTest {
-        val report = walletManager(eraser = RecordingEraser(seedKeyStillThere = true)).wipeWallet()
+        val stuck = FakeKeystore(LEGACY_ALIAS, BOUND_ALIAS).apply { refuseDeletes = true }
+        val report = walletManager(eraser = RecordingEraser(), keystore = stuck).wipeWallet()
 
         assertFalse(report.seedGone)
         assertFalse(report.verified)
@@ -193,25 +195,26 @@ class WalletWipeTest {
         // confirmed, the key stays — a wallet whose record is still on the device must still be
         // the wallet its PIN opened before the wipe ran, so a wipe that could not finish can be
         // run again and the owner is never shut out of a wallet that is still there.
+        val both = setOf(LEGACY_ALIAS, BOUND_ALIAS)
         for (eraser in listOf(RecordingEraser(refuses = setOf("seed")), RecordingEraser(throws = setOf("seed")))) {
-            val ksm = mockk<KeyStoreManager>(relaxed = true)
-            walletManager(eraser = eraser, ksm = ksm).wipeWallet()
-            verify(exactly = 0) { ksm.deleteKey() }
+            val keystore = FakeKeystore(LEGACY_ALIAS, BOUND_ALIAS)
+            walletManager(eraser = eraser, keystore = keystore).wipeWallet()
+            assertEquals(both, keystore.aliases)
         }
 
         // The write reported success but the record reads back as still there: same rule.
         val prefs = InMemoryPrefsFactory()
         prefs.prefsFor("dgb_wallet_seed").seed("encrypted_seed", "c1")
-        val stillThere = mockk<KeyStoreManager>(relaxed = true)
-        walletManager(ctx = wipeTestContext(prefs, tmp.newFolder()), eraser = RecordingEraser(), ksm = stillThere)
+        val stillThere = FakeKeystore(LEGACY_ALIAS, BOUND_ALIAS)
+        walletManager(ctx = wipeTestContext(prefs, tmp.newFolder()), eraser = RecordingEraser(), keystore = stillThere)
             .wipeWallet()
-        verify(exactly = 0) { stillThere.deleteKey() }
+        assertEquals(both, stillThere.aliases)
 
         // Confirmed gone: the key goes too, so nothing that could unwrap a record left by a
         // wipe cut short stays behind.
-        val confirmed = mockk<KeyStoreManager>(relaxed = true)
-        val report = walletManager(eraser = RecordingEraser(), ksm = confirmed).wipeWallet()
-        verify(exactly = 1) { confirmed.deleteKey() }
+        val confirmed = FakeKeystore(LEGACY_ALIAS, BOUND_ALIAS)
+        val report = walletManager(eraser = RecordingEraser(), keystore = confirmed).wipeWallet()
+        assertEquals(emptySet<String>(), confirmed.aliases)
         assertTrue(report.seedGone)
     }
 
@@ -271,15 +274,15 @@ class WalletWipeTest {
     }
 
     @Test fun `while the seed is not verifiably gone the PIN, the counters and the owed-wipe flag all stay`() = runTest {
-        for (eraser in listOf(
-            RecordingEraser(refuses = setOf("seed")),
-            RecordingEraser(throws = setOf("seed")),
-            RecordingEraser(seedKeyStillThere = true),
+        for ((eraser, keystore) in listOf(
+            RecordingEraser(refuses = setOf("seed")) to FakeKeystore(LEGACY_ALIAS, BOUND_ALIAS),
+            RecordingEraser(throws = setOf("seed")) to FakeKeystore(LEGACY_ALIAS, BOUND_ALIAS),
+            RecordingEraser() to FakeKeystore(LEGACY_ALIAS, BOUND_ALIAS).apply { refuseDeletes = true },
         )) {
             val store = trippedPinStore()
             val pin = PinManager(store)
 
-            val verified = walletManager(eraser = eraser).wipeThenReleasePin(pin).verified
+            val verified = walletManager(eraser = eraser, keystore = keystore).wipeThenReleasePin(pin).verified
 
             assertFalse(verified)
             assertTrue(pin.hasPin())
@@ -315,12 +318,12 @@ class WalletWipeTest {
         assertTrue("the seed is gone by read-back, yet the sequence did not say so", restRefused.seedGone)
         assertFalse(restRefused.verified)
 
-        for (eraser in listOf(
-            RecordingEraser(refuses = setOf("seed")),
-            RecordingEraser(throws = setOf("seed")),
-            RecordingEraser(seedKeyStillThere = true),
+        for ((eraser, keystore) in listOf(
+            RecordingEraser(refuses = setOf("seed")) to FakeKeystore(LEGACY_ALIAS, BOUND_ALIAS),
+            RecordingEraser(throws = setOf("seed")) to FakeKeystore(LEGACY_ALIAS, BOUND_ALIAS),
+            RecordingEraser() to FakeKeystore(LEGACY_ALIAS, BOUND_ALIAS).apply { refuseDeletes = true },
         )) {
-            val report = walletManager(eraser = eraser).wipeThenReleasePin(PinManager(trippedPinStore()))
+            val report = walletManager(eraser = eraser, keystore = keystore).wipeThenReleasePin(PinManager(trippedPinStore()))
             assertFalse("a seed still on the device was reported gone", report.seedGone)
             assertFalse(report.verified)
         }
@@ -338,8 +341,10 @@ class WalletWipeTest {
 
     private class FakeKeystore(vararg present: String) : KeystoreAliases {
         val aliases = present.toMutableSet()
+        /** A Keystore that keeps every alias it is asked to delete. */
+        var refuseDeletes = false
         override fun contains(alias: String) = alias in aliases
-        override fun delete(alias: String) { aliases.remove(alias) }
+        override fun delete(alias: String) { if (!refuseDeletes) aliases.remove(alias) }
         override fun aliases(): List<String> = aliases.toList()
     }
 
@@ -353,12 +358,7 @@ class WalletWipeTest {
         val hubLegacy get() = prefs.prefsFor(HubTokenStore.LEGACY_PREFS_NAME)
         val hubSecure get() = prefs.prefsFor(HubTokenStore.SECURE_PREFS_NAME)
         val eraser = AndroidWalletDataEraser(ctx, keystore) { HubTokenStore(hubLegacy, { hubSecure }) }
-        val ksm = mockk<KeyStoreManager>(relaxed = true).also {
-            every { it.deleteKey() } answers {
-                keystore.delete(KeyStoreManager.KEY_ALIAS)
-                keystore.delete(KeyStoreManager.KEY_ALIAS + KeyStoreManager.AUTH_ALIAS_SUFFIX)
-            }
-        }
+        val ksm = mockk<KeyStoreManager>(relaxed = true)
 
         /** Preference stores a wallet leaves behind, every one on both networks where suffixed. */
         val suffixedStores = listOf(
@@ -377,6 +377,7 @@ class WalletWipeTest {
 
         fun populate() {
             prefs.prefsFor("dgb_wallet_seed").apply { seed("encrypted_seed_v2", "c1"); seed("iv_v2", "c2") }
+            prefs.prefsFor("dgb_wallets").seed("registry", "{}")
             networks.forEach { net -> suffixedStores.forEach { prefs.prefsFor(it + net).seed("k", "v") } }
             sharedStores.forEach { prefs.prefsFor(it).seed("k", "v") }
             prefs.prefsFor("dgb_settings").apply {
@@ -393,7 +394,7 @@ class WalletWipeTest {
             files().forEach { it.writeBytes(byteArrayOf(1, 2, 3)) }
         }
 
-        fun walletManager() = walletManager(ctx = ctx, eraser = eraser, ksm = ksm)
+        fun walletManager() = walletManager(ctx = ctx, eraser = eraser, ksm = ksm, keystore = keystore)
     }
 
     @Test fun `one wipe clears both networks' stores, the leftover state and the hub token`() = runTest {
@@ -405,7 +406,7 @@ class WalletWipeTest {
 
         val survivors = buildList {
             d.files().filter { it.exists() }.forEach { add("file ${it.name}") }
-            (networks.flatMap { net -> d.suffixedStores.map { it + net } } + d.sharedStores + "dgb_wallet_seed")
+            (networks.flatMap { net -> d.suffixedStores.map { it + net } } + d.sharedStores + "dgb_wallet_seed" + "dgb_wallets")
                 .filter { d.prefs.prefsFor(it).all.isNotEmpty() }
                 .forEach { add("prefs $it") }
             if (d.prefs.prefsFor("dgb_settings").contains("cf_birth_height")) add("the scan floor (cf_birth_height)")

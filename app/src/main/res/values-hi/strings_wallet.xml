@@ -435,9 +435,9 @@
     <string name="sec_biometric_no">इस डिवाइस पर उपलब्ध नहीं</string>
     <string name="sec_autolock">ऑटो-लॉक टाइमआउट</string>
     <string name="sec_wipe_after">%1$d बार गलत PIN के बाद मिटाएँ</string>
-    <string name="sec_wipe_after_on">सक्षम: %1$d गलत PIN के बाद वॉलेट मिट जाएगा</string>
+    <string name="sec_wipe_after_on_all">सक्षम: %1$d गलत PIN के बाद हर वॉलेट मिट जाएगा</string>
     <string name="sec_wipe_after_off">बंद: PIN ब्रूट-फ़ोर्स से अतिरिक्त सुरक्षा</string>
-    <string name="sec_wipe_after_body">सक्षम होने पर, लगातार %1$d बार गलत PIN डालने से यह वॉलेट (सीड, कुंजियाँ और इतिहास) इस डिवाइस से स्थायी रूप से मिट जाएगा।\n\nडिवाइस पर यह अपरिवर्तनीय है। आपके फंड केवल आपकी रिकवरी वाक्यांश से ही पुनर्प्राप्त हो सकते हैं।</string>
+    <string name="sec_wipe_after_body_all">सक्षम होने पर, लगातार %1$d बार गलत PIN डालने से इस डिवाइस का हर वॉलेट स्थायी रूप से मिट जाएगा: रिकवरी वाक्यांश, कुंजियाँ और इतिहास।\n\nडिवाइस पर यह अपरिवर्तनीय है। फंड केवल हर वॉलेट के अपने रिकवरी वाक्यांश से ही पुनर्प्राप्त हो सकते हैं।</string>
     <string name="sec_wipe_after_ack">मेरी रिकवरी वाक्यांश का बैकअप है</string>
     <string name="sec_wipe_after_enabled">%1$d के बाद मिटाना सक्षम</string>
     <string name="sec_recovery_phrase">रिकवरी वाक्यांश</string>
@@ -448,7 +448,7 @@
     <string name="sec_danger_zone">खतरे का क्षेत्र</string>
     <string name="sec_wipe_wallet">वॉलेट मिटाएँ</string>
     <string name="sec_wipe_wallet_sub">इस डिवाइस से सभी वॉलेट डेटा हटाएँ</string>
-    <string name="sec_wipe_wallet_body">इसे पूर्ववत नहीं किया जा सकता।\n\nसभी वॉलेट डेटा, कुंजियाँ और लेनदेन इतिहास इस डिवाइस से स्थायी रूप से हटा दिए जाएँगे।\n\nजारी रखने से पहले सुनिश्चित करें कि आपकी रिकवरी वाक्यांश का बैकअप है।</string>
+    <string name="sec_wipe_all_body">इसे पूर्ववत नहीं किया जा सकता।\n\nइस डिवाइस का हर वॉलेट हटा दिया जाएगा: रिकवरी वाक्यांश, कुंजियाँ और लेनदेन इतिहास।\n\nजारी रखने से पहले सुनिश्चित करें कि हर वॉलेट के रिकवरी वाक्यांश का बैकअप है।</string>
     <string name="sec_wipe_everything">सब कुछ मिटाएँ</string>
     <string name="sec_verify_pin">वर्तमान PIN सत्यापित करें</string>
     <string name="sec_verify_pin_sub">जारी रखने के लिए अपना वर्तमान PIN दर्ज करें</string>

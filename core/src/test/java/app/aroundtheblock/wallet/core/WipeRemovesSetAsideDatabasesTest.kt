@@ -165,6 +165,8 @@ class WipeRemovesSetAsideDatabasesTest {
             utxoManager = utxos,
             dataEraser = d.eraser,
             quiesceNative = { },
+            keystoreAliases = d.keystore,
+            allWalletIds = { listOf(app.aroundtheblock.wallet.core.wallets.WalletIds.LEGACY) },
         )
 
         wm.wipeWallet()
@@ -182,6 +184,8 @@ class WipeRemovesSetAsideDatabasesTest {
             utxoManager = io.mockk.mockk(relaxed = true),
             dataEraser = d.eraser,
             quiesceNative = { },
+            keystoreAliases = d.keystore,
+            allWalletIds = { listOf(app.aroundtheblock.wallet.core.wallets.WalletIds.LEGACY) },
         )
 
         val report = wm.wipeWallet()

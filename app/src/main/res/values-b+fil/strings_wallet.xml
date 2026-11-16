@@ -435,9 +435,9 @@
     <string name="sec_biometric_no">Hindi available sa device na ito</string>
     <string name="sec_autolock">Auto-Lock Timeout</string>
     <string name="sec_wipe_after">Burahin pagkatapos ng %1$d maling PIN</string>
-    <string name="sec_wipe_after_on">Naka-on: mabubura ang wallet pagkatapos ng %1$d maling PIN</string>
+    <string name="sec_wipe_after_on_all">Naka-on: mabubura ang bawat wallet pagkatapos ng %1$d maling PIN</string>
     <string name="sec_wipe_after_off">Naka-off: dagdag na proteksyon laban sa PIN brute-force</string>
-    <string name="sec_wipe_after_body">Kapag naka-on, ang %1$d sunod-sunod na maling PIN ay PERMANENTENG buburahin ang wallet na ito (seed, mga key, at kasaysayan) mula sa device na ito.\n\nHindi na ito maibabalik sa device. Ang pondo mo ay mababawi lamang mula sa recovery phrase mo.</string>
+    <string name="sec_wipe_after_body_all">Kapag naka-on, ang %1$d sunod-sunod na maling PIN ay PERMANENTENG buburahin ang bawat wallet sa device na ito: mga recovery phrase, mga key, at kasaysayan.\n\nHindi na ito maibabalik sa device. Ang pondo ay mababawi lamang mula sa recovery phrase ng bawat wallet.</string>
     <string name="sec_wipe_after_ack">Naka-back up ang recovery phrase ko</string>
     <string name="sec_wipe_after_enabled">Naka-on ang pagbura pagkatapos ng %1$d</string>
     <string name="sec_recovery_phrase">Recovery Phrase</string>
@@ -448,7 +448,7 @@
     <string name="sec_danger_zone">Danger Zone</string>
     <string name="sec_wipe_wallet">Burahin ang Wallet</string>
     <string name="sec_wipe_wallet_sub">Alisin ang lahat ng data ng wallet sa device na ito</string>
-    <string name="sec_wipe_wallet_body">Hindi na ito mababawi.\n\nPermanenteng buburahin sa device na ito ang lahat ng data ng wallet, mga key, at kasaysayan ng transaksyon.\n\nTiyaking naka-back up ang recovery phrase mo bago magpatuloy.</string>
+    <string name="sec_wipe_all_body">Hindi na ito mababawi.\n\nBuburahin ang bawat wallet sa device na ito: mga recovery phrase, mga key, at kasaysayan ng transaksyon.\n\nTiyaking naka-back up ang recovery phrase ng bawat wallet bago magpatuloy.</string>
     <string name="sec_wipe_everything">Burahin ang Lahat</string>
     <string name="sec_verify_pin">I-verify ang Kasalukuyang PIN</string>
     <string name="sec_verify_pin_sub">Ilagay ang kasalukuyang PIN mo para magpatuloy</string>

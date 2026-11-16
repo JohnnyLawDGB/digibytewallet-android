@@ -26,7 +26,9 @@ import app.aroundtheblock.wallet.core.security.seedKeyStatusFor
 import app.aroundtheblock.wallet.core.security.boundKeyStateOnFailure
 import app.aroundtheblock.wallet.core.security.neverOpens
 import app.aroundtheblock.wallet.core.wallets.StoreScope
+import app.aroundtheblock.wallet.core.wallets.WalletIds
 import app.aroundtheblock.wallet.core.wallets.WalletOrigin
+import app.aroundtheblock.wallet.core.wallets.WalletRegistry
 import app.aroundtheblock.wallet.core.wallets.WalletScope
 import app.aroundtheblock.wallet.core.wallets.WalletStores
 import app.aroundtheblock.wallet.core.wallets.storageSuffix
@@ -188,6 +190,18 @@ class WalletManager @Suppress("LongParameterList") constructor(
     // floor key; not Keystore aliases). Injectable for the same reason as the above.
     private val storesLeft: (WalletScope) -> Boolean =
         { app.aroundtheblock.wallet.core.wallets.WalletStoreEraser(context).storesLeft(it) },
+    // The wipe removes every wallet (one PIN guards them all): it erases each wallet's record and
+    // stores through this eraser's phases, legacy's through [dataEraser].
+    private val scopeEraser: app.aroundtheblock.wallet.core.wallets.WalletStoreEraser =
+        app.aroundtheblock.wallet.core.wallets.WalletStoreEraser(context),
+    // Every seed key alias of every wallet, which the wipe deletes and reads back. Not
+    // [keyStoreManager], which is bound to this manager's own wallet.
+    private val keystoreAliases: KeystoreAliases = AndroidKeystoreAliases,
+    // Every wallet id on the device: the registry, the seed records on disk and the Keystore
+    // aliases. Injectable because in-memory test prefs create no files to list.
+    private val allWalletIds: () -> List<String> = {
+        app.aroundtheblock.wallet.core.wallets.ActiveWallet.everyWalletId(context) { keystoreAliases.aliases() }
+    },
 ) {
     // Sessions running for the wallet in this process (the sync service), stopped by every wipe
     // before it erases anything. See [WalletSessionStop].
@@ -233,7 +247,23 @@ class WalletManager @Suppress("LongParameterList") constructor(
      */
     fun mayHaveDigiIdHistoryElsewhere(): Boolean = prefs.getString(KEY_ORIGIN, null) != ORIGIN_CREATED
 
-    fun hasSavedWallet(): Boolean = prefs.contains("encrypted_seed") || prefs.contains("encrypted_seed_v2")
+    fun hasSavedWallet(): Boolean = holdsSeed(prefs)
+
+    private fun holdsSeed(record: SharedPreferences): Boolean =
+        record.contains("encrypted_seed") || record.contains("encrypted_seed_v2")
+
+    /** [scope]'s seed record holds a sealed seed (read from the store as this process sees it). */
+    private fun holdsSeedRecord(scope: WalletScope): Boolean =
+        holdsSeed(context.getSharedPreferences(WalletStores.seedRecordPrefs(scope), Context.MODE_PRIVATE))
+
+    /** Clear the registry `dgb_wallets`: true only when the write landed. */
+    private fun clearWalletRegistry(): Boolean {
+        val store = context.getSharedPreferences(WalletRegistry.PREFS, Context.MODE_PRIVATE)
+        val held = store.all
+        val landed = store.edit().clear().commit()
+        if (!landed) readWhatTheFileHolds("WalletManager", WalletRegistry.PREFS, store, held)
+        return landed
+    }
 
     /**
      * Whether PIN setup creates the wallet from the words onboarding holds.
@@ -978,15 +1008,19 @@ class WalletManager @Suppress("LongParameterList") constructor(
     }
 
     /**
-     * Complete wallet wipe — destroys the seed AND all privacy-sensitive derived
-     * data (tx history, address set, recorded sends, filter-header chain, Room DB),
-     * so a security wipe (manual Settings OR the PIN wipe-after-N backstop) doesn't
-     * leave transaction history behind. Both paths call this single routine, and one
-     * run covers BOTH networks' stores and the identity sessions ([IdentitySessionWipe]).
+     * Complete wipe of EVERY wallet on the device — one PIN guards them all, so one wipe removes
+     * them all. It destroys each wallet's seed AND all privacy-sensitive derived data (tx history,
+     * address set, recorded sends, filter-header chain, Room DB), so a security wipe (manual
+     * Settings OR the PIN wipe-after-N backstop) doesn't leave transaction history behind. Both
+     * paths call this single routine, and one run covers every wallet ([allWalletIds]: the
+     * registry, the seed records on disk and the Keystore aliases), BOTH networks' stores, the
+     * registry `dgb_wallets` and the identity sessions ([IdentitySessionWipe]).
      *
-     * Order holds across a process death: the seed ciphertext is cleared FIRST, and its key once
-     * that removal is CONFIRMED — so a wipe cut short leaves hasSavedWallet()=false (no
-     * half-loadable wallet) and nothing that could decrypt a record that did survive, while a
+     * It runs each phase across every wallet before the next phase starts, never one wallet at a
+     * time: every seed record first; then, once every record reads back gone, every seed key alias
+     * of every wallet (legacy's `dgb_wallet_master(_v2)` included, whichever wallet is active);
+     * then every store. Order holds across a process death: a wipe cut short leaves no
+     * half-loadable wallet and nothing that could decrypt a record that did survive, while a
      * record that is still on the device keeps the key that opens it and stays the wallet its
      * PIN opened before this run. A wipe that could not finish is always one that can be run
      * again, from a device its owner can still open.
@@ -1019,15 +1053,39 @@ class WalletManager @Suppress("LongParameterList") constructor(
             .all { it }
         // Stop sync and disconnect peers before destroying wallet.
         val quiesced = attempt("native quiesce") { quiesceNative(); true }
-        // Seed ciphertext FIRST (the ordering invariant above). The record is what holds the
-        // seed; the key only unwraps it. So the record's removal is CONFIRMED first — the write
-        // landed (the in-memory view of a preferences file shows an edit whether or not it
-        // reached the disk, so the write result is part of the evidence) and nothing is readable
-        // any more — and only then does the key go.
-        val seedErased = attempt("wallet record") { dataEraser.eraseSeedCiphertext() }
-        val recordGone = seedErased && attempt("wallet record read-back") { !hasSavedWallet() }
+        // Every wallet on the device, legacy always among them. An id set that cannot be read is a
+        // wipe that cannot say every record is gone: legacy is still erased, and the seed is not
+        // reported gone.
+        val listed: List<String>? = try {
+            (listOf(WalletIds.LEGACY) + allWalletIds()).filter(WalletIds::isValid).distinct()
+        } catch (t: Throwable) {
+            android.util.Log.e("WalletManager", "wipe: wallet ids not listed (${t.javaClass.simpleName})")
+            null
+        }
+        // Every wallet but legacy, whose stores [dataEraser] erases on both networks. A seed record
+        // is one file for both networks, so the network here only names it.
+        val others = listed.orEmpty().filter { it != WalletIds.LEGACY }.map { WalletScope(it, testnet = false) }
+        // Phase 1, every seed record FIRST (the ordering invariant above). The record is what holds
+        // the seed; the key only unwraps it. So the removal of every record is CONFIRMED first — each
+        // write landed (the in-memory view of a preferences file shows an edit whether or not it
+        // reached the disk, so the write result is part of the evidence) and no record of any wallet
+        // is readable any more — and only then does any key go.
+        val recordsErased = listOf(attempt("wallet record") { dataEraser.eraseSeedCiphertext() }) +
+            others.map { wallet -> attempt("wallet record") { scopeEraser.eraseRecord(wallet) } }
+        val recordGone = listed != null && recordsErased.all { it } &&
+            attempt("wallet record read-back") { (listOf(WalletScope.legacy(false)) + others).none(::holdsSeedRecord) }
+        // Phase 2, every seed key alias of every wallet, through the Keystore itself: [keyStoreManager]
+        // is bound to this manager's wallet, and with another wallet active it would leave legacy's.
+        // Legacy's key may still wrap the database password's record; the database and that record are
+        // erased below, so nothing needs it unwrapped first.
         if (recordGone) {
-            attempt("wallet key") { keyStoreManager.deleteKey(); true } // judged by the read-back below
+            val seedAliases = try {
+                keystoreAliases.aliases().filter { WalletStores.walletIdOfAlias(it) != null }
+            } catch (t: Throwable) {
+                android.util.Log.e("WalletManager", "wipe: wallet keys not listed (${t.javaClass.simpleName})")
+                emptyList() // judged by the read-back below
+            }
+            seedAliases.forEach { alias -> attempt("wallet key") { keystoreAliases.delete(alias); true } }
         }
         // Empty the UTXO table through the still-open handle BEFORE the database files are erased:
         // a write after the erase can create a file by name (a rollback journal) that the eraser's
@@ -1039,7 +1097,8 @@ class WalletManager @Suppress("LongParameterList") constructor(
         } catch (t: Throwable) {
             android.util.Log.w("WalletManager", "wipe: utxo cache not emptied (${t.javaClass.simpleName})")
         }
-        // Regenerable + privacy-sensitive persisted data, both networks.
+        // Phase 3. Regenerable + privacy-sensitive persisted data: legacy's on both networks, then
+        // every other wallet's on both networks (a wallet's own network is not trusted to be known).
         val storesCleared = listOf(
             attempt("sync data") { dataEraser.eraseSyncData() },
             attempt("peer cache") { dataEraser.eraseBloomPeerCache() },
@@ -1049,11 +1108,19 @@ class WalletManager @Suppress("LongParameterList") constructor(
             attempt("database") { dataEraser.eraseDatabase() },
             attempt("leftover state") { dataEraser.eraseLeftoverState() },
             attempt("hub session") { dataEraser.eraseHubSession() },
+        ) + others.flatMap { listOf(it, it.copy(testnet = true)) }.map { wallet ->
+            attempt("wallet stores") { scopeEraser.eraseStores(wallet) }
+        } + listOf(
+            // The registry goes only once no wallet's record is left: while one is, the registry
+            // still lists it.
+            recordGone && attempt("wallet registry") { clearWalletRegistry() },
             attempt("identity sessions") { identitySessions.eraseIdentitySessions() },
-        ).all { it }
-        // READ-BACK, not "no step threw": the record's removal is confirmed (above) and neither
-        // seed key alias exists when the Keystore is asked again.
-        val seedGone = recordGone && attempt("wallet key read-back") { dataEraser.seedKeyAbsent() }
+        )
+        // READ-BACK, not "no step threw": the removal of every record is confirmed (above) and no
+        // seed key alias of any wallet exists when the Keystore is asked again.
+        val seedGone = recordGone && attempt("wallet key read-back") {
+            keystoreAliases.aliases().none { WalletStores.walletIdOfAlias(it) != null }
+        }
 
         // The state says what is on the device: no wallet only when the seed is gone. Otherwise
         // the wallet still exists behind its PIN and its session has been stopped — Locked.
@@ -1062,7 +1129,7 @@ class WalletManager @Suppress("LongParameterList") constructor(
         syncFrontierSession.reset()
         val report = WipeReport(
             seedGone = seedGone,
-            everythingCleared = sessionsStopped && quiesced && storesCleared,
+            everythingCleared = sessionsStopped && quiesced && storesCleared.all { it },
         )
         return report
     }

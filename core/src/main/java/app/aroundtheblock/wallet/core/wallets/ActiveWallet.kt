@@ -36,6 +36,22 @@ object ActiveWallet {
         )
     }
 
+    /**
+     * Every wallet id on this device, legacy first, each once: the registry's entries in any state,
+     * the seed records on disk ([WalletStores.walletIdOfSeedPrefsFile]) and the wallets whose seed
+     * key alias the Keystore holds ([WalletStores.walletIdOfAlias]). What the wipe removes, so a
+     * wallet the registry lost is still found. A Keystore that cannot list its aliases adds no id
+     * here; the wipe deletes and reads back the aliases themselves, so it cannot miss one.
+     */
+    fun everyWalletId(context: Context, aliases: () -> List<String>): List<String> {
+        val app = context.applicationContext ?: context
+        val registry = registry(app)
+        val registered = (registry.list(false) + registry.list(true) + registry.incomplete()).map { it.id }
+        val onDisk = recordsOnDisk(app).map { it.first }
+        val keyed = runCatching { aliases() }.getOrDefault(emptyList()).mapNotNull(WalletStores::walletIdOfAlias)
+        return (listOf(WalletIds.LEGACY) + registered + onDisk + keyed).distinct()
+    }
+
     private fun recordsOnDisk(app: Context): List<Pair<String, Boolean?>> {
         val files = runCatching { File(app.dataDir, "shared_prefs").listFiles() }.getOrNull() ?: return emptyList()
         return files.mapNotNull { f ->

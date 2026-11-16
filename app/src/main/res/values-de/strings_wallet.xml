@@ -443,9 +443,9 @@
     <string name="sec_biometric_no">Auf diesem Gerät nicht verfügbar</string>
     <string name="sec_autolock">Zeitlimit für automatische Sperre</string>
     <string name="sec_wipe_after">Löschen nach %1$d falschen PINs</string>
-    <string name="sec_wipe_after_on">Aktiviert: Wallet wird nach %1$d falschen PINs gelöscht</string>
+    <string name="sec_wipe_after_on_all">Aktiviert: Alle Wallets werden nach %1$d falschen PINs gelöscht</string>
     <string name="sec_wipe_after_off">Aus: zusätzlicher Schutz gegen PIN-Brute-Force</string>
-    <string name="sec_wipe_after_body">Wenn aktiviert, löschen %1$d aufeinanderfolgende falsche PIN-Eingaben diese Wallet (Seed, Schlüssel und Verlauf) DAUERHAFT von diesem Gerät.\n\nAuf dem Gerät ist das unwiderruflich. Ihr Guthaben ist nur über Ihre Wiederherstellungsphrase wiederherstellbar.</string>
+    <string name="sec_wipe_after_body_all">Wenn aktiviert, löschen %1$d falsche PIN-Eingaben in Folge DAUERHAFT alle Wallets auf diesem Gerät: Wiederherstellungsphrasen, Schlüssel und Verlauf.\n\nAuf dem Gerät ist das unwiderruflich. Guthaben ist nur über die Wiederherstellungsphrase der jeweiligen Wallet wiederherstellbar.</string>
     <string name="sec_wipe_after_ack">Meine Wiederherstellungsphrase ist gesichert</string>
     <string name="sec_wipe_after_enabled">Löschen nach %1$d aktiviert</string>
     <string name="sec_recovery_phrase">Wiederherstellungsphrase</string>
@@ -456,7 +456,7 @@
     <string name="sec_danger_zone">Gefahrenbereich</string>
     <string name="sec_wipe_wallet">Wallet löschen</string>
     <string name="sec_wipe_wallet_sub">Alle Wallet-Daten von diesem Gerät entfernen</string>
-    <string name="sec_wipe_wallet_body">Dies kann nicht rückgängig gemacht werden.\n\nAlle Wallet-Daten, Schlüssel und der Transaktionsverlauf werden dauerhaft von diesem Gerät gelöscht.\n\nStellen Sie sicher, dass Ihre Wiederherstellungsphrase gesichert ist, bevor Sie fortfahren.</string>
+    <string name="sec_wipe_all_body">Dies kann nicht rückgängig gemacht werden.\n\nAlle Wallets auf diesem Gerät werden gelöscht: Wiederherstellungsphrasen, Schlüssel und Transaktionsverlauf.\n\nStellen Sie sicher, dass die Wiederherstellungsphrase jeder Wallet gesichert ist, bevor Sie fortfahren.</string>
     <string name="sec_wipe_everything">Alles löschen</string>
     <string name="sec_verify_pin">Aktuelle PIN bestätigen</string>
     <string name="sec_verify_pin_sub">Geben Sie zum Fortfahren Ihre aktuelle PIN ein</string>

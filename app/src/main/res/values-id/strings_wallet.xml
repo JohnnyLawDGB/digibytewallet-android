@@ -432,9 +432,9 @@
     <string name="sec_biometric_no">Tidak tersedia di perangkat ini</string>
     <string name="sec_autolock">Waktu Kunci Otomatis</string>
     <string name="sec_wipe_after">Hapus setelah %1$d PIN salah</string>
-    <string name="sec_wipe_after_on">Aktif: dompet dihapus setelah %1$d PIN salah</string>
+    <string name="sec_wipe_after_on_all">Aktif: semua dompet dihapus setelah %1$d PIN salah</string>
     <string name="sec_wipe_after_off">Nonaktif: perlindungan ekstra dari brute-force PIN</string>
-    <string name="sec_wipe_after_body">Jika aktif, %1$d entri PIN salah berturut-turut akan MENGHAPUS PERMANEN dompet ini (seed, kunci, dan riwayat) dari perangkat ini.\n\nIni tidak dapat dibatalkan di perangkat. Dana Anda hanya bisa dipulihkan dari frasa pemulihan.</string>
+    <string name="sec_wipe_after_body_all">Jika aktif, %1$d entri PIN salah berturut-turut akan MENGHAPUS PERMANEN semua dompet di perangkat ini: frasa pemulihan, kunci, dan riwayat.\n\nIni tidak dapat dibatalkan di perangkat. Dana hanya bisa dipulihkan dari frasa pemulihan masing-masing dompet.</string>
     <string name="sec_wipe_after_ack">Frasa pemulihan saya sudah dicadangkan</string>
     <string name="sec_wipe_after_enabled">Hapus-setelah-%1$d aktif</string>
     <string name="sec_recovery_phrase">Frasa Pemulihan</string>
@@ -445,7 +445,7 @@
     <string name="sec_danger_zone">Zona Berbahaya</string>
     <string name="sec_wipe_wallet">Hapus Dompet</string>
     <string name="sec_wipe_wallet_sub">Hapus semua data dompet dari perangkat ini</string>
-    <string name="sec_wipe_wallet_body">Ini tidak dapat dibatalkan.\n\nSemua data dompet, kunci, dan riwayat transaksi akan dihapus permanen dari perangkat ini.\n\nPastikan frasa pemulihan Anda sudah dicadangkan sebelum melanjutkan.</string>
+    <string name="sec_wipe_all_body">Ini tidak dapat dibatalkan.\n\nSemua dompet di perangkat ini akan dihapus: frasa pemulihan, kunci, dan riwayat transaksi.\n\nPastikan frasa pemulihan setiap dompet sudah dicadangkan sebelum melanjutkan.</string>
     <string name="sec_wipe_everything">Hapus Semuanya</string>
     <string name="sec_verify_pin">Verifikasi PIN Saat Ini</string>
     <string name="sec_verify_pin_sub">Masukkan PIN Anda saat ini untuk melanjutkan</string>

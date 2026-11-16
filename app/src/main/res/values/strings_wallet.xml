@@ -528,10 +528,10 @@
     <string name="sec_biometric_no">Not available on this device</string>
     <string name="sec_autolock">Auto-Lock Timeout</string>
     <string name="sec_wipe_after">Wipe After %1$d Failed PINs</string>
-    <string name="sec_wipe_after_on">Enabled: wallet erases after %1$d wrong PINs</string>
+    <string name="sec_wipe_after_on_all">Enabled: every wallet is erased after %1$d wrong PINs</string>
     <string name="sec_wipe_after_off">Off: extra protection against PIN brute-force</string>
     <!-- WARNING: explains permanent, irreversible on-device erasure. -->
-    <string name="sec_wipe_after_body">When enabled, %1$d consecutive incorrect PIN entries will PERMANENTLY erase this wallet (seed, keys, and history) from this device.\n\nThis is irreversible on-device. Your funds are only recoverable from your recovery phrase.</string>
+    <string name="sec_wipe_after_body_all">When enabled, %1$d incorrect PIN entries in a row PERMANENTLY erase every wallet on this device: recovery phrases, keys and history.\n\nThis cannot be undone on the device. Funds can be recovered only from each wallet\'s recovery phrase.</string>
     <string name="sec_wipe_after_ack">My recovery phrase is backed up</string>
     <string name="sec_wipe_after_enabled">Wipe-after-%1$d enabled</string>
     <string name="sec_recovery_phrase">Recovery Phrase</string>
@@ -544,7 +544,7 @@
     <string name="sec_wipe_wallet">Wipe Wallet</string>
     <string name="sec_wipe_wallet_sub">Remove all wallet data from this device</string>
     <!-- WARNING: last screen before permanent deletion. -->
-    <string name="sec_wipe_wallet_body">This cannot be undone.\n\nAll wallet data, keys, and transaction history will be permanently deleted from this device.\n\nMake sure you have your recovery phrase backed up before continuing.</string>
+    <string name="sec_wipe_all_body">This cannot be undone.\n\nEvery wallet on this device is deleted: recovery phrases, keys and transaction history.\n\nMake sure every wallet\'s recovery phrase is backed up before you continue.</string>
     <string name="sec_wipe_everything">Wipe Everything</string>
     <string name="sec_verify_pin">Verify Current PIN</string>
     <string name="sec_verify_pin_sub">Enter your current PIN to continue</string>

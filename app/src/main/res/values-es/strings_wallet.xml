@@ -440,9 +440,9 @@
     <string name="sec_biometric_no">No disponible en este dispositivo</string>
     <string name="sec_autolock">Tiempo de bloqueo automático</string>
     <string name="sec_wipe_after">Borrar tras %1$d PIN fallidos</string>
-    <string name="sec_wipe_after_on">Activado: la billetera se borra tras %1$d PIN incorrectos</string>
+    <string name="sec_wipe_after_on_all">Activado: todas las billeteras se borran tras %1$d PIN incorrectos</string>
     <string name="sec_wipe_after_off">Desactivado: protección adicional contra fuerza bruta del PIN</string>
-    <string name="sec_wipe_after_body">Cuando está activado, %1$d entradas de PIN incorrectas consecutivas borrarán PERMANENTEMENTE esta billetera (semilla, claves e historial) de este dispositivo.\n\nEs irreversible en el dispositivo. Tus fondos solo se pueden recuperar con tu frase de recuperación.</string>
+    <string name="sec_wipe_after_body_all">Cuando está activado, %1$d entradas de PIN incorrectas seguidas borran PERMANENTEMENTE todas las billeteras de este dispositivo: frases de recuperación, claves e historial.\n\nEs irreversible en el dispositivo. Los fondos solo se pueden recuperar con la frase de recuperación de cada billetera.</string>
     <string name="sec_wipe_after_ack">Mi frase de recuperación está respaldada</string>
     <string name="sec_wipe_after_enabled">Borrado tras %1$d activado</string>
     <string name="sec_recovery_phrase">Frase de recuperación</string>
@@ -453,7 +453,7 @@
     <string name="sec_danger_zone">Zona de peligro</string>
     <string name="sec_wipe_wallet">Borrar billetera</string>
     <string name="sec_wipe_wallet_sub">Eliminar todos los datos de la billetera de este dispositivo</string>
-    <string name="sec_wipe_wallet_body">Esto no se puede deshacer.\n\nTodos los datos de la billetera, las claves y el historial de transacciones se eliminarán permanentemente de este dispositivo.\n\nAsegúrate de tener tu frase de recuperación respaldada antes de continuar.</string>
+    <string name="sec_wipe_all_body">Esto no se puede deshacer.\n\nSe eliminan todas las billeteras de este dispositivo: frases de recuperación, claves e historial de transacciones.\n\nAsegúrate de tener respaldada la frase de recuperación de cada billetera antes de continuar.</string>
     <string name="sec_wipe_everything">Borrar todo</string>
     <string name="sec_verify_pin">Verificar PIN actual</string>
     <string name="sec_verify_pin_sub">Introduce tu PIN actual para continuar</string>

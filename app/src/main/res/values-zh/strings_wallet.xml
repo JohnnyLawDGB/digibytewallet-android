@@ -432,9 +432,9 @@
     <string name="sec_biometric_no">此设备不支持</string>
     <string name="sec_autolock">自动锁定超时</string>
     <string name="sec_wipe_after">输错 %1$d 次 PIN 后清除</string>
-    <string name="sec_wipe_after_on">已开启：输错 %1$d 次 PIN 后清除钱包</string>
+    <string name="sec_wipe_after_on_all">已开启：输错 %1$d 次 PIN 后清除所有钱包</string>
     <string name="sec_wipe_after_off">已关闭：额外防止 PIN 暴力破解</string>
-    <string name="sec_wipe_after_body">开启后，连续 %1$d 次输入错误的 PIN 码将从本设备永久清除此钱包：包括助记种子、密钥和历史记录。\n\n在设备上此操作不可撤销。您的资金只能通过恢复助记词找回。</string>
+    <string name="sec_wipe_after_body_all">开启后，连续 %1$d 次输入错误的 PIN 码将从本设备永久清除所有钱包：包括恢复助记词、密钥和历史记录。\n\n在设备上此操作不可撤销。资金只能通过各钱包的恢复助记词找回。</string>
     <string name="sec_wipe_after_ack">我的恢复助记词已备份</string>
     <string name="sec_wipe_after_enabled">已开启输错 %1$d 次清除</string>
     <string name="sec_recovery_phrase">恢复助记词</string>
@@ -445,7 +445,7 @@
     <string name="sec_danger_zone">危险区域</string>
     <string name="sec_wipe_wallet">清除钱包</string>
     <string name="sec_wipe_wallet_sub">从本设备移除所有钱包数据</string>
-    <string name="sec_wipe_wallet_body">此操作无法撤销。\n\n所有钱包数据、密钥和交易历史将从本设备永久删除。\n\n继续之前请确认您已备份恢复助记词。</string>
+    <string name="sec_wipe_all_body">此操作无法撤销。\n\n本设备上的所有钱包都将被删除：包括恢复助记词、密钥和交易历史。\n\n继续之前请确认已备份每个钱包的恢复助记词。</string>
     <string name="sec_wipe_everything">清除全部</string>
     <string name="sec_verify_pin">验证当前 PIN 码</string>
     <string name="sec_verify_pin_sub">请输入当前 PIN 码以继续</string>

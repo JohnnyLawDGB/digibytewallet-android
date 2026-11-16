@@ -432,9 +432,9 @@
     <string name="sec_biometric_no">この端末では利用できません</string>
     <string name="sec_autolock">自動ロックまでの時間</string>
     <string name="sec_wipe_after">PIN を %1$d 回間違えたら消去</string>
-    <string name="sec_wipe_after_on">オン：PIN を %1$d 回間違えるとウォレットを消去します</string>
+    <string name="sec_wipe_after_on_all">オン：PIN を %1$d 回間違えるとすべてのウォレットを消去します</string>
     <string name="sec_wipe_after_off">オフ：PIN 総当たりへの追加の保護</string>
-    <string name="sec_wipe_after_body">オンにすると、PIN を連続で %1$d 回間違えた時点で、このウォレット（シード・鍵・履歴）を端末から完全に消去します。\n\n端末上では取り消せません。資金はリカバリーフレーズからのみ復元できます。</string>
+    <string name="sec_wipe_after_body_all">オンにすると、PIN を連続で %1$d 回間違えた時点で、この端末のすべてのウォレット（リカバリーフレーズ・鍵・履歴）を完全に消去します。\n\n端末上では取り消せません。資金は各ウォレットのリカバリーフレーズからのみ復元できます。</string>
     <string name="sec_wipe_after_ack">リカバリーフレーズをバックアップ済みです</string>
     <string name="sec_wipe_after_enabled">%1$d 回で消去を有効にしました</string>
     <string name="sec_recovery_phrase">リカバリーフレーズ</string>
@@ -445,7 +445,7 @@
     <string name="sec_danger_zone">危険な操作</string>
     <string name="sec_wipe_wallet">ウォレットを消去</string>
     <string name="sec_wipe_wallet_sub">この端末からすべてのウォレットデータを削除します</string>
-    <string name="sec_wipe_wallet_body">この操作は取り消せません。\n\nすべてのウォレットデータ、鍵、取引履歴がこの端末から完全に削除されます。\n\n続行する前に、リカバリーフレーズをバックアップしてあることを確認してください。</string>
+    <string name="sec_wipe_all_body">この操作は取り消せません。\n\nこの端末のすべてのウォレット（リカバリーフレーズ・鍵・取引履歴）が削除されます。\n\n続行する前に、各ウォレットのリカバリーフレーズをバックアップしてあることを確認してください。</string>
     <string name="sec_wipe_everything">すべて消去</string>
     <string name="sec_verify_pin">現在の PIN を確認</string>
     <string name="sec_verify_pin_sub">続行するには現在の PIN を入力してください</string>

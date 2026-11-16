@@ -441,9 +441,9 @@
     <string name="sec_biometric_no">Недоступно на этом устройстве</string>
     <string name="sec_autolock">Тайм-аут автоблокировки</string>
     <string name="sec_wipe_after">Удалить после %1$d неверных PIN-кодов</string>
-    <string name="sec_wipe_after_on">Включено: кошелёк удаляется после %1$d неверных PIN-кодов</string>
+    <string name="sec_wipe_after_on_all">Включено: все кошельки удаляются после %1$d неверных PIN-кодов</string>
     <string name="sec_wipe_after_off">Выключено: дополнительная защита от перебора PIN-кода</string>
-    <string name="sec_wipe_after_body">Если включено, %1$d неверных ввода PIN-кода подряд НАВСЕГДА удалят этот кошелёк (сид, ключи и историю) с этого устройства.\n\nНа устройстве это необратимо. Средства можно вернуть только по фразе восстановления.</string>
+    <string name="sec_wipe_after_body_all">Если включено, %1$d неверных ввода PIN-кода подряд НАВСЕГДА удалят все кошельки на этом устройстве: фразы восстановления, ключи и историю.\n\nНа устройстве это необратимо. Средства можно вернуть только по фразе восстановления каждого кошелька.</string>
     <string name="sec_wipe_after_ack">Моя фраза восстановления сохранена</string>
     <string name="sec_wipe_after_enabled">Удаление после %1$d включено</string>
     <string name="sec_recovery_phrase">Фраза восстановления</string>
@@ -454,7 +454,7 @@
     <string name="sec_danger_zone">Опасная зона</string>
     <string name="sec_wipe_wallet">Удалить кошелёк</string>
     <string name="sec_wipe_wallet_sub">Удалить все данные кошелька с этого устройства</string>
-    <string name="sec_wipe_wallet_body">Это действие необратимо.\n\nВсе данные кошелька, ключи и история транзакций будут навсегда удалены с этого устройства.\n\nПеред продолжением убедитесь, что фраза восстановления сохранена.</string>
+    <string name="sec_wipe_all_body">Это действие необратимо.\n\nВсе кошельки на этом устройстве будут удалены: фразы восстановления, ключи и история транзакций.\n\nПеред продолжением убедитесь, что фраза восстановления каждого кошелька сохранена.</string>
     <string name="sec_wipe_everything">Удалить всё</string>
     <string name="sec_verify_pin">Подтвердите текущий PIN-код</string>
     <string name="sec_verify_pin_sub">Введите текущий PIN-код, чтобы продолжить</string>

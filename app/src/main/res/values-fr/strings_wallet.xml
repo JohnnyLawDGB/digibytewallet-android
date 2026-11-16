@@ -425,9 +425,9 @@
     <string name="sec_biometric_no">Non disponible sur cet appareil</string>
     <string name="sec_autolock">Délai de verrouillage automatique</string>
     <string name="sec_wipe_after">Effacer après %1$d codes PIN erronés</string>
-    <string name="sec_wipe_after_on">Activé : le portefeuille est effacé après %1$d codes PIN erronés</string>
+    <string name="sec_wipe_after_on_all">Activé : tous les portefeuilles sont effacés après %1$d codes PIN erronés</string>
     <string name="sec_wipe_after_off">Désactivé : protection supplémentaire contre la force brute sur le code PIN</string>
-    <string name="sec_wipe_after_body">Une fois activé, %1$d saisies consécutives d\'un code PIN incorrect effaceront DÉFINITIVEMENT ce portefeuille (graine, clés et historique) de cet appareil.\n\nC\'est irréversible sur l\'appareil. Vos fonds ne sont récupérables qu\'à partir de votre phrase de récupération.</string>
+    <string name="sec_wipe_after_body_all">Une fois activé, %1$d saisies d\'un code PIN incorrect à la suite effacent DÉFINITIVEMENT tous les portefeuilles de cet appareil : phrases de récupération, clés et historique.\n\nC\'est irréversible sur l\'appareil. Les fonds ne sont récupérables qu\'à partir de la phrase de récupération de chaque portefeuille.</string>
     <string name="sec_wipe_after_ack">Ma phrase de récupération est sauvegardée</string>
     <string name="sec_wipe_after_enabled">Effacement après %1$d activé</string>
     <string name="sec_recovery_phrase">Phrase de récupération</string>
@@ -438,7 +438,7 @@
     <string name="sec_danger_zone">Zone dangereuse</string>
     <string name="sec_wipe_wallet">Effacer le portefeuille</string>
     <string name="sec_wipe_wallet_sub">Supprimer toutes les données du portefeuille de cet appareil</string>
-    <string name="sec_wipe_wallet_body">Cette action est irréversible.\n\nToutes les données du portefeuille, les clés et l\'historique des transactions seront définitivement supprimés de cet appareil.\n\nAssurez-vous d\'avoir sauvegardé votre phrase de récupération avant de continuer.</string>
+    <string name="sec_wipe_all_body">Cette action est irréversible.\n\nTous les portefeuilles de cet appareil sont supprimés : phrases de récupération, clés et historique des transactions.\n\nAssurez-vous d\'avoir sauvegardé la phrase de récupération de chaque portefeuille avant de continuer.</string>
     <string name="sec_wipe_everything">Tout effacer</string>
     <string name="sec_verify_pin">Vérifier le code PIN actuel</string>
     <string name="sec_verify_pin_sub">Saisissez votre code PIN actuel pour continuer</string>

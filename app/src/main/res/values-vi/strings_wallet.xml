@@ -432,9 +432,9 @@
     <string name="sec_biometric_no">Không khả dụng trên thiết bị này</string>
     <string name="sec_autolock">Thời gian tự khóa</string>
     <string name="sec_wipe_after">Xóa sau %1$d lần sai PIN</string>
-    <string name="sec_wipe_after_on">Bật: ví sẽ bị xóa sau %1$d lần nhập sai PIN</string>
+    <string name="sec_wipe_after_on_all">Bật: mọi ví sẽ bị xóa sau %1$d lần nhập sai PIN</string>
     <string name="sec_wipe_after_off">Tắt: thêm lớp bảo vệ chống dò PIN</string>
-    <string name="sec_wipe_after_body">Khi bật, %1$d lần nhập sai PIN liên tiếp sẽ XÓA VĨNH VIỄN ví này (cụm từ gốc, khóa và lịch sử) khỏi thiết bị.\n\nTrên thiết bị, điều này không thể hoàn tác. Tiền của bạn chỉ có thể khôi phục từ cụm từ khôi phục.</string>
+    <string name="sec_wipe_after_body_all">Khi bật, %1$d lần nhập sai PIN liên tiếp sẽ XÓA VĨNH VIỄN mọi ví trên thiết bị này: cụm từ khôi phục, khóa và lịch sử.\n\nTrên thiết bị, điều này không thể hoàn tác. Tiền chỉ có thể khôi phục từ cụm từ khôi phục của từng ví.</string>
     <string name="sec_wipe_after_ack">Tôi đã sao lưu cụm từ khôi phục</string>
     <string name="sec_wipe_after_enabled">Đã bật xóa sau %1$d lần</string>
     <string name="sec_recovery_phrase">Cụm từ khôi phục</string>
@@ -445,7 +445,7 @@
     <string name="sec_danger_zone">Vùng nguy hiểm</string>
     <string name="sec_wipe_wallet">Xóa ví</string>
     <string name="sec_wipe_wallet_sub">Xóa toàn bộ dữ liệu ví khỏi thiết bị này</string>
-    <string name="sec_wipe_wallet_body">Không thể hoàn tác.\n\nToàn bộ dữ liệu ví, khóa và lịch sử giao dịch sẽ bị xóa vĩnh viễn khỏi thiết bị này.\n\nHãy chắc chắn bạn đã sao lưu cụm từ khôi phục trước khi tiếp tục.</string>
+    <string name="sec_wipe_all_body">Không thể hoàn tác.\n\nMọi ví trên thiết bị này sẽ bị xóa: cụm từ khôi phục, khóa và lịch sử giao dịch.\n\nHãy chắc chắn bạn đã sao lưu cụm từ khôi phục của từng ví trước khi tiếp tục.</string>
     <string name="sec_wipe_everything">Xóa tất cả</string>
     <string name="sec_verify_pin">Xác minh mã PIN hiện tại</string>
     <string name="sec_verify_pin_sub">Nhập mã PIN hiện tại để tiếp tục</string>

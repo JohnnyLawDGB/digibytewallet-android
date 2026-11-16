@@ -435,9 +435,9 @@
     <string name="sec_biometric_no">Bu cihazda kullanılamıyor</string>
     <string name="sec_autolock">Otomatik kilit süresi</string>
     <string name="sec_wipe_after">%1$d hatalı PIN sonrası sil</string>
-    <string name="sec_wipe_after_on">Açık: %1$d hatalı PIN sonrası cüzdan silinir</string>
+    <string name="sec_wipe_after_on_all">Açık: %1$d hatalı PIN sonrası tüm cüzdanlar silinir</string>
     <string name="sec_wipe_after_off">Kapalı: PIN deneme saldırılarına karşı ek koruma</string>
-    <string name="sec_wipe_after_body">Etkinleştirildiğinde, arka arkaya %1$d hatalı PIN girişi bu cüzdanı (tohum, anahtarlar ve geçmiş) bu cihazdan KALICI olarak siler.\n\nCihazda bu geri alınamaz. Paranız yalnızca kurtarma ifadenizle geri getirilebilir.</string>
+    <string name="sec_wipe_after_body_all">Etkinleştirildiğinde, arka arkaya %1$d hatalı PIN girişi bu cihazdaki tüm cüzdanları KALICI olarak siler: kurtarma ifadeleri, anahtarlar ve geçmiş.\n\nCihazda bu geri alınamaz. Para yalnızca her cüzdanın kendi kurtarma ifadesiyle geri getirilebilir.</string>
     <string name="sec_wipe_after_ack">Kurtarma ifademin yedeği var</string>
     <string name="sec_wipe_after_enabled">%1$d sonrası silme etkin</string>
     <string name="sec_recovery_phrase">Kurtarma ifadesi</string>
@@ -448,7 +448,7 @@
     <string name="sec_danger_zone">Tehlikeli bölge</string>
     <string name="sec_wipe_wallet">Cüzdanı sil</string>
     <string name="sec_wipe_wallet_sub">Tüm cüzdan verilerini bu cihazdan kaldır</string>
-    <string name="sec_wipe_wallet_body">Bu geri alınamaz.\n\nTüm cüzdan verileri, anahtarlar ve işlem geçmişi bu cihazdan kalıcı olarak silinecek.\n\nDevam etmeden önce kurtarma ifadenizin yedeğinin olduğundan emin olun.</string>
+    <string name="sec_wipe_all_body">Bu geri alınamaz.\n\nBu cihazdaki tüm cüzdanlar silinir: kurtarma ifadeleri, anahtarlar ve işlem geçmişi.\n\nDevam etmeden önce her cüzdanın kurtarma ifadesinin yedeğinin olduğundan emin olun.</string>
     <string name="sec_wipe_everything">Her şeyi sil</string>
     <string name="sec_verify_pin">Mevcut PIN\'i doğrula</string>
     <string name="sec_verify_pin_sub">Devam etmek için mevcut PIN\'inizi girin</string>
