@@ -1,6 +1,10 @@
 package app.aroundtheblock.wallet.core.settings
 
 import android.content.Context
+import app.aroundtheblock.wallet.core.wallets.StoreScope
+import app.aroundtheblock.wallet.core.wallets.WalletScope
+import app.aroundtheblock.wallet.core.wallets.WalletStores
+import app.aroundtheblock.wallet.core.wallets.storageSuffix
 
 /**
  * Where the display currency is stored: one key, `display_currency`, holding the
@@ -30,28 +34,29 @@ object DisplayCurrencyPrefs {
     /** The SPV sync blob the currency used to share. Every wipe path clears it whole. */
     const val LEGACY_PREFS_BASE = "dgb_sync_data"
 
-    /** [PricePrefs.PREFS] plus the network suffix ("" on mainnet, so the same file as Show prices). */
-    fun prefsName(networkSuffix: String): String = PricePrefs.PREFS + networkSuffix
+    /** [PricePrefs.PREFS] plus the network suffix ("" on mainnet, so the same file as Show prices).
+     *  Callers pass `storageSuffix(scope, StoreScope.NETWORK)`: the choice is shared by every wallet. */
+    fun prefsName(netSuffix: String): String = PricePrefs.PREFS + netSuffix
 
     /** The stored enum name, or null when none is stored. Moves a value found only in the old file. */
-    fun read(context: Context, networkSuffix: String): String? = runCatching {
-        context.getSharedPreferences(prefsName(networkSuffix), Context.MODE_PRIVATE).getString(KEY, null)
-    }.getOrNull() ?: moveFromLegacy(context, networkSuffix)
+    fun read(context: Context, netSuffix: String): String? = runCatching {
+        context.getSharedPreferences(prefsName(netSuffix), Context.MODE_PRIVATE).getString(KEY, null)
+    }.getOrNull() ?: moveFromLegacy(context, netSuffix)
 
     /**
      * Persist the user's choice. apply(): it is called from UI handlers, and no wipe path clears
      * this file, so there is nothing for an asynchronous write to race.
      */
-    fun write(context: Context, networkSuffix: String, enumName: String) {
+    fun write(context: Context, netSuffix: String, enumName: String) {
         runCatching {
-            context.getSharedPreferences(prefsName(networkSuffix), Context.MODE_PRIVATE)
+            context.getSharedPreferences(prefsName(netSuffix), Context.MODE_PRIVATE)
                 .edit().putString(KEY, enumName).apply()
         }
     }
 
     /** The move's write: commit(), because the old key is removed only once this has landed. */
-    private fun writeNow(context: Context, networkSuffix: String, enumName: String): Boolean = runCatching {
-        context.getSharedPreferences(prefsName(networkSuffix), Context.MODE_PRIVATE)
+    private fun writeNow(context: Context, netSuffix: String, enumName: String): Boolean = runCatching {
+        context.getSharedPreferences(prefsName(netSuffix), Context.MODE_PRIVATE)
             .edit().putString(KEY, enumName).commit()
     }.getOrDefault(false)
 
@@ -65,17 +70,25 @@ object DisplayCurrencyPrefs {
      *
      * @return the value to show: the new file's, else the old file's, else null.
      */
-    fun moveFromLegacy(context: Context, networkSuffix: String): String? = runCatching {
-        val legacy = context.getSharedPreferences(LEGACY_PREFS_BASE + networkSuffix, Context.MODE_PRIVATE)
+    fun moveFromLegacy(context: Context, netSuffix: String): String? = runCatching {
+        // The old home is legacy's `dgb_sync_data<net>`: no other wallet ever held the currency there.
+        val legacy = context.getSharedPreferences(
+            WalletStores.prefsName(LEGACY_PREFS_BASE, legacyScopeOf(netSuffix)), Context.MODE_PRIVATE,
+        )
         val old = legacy.getString(KEY, null)
-        val current = context.getSharedPreferences(prefsName(networkSuffix), Context.MODE_PRIVATE)
+        val current = context.getSharedPreferences(prefsName(netSuffix), Context.MODE_PRIVATE)
             .getString(KEY, null)
         if (old == null) return@runCatching current
-        if (current != null || writeNow(context, networkSuffix, old)) {
+        if (current != null || writeNow(context, netSuffix, old)) {
             legacy.edit().remove(KEY).commit()
         } else {
             runCatching { android.util.Log.w("DisplayCurrencyPrefs", "display currency not moved: the write did not land") }
         }
         current ?: old
     }.getOrNull()
+
+    /** The legacy scope whose network suffix is [netSuffix]; throws for any other suffix. */
+    private fun legacyScopeOf(netSuffix: String): WalletScope =
+        listOf(false, true).map { WalletScope.legacy(it) }
+            .first { storageSuffix(it, StoreScope.NETWORK) == netSuffix }
 }

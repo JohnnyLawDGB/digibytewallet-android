@@ -10,6 +10,9 @@ import app.aroundtheblock.wallet.core.sync.CfScanLedgerStore
 import app.aroundtheblock.wallet.core.sync.FilterHeaderStore
 import app.aroundtheblock.wallet.core.sync.SavedBlockStore
 import app.aroundtheblock.wallet.core.sync.SavedTransactionsStore
+import app.aroundtheblock.wallet.core.wallets.StoreScope
+import app.aroundtheblock.wallet.core.wallets.WalletScope
+import app.aroundtheblock.wallet.core.wallets.storageSuffix
 
 /**
  * The persistent, non-native side of a complete wallet wipe, factored behind an
@@ -73,8 +76,9 @@ interface WalletDataEraser {
     fun seedKeyAbsent(): Boolean
 }
 
-/** Every suffix a network-suffixed store or file can carry (see [networkSuffix]). */
-internal val WALLET_NETWORK_SUFFIXES = listOf("", "_testnet")
+/** Every network suffix the full wipe walks for the `legacy` wallet (see [storageSuffix]). */
+internal val WALLET_NETWORK_SUFFIXES: List<String> =
+    listOf(false, true).map { storageSuffix(WalletScope.legacy(it), StoreScope.NETWORK) }
 
 /**
  * The sessions a wallet's identity opened outside the wallet's own stores — the Hub login held

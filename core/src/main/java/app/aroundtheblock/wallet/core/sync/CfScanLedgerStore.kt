@@ -1,8 +1,9 @@
 package app.aroundtheblock.wallet.core.sync
 
 import android.content.Context
-import app.aroundtheblock.wallet.core.WALLET_NETWORK_SUFFIXES
-import app.aroundtheblock.wallet.core.networkSuffix
+import app.aroundtheblock.wallet.core.wallets.ActiveWallet
+import app.aroundtheblock.wallet.core.wallets.WalletScope
+import app.aroundtheblock.wallet.core.wallets.WalletStores
 import java.io.File
 
 /**
@@ -27,9 +28,10 @@ import java.io.File
 object CfScanLedgerStore {
     private const val FILE_BASE = "saved_cf_ledger"
 
-    fun file(ctx: Context): File = File(ctx.filesDir, FILE_BASE + networkSuffix(ctx) + ".bin")
+    fun file(ctx: Context, scope: WalletScope = ActiveWallet.scope(ctx)): File = File(ctx.filesDir, WalletStores.fileName(FILE_BASE, scope))
 
-    private fun tmpFile(ctx: Context): File = File(ctx.filesDir, FILE_BASE + networkSuffix(ctx) + ".bin.tmp")
+    private fun tmpFile(ctx: Context, scope: WalletScope): File =
+        File(ctx.filesDir, WalletStores.fileName(FILE_BASE, scope) + ".tmp")
 
     private val ioLock = Any()
     @Volatile private var epoch = 0L
@@ -46,28 +48,28 @@ object CfScanLedgerStore {
      * when the file now holds [bytes], [StoreWrite.OBSOLETE] for a dropped stale snapshot (not a
      * failure), and [StoreWrite.FAILED] with the previous file kept as it was (STORE-DURABILITY).
      */
-    fun write(ctx: Context, bytes: ByteArray, snapshotEpoch: Long): StoreWrite = synchronized(ioLock) {
+    fun write(ctx: Context, bytes: ByteArray, snapshotEpoch: Long, scope: WalletScope = ActiveWallet.scope(ctx)): StoreWrite = synchronized(ioLock) {
         if (epoch != snapshotEpoch) return StoreWrite.OBSOLETE // a delete() invalidated this snapshot
-        if (DurableFile.write(file(ctx), tmpFile(ctx), bytes)) StoreWrite.LANDED else StoreWrite.FAILED
+        if (DurableFile.write(file(ctx, scope), tmpFile(ctx, scope), bytes)) StoreWrite.LANDED else StoreWrite.FAILED
     }
 
     /**
      * Load the ledger for restore: the file's bytes; with no file, a complete tmp file (a write that
      * synced but was killed before its rename) is recovered. Null if none is persisted / the read failed.
      */
-    fun load(ctx: Context): ByteArray? = synchronized(ioLock) {
-        val f = file(ctx)
+    fun load(ctx: Context, scope: WalletScope = ActiveWallet.scope(ctx)): ByteArray? = synchronized(ioLock) {
+        val f = file(ctx, scope)
         if (f.exists()) return runCatching { f.readBytes() }.getOrNull()
-        DurableFile.recoverTmp(f, tmpFile(ctx), ::isComplete)
+        DurableFile.recoverTmp(f, tmpFile(ctx, scope), ::isComplete)
     }
 
     /** Delete the persisted ledger (file and tmp). Used on re-anchor / reset. Bumps
      *  the epoch so any in-flight [write] captured before now is dropped, and is
      *  serialized with [write] on [ioLock] so it can't be resurrected. */
-    fun delete(ctx: Context) {
+    fun delete(ctx: Context, scope: WalletScope = ActiveWallet.scope(ctx)) {
         synchronized(ioLock) {
             epoch++
-            runCatching { DurableFile.delete(file(ctx), tmpFile(ctx)) }
+            runCatching { DurableFile.delete(file(ctx, scope), tmpFile(ctx, scope)) }
         }
     }
 
@@ -79,9 +81,10 @@ object CfScanLedgerStore {
      */
     fun deleteAllNetworks(ctx: Context): Boolean = synchronized(ioLock) {
         epoch++
-        WALLET_NETWORK_SUFFIXES.map { net ->
-            val bin = File(ctx.filesDir, "$FILE_BASE$net.bin")
-            val tmp = File(ctx.filesDir, "$FILE_BASE$net.bin.tmp")
+        listOf(false, true).map { testnet ->
+            val scope = WalletScope.legacy(testnet)
+            val bin = file(ctx, scope)
+            val tmp = tmpFile(ctx, scope)
             DurableFile.delete(bin, tmp)
             !bin.exists() && !tmp.exists()
         }.all { it }

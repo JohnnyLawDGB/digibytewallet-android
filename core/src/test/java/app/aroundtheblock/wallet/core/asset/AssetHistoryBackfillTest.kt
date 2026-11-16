@@ -44,6 +44,9 @@ class AssetHistoryBackfillTest {
         txDao = mockk(relaxed = true)
     }
 
+    /** The scope is passed in: this test is about the backfill, not about which wallet is active. */
+    private val legacy = app.aroundtheblock.wallet.core.wallets.WalletScope.legacy(false)
+
     @After
     fun tearDown() {
         unmockkStatic(Log::class)
@@ -52,7 +55,7 @@ class AssetHistoryBackfillTest {
     @Test
     fun `skips work when flag is already set`() = runTest {
         every { prefs.getBoolean(any(), any()) } returns true
-        val worker = AssetHistoryBackfill(context, txDao, DigiAssetDecoder())
+        val worker = AssetHistoryBackfill(context, txDao, DigiAssetDecoder(), legacy)
 
         worker.runIfNeeded()
 
@@ -66,7 +69,7 @@ class AssetHistoryBackfillTest {
         coEvery { txDao.backfillAssetIdFromUtxos() } returns Unit
         coEvery { txDao.getUnbackfilledAssetTxsBatch() } returns emptyList()
 
-        val worker = AssetHistoryBackfill(context, txDao, DigiAssetDecoder())
+        val worker = AssetHistoryBackfill(context, txDao, DigiAssetDecoder(), legacy)
         worker.runIfNeeded()
 
         coVerify(exactly = 1) { txDao.backfillAssetIdFromUtxos() }
@@ -79,7 +82,7 @@ class AssetHistoryBackfillTest {
         every { prefs.getBoolean(any(), any()) } returns false
         coEvery { txDao.backfillAssetIdFromUtxos() } throws RuntimeException("db locked")
 
-        val worker = AssetHistoryBackfill(context, txDao, DigiAssetDecoder())
+        val worker = AssetHistoryBackfill(context, txDao, DigiAssetDecoder(), legacy)
         worker.runIfNeeded()
 
         coVerify(exactly = 1) { txDao.backfillAssetIdFromUtxos() }
@@ -106,7 +109,7 @@ class AssetHistoryBackfillTest {
         )
         coEvery { txDao.getUnbackfilledAssetTxsBatch() } returns listOf(undecodableRow)
 
-        val worker = AssetHistoryBackfill(context, txDao, DigiAssetDecoder())
+        val worker = AssetHistoryBackfill(context, txDao, DigiAssetDecoder(), legacy)
         worker.runIfNeeded()
 
         // Loop should break after one batch — we did NOT update anyone, so
@@ -124,7 +127,7 @@ class AssetHistoryBackfillTest {
         coEvery { txDao.backfillAssetIdFromUtxos() } returns Unit
         coEvery { txDao.getUnbackfilledAssetTxsBatch() } returns emptyList()
 
-        val worker = AssetHistoryBackfill(context, txDao, DigiAssetDecoder())
+        val worker = AssetHistoryBackfill(context, txDao, DigiAssetDecoder(), legacy)
         worker.runIfNeeded()
         worker.runIfNeeded() // second call reads flag=true, no-ops
 

@@ -47,6 +47,7 @@ class StaleDataWiperWalletResetTest {
 
     @Before
     fun setUp() {
+        app.aroundtheblock.wallet.core.wallets.ActiveWallet.resetForTest()
         mockkStatic(Log::class)
         every { Log.d(any(), any<String>()) } returns 0
         every { Log.i(any(), any<String>()) } returns 0
@@ -58,6 +59,7 @@ class StaleDataWiperWalletResetTest {
 
     @After
     fun tearDown() {
+        app.aroundtheblock.wallet.core.wallets.ActiveWallet.resetForTest()
         unmockkStatic(Log::class)
     }
 
@@ -282,6 +284,9 @@ class StaleDataWiperWalletResetTest {
             every { context.getSharedPreferences(any(), any()) } answers { prefs.prefsFor(firstArg()) }
             every { context.filesDir } returns dir
             every { context.getDatabasePath(any()) } answers { File(dir, firstArg<String>()) }
+            // Its own application context: the stores' default scope (ActiveWallet, cached per
+            // application context) is then resolved from these prefs, not from an unrelated mock.
+            every { context.applicationContext } returns context
         }
 
         val chain: File get() = FilterHeaderStore.file(context)

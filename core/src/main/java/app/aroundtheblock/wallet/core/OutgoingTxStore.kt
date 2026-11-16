@@ -1,6 +1,9 @@
 package app.aroundtheblock.wallet.core
 
 import android.content.Context
+import app.aroundtheblock.wallet.core.wallets.ActiveWallet
+import app.aroundtheblock.wallet.core.wallets.WalletScope
+import app.aroundtheblock.wallet.core.wallets.WalletStores
 
 /**
  * Records transactions that the user broadcast locally: the stranded-send sweep
@@ -12,9 +15,9 @@ import android.content.Context
  * keys per txid: `<txid>.sent`, `<txid>.fee`, `<txid>.to`, `<txid>.self`, `<txid>.dd`.
  * Lookups return null when the txid isn't ours.
  */
-class OutgoingTxStore(context: Context) {
+class OutgoingTxStore(context: Context, scope: WalletScope = ActiveWallet.scope(context)) {
 
-    private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private val prefs = context.getSharedPreferences(WalletStores.prefsName(PREFS_NAME, scope), Context.MODE_PRIVATE)
 
     /** @param isSelfTransfer true when [toAddress] is an address THIS wallet
      *  owns (e.g. a legacy-funds sweep into our own receive address). Such a tx

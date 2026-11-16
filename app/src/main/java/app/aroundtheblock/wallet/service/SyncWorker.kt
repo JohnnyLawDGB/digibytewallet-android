@@ -12,7 +12,8 @@ import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
 import app.aroundtheblock.wallet.core.bridge.NativeBridge
 import app.aroundtheblock.wallet.core.isTestnet
-import app.aroundtheblock.wallet.core.networkSuffix
+import app.aroundtheblock.wallet.core.wallets.ActiveWallet
+import app.aroundtheblock.wallet.core.wallets.WalletStores
 import app.aroundtheblock.wallet.core.tor.TorManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -125,7 +126,7 @@ class SyncWorker @AssistedInject constructor(
     /** Inject the cached seeder list; true when it is stale or missing and should be refreshed. */
     private fun injectCachedPeers(): Boolean {
         if (isTestnet(applicationContext)) return false   // see fetchBloomPeers
-        val prefs = applicationContext.getSharedPreferences("dgb_bloom_peers" + networkSuffix(applicationContext), 0)
+        val prefs = applicationContext.getSharedPreferences(WalletStores.prefsName("dgb_bloom_peers", ActiveWallet.scope(applicationContext)), 0)
         val cachedJson = prefs.getString("peers_json", null)
         if (cachedJson != null) injectPeersJson(cachedJson)
         // BRSeederShouldRefresh, as SyncService and iOS. Only whether a cached answer exists is
@@ -146,7 +147,7 @@ class SyncWorker @AssistedInject constructor(
             // without hitting the mainnet seeder.
             return
         }
-        val prefs = applicationContext.getSharedPreferences("dgb_bloom_peers" + networkSuffix(applicationContext), 0)
+        val prefs = applicationContext.getSharedPreferences(WalletStores.prefsName("dgb_bloom_peers", ActiveWallet.scope(applicationContext)), 0)
         val now = System.currentTimeMillis()
         // capability=filter: the wallet is CF-only end to end, so the
         // background catch-up worker must never source a bloom-only peer.

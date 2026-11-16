@@ -48,11 +48,13 @@ object AppModule {
     fun provideDatabase(@ApplicationContext context: Context): WalletDatabase = provideDatabaseInner(context)
 
     private fun provideDatabaseInner(context: Context): WalletDatabase {
-        // Per-network DB file (e.g. "wallet.db" mainnet / "wallet_testnet.db"
+        // Per-wallet, per-network DB file (legacy: "wallet.db" mainnet / "wallet_testnet.db"
         // testnet) so a testnet session never opens the mainnet DB, and vice
         // versa. The key record stays unsuffixed/shared — the same password
         // encrypts either network's DB file, no cross-network trust issue.
-        val dbFileName = "wallet${networkSuffix(context)}.db"
+        val dbFileName = app.aroundtheblock.wallet.core.wallets.WalletStores.databaseName(
+            app.aroundtheblock.wallet.core.wallets.ActiveWallet.scope(context),
+        )
         return app.aroundtheblock.wallet.core.db.DatabaseKeyProvisioner.openWalletDatabase(context, dbFileName)
     }
 

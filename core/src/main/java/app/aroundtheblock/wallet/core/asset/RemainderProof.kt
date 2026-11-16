@@ -2,7 +2,9 @@ package app.aroundtheblock.wallet.core.asset
 
 import android.content.Context
 import app.aroundtheblock.wallet.core.model.AssetOperation
-import app.aroundtheblock.wallet.core.networkSuffix
+import app.aroundtheblock.wallet.core.wallets.ActiveWallet
+import app.aroundtheblock.wallet.core.wallets.WalletScope
+import app.aroundtheblock.wallet.core.wallets.WalletStores
 import kotlinx.coroutines.sync.withLock
 
 /**
@@ -32,9 +34,12 @@ class InMemoryRemainderProofStore : RemainderProofStore {
 /** Store kept in the app's private preferences, per network, so a proof survives a restart and
  *  the startup replay does not hold the output out again. It lives in the scan's own preferences
  *  file, which a wallet wipe already clears on every network. */
-class PrefsRemainderProofStore(context: Context) : RemainderProofStore {
+class PrefsRemainderProofStore(
+    context: Context,
+    scope: WalletScope = ActiveWallet.scope(context),
+) : RemainderProofStore {
     private val prefs = context.getSharedPreferences(
-        PREFS_NAME + networkSuffix(context), Context.MODE_PRIVATE,
+        WalletStores.prefsName(PREFS_NAME, scope), Context.MODE_PRIVATE,
     )
 
     override fun isProven(txid: String): Boolean =

@@ -1,7 +1,7 @@
 package app.aroundtheblock.wallet
 
 import android.content.Context
-import app.aroundtheblock.wallet.core.networkSuffix
+import app.aroundtheblock.wallet.core.isTestnet
 import app.aroundtheblock.wallet.core.sync.CfAbandonmentStore
 import app.aroundtheblock.wallet.core.sync.CfRecoveryPolicy
 import app.aroundtheblock.wallet.core.sync.CfScanLedgerStore
@@ -10,6 +10,11 @@ import app.aroundtheblock.wallet.core.sync.FilterHeaderStore
 import app.aroundtheblock.wallet.core.sync.HistoryRebuildOnUpgrade
 import app.aroundtheblock.wallet.core.sync.SavedBlockStore
 import app.aroundtheblock.wallet.core.sync.SavedTransactionsStore
+import app.aroundtheblock.wallet.core.wallets.ActiveWallet
+import app.aroundtheblock.wallet.core.wallets.StoreScope
+import app.aroundtheblock.wallet.core.wallets.WalletScope
+import app.aroundtheblock.wallet.core.wallets.WalletStores
+import app.aroundtheblock.wallet.core.wallets.storageSuffix
 
 /**
  * Recovers from corruption — WITHOUT ever touching the wallet seed (`dgb_wallet_seed`)
@@ -22,7 +27,7 @@ import app.aroundtheblock.wallet.core.sync.SavedTransactionsStore
  * never deleted here: it is set aside with its key kept. User funds live only in the
  * seed, which is never in scope.
  *
- * All prefs/DB files are network-suffixed ([networkSuffix]) so a recovery of the
+ * Every prefs/DB name is the active wallet's, resolved by [storageSuffix], so a recovery of the
  * mainnet session never touches a testnet DB/prefs on disk, and vice versa.
  * `dgb_db_key` stays unsuffixed/shared (same password encrypts either DB), and is kept.
  */
@@ -41,14 +46,15 @@ object StaleDataWiper {
      *  thing at start, where a throw is itself a crash on every launch. */
     fun wipeSyncBlobs(context: Context): Boolean {
         android.util.Log.w("StaleDataWiper", "Wiping saved sync state (blocks/peers/tx) — seed preserved")
-        val suffix = networkSuffix(context)
+        val scope = activeScope(context)
+        val suffix = storageSuffix(scope, StoreScope.NETWORK)
         // commit(), not apply(): the risky start this breaker guards follows at once, and a clear
         // still queued when that start dies is lost — the next launch would find what it cleared.
         // The display currency is a device setting that used to live in this file: move it out
         // first (owner decision, 2026-11-12). The breaker can run before anything has read it.
         app.aroundtheblock.wallet.core.settings.DisplayCurrencyPrefs.moveFromLegacy(context, suffix)
-        val syncData = clearPrefs(context, "dgb_sync_data$suffix")
-        val peerCache = clearPrefs(context, "dgb_bloom_peers$suffix")
+        val syncData = clearPrefs(context, WalletStores.prefsName("dgb_sync_data", scope))
+        val peerCache = clearPrefs(context, WalletStores.prefsName("dgb_bloom_peers", scope))
 
         val reset = CfRecoveryPolicy.decide(CfRecoveryPolicy.Reason.WALLET_RESET)
         var filterState = true
@@ -56,31 +62,31 @@ object StaleDataWiper {
             // FILE-BACKED (`saved_filter_headers<net>.bin`, see FilterHeaderStore) — the prefs
             // clear above never reaches it. A corrupt .bin left behind here could re-crash the very
             // next restore/re-anchor.
-            FilterHeaderStore.delete(context)
-            filterState = gone { FilterHeaderStore.file(context) }
+            FilterHeaderStore.delete(context, scope)
+            filterState = gone { FilterHeaderStore.file(context, scope) }
         }
         if (reset.dropScanLedger) {
             // FILE-BACKED too. The abandoned band is recorded against this ledger's floor: the next
             // scan starts a new ledger at the wallet's own floor and records its own.
-            CfScanLedgerStore.delete(context)
-            val bandCleared = runCatching { CfAbandonmentStore.clear(context) }.getOrDefault(false)
+            CfScanLedgerStore.delete(context, scope)
+            val bandCleared = runCatching { CfAbandonmentStore.clear(context, scope) }.getOrDefault(false)
             // With the record gone the scan has to start from the wallet's floor, and keep starting
             // there until it has a ledger again: a synced wallet has no persisted floor, so a start
             // that dies before its first ledger write would otherwise be followed by one that
             // resumes near the saved tip. The wallet is not loaded yet, so the next sync start pins
             // the floor at its anchor — the step a rebuild's floor takes.
-            val floorPinned = runCatching { HistoryRebuildOnUpgrade.requestFloorAtAnchor(context) }.getOrDefault(false)
-            filterState = filterState && gone { CfScanLedgerStore.file(context) } && bandCleared && floorPinned
+            val floorPinned = runCatching { HistoryRebuildOnUpgrade.requestFloorAtAnchor(context, scope) }.getOrDefault(false)
+            filterState = filterState && gone { CfScanLedgerStore.file(context, scope) } && bandCleared && floorPinned
         }
         // ...and the FILE-BACKED saved-blocks window (`saved_blocks<net>.bin`,
         // I2 fix) — same reasoning: it moved out of dgb_sync_data too, so the
         // .clear() above never touches it.
-        SavedBlockStore.delete(context)
-        val savedBlocks = gone { SavedBlockStore.file(context) }
+        SavedBlockStore.delete(context, scope)
+        val savedBlocks = gone { SavedBlockStore.file(context, scope) }
         // The transaction checkpoint (`saved_transactions<net>.bin`, TX-CKPT-CAP) is file-backed as
         // well; a corrupt one is exactly what this breaker exists to clear.
-        val savedTransactions = runCatching { SavedTransactionsStore.delete(context) }.getOrDefault(false) &&
-            gone { SavedTransactionsStore.file(context) }
+        val savedTransactions = runCatching { SavedTransactionsStore.delete(context, scope) }.getOrDefault(false) &&
+            gone { SavedTransactionsStore.file(context, scope) }
         // ChainTipStore's persisted value went out with the dgb_sync_data .clear() above, but its
         // in-memory mirror did not — and this runs from BootGuard on a crash-loop recovery, in a
         // process that keeps running afterwards. Left stale, the mirror would be re-persisted on
@@ -94,6 +100,10 @@ object StaleDataWiper {
         }
         return landed
     }
+
+    /** The wallet this process runs. Never throws: a registry that cannot answer means legacy. */
+    private fun activeScope(context: Context): WalletScope =
+        runCatching { ActiveWallet.scope(context) }.getOrElse { WalletScope.legacy(isTestnet(context)) }
 
     /** Read back: the file is not there. A file that cannot even be resolved is not confirmed gone. */
     private fun gone(file: () -> java.io.File): Boolean = runCatching { !file().exists() }.getOrDefault(false)
@@ -121,7 +131,7 @@ object StaleDataWiper {
             android.util.Log.w("StaleDataWiper", "Encrypted DB left in place: its re-key is pending and resumes on the next open")
             return
         }
-        val dbFileName = "wallet${networkSuffix(context)}.db"
+        val dbFileName = WalletStores.databaseName(activeScope(context))
         val path = context.getDatabasePath(dbFileName)
         val dir = path.parentFile ?: return
         val setAside = app.aroundtheblock.wallet.core.db.DatabaseFiles(dir, dbFileName)

@@ -134,7 +134,7 @@ class WalletManagerHistoryRebuildTest {
     @Test fun restoreFromDisk_evaluatesTheRebuildBeforeItReadsTheCache() {
         val b = body("restoreFromDisk")
         val eval = b.indexOf("HistoryRebuildOnUpgrade.beforeWalletLoad(")
-        val read = b.indexOf("SavedTransactionsStore.load(context)")
+        val read = b.indexOf("SavedTransactionsStore.load(context, scope)")
         assertTrue("scanner is blind: no cache read", read >= 0)
         assertTrue("the rebuild is not evaluated before the cache is read", eval in 0 until read)
         assertTrue("a partial rebuild must not load the cache", b.substring(eval, read).contains("isInProgress("))
@@ -142,7 +142,7 @@ class WalletManagerHistoryRebuildTest {
 
     @Test fun restoreFromDisk_anchorsTheHeadersAtTheFloorTime() {
         val b = body("restoreFromDisk")
-        val lowered = Regex("""val (\w+) = creationTimeForRestore\(\s*creationTime\s*,\s*HistoryRebuildOnUpgrade\.floorTime\(context\)\s*\)""")
+        val lowered = Regex("""val (\w+) = creationTimeForRestore\(\s*creationTime\s*,\s*HistoryRebuildOnUpgrade\.floorTime\(context(?:,\s*scope\s*=\s*scope)?\)\s*\)""")
             .find(b) ?: error("the restore time is not creationTimeForRestore(creationTime, floorTime)")
         val name = lowered.groupValues[1]
         val calls = Regex("""NativeBridge\.restoreWalletFromBytes\(([^)]*)\)""").findAll(b).map { it.groupValues[1] }.toList()

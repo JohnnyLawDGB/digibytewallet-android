@@ -22,7 +22,6 @@ import app.aroundtheblock.wallet.core.model.SyncProgressInfo
 import app.aroundtheblock.wallet.core.model.SyncStage
 import app.aroundtheblock.wallet.core.model.SyncState
 import app.aroundtheblock.wallet.core.model.deriveSyncFrontier
-import app.aroundtheblock.wallet.core.networkSuffix
 import app.aroundtheblock.wallet.core.sync.AbandonedBand
 import app.aroundtheblock.wallet.core.sync.CfAbandonmentStore
 import app.aroundtheblock.wallet.core.sync.ChainTipPolicy
@@ -53,7 +52,12 @@ class WalletViewModel @Inject constructor(
     private val dgbNodeClient: app.aroundtheblock.wallet.core.reconcile.DgbNodeClient,
 ) : ViewModel() {
 
-    private val prefs = application.getSharedPreferences("dgb_sync_data" + networkSuffix(application), 0)
+    private val prefs = application.getSharedPreferences(
+        app.aroundtheblock.wallet.core.wallets.WalletStores.prefsName(
+            "dgb_sync_data", app.aroundtheblock.wallet.core.wallets.ActiveWallet.scope(application),
+        ),
+        0,
+    )
 
     /** Live balance in satoshis — polls C core every 5 seconds.
      *  Initialized from last-known snapshot so the UI isn't blank on restart. */

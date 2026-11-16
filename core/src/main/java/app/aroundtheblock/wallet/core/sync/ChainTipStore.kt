@@ -1,7 +1,9 @@
 package app.aroundtheblock.wallet.core.sync
 
 import android.content.Context
-import app.aroundtheblock.wallet.core.networkSuffix
+import app.aroundtheblock.wallet.core.wallets.ActiveWallet
+import app.aroundtheblock.wallet.core.wallets.WalletScope
+import app.aroundtheblock.wallet.core.wallets.WalletStores
 
 /**
  * Remembers the last observed chain tip across sessions, so confirmation counts are right the
@@ -35,14 +37,14 @@ object ChainTipStore {
     /** Mirrors the persisted value so the UI refresh loop doesn't hit prefs on every tick. */
     @Volatile private var cached: Long = -1L
 
-    private fun prefs(ctx: Context) =
-        ctx.getSharedPreferences(PREFS_NAME + networkSuffix(ctx), Context.MODE_PRIVATE)
+    private fun prefs(ctx: Context, scope: WalletScope) =
+        ctx.getSharedPreferences(WalletStores.prefsName(PREFS_NAME, scope), Context.MODE_PRIVATE)
 
     /** Last remembered tip, or [ChainTipPolicy.UNKNOWN_TIP] if none has been stored yet. */
-    fun read(ctx: Context): Long {
+    fun read(ctx: Context, scope: WalletScope = ActiveWallet.scope(ctx)): Long {
         val c = cached
         if (c >= 0L) return c
-        val stored = runCatching { prefs(ctx).getLong(KEY_TIP, ChainTipPolicy.UNKNOWN_TIP) }
+        val stored = runCatching { prefs(ctx, scope).getLong(KEY_TIP, ChainTipPolicy.UNKNOWN_TIP) }
             .getOrDefault(ChainTipPolicy.UNKNOWN_TIP)
         cached = stored
         return stored
@@ -56,10 +58,10 @@ object ChainTipStore {
      * worth of a slightly stale count, which is exactly the thing this class already tolerates by
      * design, and is not worth a synchronous disk write on a UI refresh path.
      */
-    fun record(ctx: Context, candidate: Long): Boolean {
-        if (!ChainTipPolicy.shouldPersistTip(candidate, read(ctx))) return false
+    fun record(ctx: Context, candidate: Long, scope: WalletScope = ActiveWallet.scope(ctx)): Boolean {
+        if (!ChainTipPolicy.shouldPersistTip(candidate, read(ctx, scope))) return false
         cached = candidate
-        runCatching { prefs(ctx).edit().putLong(KEY_TIP, candidate).apply() }
+        runCatching { prefs(ctx, scope).edit().putLong(KEY_TIP, candidate).apply() }
         return true
     }
 

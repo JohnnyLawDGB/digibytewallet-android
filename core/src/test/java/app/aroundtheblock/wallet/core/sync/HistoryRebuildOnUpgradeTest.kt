@@ -445,6 +445,8 @@ class HistoryRebuildOnUpgradeTest {
         HistoryRebuildOnUpgrade.runAtProcessStart(c, now)
         // switch to testnet: its own earlier cache is rebuilt on its own first start
         settings(c).edit().putBoolean("dgb_network_testnet", true).commit()
+        // The active scope is cached per application context; a network flip is a new process.
+        app.aroundtheblock.wallet.core.wallets.ActiveWallet.resetForTest()
         c.getSharedPreferences("dgb_sync_data_testnet", Context.MODE_PRIVATE).edit()
             .putString("saved_transactions", toHex(blob(Rec(1_000_000L, 1_600_000_000L, realTx)))).commit()
         HistoryRebuildOnUpgrade.resetProcessStateForTest()
@@ -470,15 +472,15 @@ class HistoryRebuildOnUpgradeTest {
         recordSend(c, "ab12", settled = false)
         val day = 24L * 60 * 60 * 1000
 
-        assertEquals(OutcomeKind.DEFERRED, HistoryRebuildOnUpgrade.runAtProcessStart(c, now, lookupNone).kind)
+        assertEquals(OutcomeKind.DEFERRED, HistoryRebuildOnUpgrade.runAtProcessStart(c, now, checkpointTimeAtOrBelow = lookupNone).kind)
         HistoryRebuildOnUpgrade.resetProcessStateForTest()
-        assertEquals(OutcomeKind.DEFERRED, HistoryRebuildOnUpgrade.runAtProcessStart(c, now - 20 * day, lookupNone).kind)
+        assertEquals(OutcomeKind.DEFERRED, HistoryRebuildOnUpgrade.runAtProcessStart(c, now - 20 * day, checkpointTimeAtOrBelow = lookupNone).kind)
         assertEquals("the first deferral stands", now, HistoryRebuildOnUpgrade.readState(c).deferredSinceMs)
         HistoryRebuildOnUpgrade.resetProcessStateForTest()
-        assertEquals(OutcomeKind.DEFERRED, HistoryRebuildOnUpgrade.runAtProcessStart(c, now + day, lookupNone).kind)
+        assertEquals(OutcomeKind.DEFERRED, HistoryRebuildOnUpgrade.runAtProcessStart(c, now + day, checkpointTimeAtOrBelow = lookupNone).kind)
         assertTrue(SavedTransactionsStore.exists(c))
         HistoryRebuildOnUpgrade.resetProcessStateForTest()
-        assertEquals(OutcomeKind.RAN, HistoryRebuildOnUpgrade.runAtProcessStart(c, now + DEFER_CAP_MS, lookupNone).kind)
+        assertEquals(OutcomeKind.RAN, HistoryRebuildOnUpgrade.runAtProcessStart(c, now + DEFER_CAP_MS, checkpointTimeAtOrBelow = lookupNone).kind)
     }
 
     @Test fun run_floorTime_reachesTheCheckpointAtOrBelowTheHint_whateverTheRecordTimes() {
@@ -518,7 +520,7 @@ class HistoryRebuildOnUpgradeTest {
     @Test fun run_whenTheSyncClearDoesNotLand_throws_andLeavesItInProgress() {
         val c = failingCommitContext("dgb_sync_data")
         seedEarlierBuild(c)
-        assertThrows(IllegalStateException::class.java) { HistoryRebuildOnUpgrade.runAtProcessStart(c, now, lookupNone) }
+        assertThrows(IllegalStateException::class.java) { HistoryRebuildOnUpgrade.runAtProcessStart(c, now, checkpointTimeAtOrBelow = lookupNone) }
         val st = HistoryRebuildOnUpgrade.readState(c)
         assertFalse("done must not be stamped over a clear that did not land", st.done)
         assertTrue(st.inProgress)
@@ -531,7 +533,7 @@ class HistoryRebuildOnUpgradeTest {
         // A directory with a child where the saved-blocks file lives: delete() cannot remove it.
         val f = SavedBlockStore.file(c)
         f.delete(); f.mkdirs(); java.io.File(f, "child").writeText("x")
-        assertThrows(IllegalStateException::class.java) { HistoryRebuildOnUpgrade.runAtProcessStart(c, now, lookupNone) }
+        assertThrows(IllegalStateException::class.java) { HistoryRebuildOnUpgrade.runAtProcessStart(c, now, checkpointTimeAtOrBelow = lookupNone) }
         assertFalse(HistoryRebuildOnUpgrade.readState(c).done)
         assertTrue(HistoryRebuildOnUpgrade.readState(c).inProgress)
     }
@@ -547,26 +549,26 @@ class HistoryRebuildOnUpgradeTest {
 
     @Test fun emptyCache_whenTheSyncCommitFails_doesNotStampDone() {
         val c = failingCommitContext("dgb_sync_data")
-        assertThrows(IllegalStateException::class.java) { HistoryRebuildOnUpgrade.runAtProcessStart(c, now, lookupNone) }
+        assertThrows(IllegalStateException::class.java) { HistoryRebuildOnUpgrade.runAtProcessStart(c, now, checkpointTimeAtOrBelow = lookupNone) }
         assertFalse(HistoryRebuildOnUpgrade.readState(c).done)
     }
 
     @Test fun run_marksTheRoomTableForClearing_inTheInProgressCommit() {
         val c = ctx()
         seedEarlierBuild(c)
-        HistoryRebuildOnUpgrade.runAtProcessStart(c, now, lookupNone)
+        HistoryRebuildOnUpgrade.runAtProcessStart(c, now, checkpointTimeAtOrBelow = lookupNone)
         assertTrue(statePrefs(c).getBoolean(HistoryRebuildOnUpgrade.KEY_ROOM_CLEAR_PENDING, false))
     }
 
     @Test fun notNeededOrDeferred_doNotMarkTheRoomTable() {
         val empty = ctx()
-        HistoryRebuildOnUpgrade.runAtProcessStart(empty, now, lookupNone)
+        HistoryRebuildOnUpgrade.runAtProcessStart(empty, now, checkpointTimeAtOrBelow = lookupNone)
         assertFalse(statePrefs(empty).getBoolean(HistoryRebuildOnUpgrade.KEY_ROOM_CLEAR_PENDING, false))
         HistoryRebuildOnUpgrade.resetProcessStateForTest()
         val deferred = ctx()
         seedEarlierBuild(deferred)
         recordSend(deferred, "cd34", settled = false)
-        HistoryRebuildOnUpgrade.runAtProcessStart(deferred, now, lookupNone)
+        HistoryRebuildOnUpgrade.runAtProcessStart(deferred, now, checkpointTimeAtOrBelow = lookupNone)
         assertFalse(statePrefs(deferred).getBoolean(HistoryRebuildOnUpgrade.KEY_ROOM_CLEAR_PENDING, false))
     }
 
@@ -594,7 +596,7 @@ class HistoryRebuildOnUpgradeTest {
         assertTrue(HistoryRebuildOnUpgrade.armRerun(c))
         val st = HistoryRebuildOnUpgrade.readState(c)
         assertFalse(st.done); assertTrue(st.inProgress); assertEquals(5L, st.floorHint); assertEquals(6L, st.floorTime)
-        assertEquals(OutcomeKind.RAN, HistoryRebuildOnUpgrade.runAtProcessStart(c, now, lookupNone).kind)
+        assertEquals(OutcomeKind.RAN, HistoryRebuildOnUpgrade.runAtProcessStart(c, now, checkpointTimeAtOrBelow = lookupNone).kind)
         assertTrue(HistoryRebuildOnUpgrade.readState(c).done)
     }
 
@@ -604,14 +606,14 @@ class HistoryRebuildOnUpgradeTest {
         val c = ctx()
         seedEarlierBuild(c)
         syncPrefs(c).edit().putLong("last_dd_balance", 150L).commit()
-        HistoryRebuildOnUpgrade.runAtProcessStart(c, now, lookupNone)
+        HistoryRebuildOnUpgrade.runAtProcessStart(c, now, checkpointTimeAtOrBelow = lookupNone)
         assertFalse(syncPrefs(c).contains("last_dd_balance"))
     }
 
     @Test fun run_withOnlyUnconfirmedRecords_marksTheFloorPending() {
         val c = ctx()
         seedEarlierBuild(c, blob(Rec(0x7fffffffL, 1_600_000_000L, realTx)))
-        HistoryRebuildOnUpgrade.runAtProcessStart(c, now, lookupNone)
+        HistoryRebuildOnUpgrade.runAtProcessStart(c, now, checkpointTimeAtOrBelow = lookupNone)
         val st = HistoryRebuildOnUpgrade.readState(c)
         assertEquals(0L, st.floorHint)
         assertEquals(1_600_000_000L, st.floorTime)
@@ -621,12 +623,12 @@ class HistoryRebuildOnUpgradeTest {
     @Test fun run_withAFloorHeight_marksTheFloorPending_andWithoutAnyFloor_doesNot() {
         val c = ctx()
         seedEarlierBuild(c)
-        HistoryRebuildOnUpgrade.runAtProcessStart(c, now, lookupNone)
+        HistoryRebuildOnUpgrade.runAtProcessStart(c, now, checkpointTimeAtOrBelow = lookupNone)
         assertTrue(HistoryRebuildOnUpgrade.floorPending(c))
         HistoryRebuildOnUpgrade.resetProcessStateForTest()
         val none = ctx()
         seedEarlierBuild(none, blob(Rec(0x7fffffffL, 0L, realTx)))
-        HistoryRebuildOnUpgrade.runAtProcessStart(none, now, lookupNone)
+        HistoryRebuildOnUpgrade.runAtProcessStart(none, now, checkpointTimeAtOrBelow = lookupNone)
         assertFalse(HistoryRebuildOnUpgrade.floorPending(none))
     }
 

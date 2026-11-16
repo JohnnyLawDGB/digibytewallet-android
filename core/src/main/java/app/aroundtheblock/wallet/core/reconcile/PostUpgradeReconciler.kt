@@ -4,7 +4,9 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.content.pm.PackageInfo
 import android.util.Log
-import app.aroundtheblock.wallet.core.networkSuffix
+import app.aroundtheblock.wallet.core.wallets.ActiveWallet
+import app.aroundtheblock.wallet.core.wallets.WalletScope
+import app.aroundtheblock.wallet.core.wallets.WalletStores
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -56,16 +58,16 @@ object PostUpgradeReconciler {
     /** Hydrate the StateFlow from persisted state. Call once on app
      *  startup (before the wallet UI subscribes) so the banner reflects
      *  a failure from a prior process. */
-    fun hydrateFailedFlag(context: Context) {
-        val prefs = context.getSharedPreferences(PREFS + networkSuffix(context), Context.MODE_PRIVATE)
+    fun hydrateFailedFlag(context: Context, scope: WalletScope = ActiveWallet.scope(context)) {
+        val prefs = prefs(context, scope)
         _lastAttemptFailed.value = prefs.getBoolean(KEY_LAST_FAILED, false)
     }
 
     /** Manually clear the failed flag — invoked after a successful manual
      *  reconcile run from Settings → Recovery → Scan, or after the user
      *  taps "Dismiss" on the banner. */
-    fun clearFailedFlag(context: Context) {
-        val prefs = context.getSharedPreferences(PREFS + networkSuffix(context), Context.MODE_PRIVATE)
+    fun clearFailedFlag(context: Context, scope: WalletScope = ActiveWallet.scope(context)) {
+        val prefs = prefs(context, scope)
         prefs.edit().putBoolean(KEY_LAST_FAILED, false).apply()
         _lastAttemptFailed.value = false
     }
@@ -93,8 +95,9 @@ object PostUpgradeReconciler {
         context: Context,
         nodeClient: DgbNodeClient,
         assetManager: app.aroundtheblock.wallet.core.asset.AssetManager? = null,
+        scope: WalletScope = ActiveWallet.scope(context),
     ) {
-        runIfNeeded(context) { ctx ->
+        runIfNeeded(context, scope) { ctx ->
             ChainReconciliationService(nodeClient, assetManager, appContext = ctx)
         }
     }
@@ -113,10 +116,11 @@ object PostUpgradeReconciler {
      */
     internal suspend fun runIfNeeded(
         context: Context,
+        scope: WalletScope = ActiveWallet.scope(context),
         serviceFactory: (Context) -> ChainReconciliationService,
     ) {
         if (inFlight) return
-        val prefs = context.getSharedPreferences(PREFS + networkSuffix(context), Context.MODE_PRIVATE)
+        val prefs = prefs(context, scope)
         val current = currentVersionCode(context)
         val last = prefs.getInt(KEY_LAST_VERSION, 0)
         // Fresh install (no prior baseline): there is no "post-upgrade" discrepancy
@@ -161,12 +165,15 @@ object PostUpgradeReconciler {
             setFailedFlag(prefs, false)
         } catch (t: Throwable) {
             Log.w(TAG, "post-upgrade reconcile threw", t)
-            val prefs = context.getSharedPreferences(PREFS + networkSuffix(context), Context.MODE_PRIVATE)
+            val prefs = prefs(context, scope)
             setFailedFlag(prefs, true)
         } finally {
             inFlight = false
         }
     }
+
+    private fun prefs(context: Context, scope: WalletScope): SharedPreferences =
+        context.getSharedPreferences(WalletStores.prefsName(PREFS, scope), Context.MODE_PRIVATE)
 
     private fun persistVersion(prefs: SharedPreferences, versionCode: Int) {
         prefs.edit().putInt(KEY_LAST_VERSION, versionCode).apply()

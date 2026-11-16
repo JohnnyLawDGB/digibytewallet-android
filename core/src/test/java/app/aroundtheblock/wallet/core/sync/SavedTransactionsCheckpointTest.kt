@@ -145,7 +145,7 @@ class SavedTransactionsCheckpointTest {
 
     @Test fun `the restore records its load before the wallet is built from it`() {
         val wm = File("src/main/java/app/aroundtheblock/wallet/core/WalletManager.kt").readText()
-        val read = wm.indexOf("SavedTransactionsStore.load(context)")
+        val read = wm.indexOf("SavedTransactionsStore.load(context, scope)")
         val load = wm.indexOf("loaded = NativeBridge.loadSerializedTransactions(savedTx)")
         val record = wm.indexOf("SavedTransactionsCheckpoint.recordRestore(syncPrefs, savedTx, loaded.toLong())")
         val build = wm.indexOf("NativeBridge.restoreWalletFromBytes(seedBytes, restoreTime, storedPass)")

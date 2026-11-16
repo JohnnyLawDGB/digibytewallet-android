@@ -7,6 +7,9 @@ import android.content.Context
 import android.util.Log
 import app.aroundtheblock.wallet.core.bridge.NativeBridge
 import app.aroundtheblock.wallet.core.db.dao.TransactionDao
+import app.aroundtheblock.wallet.core.wallets.ActiveWallet
+import app.aroundtheblock.wallet.core.wallets.WalletScope
+import app.aroundtheblock.wallet.core.wallets.WalletStores
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -32,13 +35,14 @@ import kotlinx.coroutines.withContext
 class AssetHistoryBackfill(
     private val context: Context,
     private val transactionDao: TransactionDao,
-    private val decoder: DigiAssetDecoder
+    private val decoder: DigiAssetDecoder,
+    private val scope: WalletScope = ActiveWallet.scope(context),
 ) {
     private val mutex = Mutex()
 
     suspend fun runIfNeeded() = withContext(Dispatchers.IO) {
         mutex.withLock {
-            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val prefs = context.getSharedPreferences(WalletStores.prefsName(PREFS_NAME, scope), Context.MODE_PRIVATE)
             if (prefs.getBoolean(FLAG_KEY, false)) return@withLock
 
             Log.i(TAG, "Starting asset history backfill")

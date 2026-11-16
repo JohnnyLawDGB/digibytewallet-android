@@ -201,13 +201,13 @@ class SavedTransactionsStoreTest {
         assertTrue("the wallet wipe no longer deletes every network's checkpoint",
             eraser.contains("SavedTransactionsStore.deleteAllNetworks(context)") && eraser.contains("savedTransactions && abandonedBand"))
         assertTrue("the crash-loop breaker no longer deletes the checkpoint",
-            src("app/src/main/java/app/aroundtheblock/wallet/StaleDataWiper.kt").contains("SavedTransactionsStore.delete(context)"))
+            src("app/src/main/java/app/aroundtheblock/wallet/StaleDataWiper.kt").contains("SavedTransactionsStore.delete(context, scope)"))
         val wm = src("core/src/main/java/app/aroundtheblock/wallet/core/WalletManager.kt")
         assertTrue("a new wallet (clearSyncData) no longer drops the previous checkpoint",
-            wm.contains("SavedTransactionsStore.delete(context)"))
+            wm.contains("SavedTransactionsStore.delete(context, scope)"))
         val rebuild = src("core/src/main/java/app/aroundtheblock/wallet/core/sync/HistoryRebuildOnUpgrade.kt")
         assertTrue("the history rebuild no longer drops the checkpoint",
-            rebuild.contains("SavedTransactionsStore.delete(context)") && rebuild.contains("SavedTransactionsStore.file(context)"))
+            rebuild.contains("SavedTransactionsStore.delete(context, scope)") && rebuild.contains("SavedTransactionsStore.file(context, scope)"))
     }
 
     @Test fun `no source writes the legacy prefs key any more`() {

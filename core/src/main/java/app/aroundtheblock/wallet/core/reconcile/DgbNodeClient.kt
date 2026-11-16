@@ -3,7 +3,9 @@ package app.aroundtheblock.wallet.core.reconcile
 import android.content.Context
 import app.aroundtheblock.wallet.core.bridge.NativeBridge
 import app.aroundtheblock.wallet.core.network.BoundedBody
-import app.aroundtheblock.wallet.core.networkSuffix
+import app.aroundtheblock.wallet.core.isTestnet
+import app.aroundtheblock.wallet.core.wallets.WalletScope
+import app.aroundtheblock.wallet.core.wallets.WalletStores
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl
@@ -114,7 +116,12 @@ class DgbNodeClient(
         .callTimeout(120, TimeUnit.SECONDS)
         .build()
 
-    private val prefs = context.getSharedPreferences(PREFS_NAME + networkSuffix(context), Context.MODE_PRIVATE)
+    // `custom_rpc_endpoint` is a device setting every wallet must see, so it stays in legacy's
+    // `dgb_reconcile<net>` whichever wallet is active.
+    private val prefs = context.getSharedPreferences(
+        WalletStores.prefsName(PREFS_NAME, WalletScope.legacy(isTestnet(context))),
+        Context.MODE_PRIVATE,
+    )
 
     /** The active endpoint. Defaults to digiscope.me; can be user-overridden. */
     fun endpoint(): String =

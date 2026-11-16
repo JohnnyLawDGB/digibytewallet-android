@@ -40,7 +40,9 @@ import app.aroundtheblock.wallet.core.db.entity.PeerEntity
 import app.aroundtheblock.wallet.core.db.entity.TransactionEntity
 import app.aroundtheblock.wallet.core.model.SyncState
 import app.aroundtheblock.wallet.core.isTestnet
-import app.aroundtheblock.wallet.core.networkSuffix
+import app.aroundtheblock.wallet.core.wallets.ActiveWallet
+import app.aroundtheblock.wallet.core.wallets.WalletScope
+import app.aroundtheblock.wallet.core.wallets.WalletStores
 import app.aroundtheblock.wallet.core.settings.CustomNode
 import app.aroundtheblock.wallet.core.settings.CustomNodePrefs
 import app.aroundtheblock.wallet.core.settings.syncModeFor
@@ -168,6 +170,9 @@ class SyncService : Service() {
     @Inject lateinit var dgbNodeClient: DgbNodeClient
     /** Every seeder request goes through this; see [SeederClient]. Derived once, after injection. */
     private val seederClient by lazy { SeederClient(okHttpClient) }
+
+    /** The wallet this service runs. Every store it names resolves through `storageSuffix`. */
+    private val walletScope: WalletScope get() = ActiveWallet.scope(this)
 
     /** True if Tor proxy was successfully wired before this sync session started. */
     @Volatile private var torProxyActive: Boolean = false
@@ -493,7 +498,7 @@ class SyncService : Service() {
         // Restore persisted sync state so progress callbacks don't revert
         // "Connected" back to "Syncing 0%" on restart near the chain tip.
         run {
-            val syncPrefs = getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
+            val syncPrefs = getSharedPreferences(WalletStores.prefsName("dgb_sync_data", walletScope), MODE_PRIVATE)
             hasReachedSynced = syncPrefs.getBoolean("has_synced", false)
             // Restore the sync-start anchor on the SAME path as has_synced, so a
             // cold poll before the first onSyncProgress callback computes real
@@ -1251,7 +1256,7 @@ class SyncService : Service() {
                             // asset orphans (the legacy Chang over-count, C9). Gated on the same
                             // prune gate — synced-this-session + connected + wallet loaded — plus
                             // a pref so it only ever runs once (or once per real, non-dry pass).
-                            val healPrefs = getSharedPreferences("dgb_asset_heal", MODE_PRIVATE)
+                            val healPrefs = getSharedPreferences(WalletStores.prefsName("dgb_asset_heal", walletScope), MODE_PRIVATE)
                             if (!healPrefs.getBoolean("legacy_done", false)) {
                                 runCatching {
                                     val changeSet = assetManager.buildChangeScriptHexes()
@@ -1730,7 +1735,7 @@ class SyncService : Service() {
      */
     private fun nextValidatedFilterPeer(rotation: Int): Pair<String, Int>? {
         val prefs = getSharedPreferences(
-            "dgb_filter_peers" + networkSuffix(this@SyncService), MODE_PRIVATE
+            WalletStores.prefsName("dgb_filter_peers", walletScope), MODE_PRIVATE
         )
         val pool = prefs.getString("peer_pool", null)?.let { parsePool(it) } ?: return null
         if (pool.isEmpty()) return null
@@ -2228,7 +2233,7 @@ class SyncService : Service() {
         }.onFailure { android.util.Log.w(HistoryRebuildOnUpgrade.TAG, "transaction table clear threw", it) }
 
         // Load saved blocks and peers from previous session before syncing
-        val prefs = getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
+        val prefs = getSharedPreferences(WalletStores.prefsName("dgb_sync_data", walletScope), MODE_PRIVATE)
 
         // Validate + decode the stored hex blobs before handing raw bytes to the
         // native block/peer deserializer. A malformed blob (odd length, non-hex,
@@ -2300,7 +2305,7 @@ class SyncService : Service() {
             // access. Persist WHICH preflight condition fired, WHEN, and how far back it threw the
             // chain (from savedTip → birth), so a returning user's report — or a future
             // diagnostics view — can pinpoint the cause without a live logcat capture.
-            getSharedPreferences("dgb_diag", MODE_PRIVATE).edit()
+            getSharedPreferences(WalletStores.prefsName("dgb_diag", walletScope), MODE_PRIVATE).edit()
                 .putString("last_cf_reset_reason", cfResetReason.name)
                 .putLong("last_cf_reset_at_ms", System.currentTimeMillis())
                 .putLong("last_cf_reset_birth", birth)
@@ -2472,7 +2477,7 @@ class SyncService : Service() {
             // Re-pin every Receive-screen address into the native BIP158 watch set so a
             // receive to an address that fell outside the derived gap window is still
             // scanned in every block (fixes not-confirming / undetected receives).
-            val watched = (getSharedPreferences("dgb_watched_addrs", MODE_PRIVATE)
+            val watched = (getSharedPreferences(WalletStores.prefsName("dgb_watched_addrs", walletScope), MODE_PRIVATE)
                 .getStringSet("addrs", emptySet()) ?: emptySet()).toMutableSet()
             // NOTE: the DigiDollar receive address is deliberately NOT added here.
             //
@@ -2569,7 +2574,7 @@ class SyncService : Service() {
      */
     private fun persistPeerPenalties() {
         runCatching {
-            val prefs = getSharedPreferences("dgb_sync_data" + networkSuffix(this), MODE_PRIVATE)
+            val prefs = getSharedPreferences(WalletStores.prefsName("dgb_sync_data", walletScope), MODE_PRIVATE)
             val blob = NativeBridge.serializePeerPenalties()
             // Asked after the native read, which can wait on the peer lock: a wipe may have
             // stood the service down meanwhile, and then nothing is written.
@@ -2742,7 +2747,7 @@ class SyncService : Service() {
         // first save this session can't overwrite a higher persisted window
         // with a lower one — the regression this guard exists to prevent.
         val onDiskTip = parseSavedBlocksTopHeight(blockBytes)
-        val prefs = getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
+        val prefs = getSharedPreferences(WalletStores.prefsName("dgb_sync_data", walletScope), MODE_PRIVATE)
         if (onDiskTip > prefs.getLong("saved_blocks_tip", 0L)) {
             prefs.edit().putLong("saved_blocks_tip", onDiskTip).apply()
         }
@@ -2888,7 +2893,7 @@ class SyncService : Service() {
      *  has_synced so restore is a single path (onStartCommand). */
     private fun setSyncStartHeight(h: Long) {
         syncStartHeight = h
-        getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
+        getSharedPreferences(WalletStores.prefsName("dgb_sync_data", walletScope), MODE_PRIVATE)
             .edit().putLong("sync_start_height", h).apply()
     }
 
@@ -3193,7 +3198,7 @@ class SyncService : Service() {
             val copy = data.copyOf()
             serviceScope.launch(Dispatchers.IO) {
                 val hex = bytesToHex(copy)
-                getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
+                getSharedPreferences(WalletStores.prefsName("dgb_sync_data", walletScope), MODE_PRIVATE)
                     .edit().putString("saved_peers", hex).apply()
             }
         }
@@ -3258,7 +3263,7 @@ class SyncService : Service() {
      *  list in its own bucket so an offline launch still primes the native set. Injected services
      *  carry the 0x40 (NODE_COMPACT_FILTERS) bit, which is what the native CF-first dialer keys on. */
     private fun injectFilterPeers() {
-        val prefs = getSharedPreferences("dgb_filter_peers" + networkSuffix(this@SyncService), MODE_PRIVATE)
+        val prefs = getSharedPreferences(WalletStores.prefsName("dgb_filter_peers", walletScope), MODE_PRIVATE)
         val pool: List<Triple<String, Int, Long>> =
             prefs.getString("peer_pool", null)?.let { parsePool(it) } ?: emptyList()
 
@@ -3316,7 +3321,7 @@ class SyncService : Service() {
         // path (all of them call injectPeers). Runs first so the early
         // returns below can't skip it; its cached list is refreshed in the background when stale.
         injectDandelionPeers()
-        val prefs = getSharedPreferences("dgb_bloom_peers" + networkSuffix(this@SyncService), MODE_PRIVATE)
+        val prefs = getSharedPreferences(WalletStores.prefsName("dgb_bloom_peers", walletScope), MODE_PRIVATE)
         val now = System.currentTimeMillis()
 
         val existing = prefs.getString("peer_pool", null)
@@ -3513,7 +3518,7 @@ class SyncService : Service() {
         Broadcaster.applySetting(enabled)
         if (!enabled) return
 
-        val prefs = getSharedPreferences("dgb_dandelion_peers" + networkSuffix(this@SyncService), MODE_PRIVATE)
+        val prefs = getSharedPreferences(WalletStores.prefsName("dgb_dandelion_peers", walletScope), MODE_PRIVATE)
         // Triple = (ip, port, servicesHex) — Dandelion peers are also filter-
         // capable per the seeder, so carry their services_hex through too.
         // Cached list only; a stale one is refreshed in the background ([refreshSeederPools]).
@@ -3562,9 +3567,8 @@ class SyncService : Service() {
 
     /** The background half of [requestSeederRefresh]: fetch, cache, inject. Runs on [recoveryScope]. */
     private fun refreshSeederPools() {
-        val suffix = networkSuffix(this@SyncService)
-        val filterPrefs = getSharedPreferences("dgb_filter_peers$suffix", MODE_PRIVATE)
-        val generalPrefs = getSharedPreferences("dgb_bloom_peers$suffix", MODE_PRIVATE)
+        val filterPrefs = getSharedPreferences(WalletStores.prefsName("dgb_filter_peers", walletScope), MODE_PRIVATE)
+        val generalPrefs = getSharedPreferences(WalletStores.prefsName("dgb_bloom_peers", walletScope), MODE_PRIVATE)
         val now = System.currentTimeMillis()
 
         // Only the lists that are stale (BRSeederShouldRefresh, the rule iOS calls too). One
@@ -3601,7 +3605,7 @@ class SyncService : Service() {
         }
 
         if (getSharedPreferences("dgb_dandelion", MODE_PRIVATE).getBoolean("enabled", false)) {
-            val dPrefs = getSharedPreferences("dgb_dandelion_peers$suffix", MODE_PRIVATE)
+            val dPrefs = getSharedPreferences(WalletStores.prefsName("dgb_dandelion_peers", walletScope), MODE_PRIVATE)
             val cached = dPrefs.getString("peer_pool", null)?.let { parsePool(it) } ?: emptyList()
             if (NativeBridge.seederShouldRefresh(dPrefs.getLong("last_fetch", 0L), now, cached.size)) {
                 val dandelion = fetchFromSeeder("dandelion")
@@ -3993,7 +3997,7 @@ class SyncService : Service() {
         if (!checkpointGateOpen(result) || stoodDownForWipe) return@runCatching false
         // The flag and the count of the checkpoint it vouches for, in one commit, after the file landed:
         // a restore that finds the flag and the count but no file knows the file was lost (TX-CKPT-CAP).
-        getSharedPreferences("dgb_sync_data" + networkSuffix(this), MODE_PRIVATE).edit()
+        getSharedPreferences(WalletStores.prefsName("dgb_sync_data", walletScope), MODE_PRIVATE).edit()
             .putBoolean("transactions_checkpointed", true)
             .putLong(SavedTransactionsStore.KEY_COUNT, persister.lastDeclaredCount.coerceAtLeast(0L))
             .commit()
@@ -4027,7 +4031,7 @@ class SyncService : Service() {
             return false
         }
         val synced = getSharedPreferences(
-            "dgb_sync_data" + networkSuffix(this),
+            WalletStores.prefsName("dgb_sync_data", walletScope),
             MODE_PRIVATE,
         ).edit().putBoolean("has_synced", true).commit()
         if (!synced) return false
@@ -4045,7 +4049,7 @@ class SyncService : Service() {
      *  synchronous tmp-write+rename regardless of [synchronous]. */
     private fun persistBlocks(data: ByteArray, snapshotEpoch: Long, synchronous: Boolean): Boolean {
         if (stoodDownForWipe) return true
-        val prefs = getSharedPreferences("dgb_sync_data" + networkSuffix(this@SyncService), MODE_PRIVATE)
+        val prefs = getSharedPreferences(WalletStores.prefsName("dgb_sync_data", walletScope), MODE_PRIVATE)
         val newTop = parseSavedBlocksTopHeight(data)
         val persistedTop = prefs.getLong("saved_blocks_tip", 0L)
         if (!shouldPersistBlocks(newTop, persistedTop)) {

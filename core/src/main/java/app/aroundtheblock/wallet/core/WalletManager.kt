@@ -25,6 +25,10 @@ import app.aroundtheblock.wallet.core.security.seedKeyReadinessFor
 import app.aroundtheblock.wallet.core.security.seedKeyStatusFor
 import app.aroundtheblock.wallet.core.security.boundKeyStateOnFailure
 import app.aroundtheblock.wallet.core.security.neverOpens
+import app.aroundtheblock.wallet.core.wallets.StoreScope
+import app.aroundtheblock.wallet.core.wallets.WalletScope
+import app.aroundtheblock.wallet.core.wallets.WalletStores
+import app.aroundtheblock.wallet.core.wallets.storageSuffix
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -163,6 +167,9 @@ class WalletManager @Suppress("LongParameterList") constructor(
         { app.aroundtheblock.wallet.core.db.DatabaseKeyProvisioner.forContext(context).releaseLegacyWrap() },
     // The rebuild's STOP_SYNC step, injectable for the same reason as the above.
     private val stopSyncForRebuild: () -> Unit = { NativeBridge.stopSync() },
+    // The wallet this manager reads and writes. Every store call below passes it, so none falls
+    // back to the process's active wallet.
+    private val scope: WalletScope = WalletScope.legacy(isTestnet(context)),
 ) {
     // Sessions running for the wallet in this process (the sync service), stopped by every wipe
     // before it erases anything. See [WalletSessionStop].
@@ -180,13 +187,13 @@ class WalletManager @Suppress("LongParameterList") constructor(
     val syncFrontierSession = SyncFrontierSession()
 
     private val prefs: SharedPreferences =
-        context.getSharedPreferences("dgb_wallet_seed", Context.MODE_PRIVATE)
+        context.getSharedPreferences(WalletStores.seedRecordPrefs(scope), Context.MODE_PRIVATE)
 
     // Every address ever shown on the Receive screen, persisted so it can be re-pinned
     // into the native BIP158 watch set on each load — a receive to it can never fall
     // outside the derived gap window and be missed. See NativeBridge.addWatchedAddresses.
     private val watchedPrefs: SharedPreferences =
-        context.getSharedPreferences("dgb_watched_addrs", Context.MODE_PRIVATE)
+        context.getSharedPreferences(WalletStores.prefsName("dgb_watched_addrs", scope), Context.MODE_PRIVATE)
 
     // Off-main scope for the native watch-set pin. Deliberately NOT the caller's thread:
     // getReceiveAddress is invoked from Compose composition on the main thread, and the
@@ -403,7 +410,7 @@ class WalletManager @Suppress("LongParameterList") constructor(
             // causing BRWalletAmountSentByTx to return wrong values mid-rescan.
             // The wider bloom filter (830 addresses) takes effect naturally
             // on the next sync cycle without needing a full rescan.
-            val migrationPrefs = context.getSharedPreferences("dgb_sync_data" + networkSuffix(context), android.content.Context.MODE_PRIVATE)
+            val migrationPrefs = context.getSharedPreferences(WalletStores.prefsName("dgb_sync_data", scope), android.content.Context.MODE_PRIVATE)
             if (!migrationPrefs.getBoolean("bip84_migrated", false)) {
                 android.util.Log.i("WalletManager", "BIP84 upgrade detected — marking migration (no rescan)")
                 migrationPrefs.edit()
@@ -413,22 +420,22 @@ class WalletManager @Suppress("LongParameterList") constructor(
 
             // Load saved transactions BEFORE creating wallet — recoverWallet uses them
             // so the wallet starts with full tx history and balance is immediately spendable.
-            val syncPrefs = context.getSharedPreferences("dgb_sync_data" + networkSuffix(context), android.content.Context.MODE_PRIVATE)
+            val syncPrefs = context.getSharedPreferences(WalletStores.prefsName("dgb_sync_data", scope), android.content.Context.MODE_PRIVATE)
             // Rebuild transaction history once after an update: a cache written by an earlier
             // build is discarded here, before it is read. Normally already decided at process
             // start (DigiByteApp.onCreate); this covers a network this process has not evaluated.
             // A throw leaves it undone, to be retried on the next launch.
-            runCatching { HistoryRebuildOnUpgrade.beforeWalletLoad(context) }
+            runCatching { HistoryRebuildOnUpgrade.beforeWalletLoad(context, scope = scope) }
                 .onFailure { android.util.Log.w(HistoryRebuildOnUpgrade.TAG, "history rebuild check failed; retried next launch", it) }
             // A rebuild that started clearing and did not finish leaves a partial cache: do not load it.
             // TX-CKPT-CAP: the checkpoint is a file of raw bytes (SavedTransactionsStore), migrated once
             // from the legacy dgb_sync_data hex key, so no 50 MB string is pinned in the prefs map here.
-            val rebuildInProgress = HistoryRebuildOnUpgrade.isInProgress(context)
+            val rebuildInProgress = HistoryRebuildOnUpgrade.isInProgress(context, scope = scope)
             val savedTx = if (rebuildInProgress) {
                 android.util.Log.w(HistoryRebuildOnUpgrade.TAG, "history rebuild in progress; not loading the transaction cache")
                 null
             } else {
-                runCatching { SavedTransactionsStore.load(context) }
+                runCatching { SavedTransactionsStore.load(context, scope) }
                     .onFailure { android.util.Log.w("WalletManager", "transaction checkpoint read failed", it) }
                     .getOrElse { ByteArray(0) }   // present but unreadable: recorded as a short restore below
             }
@@ -485,7 +492,7 @@ class WalletManager @Suppress("LongParameterList") constructor(
             val creationTime = prefs.getLong(KEY_CREATION_TIME, 0L)
             // After a one-time history rebuild the anchor goes no later than the oldest record
             // the discarded cache held (creationTimeForRestore); otherwise unchanged.
-            val restoreTime = creationTimeForRestore(creationTime, HistoryRebuildOnUpgrade.floorTime(context))
+            val restoreTime = creationTimeForRestore(creationTime, HistoryRebuildOnUpgrade.floorTime(context, scope = scope))
             val success = NativeBridge.restoreWalletFromBytes(seedBytes, restoreTime, storedPass)
             if (success) {
                 _walletState.value = WalletState.Unlocked
@@ -618,7 +625,7 @@ class WalletManager @Suppress("LongParameterList") constructor(
         neverRelayed: suspend (txid: String, inputs: List<Pair<String, Int>>) -> Boolean = { _, _ -> false },
         nowS: Long = System.currentTimeMillis() / 1000L,
     ): StuckSendResult {
-        val store = OutgoingTxStore(context)
+        val store = OutgoingTxStore(context, scope)
 
         // Sovereign owned-address set, built ONCE for the whole pass (never a
         // third party) so dead-send phantom asset rows can be identified.
@@ -733,7 +740,7 @@ class WalletManager @Suppress("LongParameterList") constructor(
                 android.util.Log.w("WalletManager", "clearStuckSends: skipping row after exception", e)
             }
         }
-        if (dropped > 0) runCatching { WalletTxPersister(context).persist() }
+        if (dropped > 0) runCatching { WalletTxPersister(context, scope = scope).persist() }
         return StuckSendResult(
             dropped = dropped,
             kept = kept,
@@ -780,9 +787,9 @@ class WalletManager @Suppress("LongParameterList") constructor(
         // done. Without it nothing would repeat a clear that did not land: stop here. A commit
         // that returns false has still put the armed values in memory, where the next commit to
         // the file in this process would write them to disk: disarm on this path too.
-        val prior = HistoryRebuildOnUpgrade.readState(context)
-        if (!HistoryRebuildOnUpgrade.armRerun(context)) {
-            logRebuildStopped("armRerun", disarmedNote(HistoryRebuildOnUpgrade.disarmRerun(context, prior)))
+        val prior = HistoryRebuildOnUpgrade.readState(context, scope = scope)
+        if (!HistoryRebuildOnUpgrade.armRerun(context, scope = scope)) {
+            logRebuildStopped("armRerun", disarmedNote(HistoryRebuildOnUpgrade.disarmRerun(context, prior, scope)))
             return false
         }
         // FLOOR_FROM_CACHE before the cache goes: its oldest confirmed height and record time
@@ -790,8 +797,8 @@ class WalletManager @Suppress("LongParameterList") constructor(
         // again. If that does not land the cache's floor would be lost with it: stop, and put
         // the rerun back as it was (if that does not land either, the rerun stays armed, which
         // only defers the rebuild to the next start: its run carries the floor before it clears).
-        if (!HistoryRebuildOnUpgrade.floorFromCache(context)) {
-            logRebuildStopped("floorFromCache", disarmedNote(HistoryRebuildOnUpgrade.disarmRerun(context, prior)))
+        if (!HistoryRebuildOnUpgrade.floorFromCache(context, scope = scope)) {
+            logRebuildStopped("floorFromCache", disarmedNote(HistoryRebuildOnUpgrade.disarmRerun(context, prior, scope)))
             return false
         }
         // NOTE: synchronous (commit), NOT apply(). The caller kills the process
@@ -801,10 +808,10 @@ class WalletManager @Suppress("LongParameterList") constructor(
         // tip instead of the birth floor). The clear is shared with the one-time
         // history rebuild after an update, so the two cannot drift; see
         // clearTransactionCacheForRebuild for what it removes and why.
-        if (!clearTransactionCacheForRebuild(context)) {
+        if (!clearTransactionCacheForRebuild(context, scope)) {
             runCatching { android.util.Log.w(HistoryRebuildOnUpgrade.TAG, "manual rebuild: the clear did not fully land; the next start repeats it") }
         }
-        OutgoingTxStore(context).clearAll()
+        OutgoingTxStore(context, scope).clearAll()
         // Floor the compact-filter rescan at the wallet's birth so old tx blocks are
         // re-scanned and stamped (SyncService reads cf_birth_height on sync start).
         // If the birth height is unknown, REMOVE the pref rather than writing 0 —
@@ -827,13 +834,13 @@ class WalletManager @Suppress("LongParameterList") constructor(
      * restarts the app, as for the plain rebuild.
      */
     fun rebuildFromChainRescanFrom(height: Long): Boolean {
-        if (!HistoryRebuildOnUpgrade.lowerFloorTo(context, height)) {
+        if (!HistoryRebuildOnUpgrade.lowerFloorTo(context, height, scope)) {
             // The record's values may still be in memory (a commit that returns false keeps them
             // there); they only ever lower the floor, so a later write of them costs a longer scan.
             logRebuildStopped(
                 "lowerFloorTo($height)",
                 "the rerun was not armed; the lowered floor may stay in the record (floor height " +
-                    "${HistoryRebuildOnUpgrade.floorHint(context)}, pending ${HistoryRebuildOnUpgrade.floorPending(context)})",
+                    "${HistoryRebuildOnUpgrade.floorHint(context, scope = scope)}, pending ${HistoryRebuildOnUpgrade.floorPending(context, scope = scope)})",
             )
             return false
         }
@@ -841,7 +848,7 @@ class WalletManager @Suppress("LongParameterList") constructor(
             if (!rebuilt) runCatching {
                 android.util.Log.w(
                     HistoryRebuildOnUpgrade.TAG,
-                    "rescan from $height: the floor was lowered (floor height ${HistoryRebuildOnUpgrade.floorHint(context)}) " +
+                    "rescan from $height: the floor was lowered (floor height ${HistoryRebuildOnUpgrade.floorHint(context, scope = scope)}) " +
                         "and stays in the record; the next sync start carries it into the stored floor",
                 )
             }
@@ -1642,8 +1649,8 @@ class WalletManager @Suppress("LongParameterList") constructor(
         // clear did not land.
         // The display currency used to live in this file and is a device setting: a create or a
         // restore keeps it (owner decision, 2026-11-12), so move it out before the clear.
-        app.aroundtheblock.wallet.core.settings.DisplayCurrencyPrefs.moveFromLegacy(context, networkSuffix(context))
-        val cleared = context.getSharedPreferences("dgb_sync_data" + networkSuffix(context), Context.MODE_PRIVATE)
+        app.aroundtheblock.wallet.core.settings.DisplayCurrencyPrefs.moveFromLegacy(context, storageSuffix(scope, StoreScope.NETWORK))
+        val cleared = context.getSharedPreferences(WalletStores.prefsName("dgb_sync_data", scope), Context.MODE_PRIVATE)
             .edit().clear().commit()
         // Drop ChainTipStore's in-memory mirror too — see the note in
         // AndroidWalletDataEraser.eraseSyncData. This helper backs createWallet and recoverWallet,
@@ -1655,21 +1662,21 @@ class WalletManager @Suppress("LongParameterList") constructor(
         // Without this, a fresh wallet (createWallet/recoverWallet) or a
         // seed-fingerprint-mismatch restore (restoreFromDisk) would inherit the
         // PREVIOUS wallet's saved-blocks window from disk.
-        SavedBlockStore.delete(context)
+        SavedBlockStore.delete(context, scope)
         // TX-CKPT-CAP: the transaction checkpoint moved out of dgb_sync_data too; a new wallet must
         // not restore the previous wallet's history from it.
-        SavedTransactionsStore.delete(context)
+        SavedTransactionsStore.delete(context, scope)
         // STORE-DURABILITY review: the scan ledger records which heights were evaluated for ONE wallet,
         // so after a seed change it is the wrong wallet's record; the header chain goes with it. Deleted
         // here, through delete() (epoch bump, tmp first), rather than left to the next start's restore
         // preflight to find (HEADER_WINDOW_MISSING) once the block window above is gone.
-        app.aroundtheblock.wallet.core.sync.FilterHeaderStore.delete(context)
-        app.aroundtheblock.wallet.core.sync.CfScanLedgerStore.delete(context)
+        app.aroundtheblock.wallet.core.sync.FilterHeaderStore.delete(context, scope)
+        app.aroundtheblock.wallet.core.sync.CfScanLedgerStore.delete(context, scope)
         // A new wallet (create, recover, seed change): every record cached from here on is
         // written by this build, so the one-time rebuild after an update has nothing to do. The
         // floor a previous wallet's rebuild recorded does not belong to this one.
         if (cleared) {
-            HistoryRebuildOnUpgrade.markNotNeeded(context, forgetFloor = true)
+            HistoryRebuildOnUpgrade.markNotNeeded(context, forgetFloor = true, scope = scope)
         } else {
             runCatching { android.util.Log.w(HistoryRebuildOnUpgrade.TAG, "sync data clear did not land; the one-time rebuild stays armed") }
         }
