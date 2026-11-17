@@ -7,11 +7,16 @@ drift.
 
 **Status (2026-11-17): open.** Step 1 is built, not merged: core `6a7742d` on
 `feat/digiid-site-key-root`, and this repo's branch of the same name (`ab564c3e3` characterizes the
-header before the change; `14b0c99d4` moves the pin and holds the new header). §3 to §5 are iOS's.
+header before the change; `14b0c99d4` moves the pin and holds the new header). Review round 1 added
+core `c90a284` (a `hasUri` but 0 or 1 is refused) and `f263cdd` (`BRHMAC` clears both pads), held
+here by `a6f417421` and `b40565997`. §3 to §5 are iOS's.
 
 Core and host-KAT work is the iOS and core session's lane (`docs/development-process.md`, "Two
 sessions, one Android repo"). Mark assigned step 1 to the Android session on 2026-11-17, as an
-exception to that rule. Steps 2 to 4 are Android app work.
+exception to that rule. Steps 2 and 3 are Android app work (Kotlin `core/`, the bridge, the UI).
+Step 4 is not: watching Coinomi's fund paths changes what the wallet holds, so it is core engine work
+with a host KAT ("Funds in the core"), and it lands with multi-wallet step 2 (the design's "Funds on
+Coinomi's paths").
 
 ## 1. What changed in `BRDigiId.h`
 
@@ -27,9 +32,19 @@ exception to that rule. Steps 2 to 4 are Android app work.
   both roots give the one shared address. `BRDigiIdSharedKey` and `BRDigiIdSignShared` take no root.
 - A new include, `BRDerivationProfiles.h` (libc only, nothing to link), for the standard key's
   name. `STANDARD` derives through `BRBIP32PrivKeyArrayPath`.
-- Three comparison arms: 131072 `DIGIID_RED_ROOT_IGNORED`, 262144 `DIGIID_RED_ROOT_ALWAYS_STANDARD`,
-  524288 `DIGIID_RED_ANY_ROOT`.
+- `BRDigiIdAddress` refuses a `hasUri` that is neither 0 nor 1, beside the root check and ahead of
+  `BR_DIGIID_CAPACITY` (review round 1). The root sits directly before `hasUri`, and C converts
+  between the enum and `int` with no warning under `-Wall -Wextra -Wpedantic`, so a C caller could
+  swap the two: `(STANDARD, 1)` swapped is `(1, 2)`, which answered `DIGIBYTE`'s per-site address,
+  one that `BRDigiIdSignSite` under `STANDARD` never signs with. Now every swapped call is refused,
+  or is the call meant (`(DIGIBYTE, 1)`). The root values stay 1 and 2.
+- Four comparison arms: 131072 `DIGIID_RED_ROOT_IGNORED`, 262144 `DIGIID_RED_ROOT_ALWAYS_STANDARD`,
+  524288 `DIGIID_RED_ANY_ROOT`, and 1048576 `DIGIID_RED_ANY_HASURI` (review round 1).
 - THE RULES say all of this. "Byte-identical to the bridge" now holds under `DIGIBYTE` only.
+- Separately, and older than this change (review round 1 found it): `BRHMAC` (`BRCrypto.c`) cleared
+  only the key's block of its two stack arrays, leaving the data (a BIP32 master key's seed, a
+  hardened step's parent key) and the inner hash in its dead frame. It now clears both arrays whole.
+  No MAC changes; `hmac_residue_kat` holds it, and iOS gets it with the same pin move.
 
 ## 2. Android, until step 2
 
@@ -39,10 +54,19 @@ The Android app does not sign through this header. Its bridge derives the per-si
 `DIGIBYTE` to that bridge (1800 of 1800 answers agree, 64- and 32-bit); `STANDARD` has no bridge
 answer until step 2 gives the bridge a root.
 
-When Android ships steps 2 and 3, the root becomes a per-wallet setting there, and new and most
-restored Android wallets get `STANDARD` (the design's table). The same phrase then needs `STANDARD`
-on iOS too, or one seed has two per-site identities (contract §0). That is for the iOS roadmap;
-step 1 changes nothing either app computes.
+When Android ships steps 2 and 3, the root becomes a per-wallet setting there (`siteKeyRoot`), set
+by the design's table. Read that table where it is current: open PR #267 amends it (decision 3,
+reversed by the owner on 2026-11-17), so that every HoldFast wallet, new ones included, keeps
+`DIGIBYTE`, and only a phrase restored as from Coinomi or another wallet gets `STANDARD`. Whatever
+the table says when it ships, iOS gives the same phrase the same root as Android, or one seed has two
+per-site identities (contract §0). That is for the iOS roadmap; step 1 changes nothing either app
+computes.
+
+Step 2 is the first C caller of `BRDigiIdAddress` on Android: PR #267's design moves
+`signIdentityMessage` and `identityAddress` onto `BRDigiIdSignSite` and `BRDigiIdAddress`. A root and
+`hasUri` swapped there is refused by the header (§1). Step 2 still owes a bridge test that holds
+`identityAddress` under `STANDARD` to the address `signIdentityMessage` signs with, as
+`address_root_hasuri_swapped` holds the header.
 
 ## 3. iOS: four calls stop compiling once the pin contains this change
 
@@ -56,7 +80,8 @@ was searched. These four calls use the old argument list, and nothing calls `BRD
 | `Policy/DigiIdSigner.swift` | 88 | `BRDigiIdAddress`, `hasUri` 0 |
 | `DigiByteWalletTests/DigiIdCoreTests.swift` | 110 | `BRDigiIdAddress`, `hasUri` 1 |
 
-Each passes `BR_DIGIID_ROOT_DIGIBYTE` after `seed.count`. No address or signature changes: every
+Each passes `BR_DIGIID_ROOT_DIGIBYTE` after `seed.count`. The three `BRDigiIdAddress` calls pass
+`hasUri` 1, 0 and 1, the only values the header takes now. No address or signature changes: every
 literal the KAT had before the change is still in it and passes, and the bridge comparison above
 still agrees. Since nothing either app computes changes, contract §4 item 3 does not force a pin
 move; the first move that contains the core merge carries these four edits.
@@ -76,6 +101,10 @@ header. The gate's line must end `(iphoneos + iphonesimulator; Swift imports it)
 `BRDerivationProfiles.h` and `BRDigiId.h` are both in iOS's `PUBLIC_HEADERS` already
 (`Scripts/build-core-xcframework.sh:39`, `:46`), so the new include should need no change there;
 the XCFramework build is what shows it.
+
+`hmac_residue_kat` (new, review round 1) has run only on Linux. It searches a thread's stack after
+`BRHMAC` returns, so it depends on how the platform lays out a stack it is given: its comparison arm
+must still find the old residue on a Mac, at -O0 and -O2, before its green arm there means anything.
 
 ## 5. iOS: L2 tests to carry
 
@@ -97,8 +126,16 @@ destructive action, which the L2 test must reach (:156-157). From
   real bridge: `DHawr8VSh4T2iEM9NxJdubbDTra31RKU94`, `DKBDZRPxPz6qGseZKNNzSwW3zfaRr1FQNA`,
   `DS4cZJP33QZ2mc1bTy9RgHZ3nDznEzS5eh`). The KAT's `LOGIN` (`DigiIdCoreTests`' `login`), signed
   under `STANDARD` with the second URL's identity, answers `DSsC7WWi7mgr4t7xEw9kmcZqgQq6YJjdri|…`
-  and recovers to that address. There is no `STANDARD` signature literal: the bridge has none to
-  read off.
+  and recovers to that address. The bridge has no `STANDARD` signature to read off; the next case
+  pins the whole answer from the independent model.
+- **`site_key_standard_login_and_indexes`**: the same phrase under `STANDARD`, where nothing was
+  measured. `https://api.digiscope.me/api/auth/digiid/callback` at index 1 is
+  `D6jnpnRo8u9x3FsgSMcUPwRGphbANMqz4g`, at 2 `DT1N5cjfpXxrTQztFQSQGCEiNdfhYTbJSc`, and at
+  `INT32_MAX` `D7D31HYwVkgv2wGjx3vxczkx6kXpa6zg6r`. `LOGIN` signed with its index-0 identity answers
+  `DSsC7WWi7mgr4t7xEw9kmcZqgQq6YJjdri|IMx5g483pmrhXxBN7sywXP4364mTuX1jM7F2QAMJZ5CzKifnD1bbptCQGvlXMB78Xo6URQkWkPV1IIbSh/o+lfI=`.
+  Index -1 and `INT32_MIN` are refused by all three calls. The values are the independent model's
+  (BIP32 from `"Bitcoin seed"`, SLIP-0013, RFC 6979 as libsecp256k1 signs), which gives the bridge's
+  `DIGIBYTE` answer for the same login byte for byte.
 - **`site_key_standard_bitid_vector`**: the BitID phrase (`inhale …`) and
   `http://bitid.bitcoin.blue/callback`, index 0, under `STANDARD`: the key's hash160 is the published
   `1J34vj4wowwPYafbeibZGht3zy3qERoUM1`'s.
@@ -109,12 +146,22 @@ destructive action, which the L2 test must reach (:156-157). From
   three calls (on both branches of `BRDigiIdAddress`), also when `work` is too small, with the key
   wiped and `out` empty. Swift writes 0 as `BR_DIGIID_ROOT_NONE` and other values as
   `BRDigiIdRoot(rawValue: 3)`, as `CoreParityTests.swift:88` does for `BRCFRecoveryReason`.
+- **`address_root_hasuri_swapped`**: `hasUri` 2, 3, -1, `INT_MAX` and `INT_MIN` are
+  `BR_DIGIID_REFUSED` from `BRDigiIdAddress` under both roots, also when `work` is too small, `out`
+  empty. In Swift the enum is its own type (hence `BRDigiIdRoot(rawValue: 3)` above), so a swapped
+  root and `hasUri` should not type-check; no Swift toolchain here showed it. Swift can still pass
+  those `hasUri` values, and they are refused there too.
+- `sweep_keys_standard` holds every `STANDARD` key over a pseudo-random stream to the KAT's own
+  BIP32; it has no literal to carry.
 
-The `STANDARD` values are Coinomi's own addresses (the design's table, measured 2026-11-17) and the
-published BitID vector, not the header's output; an independent Python BIP32/SLIP-0013 model gives
-all four again, and the three `DIGIBYTE` addresses. The new arms reach the test bundle the way
-`DigiIdCoreTests`' header records (`-Xcc -DDIGIID_UNFIXED=<bit>`). On Linux, 131072 fails exactly
-the two `STANDARD` cases and 524288 exactly `unknown_root_refused`.
+The `STANDARD` values at index 0 are Coinomi's own addresses (the design's table, measured
+2026-11-17) and the published BitID vector, not the header's output; an independent Python
+BIP32/SLIP-0013 model gives all four again, and the three `DIGIBYTE` addresses. The other `STANDARD`
+values are that model's alone. The new arms reach the test bundle the way `DigiIdCoreTests`' header
+records (`-Xcc -DDIGIID_UNFIXED=<bit>`). On Linux (run.sh at `a6f417421`), 131072 fails exactly the
+four `STANDARD` cases (`site_key_standard_coinomi_uris`, `site_key_standard_bitid_vector`,
+`site_key_standard_login_and_indexes`, `sweep_keys_standard`), 524288 exactly
+`unknown_root_refused`, and 1048576 exactly `address_root_hasuri_swapped`.
 
 ## 6. Merge order
 

@@ -572,9 +572,9 @@ not — but the coupling ran through the duress PIN, which was cancelled
    every per-site identity so far) or `STANDARD` ("Bitcoin seed",
    Coinomi's), and no app's output changes. Shown by `digiid_core_kat`:
    its `STANDARD` rows give the addresses Coinomi showed, and arms
-   131072, 262144 and 524288 each fail exactly their cases. Steps 2
-   (the app), 3 (the UI) and 4 (watching Coinomi's fund paths, with
-   multi-wallet step 2) are pending.
+   131072, 262144, 524288 and 1048576 each fail exactly their cases.
+   Steps 2 (the app), 3 (the UI) and 4 (watching Coinomi's fund paths:
+   core engine work, with multi-wallet step 2) are pending.
 
 **Effort:** S–M, reduced by the duress cancellation. Item 1 is shipped;
 5 is days; 3 is the riskiest (device-matrix testing); 4 is
