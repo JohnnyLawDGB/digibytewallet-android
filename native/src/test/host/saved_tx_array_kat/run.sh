@@ -110,7 +110,7 @@ BUILD_AT="$(<<<"$RESTORE_KT" grep -nE '(^|[^[:alnum:]_.])restoreNative\(' | grep
 [ -n "$LOAD_AT" ] && [ -n "$BUILD_AT" ] && [ "$(wc -w <<<"$LOAD_AT")" -eq 1 ] && [ "$(wc -w <<<"$BUILD_AT")" -eq 1 ] &&
     [ "$LOAD_AT" -lt "$BUILD_AT" ] ||
     gate_fail "restoreFromDisk must call loadSerializedTransactions (seam loadTxNative) and then restoreWalletFromBytes (seam restoreNative), once each (load at '${LOAD_AT}', build at '${BUILD_AT}')."
-if <<<"$RESTORE_KT" grep -vE '^[[:space:]]*(//|\*)' | grep -qE "NativeBridge\.(recoverWalletFromBytes|createWalletFromBytes)\(|(^|[^[:alnum:]_.])(recoverNative|createNative)\("; then
+if <<<"$RESTORE_KT" grep -vE '^[[:space:]]*(//|\*)' | grep -cE "NativeBridge\.(recoverWalletFromBytes|createWalletFromBytes)\(|(^|[^[:alnum:]_.])(recoverNative|createNative)\(" >/dev/null; then
     gate_fail "restoreFromDisk calls recoverWalletFromBytes or createWalletFromBytes (or their seams recoverNative/createNative), which drop its own load."
 fi
 
