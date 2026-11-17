@@ -19,7 +19,25 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../../.." && pwd)"
 CORE_DIR="${CORE_DIR:-$REPO_ROOT/native/src/main/jni/digibytewallet-core}"
 BUILD_DIR="$(mktemp -d)"
-trap 'rm -rf "$BUILD_DIR"' EXIT
+# macOS's /bin/bash is 3.2. Before bash 4.4, "${a[@]}" of an empty array is an unbound variable under set -u (hence
+# ${a[@]+"${a[@]}"} below), and bash 3.2 then stops the script and exits with its EXIT trap's status, 0 after a
+# clean-up: a run that never reached its arms read as passed (measured on a Mac for PR #154). Stopped inside a build,
+# its message is in that build's log, which the clean-up deletes. So a run that stops before its verdict says so on
+# the runner's own output (fd 3, which no build redirects), with the shell's error lines from the build logs, and
+# exits 1 whatever status the shell gave it.
+exec 3>&1
+VERDICT_GIVEN=0
+on_exit() {
+    local status=$?
+    if [ "$VERDICT_GIVEN" -ne 1 ]; then
+        echo "FAIL: hmac_residue_kat stopped before its verdict (exit $status)" >&3
+        grep -hE ': line [0-9]+: ' "$BUILD_DIR"/*.build.log 2>/dev/null | sed 's/^/    /' >&3
+        [ "$status" -ne 0 ] || status=1
+    fi
+    rm -rf "$BUILD_DIR"
+    exit "$status"
+}
+trap on_exit EXIT
 CC="${CC:-clang}"
 LIMIT_S=60   # a case finishes in about a second
 
@@ -31,12 +49,12 @@ shopt -s nullglob
 SHA3_SRCS=("$CORE_DIR"/crypto/sha3/*.c)
 shopt -u nullglob
 UNITS=("$CORE_DIR/BRCrypto.c" "$CORE_DIR/crypto/groestl.c" "$CORE_DIR/crypto/skein.c" "$CORE_DIR/crypto/qubit.c"
-       "$CORE_DIR/crypto/odocrypt.c" "${SHA3_SRCS[@]}")
+       "$CORE_DIR/crypto/odocrypt.c" ${SHA3_SRCS[@]+"${SHA3_SRCS[@]}"})
 
 build() {   # <out> <-O level> <64|32> [-D...]
     local out="$1" opt="$2" bits="$3"; shift 3
     local m=(); [ "$bits" = "32" ] && m=(-m32)
-    "$CC" -w -include stdint.h -g "$opt" "${m[@]}" "$@" -I "$CORE_DIR" \
+    "$CC" -w -include stdint.h -g "$opt" ${m[@]+"${m[@]}"} "$@" -I "$CORE_DIR" \
         "$SCRIPT_DIR/hmac_residue_kat_main.c" "${UNITS[@]}" -lpthread -lm -o "$out"
 }
 
@@ -53,7 +71,7 @@ for bits in "${WIDTHS[@]}"; do
         for arm in red green; do
             name="${arm}${bits}${opt}"
             flags=(); [ "$arm" = red ] && flags=(-DHMAC_PAD_RESIDUE_UNFIXED)
-            if ! build "$BUILD_DIR/$name" "$opt" "$bits" "${flags[@]}" >"$BUILD_DIR/$name.build.log" 2>&1; then
+            if ! build "$BUILD_DIR/$name" "$opt" "$bits" ${flags[@]+"${flags[@]}"} >"$BUILD_DIR/$name.build.log" 2>&1; then
                 echo "GATE FAILURE: $name did not compile (a build error is not evidence)."; sed -n '1,20p' "$BUILD_DIR/$name.build.log" | sed 's/^/    /'
                 exit 1
             fi
@@ -100,4 +118,5 @@ done
 
 [ $FAIL -eq 0 ] && echo "PASS: hmac_residue_kat (${#CASES[@]} cases; comparison arm red on exactly data and inner, shipped arm clean; -O0 and -O2; $bits_note)"
 [ $FAIL -ne 0 ] && echo "FAIL: hmac_residue_kat"
+VERDICT_GIVEN=1
 exit $FAIL
