@@ -55,7 +55,7 @@ The Android app does not sign through this header. Its bridge derives the per-si
 answer until step 2 gives the bridge a root.
 
 When Android ships steps 2 and 3, the root becomes a per-wallet setting there (`siteKeyRoot`), set
-by the design's table. Read that table where it is current: open PR #267 amends it (decision 3,
+by the design's table. Read that table where it is current: PR #267 amends it (decision 3,
 reversed by the owner on 2026-11-17), so that every HoldFast wallet, new ones included, keeps
 `DIGIBYTE`, and only a phrase restored as from Coinomi or another wallet gets `STANDARD`. Whatever
 the table says when it ships, iOS gives the same phrase the same root as Android, or one seed has two

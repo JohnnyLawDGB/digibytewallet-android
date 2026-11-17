@@ -566,7 +566,10 @@ not — but the coupling ran through the duress PIN, which was cancelled
 6. **Coinomi-compatible Digi-ID.** A phrase restored from Coinomi signs
    in to Digi-ID sites, DigiScope included, as the account Coinomi
    signed in to. Approved 2026-11-17, in four steps:
-   `docs/superpowers/specs/2026-11-17-coinomi-digiid-design.md`.
+   `docs/superpowers/specs/2026-11-17-coinomi-digiid-design.md`, as
+   PR #267 amends it with the owner's OK of the same day (among other
+   changes, decision 3 is reversed). Until #267 merges, the amended
+   text is only in that PR, and steps 2 to 4 read it there.
    Step 1, the core, is **done**: each per-site call in `BRDigiId.h`
    takes the wallet's master-key root, `DIGIBYTE` ("DigiByte seed",
    every per-site identity so far) or `STANDARD` ("Bitcoin seed",
