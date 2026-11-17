@@ -509,12 +509,6 @@
     <string name="did_insecure">Conexión insegura</string>
     <string name="did_insecure_body">Este sitio usa HTTP, no HTTPS. Tu autenticación podría ser interceptada.</string>
     <string name="did_callback_url">URL de retorno</string>
-    <string name="did_identity_title">¿Qué inicio de sesión conoce este sitio?</string>
-    <string name="did_identity_hint">¿Restauraste esta billetera? Elige la identidad que usabas antes en este sitio. Cuando un inicio de sesión funcione, la billetera lo recordará.</string>
-    <string name="did_identity_per_site">Clave propia para este sitio (app original de DigiByte)</string>
-    <string name="did_identity_shared">Clave compartida para todos los sitios (DigiByte wallet 3.x–4.0.76)</string>
-    <string name="did_identity_shared_note">Es el mismo en todos los sitios, así que los sitios pueden vincular tus inicios de sesión. Elígelo solo si este sitio te conocía con él.</string>
-    <string name="did_identity_address">Dirección: %1$s</string>
     <string name="did_approve">Aprobar</string>
     <string name="did_deny">Denegar</string>
     <string name="did_success">Autenticación correcta</string>

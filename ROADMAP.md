@@ -335,7 +335,10 @@ a CF-only wallet** and **DigiDollar as a sovereign light client**.
   canonical callback URI, so sites can no longer correlate a user by address. DigiScope
   domains and domains with a successful pre-change login are grandfathered on the legacy
   key (their accounts are bound to that address; re-binding is future work). The entry
-  below records the pre-change state it fixed.
+  below records the pre-change state it fixed. **Superseded in part by Q4 A** (owner
+  decision 2026-11-10; Android change of 2026-11-17): only `digiscope.me` and `api.digiscope.me`
+  keep the legacy key, a fixed list the same on every device. History no longer
+  grandfathers a domain, and a restored wallet is no longer offered the choice (4.1.2 row 16).
 - **Digi-ID has no dedicated identity path** — corrected 2026-08-19,
   traced through the JNI rather than inferred. `DigiIdManager.kt:49`
   calls `signMessage(uri, addressFormat)` (the second argument is the

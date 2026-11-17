@@ -274,9 +274,13 @@ NativeBridge_signIdentityMessage(JNIEnv *env, jobject thiz,
 /* ---- identityAddress JNI (4.1.2 row 16) ----
  *
  * The P2PKH address a Digi-ID login would sign with, without signing anything: the per-site
- * SLIP-0013 identity for siteUri, or the shared m/0'/0/0 identity when siteUri is null. The
- * confirm screen shows both so a restored wallet can pick the identity a site already knows.
+ * SLIP-0013 identity for siteUri, or the shared m/0'/0/0 identity when siteUri is null.
  * Same derivation and address format as signIdentityMessage / signMessage(…, 0).
+ *
+ * No Kotlin code has called it since Android adopted Q4 A (2026-11-17). Its only caller was the
+ * identity card on the Digi-ID confirm screen, where a restored wallet picked between the two
+ * identities, and that card is gone. It stays, with its digiid_core_kat cases, until the core
+ * lane decides (docs/handoffs/2026-11-17-android-q4a.md).
  */
 jstring JNICALL
 NativeBridge_identityAddress(JNIEnv *env, jobject thiz, jstring siteUri, jint index) {

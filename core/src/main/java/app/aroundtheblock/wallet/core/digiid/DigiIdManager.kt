@@ -27,27 +27,7 @@ class DigiIdManager(
      * driven without the native library; the app always takes this default.
      */
     private val sign: (DigiIdRequest, IdentityKeyKind) -> String? = ::signNatively,
-    /** The address an identity would sign with, without signing; a parameter for the same reason. */
-    private val address: (DigiIdRequest, IdentityKeyKind) -> String? = ::addressNatively,
-    /** False for a wallet created on this device: it is never offered the shared identity (row 16). */
-    private val walletMayHaveHistoryElsewhere: () -> Boolean = { true },
 ) {
-    /** The two identities a restored wallet may pick between for [request]; see [IdentityChoice]. */
-    data class IdentityChoice(val perSiteAddress: String, val sharedAddress: String)
-
-    /**
-     * The choice to offer for [request], or null when there is none: DigiScope, a domain with a
-     * successful login on record (its history decides), or a wallet that cannot derive (locked).
-     */
-    suspend fun identityChoice(request: DigiIdRequest): IdentityChoice? = withContext(Dispatchers.IO) {
-        if (!IdentityKeyPolicy.offersChoice(request.domain, historyDao.countSuccessful(request.domain) > 0, walletMayHaveHistoryElsewhere())) {
-            return@withContext null
-        }
-        val perSite = address(request, IdentityKeyKind.PER_SITE) ?: return@withContext null
-        val shared = address(request, IdentityKeyKind.LEGACY) ?: return@withContext null
-        IdentityChoice(perSite, shared)
-    }
-
     // Derived from the shared client, so its Tor proxy, pins and timeouts carry over. Redirects
     // are not followed: the signed login goes to the host the user approved, or nowhere.
     private val httpClient: OkHttpClient = baseClient.newBuilder()
@@ -55,8 +35,7 @@ class DigiIdManager(
         .followSslRedirects(false)
         .build()
 
-    /** [requested] is the user's pick from [identityChoice]; it counts only where a choice is offered. */
-    suspend fun authenticate(request: DigiIdRequest, requested: IdentityKeyKind? = null): DigiIdResult = withContext(Dispatchers.IO) {
+    suspend fun authenticate(request: DigiIdRequest): DigiIdResult = withContext(Dispatchers.IO) {
         try {
             // ── Security: validate callback domain matches URI ──
             // CRITICAL-4: The callback URL is derived from the scanned QR.
@@ -74,13 +53,10 @@ class DigiIdManager(
                 return@withContext DigiIdResult.Error(1, "Insecure (HTTP) authentication not allowed")
             }
 
-            // Pick the identity: legacy m/0'/0/0 for DigiScope + grandfathered domains,
-            // per-site SLIP-0013 (m/13'/...) for new ones — docs/specs/digiid-key-isolation.md.
-            val hasLegacyHistory = historyDao.countSuccessfulLegacy(request.domain) > 0
-            val hasAnyHistory = requested != null && historyDao.countSuccessful(request.domain) > 0
-            val keyKind = IdentityKeyPolicy.choose(
-                request.domain, hasLegacyHistory, hasAnyHistory, requested != null && walletMayHaveHistoryElsewhere(), requested,
-            )
+            // Pick the identity (Q4 A, IdentityKeyPolicy): the shared m/0'/0/0 key exactly for the
+            // hosts on the fixed list, the per-site SLIP-0013 key (m/13'/...) for every other one.
+            // The history below records which identity signed; it does not decide it.
+            val keyKind = IdentityKeyPolicy.choose(request.domain)
 
             // Sign the original digiid:// URI (includes nonce) with the chosen identity key.
             val signResult = sign(request, keyKind)
@@ -170,10 +146,4 @@ private fun signNatively(request: DigiIdRequest, keyKind: IdentityKeyKind): Stri
     // stable per site, unlinkable across sites.
     IdentityKeyKind.PER_SITE ->
         NativeBridge.signIdentityMessage(request.rawUri, request.callbackUrl, 0)
-}
-
-/** The address [keyKind] would sign [request] with, through the native library; no signature. */
-private fun addressNatively(request: DigiIdRequest, keyKind: IdentityKeyKind): String? = when (keyKind) {
-    IdentityKeyKind.LEGACY -> NativeBridge.identityAddress(null, 0)
-    IdentityKeyKind.PER_SITE -> NativeBridge.identityAddress(request.callbackUrl, 0)
 }
