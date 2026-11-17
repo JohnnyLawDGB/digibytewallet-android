@@ -501,12 +501,6 @@
     <string name="did_insecure">Koneksi Tidak Aman</string>
     <string name="did_insecure_body">Situs ini memakai HTTP, bukan HTTPS. Autentikasi Anda bisa disadap.</string>
     <string name="did_callback_url">URL Callback</string>
-    <string name="did_identity_title">Masuk mana yang dikenal situs ini?</string>
-    <string name="did_identity_hint">Memulihkan dompet ini? Pilih identitas yang dulu Anda pakai di situs ini. Setelah masuk berhasil, dompet akan mengingatnya.</string>
-    <string name="did_identity_per_site">Kunci terpisah untuk situs ini (aplikasi DigiByte asli)</string>
-    <string name="did_identity_shared">Kunci bersama untuk semua situs (DigiByte wallet 3.x–4.0.76)</string>
-    <string name="did_identity_shared_note">Sama di setiap situs, sehingga situs dapat menautkan proses masuk Anda. Pilih hanya jika situs ini mengenal Anda dengannya.</string>
-    <string name="did_identity_address">Alamat: %1$s</string>
     <string name="did_approve">Setujui</string>
     <string name="did_deny">Tolak</string>
     <string name="did_success">Autentikasi Berhasil</string>

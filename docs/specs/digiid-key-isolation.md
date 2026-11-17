@@ -1,5 +1,13 @@
 # Digi-ID key isolation — per-site identity derivation
 
+> **Disposition (2026-11-17):** the per-site derivation shipped. The compatibility policy below
+> is superseded by the owner's decision Q4 A (2026-11-10): only `digiscope.me` and
+> `api.digiscope.me` keep the shared `m/0'/0/0` key, a fixed list that is the same on every
+> device. The rule that kept a domain with a successful legacy login on that key is gone, and so
+> is the restored-wallet choice of identity added later (4.1.2 row 16, `offersChoice`).
+> `derivation` stays, as a record of which identity signed. Code: `IdentityKeyPolicy`. Read the
+> table below as history.
+
 **Status:** In progress (branch `feat/digiid-key-isolation`)
 **Provenance:** Security audit CRITICAL-4 residual → THREAT_MODEL known-limitation #6 →
 ROADMAP Phase 2 (top slot since duress-PIN cancellation, 2026-08-19 sequencing).

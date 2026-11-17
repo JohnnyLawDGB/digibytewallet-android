@@ -288,9 +288,8 @@ object AppModule {
         client: OkHttpClient,
         historyDao: DigiIdHistoryDao,
         digiScopeClient: DigiScopeClient,
-        walletManager: WalletManager,
     ): DigiIdManager =
-        DigiIdManager(client, historyDao, digiScopeClient, walletMayHaveHistoryElsewhere = walletManager::mayHaveDigiIdHistoryElsewhere)
+        DigiIdManager(client, historyDao, digiScopeClient)
 
     @Provides @Singleton
     fun provideDigiScopeClient(

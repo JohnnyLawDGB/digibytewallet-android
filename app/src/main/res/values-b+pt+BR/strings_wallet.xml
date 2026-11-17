@@ -507,12 +507,6 @@
     <string name="did_insecure">Conexão insegura</string>
     <string name="did_insecure_body">Este site usa HTTP, não HTTPS. Sua autenticação pode ser interceptada.</string>
     <string name="did_callback_url">URL de callback</string>
-    <string name="did_identity_title">Qual login este site conhece?</string>
-    <string name="did_identity_hint">Restaurou esta carteira? Escolha a identidade que você usava neste site. Depois que um login funcionar, a carteira lembra a escolha.</string>
-    <string name="did_identity_per_site">Chave própria para este site (app DigiByte original)</string>
-    <string name="did_identity_shared">Chave compartilhada para todos os sites (DigiByte wallet 3.x–4.0.76)</string>
-    <string name="did_identity_shared_note">É a mesma em todos os sites, então os sites podem vincular seus logins. Escolha só se este site conhecia você por ela.</string>
-    <string name="did_identity_address">Endereço: %1$s</string>
     <string name="did_approve">Aprovar</string>
     <string name="did_deny">Negar</string>
     <string name="did_success">Autenticação bem-sucedida</string>

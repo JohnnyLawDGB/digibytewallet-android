@@ -504,12 +504,6 @@
     <string name="did_insecure">Hindi Ligtas na Koneksyon</string>
     <string name="did_insecure_body">HTTP ang gamit ng site na ito, hindi HTTPS. Maaaring ma-intercept ang authentication mo.</string>
     <string name="did_callback_url">Callback URL</string>
-    <string name="did_identity_title">Aling sign-in ang kilala ng site na ito?</string>
-    <string name="did_identity_hint">Ni-restore mo ba ang wallet na ito? Piliin ang identity na ginamit mo dati sa site na ito. Kapag gumana ang sign-in, tatandaan ito ng wallet.</string>
-    <string name="did_identity_per_site">Hiwalay na key para sa site na ito (orihinal na DigiByte app)</string>
-    <string name="did_identity_shared">Iisang key para sa lahat ng site (DigiByte wallet 3.x–4.0.76)</string>
-    <string name="did_identity_shared_note">Pareho ito sa bawat site, kaya maiuugnay ng mga site ang iyong mga sign-in. Piliin lang kung kilala ka ng site na ito rito.</string>
-    <string name="did_identity_address">Address: %1$s</string>
     <string name="did_approve">Aprubahan</string>
     <string name="did_deny">Tanggihan</string>
     <string name="did_success">Matagumpay ang Authentication</string>

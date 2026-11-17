@@ -195,7 +195,7 @@ class MigrationTest {
         v9Db.query("SELECT derivation FROM digiid_history WHERE domain = 'example.com'").use { c ->
             assertTrue(c.moveToFirst())
             // Every pre-migration login was signed with the shared m/0'/0/0 key — the
-            // backfill records that fact, and IdentityKeyPolicy grandfathers on it.
+            // backfill records that fact (a record only: no row decides the identity, Q4 A).
             assertEquals("legacy", c.getString(0))
         }
         v9Db.close()
@@ -332,29 +332,21 @@ class MigrationTest {
         assertEquals(setOf("backed", "verified"), dao.getAssetUtxosByIdNow("assetA").map { it.txid }.toSet())
     }
 
+    /** The history keeps which identity signed each login: a record (Q4 A — nothing reads it to choose one). */
     @Test
-    fun digiIdHistoryDao_countSuccessfulLegacy_ignoresFailuresAndSiteRows() = runTest {
+    fun digiIdHistoryDao_keepsWhichIdentitySigned() = runTest {
         val dao: DigiIdHistoryDao = db.digiIdHistoryDao()
-        // Successful legacy login → grandfathers the domain
         dao.insert(DigiIdHistoryEntity(
             domain = "old-site.com", callbackUrl = "https://old-site.com/cb",
             address = "DLegacy", timestamp = 100L, success = true, derivation = "legacy"
         ))
-        // Failed legacy attempt → must NOT grandfather
-        dao.insert(DigiIdHistoryEntity(
-            domain = "failed.com", callbackUrl = "https://failed.com/cb",
-            address = "DLegacy", timestamp = 100L, success = false, derivation = "legacy"
-        ))
-        // Successful per-site login → must NOT count as legacy
         dao.insert(DigiIdHistoryEntity(
             domain = "new-site.com", callbackUrl = "https://new-site.com/cb",
-            address = "DSite", timestamp = 100L, success = true, derivation = "site"
+            address = "DSite", timestamp = 200L, success = true, derivation = "site"
         ))
 
-        assertEquals(1, dao.countSuccessfulLegacy("old-site.com"))
-        assertEquals(0, dao.countSuccessfulLegacy("failed.com"))
-        assertEquals(0, dao.countSuccessfulLegacy("new-site.com"))
-        assertEquals(0, dao.countSuccessfulLegacy("never-seen.com"))
+        val history = dao.getHistory().first()
+        assertEquals(listOf("new-site.com" to "site", "old-site.com" to "legacy"), history.map { it.domain to it.derivation })
     }
 
     @Test
