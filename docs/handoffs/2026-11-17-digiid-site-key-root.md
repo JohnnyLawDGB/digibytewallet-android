@@ -183,3 +183,21 @@ and read the run's "Show what is under test" step: its `core:` line must name th
 its `android:` line must end `(feat/digiid-site-key-root)`. If `develop` has moved on, the `core:`
 line names the commit the run tested, and that commit, which contains the merge, is the one the pin
 takes once the run is green.
+
+## 7. The DigiScope list in the core, reshaped (iOS hand-off 2026-11-13 §3)
+
+The iOS session's hand-off of 2026-11-13 (§3) asks the core lane for
+`BRDigiIdUsesSharedIdentity(host, hostLen)`. Mark gave that header to the Android session too
+(2026-11-17), as its own small core PR after this step. The Coinomi design (merged in #267, "App:
+the policy") reshapes it, because a Coinomi-mode wallet signs DigiScope per-site, so "the host is on
+the list" no longer means "sign with the shared key":
+- **"Is a DigiScope host":** list membership, exactly `digiscope.me` and `api.digiscope.me`, byte
+  for byte, on the parsed (lower-cased) domain.
+- **The whole choice:** one header-only call that takes the host, the wallet's `digiScopeIdentity`
+  and its `siteKeyRoot`, and answers either `SHARED` or the per-site key with the URI and root to
+  derive it from. The DigiScope login URI is a core literal.
+- Its host KAT carries §3's host cases, crossed with both `digiScopeIdentity` values and both roots.
+
+Until it lands, Android keeps its two-host Kotlin list (Q4 A, #268), and iOS keeps its Swift list. When
+it lands, both call it in place of their lists. `BRDigiIdUsesSharedIdentity` is not built under that
+name.
