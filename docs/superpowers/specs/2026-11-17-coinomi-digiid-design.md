@@ -1,6 +1,6 @@
 # Coinomi-compatible Digi-ID — design
 
-Status: owner decisions taken 2026-11-17 (all four below); for owner approval of this text.
+Status: **APPROVED by the owner 2026-11-17** (text and all four decisions below).
 Follows: `docs/superpowers/specs/2026-11-16-multi-wallet-design.md` (Non-goals: "Coinomi-compatible
 Digi-ID ... has its own design next"). Builds on `docs/specs/digiid-key-isolation.md`.
 
