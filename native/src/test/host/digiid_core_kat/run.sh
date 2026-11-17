@@ -7,7 +7,8 @@
 # identity each master-key root gives the three callback URLs Coinomi was measured signing in to
 # (docs/superpowers/specs/2026-11-17-coinomi-digiid-design.md): BR_DIGIID_ROOT_DIGIBYTE ("DigiByte seed", the
 # bridge's) and BR_DIGIID_ROOT_STANDARD ("Bitcoin seed": the addresses Coinomi showed, and BitID's published
-# vector); an unknown root is refused. Beside them a line-for-line C model of the bridge that the header is
+# vector, and an independent model's answers where nothing was measured); an unknown root is refused, and so is a
+# hasUri but 0 or 1 (a root swapped with it). Beside them a line-for-line C model of the bridge that the header is
 # compared with over fixed pseudo-random inputs. See digiid_core_kat_main.c. Then the REAL bridge, booted over a
 # host JNI, is held to the header answer for answer under the DigiByte root (digiid_core_bridge_main.c).
 #
@@ -24,7 +25,8 @@
 #               with "DigiByte seed" (the per-site master key before the root was an argument); 262144 every
 #               known root derives with "Bitcoin seed" (the constant swapped in place, which moves every
 #               existing identity); 524288 a root that is neither DIGIBYTE nor STANDARD is not refused (it
-#               derives with "DigiByte seed"). Each arm fails exactly the cases CASES lists for its bit and
+#               derives with "DigiByte seed"); 1048576 BRDigiIdAddress takes any nonzero hasUri as 1, so a root
+#               swapped with hasUri is not refused. Each arm fails exactly the cases CASES lists for its bit and
 #               passes every other.
 #   shipped     -DDIGIID_UNFIXED=0: every case passes, exit 0.
 #   bridge      the shipped header under BR_DIGIID_ROOT_DIGIBYTE against the bridge's own jni_wallet_sign.c /
@@ -79,9 +81,11 @@ CASES=(
     site_key_digibyte_coinomi_uris:2,4,64,8192,262144
     site_key_standard_coinomi_uris:2,4,64,8192,131072,262144
     site_key_standard_bitid_vector:2,4,131072
+    site_key_standard_login_and_indexes:1,2,4,8,64,8192,131072
     shared_key_derivation:4096
     shared_address_both_roots:16,4096
     unknown_root_refused:524288
+    address_root_hasuri_swapped:1048576
     message_prefix:32
     message_digest:64
     utf8_bytes:1024,2048
@@ -98,6 +102,7 @@ CASES=(
     buffer_edges:512
     sweep_indexes:1,2
     sweep_keys:1,2,4,8,4096,262144
+    sweep_keys_standard:1,2,4,8,64,8192,131072
     sweep_sign:1,2,4,8,16,64,256,4096,8192,262144
     sweep_utf8:1024,2048
     sweep_uri_bytes:16384,32768
@@ -105,7 +110,7 @@ CASES=(
 ARMS=(1:index-big-endian 2:words-big-endian 4:soft-path 8:negative-index 16:shared-any-index 32:compact-size
       64:single-sha 128:uncompressed 256:segwit-ignored 512:key-kept 1024:lone-surrogate-kept 2048:modified-utf8
       4096:shared-path 8192:base64-unpadded 16384:uri-spec-pairs 32768:uri-as-message 65536:address-key-kept
-      131072:root-ignored 262144:root-always-standard 524288:any-root)
+      131072:root-ignored 262144:root-always-standard 524288:any-root 1048576:any-hasuri)
 
 # ---- the seam is real ----------------------------------------------------------------------
 if [ ! -f "$HEADER" ]; then

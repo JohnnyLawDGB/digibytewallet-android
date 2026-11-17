@@ -25,11 +25,16 @@
 //       the same three URLs, which an independent Python BIP32/SLIP-0013 model gives again
 //       (site_key_standard_coinomi_uris), and the core's published BitID address
 //       1J34vj4wowwPYafbeibZGht3zy3qERoUM1 (site_key_standard_bitid_vector); a signature under it is held to
-//       its address by the signer it recovers to. An unknown root is refused (unknown_root_refused).
+//       its address by the signer it recovers to. Where nothing was measured (an index but 0, and a login's
+//       whole answer) the literals are that model's alone, with RFC 6979 as libsecp256k1 signs, which gives
+//       the bridge's DIGIBYTE login answer byte for byte as well (site_key_standard_login_and_indexes). An
+//       unknown root is refused (unknown_root_refused), and so is a hasUri but 0 or 1, which a root swapped
+//       with it would be (address_root_hasuri_swapped).
 //    2. BY THE BRIDGE'S OWN slip13.c, compiled into this binary: the path indexes are held to it.
 //    3. BY A MODEL. `b_...` below is the bridge's C written out line for line without JNI (a jstring
 //       becomes its bytes or its UTF-16 units, NULL a Java null). The sweep_* cases hold the header to
-//       it over fixed pseudo-random inputs. The URI's bytes are what ART's GetStringUTFChars writes:
+//       it over fixed pseudo-random inputs; sweep_keys_standard, a root the bridge has no answer for, holds
+//       every key to this file's BIP32 instead. The URI's bytes are what ART's GetStringUTFChars writes:
 //       art8_utf below is ART's own encoder (Android 8.0 to 12) line for line, and
 //       digiid_core_bridge_main.c's host env writes them with the newer ART's.
 //
@@ -826,6 +831,64 @@ static void site_key_standard_bitid_vector(void)
        "BRDigiIdAddress answers that hash160 as a DigiByte address (%s)", addr);
 }
 
+// BR_DIGIID_ROOT_STANDARD where nothing was measured: DigiScope's login callback at indexes 1, 2 and INT32_MAX
+// (Coinomi signs at index 0 alone, and at 0 the index's little- and big-endian bytes are the same), and LOGIN's whole
+// answer, signed with that callback's identity at index 0. The literals are an independent Python model's (BIP39;
+// BIP32 from "Bitcoin seed"; SLIP-0013; RFC 6979 as libsecp256k1 signs), which gives the bridge's DIGIBYTE answer
+// for the same login (site_key_digibyte_coinomi_uris) byte for byte as well. A negative index is refused under
+// STANDARD as under DIGIBYTE: the key wiped, out empty.
+static void site_key_standard_login_and_indexes(void)
+{
+    static const char *uri = "https://api.digiscope.me/api/auth/digiid/callback";
+    static const struct { int32_t index; const char *address; } V[] = {
+        { 1, "D6jnpnRo8u9x3FsgSMcUPwRGphbANMqz4g" },
+        { 2, "DT1N5cjfpXxrTQztFQSQGCEiNdfhYTbJSc" },
+        { INT32_MAX, "D7D31HYwVkgv2wGjx3vxczkx6kXpa6zg6r" },
+    };
+    static const char *loginAnswer =
+        "DSsC7WWi7mgr4t7xEw9kmcZqgQq6YJjdri|IMx5g483pmrhXxBN7sywXP4364mTuX1jM7F2QAMJZ5CzKifnD1bbptCQGvlXMB78Xo6URQkWkPV1IIbSh/o+lfI=";
+    static const int32_t negative[] = { -1, INT32_MIN };
+    uint8_t seed[64];
+    char addr[BR_DIGIID_ADDRESS_CAPACITY], answer[BR_DIGIID_ANSWER_CAPACITY], keyAddr[75];
+    size_t i, n = strlen(uri);
+    BRKey key;
+
+    seedOf(seed, ABANDON);
+    for (i = 0; i < N(V); i++) {
+        uint32_t idx[4], path[5];
+
+        ck(BRDigiIdAddress(addr, sizeof(addr), seed, 64, BR_DIGIID_ROOT_STANDARD, 1, uri, n, V[i].index, WORK, sizeof(WORK)) == BR_DIGIID_OK &&
+           strcmp(addr, V[i].address) == 0, "index %d, STANDARD: the model's address (%s)", (int)V[i].index, addr);
+        ck(BRDigiIdSiteKey(&key, seed, 64, BR_DIGIID_ROOT_STANDARD, uri, n, V[i].index, WORK, sizeof(WORK)) == BR_DIGIID_OK,
+           "index %d, STANDARD: BRDigiIdSiteKey derives", (int)V[i].index);
+        slip13_indexes(idx, uri, n, (uint32_t)V[i].index);
+        path[0] = 13 | HARD; path[1] = idx[0] | HARD; path[2] = idx[1] | HARD; path[3] = idx[2] | HARD; path[4] = idx[3] | HARD;
+        ck(sameSecret(&key, ownSecret(seed, 64, "Bitcoin seed", path, 5)),
+           "index %d: the key is m/13'/A'/B'/C'/D' of the bridge's A..D, from \"Bitcoin seed\" (this file's BIP32)", (int)V[i].index);
+        memset(keyAddr, 0, sizeof(keyAddr));
+        BRKeyAddress(&key, keyAddr, sizeof(keyAddr));
+        ck(strcmp(keyAddr, V[i].address) == 0, "index %d: whose P2PKH address is that address", (int)V[i].index);
+        BRKeyClean(&key);
+    }
+    ck(BRDigiIdSignSite(answer, sizeof(answer), seed, 64, BR_DIGIID_ROOT_STANDARD, (const uint8_t *)LOGIN, strlen(LOGIN), uri, n, 0, WORK,
+                        sizeof(WORK)) == BR_DIGIID_OK && strcmp(answer, loginAnswer) == 0,
+       "LOGIN signed with the callback's STANDARD identity: the model's answer");
+    ck(signsBytes(answer, (const uint8_t *)LOGIN, strlen(LOGIN)), "over LOGIN's bytes, by that address");
+
+    for (i = 0; i < N(negative); i++) {
+        memset(&key, 0xa5, sizeof(key));
+        ck(BRDigiIdSiteKey(&key, seed, 64, BR_DIGIID_ROOT_STANDARD, uri, n, negative[i], WORK, sizeof(WORK)) == BR_DIGIID_REFUSED &&
+           allZero(&key, sizeof(key)), "index %d, STANDARD: BRDigiIdSiteKey refuses, the key wiped", (int)negative[i]);
+        memset(answer, 'X', sizeof(answer));
+        ck(BRDigiIdSignSite(answer, sizeof(answer), seed, 64, BR_DIGIID_ROOT_STANDARD, (const uint8_t *)LOGIN, strlen(LOGIN), uri, n,
+                            negative[i], WORK, sizeof(WORK)) == BR_DIGIID_REFUSED && answer[0] == '\0',
+           "index %d, STANDARD: BRDigiIdSignSite refuses, out empty", (int)negative[i]);
+        memset(addr, 'X', sizeof(addr));
+        ck(BRDigiIdAddress(addr, sizeof(addr), seed, 64, BR_DIGIID_ROOT_STANDARD, 1, uri, n, negative[i], WORK, sizeof(WORK)) ==
+           BR_DIGIID_REFUSED && addr[0] == '\0', "index %d, STANDARD: BRDigiIdAddress refuses, out empty", (int)negative[i]);
+    }
+}
+
 static void shared_key_derivation(void)
 {
     static const uint32_t path[3] = { 0 | HARD, 0, 0 };
@@ -923,6 +986,58 @@ static void unknown_root_refused(void)
            BRDigiIdSignSite(out, sizeof(out), seed, 64, GOOD[i], msg, m, REQUEST_CALLBACK, n, 0, WORK, little) == BR_DIGIID_CAPACITY &&
            BRDigiIdAddress(addr, sizeof(addr), seed, 64, GOOD[i], 1, REQUEST_CALLBACK, n, 0, WORK, little) == BR_DIGIID_CAPACITY,
            "root %d: and with too little work, CAPACITY", (int)GOOD[i]);
+    }
+}
+
+// THE ROOT, beside hasUri: in BRDigiIdAddress the two are neighbouring arguments, and C passes an int where the enum
+// goes, and the enum where an int goes, without a word (clang -Wall -Wextra -Wpedantic says nothing). So hasUri is 0
+// or 1, and every other value is REFUSED, ahead of CAPACITY, out empty. A caller that swaps the two is then refused,
+// or makes the very call it meant (DIGIBYTE with a URI): a STANDARD wallet asking for a per-site address, swapped,
+// asks the DIGIBYTE root with hasUri 2, which is refused instead of answering DIGIBYTE's identity, an address the
+// login (BRDigiIdSignSite, whose root is followed by a pointer) never signs with.
+static void address_root_hasuri_swapped(void)
+{
+    static const int BAD[] = { 2, 3, -1, INT_MAX, INT_MIN };
+    static const BRDigiIdRoot ROOTS[] = { BR_DIGIID_ROOT_DIGIBYTE, BR_DIGIID_ROOT_STANDARD };
+    const size_t n = strlen(REQUEST_CALLBACK), little = 4 + strlen(REQUEST_CALLBACK) - 1;   // a byte short
+    uint8_t seed[64];
+    char addr[BR_DIGIID_ADDRESS_CAPACITY], meant[BR_DIGIID_ADDRESS_CAPACITY], answer[BR_DIGIID_ANSWER_CAPACITY];
+    size_t r, i;
+    int h;
+
+    seedOf(seed, ABANDON);
+    for (r = 0; r < N(ROOTS); r++) {
+        const BRDigiIdRoot root = ROOTS[r];
+
+        for (i = 0; i < N(BAD); i++) {
+            memset(addr, 'X', sizeof(addr));
+            ck(BRDigiIdAddress(addr, sizeof(addr), seed, 64, root, BAD[i], REQUEST_CALLBACK, n, 0, WORK, sizeof(WORK)) == BR_DIGIID_REFUSED &&
+               addr[0] == '\0', "root %d, hasUri %d: refused, out empty", (int)root, BAD[i]);
+            memset(addr, 'X', sizeof(addr));
+            ck(BRDigiIdAddress(addr, sizeof(addr), seed, 64, root, BAD[i], REQUEST_CALLBACK, n, 0, WORK, little) == BR_DIGIID_REFUSED &&
+               addr[0] == '\0', "root %d, hasUri %d, and too little work: REFUSED, not CAPACITY", (int)root, BAD[i]);
+        }
+        // Each call a caller means (a URI exactly when hasUri is 1), and the same call with root and hasUri swapped.
+        for (h = 0; h <= 1; h++) {
+            const char *u = h ? REQUEST_CALLBACK : NULL;
+            const size_t ul = h ? n : 0;
+            BRDigiIdStatus s;
+
+            ck(BRDigiIdAddress(meant, sizeof(meant), seed, 64, root, h, u, ul, 0, WORK, sizeof(WORK)) == BR_DIGIID_OK,
+               "root %d, hasUri %d: the call meant answers (%s)", (int)root, h, meant);
+            memset(addr, 'X', sizeof(addr));
+            s = BRDigiIdAddress(addr, sizeof(addr), seed, 64, (BRDigiIdRoot)h, (int)root, u, ul, 0, WORK, sizeof(WORK));
+            if (root == BR_DIGIID_ROOT_DIGIBYTE && h == 1)
+                ck(s == BR_DIGIID_OK && strcmp(addr, meant) == 0, "root %d, hasUri %d swapped: the same call, the same address", (int)root, h);
+            else
+                ck(s == BR_DIGIID_REFUSED && addr[0] == '\0', "root %d, hasUri %d swapped: refused, out empty (%s%s%s)", (int)root, h, st(s),
+                   s == BR_DIGIID_OK ? " " : "", s == BR_DIGIID_OK ? addr : "");
+        }
+        // The per-site address a caller shows is the one the login signs with, under either root.
+        ck(BRDigiIdAddress(meant, sizeof(meant), seed, 64, root, 1, REQUEST_CALLBACK, n, 0, WORK, sizeof(WORK)) == BR_DIGIID_OK &&
+           BRDigiIdSignSite(answer, sizeof(answer), seed, 64, root, (const uint8_t *)REQUEST, strlen(REQUEST), REQUEST_CALLBACK, n, 0, WORK,
+                            sizeof(WORK)) == BR_DIGIID_OK && strncmp(answer, meant, strlen(meant)) == 0 && answer[strlen(meant)] == '|',
+           "root %d: the per-site address is the one the login signs with", (int)root);
     }
 }
 
@@ -1567,6 +1682,69 @@ static void sweep_keys(void)
     ck(refused > 150 && refused < 1500 - 150, "the stream reaches keys and refusals (%ld refused)", refused);
 }
 
+// sweep_keys's stream under BR_DIGIID_ROOT_STANDARD, which the bridge has no answer for: every key is held to this
+// file's BIP32 from "Bitcoin seed" and the bridge's A..D, over seeds of 16 to 80 bytes and indexes up to INT32_MAX;
+// a negative index, and only a negative one, is refused with the key wiped; and every tenth key's address is
+// BRDigiIdAddress's, the address BRDigiIdSignSite signs a message with. (Every other STANDARD check is at index 0
+// with a 64-byte seed, where an index or seed length the STANDARD branch dropped would not show.)
+static void sweep_keys_standard(void)
+{
+    uint8_t seed[80], uri[200], msg[200];
+    char addr[BR_DIGIID_ADDRESS_CAPACITY], keyAddr[75], answer[BR_DIGIID_ANSWER_CAPACITY];
+    long ownDiffer = 0, wrong = 0, siteDiffer = 0, n, refused = 0, nonzeroIndex = 0, otherLength = 0, signedAt = 0;
+
+    for (n = 0; n < 1500; n++) {
+        size_t seedLen = below(4) ? 64 : (size_t)(16 + below(65)), uriLen, msgLen, i;
+        int32_t index = below(5) == 0 ? -(int32_t)below(3) - 1 : (int32_t)(rndIndex32() & 0x7fffffff);
+        uint32_t idx[4], path[5];
+        BRDigiIdStatus s;
+        BRKey key;
+
+        for (i = 0; i < seedLen; i++) seed[i] = (uint8_t)rnd();
+        uriLen = rndBytes(uri, sizeof(uri));
+        memset(&key, 0xa5, sizeof(key));
+        s = BRDigiIdSiteKey(&key, seed, seedLen, BR_DIGIID_ROOT_STANDARD, (const char *)uri, uriLen, index, WORK, sizeof(WORK));
+        if (index < 0) {
+            refused++;
+            if ((s != BR_DIGIID_REFUSED || ! allZero(&key, sizeof(key))) && wrong++ < 4)
+                ck(0, "seed of %zu bytes, %zu-byte URI, index %d, STANDARD: %s, not refused with the key wiped", seedLen, uriLen, (int)index, st(s));
+            continue;
+        }
+        if (s != BR_DIGIID_OK) {
+            if (wrong++ < 4) ck(0, "seed of %zu bytes, %zu-byte URI, index %d, STANDARD: %s", seedLen, uriLen, (int)index, st(s));
+            continue;
+        }
+        if (index != 0) nonzeroIndex++;
+        if (seedLen != 64) otherLength++;
+        slip13_indexes(idx, (const char *)uri, uriLen, (uint32_t)index);
+        path[0] = 13 | HARD; path[1] = idx[0] | HARD; path[2] = idx[1] | HARD; path[3] = idx[2] | HARD; path[4] = idx[3] | HARD;
+        if (! sameSecret(&key, ownSecret(seed, seedLen, "Bitcoin seed", path, 5)) && ownDiffer++ < 4)
+            ck(0, "seed of %zu bytes, %zu-byte URI, index %d, STANDARD: the key is not this file's BIP32's", seedLen, uriLen, (int)index);
+        if (n % 10 == 0) {
+            int ok;
+
+            memset(keyAddr, 0, sizeof(keyAddr));
+            BRKeyAddress(&key, keyAddr, sizeof(keyAddr));
+            msgLen = rndBytes(msg, sizeof(msg));
+            ok = BRDigiIdAddress(addr, sizeof(addr), seed, seedLen, BR_DIGIID_ROOT_STANDARD, 1, (const char *)uri, uriLen, index, WORK,
+                                 sizeof(WORK)) == BR_DIGIID_OK && strcmp(addr, keyAddr) == 0;
+            ok = ok && BRDigiIdSignSite(answer, sizeof(answer), seed, seedLen, BR_DIGIID_ROOT_STANDARD, msg, msgLen, (const char *)uri, uriLen,
+                                        index, WORK, sizeof(WORK)) == BR_DIGIID_OK &&
+                 strncmp(answer, addr, strlen(addr)) == 0 && answer[strlen(addr)] == '|' && signsBytes(answer, msg, msgLen);
+            if (! ok && siteDiffer++ < 4)
+                ck(0, "seed of %zu bytes, %zu-byte URI, index %d, STANDARD: the address or the login is not the key's", seedLen, uriLen, (int)index);
+            signedAt++;
+        }
+        BRKeyClean(&key);
+    }
+    ck(ownDiffer == 0, "1500 seeds, URIs and indexes, STANDARD: every key is this file's BIP32's from \"Bitcoin seed\" (%ld differ)", ownDiffer);
+    ck(wrong == 0, "a negative index, and only a negative one, is refused, the key wiped (%ld wrong)", wrong);
+    ck(siteDiffer == 0, "every tenth key's address is BRDigiIdAddress's, and BRDigiIdSignSite signs with it (%ld of %ld differ)", siteDiffer,
+       signedAt);
+    ck(refused > 150 && nonzeroIndex > 1000 && otherLength > 200,
+       "the stream reaches refusals (%ld), indexes but 0 (%ld) and seeds of other lengths than 64 (%ld)", refused, nonzeroIndex, otherLength);
+}
+
 static void sweep_sign(void)
 {
     static const int32_t formats[] = { 0, 1, 2, 2, -1, INT32_MAX };
@@ -1677,14 +1855,16 @@ static const Case CASES[] = {
     { "slip13_index_values", slip13_index_values }, { "slip13_edges", slip13_edges },
     { "site_key_derivation", site_key_derivation }, { "site_key_digibyte_coinomi_uris", site_key_digibyte_coinomi_uris },
     { "site_key_standard_coinomi_uris", site_key_standard_coinomi_uris }, { "site_key_standard_bitid_vector", site_key_standard_bitid_vector },
+    { "site_key_standard_login_and_indexes", site_key_standard_login_and_indexes },
     { "shared_key_derivation", shared_key_derivation }, { "shared_address_both_roots", shared_address_both_roots },
-    { "unknown_root_refused", unknown_root_refused },
+    { "unknown_root_refused", unknown_root_refused }, { "address_root_hasuri_swapped", address_root_hasuri_swapped },
     { "message_prefix", message_prefix }, { "message_digest", message_digest }, { "utf8_bytes", utf8_bytes },
     { "uri_bytes", uri_bytes }, { "uri_identity", uri_identity },
     { "sign_shared_login", sign_shared_login }, { "sign_site_request", sign_site_request },
     { "request_golden_inputs", request_golden_inputs }, { "address_rules", address_rules },
     { "sign_with_key_wipes", sign_with_key_wipes }, { "address_with_key_wipes", address_with_key_wipes }, { "long_messages", long_messages }, { "edges", edges }, { "buffer_edges", buffer_edges },
-    { "sweep_indexes", sweep_indexes }, { "sweep_keys", sweep_keys }, { "sweep_sign", sweep_sign }, { "sweep_utf8", sweep_utf8 },
+    { "sweep_indexes", sweep_indexes }, { "sweep_keys", sweep_keys }, { "sweep_keys_standard", sweep_keys_standard },
+    { "sweep_sign", sweep_sign }, { "sweep_utf8", sweep_utf8 },
     { "sweep_uri_bytes", sweep_uri_bytes },
 };
 
