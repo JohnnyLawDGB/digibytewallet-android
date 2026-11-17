@@ -127,7 +127,11 @@ class WalletStoreEraser internal constructor(
 
     fun anythingLeft(scope: WalletScope): Boolean = storesLeft(scope) || aliasesLeft(scope)
 
-    private fun recordLeft(scope: WalletScope): Boolean = try {
+    /**
+     * READ-BACK, deletes nothing: [scope]'s seed record is still present (production: its file or
+     * its backup is on disk, readable or not), or cannot be read back.
+     */
+    fun recordLeft(scope: WalletScope): Boolean = try {
         prefsLeft(WalletStores.seedRecordPrefs(scope))
     } catch (t: Throwable) {
         Log.w(TAG, "record read-back: ${t.javaClass.simpleName}")

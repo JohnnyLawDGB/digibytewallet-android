@@ -64,6 +64,14 @@ class WalletRegistry(
         return all
     }
 
+    /**
+     * READY entries on either network whose seed record is gone: what a wipe or an add cut short
+     * after the record went leaves behind. [list] hides each one, yet each holds its slot toward the
+     * cap ([occupied]) until it is dropped. Never legacy, whose record going is what unlists it.
+     */
+    fun readyWithoutRecord(): List<WalletEntry> =
+        load().entries.filter { it.id != WalletIds.LEGACY && it.state == EntryState.READY && !holdsRecord(it.id) }
+
     fun find(id: String): WalletEntry? {
         val doc = load()
         if (id == WalletIds.LEGACY) {
@@ -201,7 +209,8 @@ class WalletRegistry(
 
     /**
      * Entries that hold a slot on [testnet]: every READY and PENDING entry (legacy while its record
-     * exists). A READY entry whose record is gone still holds its slot until it is dropped.
+     * exists). A READY entry whose record is gone still holds its slot until it is dropped
+     * ([readyWithoutRecord]; [WalletHousekeeping] drops it once its scope is erased).
      */
     private fun occupied(testnet: Boolean, doc: Doc): List<WalletEntry> =
         listOfNotNull(legacyEntry(doc).takeIf { it.state == EntryState.READY && legacyRecordExists() }) +

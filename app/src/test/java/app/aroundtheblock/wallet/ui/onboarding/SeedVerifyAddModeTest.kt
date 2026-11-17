@@ -3,6 +3,7 @@ package app.aroundtheblock.wallet.ui.onboarding
 import app.aroundtheblock.wallet.R
 import app.aroundtheblock.wallet.ui.KotlinSourceGate
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -29,7 +30,14 @@ class SeedVerifyAddModeTest {
         val toPin = src.calls("navController.navigate").filter { it.arguments.firstOrNull() == "\"pin_setup\"" }
         assertTrue("the seed check navigates to pin_setup", toPin.isEmpty())
         // The PIN wording is reached only through verifySuccessLabels, never written straight into the screen.
-        val outside = src.code.replace(Regex("""internal fun verifySuccessLabels[\s\S]*?\n}\n"""), "")
+        // Only that function is set aside: from its declaration to the composable after it, with nothing
+        // else at the top level in between. The success screen that shows the labels stays in what is read.
+        val labels = src.range("internal fun verifySuccessLabels", "@Composable")
+        assertNotNull("verifySuccessLabels is not followed by a composable", labels)
+        val setAside = src.code.substring(labels!!).lines().drop(1)
+        assertTrue("more than verifySuccessLabels is set aside", setAside.all { it.isBlank() || it.first().isWhitespace() })
+        val outside = src.code.removeRange(labels)
+        assertTrue("the success screen is not read", outside.contains("fun VerifyResultScreen("))
         for (pinText in listOf("R.string.verify_setup_pin", "R.string.verify_success_body)")) {
             assertTrue("$pinText is used outside verifySuccessLabels", !outside.contains(pinText))
         }
