@@ -1,8 +1,9 @@
 package app.aroundtheblock.wallet.core.sync
 
 import android.content.Context
-import app.aroundtheblock.wallet.core.WALLET_NETWORK_SUFFIXES
-import app.aroundtheblock.wallet.core.networkSuffix
+import app.aroundtheblock.wallet.core.wallets.ActiveWallet
+import app.aroundtheblock.wallet.core.wallets.WalletScope
+import app.aroundtheblock.wallet.core.wallets.WalletStores
 
 /**
  * A contiguous range of block heights the B2 abandonment valve gave up on.
@@ -105,12 +106,12 @@ object CfAbandonmentStore {
      */
     private const val KEY_SAW_IN_BAND = "band_saw_frontier_in_band"
 
-    private fun prefs(ctx: Context) =
-        ctx.getSharedPreferences(PREFS_BASE + networkSuffix(ctx), Context.MODE_PRIVATE)
+    private fun prefs(ctx: Context, scope: WalletScope) =
+        ctx.getSharedPreferences(WalletStores.prefsName(PREFS_BASE, scope), Context.MODE_PRIVATE)
 
     /** The recorded band, recovered or not. Null when nothing was ever abandoned. */
-    fun band(ctx: Context): AbandonedBand? {
-        val p = prefs(ctx)
+    fun band(ctx: Context, scope: WalletScope = ActiveWallet.scope(ctx)): AbandonedBand? {
+        val p = prefs(ctx, scope)
         val high = p.getLong(KEY_HIGH, -1L)
         if (high < 0L) return null
         return AbandonedBand(
@@ -121,14 +122,14 @@ object CfAbandonmentStore {
     }
 
     /** True once a recovery covered the recorded band. Meaningless without a band. */
-    fun isRecovered(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_RECOVERED, false)
+    fun isRecovered(ctx: Context, scope: WalletScope = ActiveWallet.scope(ctx)): Boolean = prefs(ctx, scope).getBoolean(KEY_RECOVERED, false)
 
     /**
      * The band that still needs recovering — what the banner and the Synced gate
      * key on. Null when nothing was abandoned OR recovery already covered it.
      */
-    fun unrecoveredBand(ctx: Context): AbandonedBand? =
-        band(ctx)?.takeIf { !isRecovered(ctx) }
+    fun unrecoveredBand(ctx: Context, scope: WalletScope = ActiveWallet.scope(ctx)): AbandonedBand? =
+        band(ctx, scope)?.takeIf { !isRecovered(ctx, scope) }
 
     /**
      * Fold a freshly-polled `abandonedBelow` into the record. `lowHint` is the CF
@@ -146,11 +147,11 @@ object CfAbandonmentStore {
      * Surfacing the specific reason in the UI is an optional future follow-up that
      * would need new native → Kotlin plumbing; none was added here (YAGNI).
      */
-    fun noteAbandonment(ctx: Context, abandonedBelow: Long, lowHint: Long): Boolean {
-        val existing = band(ctx)
+    fun noteAbandonment(ctx: Context, abandonedBelow: Long, lowHint: Long, scope: WalletScope = ActiveWallet.scope(ctx)): Boolean {
+        val existing = band(ctx, scope)
         val next = nextAbandonedBand(existing, abandonedBelow, lowHint) ?: return false
         if (next == existing) return false
-        prefs(ctx).edit()
+        prefs(ctx, scope).edit()
             .putLong(KEY_LOW, next.low)
             .putLong(KEY_HIGH, next.high)
             .putBoolean(KEY_LOW_KNOWN, next.lowKnown)
@@ -164,8 +165,8 @@ object CfAbandonmentStore {
      * Phase-1 witness for [noteScanCoverage] — see [KEY_SAW_IN_BAND]. Exposed for the
      * store's own tests; production only ever reaches it through [noteScanCoverage].
      */
-    internal fun sawFrontierInBand(ctx: Context): Boolean =
-        prefs(ctx).getBoolean(KEY_SAW_IN_BAND, false)
+    internal fun sawFrontierInBand(ctx: Context, scope: WalletScope = ActiveWallet.scope(ctx)): Boolean =
+        prefs(ctx, scope).getBoolean(KEY_SAW_IN_BAND, false)
 
     /**
      * Record that a recovery covered the abandoned band — the `abandonedBandRecovered`
@@ -173,10 +174,10 @@ object CfAbandonmentStore {
      * there is no band to recover, so a routine reconcile on a healthy wallet writes
      * nothing.
      */
-    fun markRecovered(ctx: Context): Boolean {
-        if (band(ctx) == null) return false
-        if (isRecovered(ctx)) return false
-        prefs(ctx).edit().putBoolean(KEY_RECOVERED, true).apply()
+    fun markRecovered(ctx: Context, scope: WalletScope = ActiveWallet.scope(ctx)): Boolean {
+        if (band(ctx, scope) == null) return false
+        if (isRecovered(ctx, scope)) return false
+        prefs(ctx, scope).edit().putBoolean(KEY_RECOVERED, true).apply()
         return true
     }
 
@@ -292,8 +293,8 @@ object CfAbandonmentStore {
         return scannedThrough >= bandHigh
     }
 
-    fun noteScanCoverage(ctx: Context, abandonedBelow: Long, scanFrontier: Long): Boolean {
-        val band = unrecoveredBand(ctx) ?: return false
+    fun noteScanCoverage(ctx: Context, abandonedBelow: Long, scanFrontier: Long, scope: WalletScope = ActiveWallet.scope(ctx)): Boolean {
+        val band = unrecoveredBand(ctx, scope) ?: return false
         // The floor must no longer cover THIS band. Partial retirement is not recovery —
         // telling the user everything is fine while heights are still condemned is worse
         // than leaving the warning up.
@@ -304,14 +305,14 @@ object CfAbandonmentStore {
         if (scanFrontier <= 0L) return false
         if (scanFrontier <= band.high) {
             // PHASE 1 — the scan is genuinely inside the band with the floor gone.
-            if (!sawFrontierInBand(ctx)) {
-                prefs(ctx).edit().putBoolean(KEY_SAW_IN_BAND, true).apply()
+            if (!sawFrontierInBand(ctx, scope)) {
+                prefs(ctx, scope).edit().putBoolean(KEY_SAW_IN_BAND, true).apply()
             }
             return false                              // scan hasn't passed the band yet
         }
         // PHASE 2 — past the top. Only counts if Phase 1 ever happened for THIS band.
-        if (!sawFrontierInBand(ctx)) return false
-        return markRecovered(ctx)
+        if (!sawFrontierInBand(ctx, scope)) return false
+        return markRecovered(ctx, scope)
     }
 
     /**
@@ -322,8 +323,8 @@ object CfAbandonmentStore {
      * async apply() would be dropped, resurrecting the banner for a band that no
      * longer exists. Returns whether the write landed.
      */
-    fun clear(ctx: Context): Boolean =
-        prefs(ctx).edit().clear().commit()
+    fun clear(ctx: Context, scope: WalletScope = ActiveWallet.scope(ctx)): Boolean =
+        prefs(ctx, scope).edit().clear().commit()
 
     /**
      * [clear] for EVERY network's band, not only the selected one, for a full wallet reset: a
@@ -331,9 +332,9 @@ object CfAbandonmentStore {
      * network. Returns true only when every write landed; both networks are always attempted.
      */
     fun clearAllNetworks(ctx: Context): Boolean =
-        WALLET_NETWORK_SUFFIXES.map { net ->
+        listOf(false, true).map { testnet ->
             runCatching {
-                ctx.getSharedPreferences(PREFS_BASE + net, Context.MODE_PRIVATE).edit().clear().commit()
+                prefs(ctx, WalletScope.legacy(testnet)).edit().clear().commit()
             }.getOrDefault(false)
         }.all { it }
 }

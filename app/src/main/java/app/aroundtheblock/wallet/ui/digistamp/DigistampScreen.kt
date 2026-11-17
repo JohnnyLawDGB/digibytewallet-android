@@ -65,7 +65,13 @@ fun DigistampScreen(
         ).torManager().isEnabled
     }
     var asking by remember { mutableStateOf(MarketTorNotice.mustAsk(torEnabled)) }
-    if (asking) {
+    // Fail closed: until the launch check proved the web data belongs to this wallet, no view starts.
+    if (!app.aroundtheblock.wallet.WebSessionIsolation.verified) {
+        androidx.compose.runtime.LaunchedEffect(Unit) {
+            DigistampWebViewHost.pendingUrl = null
+            onCancel()
+        }
+    } else if (asking) {
         MarketTorNoticeDialog(
             onContinue = {
                 MarketTorNotice.accept()

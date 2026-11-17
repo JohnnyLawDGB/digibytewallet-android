@@ -3,7 +3,9 @@ package app.aroundtheblock.wallet.core.reconcile
 import android.content.Context
 import app.aroundtheblock.wallet.core.bridge.NativeBridge
 import app.aroundtheblock.wallet.core.network.BoundedBody
-import app.aroundtheblock.wallet.core.networkSuffix
+import app.aroundtheblock.wallet.core.isTestnet
+import app.aroundtheblock.wallet.core.wallets.WalletScope
+import app.aroundtheblock.wallet.core.wallets.WalletStores
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl
@@ -30,7 +32,7 @@ import java.util.concurrent.TimeUnit
  *
  * We request both in a single round-trip to minimize client→server latency.
  */
-class DgbNodeClient(
+class DgbNodeClient internal constructor(
     private val context: Context,
     /**
      * The client every request is derived from. Required, with no default: in the app it is the
@@ -39,8 +41,35 @@ class DgbNodeClient(
      * started with Tor on would leave from the device's own address.
      */
     private val baseClient: OkHttpClient,
+    /**
+     * The one endpoint every request goes to, whatever `custom_rpc_endpoint` holds now, or null to
+     * read the setting per request. Set by [digiScopeOnly] and [ownNodeOnly].
+     */
+    private val pinnedEndpoint: String?,
 ) {
+    constructor(context: Context, baseClient: OkHttpClient) : this(context, baseClient, null)
+
     companion object {
+        /**
+         * A client that always asks DigiScope ([DEFAULT_BASE_URL], pinned), whatever
+         * `custom_rpc_endpoint` holds: a lookup the user addressed to DigiScope never reaches their
+         * own node, and the own node's address never appears in it.
+         */
+        fun digiScopeOnly(context: Context, client: OkHttpClient): DgbNodeClient =
+            DgbNodeClient(context, client, DEFAULT_BASE_URL)
+
+        /**
+         * A client that always asks [endpoint], the own node the user picked, captured when they
+         * picked it: clearing or changing `custom_rpc_endpoint` afterwards never sends a later
+         * request to DigiScope. A blank [endpoint] is refused ([IllegalArgumentException]); there
+         * is no fallback.
+         */
+        fun ownNodeOnly(context: Context, client: OkHttpClient, endpoint: String): DgbNodeClient {
+            val pinned = endpoint.trim().trimEnd('/')
+            require(pinned.isNotEmpty()) { "no own node endpoint" }
+            return DgbNodeClient(context, client, pinned)
+        }
+
         const val DEFAULT_BASE_URL = "https://api.digiscope.me/api"
         private const val PREFS_NAME = "dgb_reconcile"
         private const val KEY_CUSTOM_ENDPOINT = "custom_rpc_endpoint"
@@ -114,11 +143,20 @@ class DgbNodeClient(
         .callTimeout(120, TimeUnit.SECONDS)
         .build()
 
-    private val prefs = context.getSharedPreferences(PREFS_NAME + networkSuffix(context), Context.MODE_PRIVATE)
+    // `custom_rpc_endpoint` is a device setting every wallet must see, so it stays in legacy's
+    // `dgb_reconcile<net>` whichever wallet is active.
+    private val prefs = context.getSharedPreferences(
+        WalletStores.prefsName(PREFS_NAME, WalletScope.legacy(isTestnet(context))),
+        Context.MODE_PRIVATE,
+    )
 
-    /** The active endpoint. Defaults to digiscope.me; can be user-overridden. */
+    /** The active endpoint. Defaults to digiscope.me; can be user-overridden; fixed for [digiScopeOnly] and [ownNodeOnly]. */
     fun endpoint(): String =
-        prefs.getString(KEY_CUSTOM_ENDPOINT, null)?.trimEnd('/') ?: DEFAULT_BASE_URL
+        pinnedEndpoint ?: customEndpoint() ?: DEFAULT_BASE_URL
+
+    /** The user's own node (`custom_rpc_endpoint`, trimmed, without a trailing slash), or null when none is set. */
+    fun customEndpoint(): String? =
+        prefs.getString(KEY_CUSTOM_ENDPOINT, null)?.trim()?.trimEnd('/')?.takeIf { it.isNotEmpty() }
 
     fun setCustomEndpoint(url: String?) {
         prefs.edit().apply {

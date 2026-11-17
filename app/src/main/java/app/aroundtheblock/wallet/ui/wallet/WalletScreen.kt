@@ -17,6 +17,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
@@ -54,11 +55,20 @@ fun WalletScreen(
     /** Opens the reconcile / full-rebuild screen — both recovery paths for an
      *  abandoned compact-filter band (see [AbandonedBandBanner]). */
     onNavigateReconcile: () -> Unit = {},
-    viewModel: WalletViewModel = hiltViewModel()
+    /** The switcher sheet's Add wallet and Manage. */
+    onNavigateAddWallet: () -> Unit = {},
+    onNavigateManageWallets: () -> Unit = {},
+    viewModel: WalletViewModel = hiltViewModel(),
+    walletsViewModel: app.aroundtheblock.wallet.ui.wallets.WalletsViewModel = hiltViewModel(),
 ) {
+    val walletRows by walletsViewModel.rows.collectAsStateWithLifecycle()
+    val canAddWallet by walletsViewModel.canAdd.collectAsStateWithLifecycle()
+    var showWalletSheet by remember { mutableStateOf(false) }
     val balance by viewModel.balance.collectAsStateWithLifecycle()
     val ddBalance by viewModel.ddBalance.collectAsStateWithLifecycle()
     val balanceHidden by viewModel.balanceHidden.collectAsStateWithLifecycle()
+    // A restored wallet's quick start: shown beneath the balance, never in it, until sync proves it.
+    val unverified by viewModel.unverified.collectAsStateWithLifecycle()
     val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
     val fiatBalance by viewModel.fiatBalance.collectAsStateWithLifecycle()
     val transactions by viewModel.transactions.collectAsStateWithLifecycle()
@@ -88,6 +98,12 @@ fun WalletScreen(
     // Report RESUMED state so the poll loop's active-screen readiness nudge only
     // fires while the user is actually looking at this screen — never in the
     // background or behind a pushed-over destination. Pairs with [shouldWakePeers].
+    // A rename or reorder in Manage shows on the chip when this tab comes back.
+    LifecycleResumeEffect(walletsViewModel) {
+        walletsViewModel.refresh()
+        onPauseOrDispose { }
+    }
+
     LifecycleResumeEffect(viewModel) {
         viewModel.setScreenActive(true)
         onPauseOrDispose { viewModel.setScreenActive(false) }
@@ -104,6 +120,25 @@ fun WalletScreen(
             .background(MaterialTheme.colorScheme.background),
         contentPadding = PaddingValues(bottom = 16.dp)
     ) {
+        // ── Wallet chip: the running wallet's name; opens the switcher ────
+        item {
+            val running = walletRows.firstOrNull { it.active }
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(DigiByteNavy)
+                    .padding(top = 8.dp, start = 16.dp, end = 16.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (running != null) {
+                    app.aroundtheblock.wallet.ui.wallets.WalletChip(
+                        name = running.shownName,
+                        onClick = { walletsViewModel.refresh(); showWalletSheet = true },
+                    )
+                }
+            }
+        }
+
         // ── Hero balance card ─────────────────────────────────────────────
         item {
             Box(
@@ -137,6 +172,8 @@ fun WalletScreen(
                         onFiatTap = if (pricesShown) ({ showCurrencyPicker = true }) else null,
                         onDigiDollarTap = onNavigateReceiveDigiDollar,
                     )
+
+                    unverified?.let { q -> UnverifiedQuickStart(q, balanceHidden) }
 
                     Spacer(modifier = Modifier.height(8.dp))
 
@@ -377,6 +414,19 @@ fun WalletScreen(
             }
         }
     }
+    }
+
+    // Opened by the wallet chip; outside the LazyColumn for the same reason as the currency picker.
+    if (showWalletSheet) {
+        app.aroundtheblock.wallet.ui.wallets.WalletSwitcherSheet(
+            rows = walletRows,
+            canAdd = canAddWallet,
+            hidden = balanceHidden,
+            onSwitch = { id -> walletsViewModel.switchTo(id) },
+            onAdd = { showWalletSheet = false; onNavigateAddWallet() },
+            onManage = { showWalletSheet = false; onNavigateManageWallets() },
+            onDismiss = { showWalletSheet = false },
+        )
     }
 
     // Opened by tapping the equivalent line under the balance. Rendered here rather than inside
@@ -1224,6 +1274,49 @@ private fun OwnNodeHealthChip(modifier: Modifier = Modifier) {
             text = stringResource(R.string.wallet_own_node_serving),
             style = MaterialTheme.typography.labelSmall,
             color = Color(0xFF6FCF97),
+        )
+    }
+}
+
+/**
+ * The quick start's figure, beneath the balance and never part of it: what a server reported for
+ * this restored wallet before its own sync has proved it. Not spendable, not in the balance; gone
+ * once the wallet has synced. Masked with the balance.
+ */
+/**
+ * The "reported by" line's amount and server, both masked with the balance: an own node's host
+ * names the user's own machine.
+ */
+internal fun unverifiedQuickStartArgs(q: app.aroundtheblock.wallet.core.wallets.QuickStart, hidden: Boolean): List<String> =
+    listOf(WalletViewModel.formatSatoshisBare(q.unverifiedSat), q.sourceLabel)
+        .map { app.aroundtheblock.wallet.core.settings.maskedAmount(hidden, it) }
+
+@Composable
+private fun UnverifiedQuickStart(q: app.aroundtheblock.wallet.core.wallets.QuickStart, hidden: Boolean) {
+    val mask = { v: String -> app.aroundtheblock.wallet.core.settings.maskedAmount(hidden, v) }
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.padding(top = 8.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.quickstart_unverified, *unverifiedQuickStartArgs(q, hidden).toTypedArray()),
+            style = MaterialTheme.typography.bodySmall,
+            color = Color(0xFFFFC107),
+            textAlign = TextAlign.Center,
+        )
+        q.unverifiedDdCents?.let { cents ->
+            Text(
+                text = stringResource(R.string.quickstart_unverified_dd, mask(WalletViewModel.formatDigiDollar(cents))),
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFFFFC107),
+                textAlign = TextAlign.Center,
+            )
+        }
+        Text(
+            text = stringResource(R.string.quickstart_unverified_sub),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
+            textAlign = TextAlign.Center,
         )
     }
 }

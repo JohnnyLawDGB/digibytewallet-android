@@ -75,7 +75,7 @@ class RecoveryScanPhraseBindingTest {
             withContext(NonCancellable) { release.await() }
             fundedElsewhere
         }
-        val vm = OnboardingViewModel(walletManager, pinManager, scanService)
+        val vm = onboardingViewModel(walletManager, pinManager, scanService)
         vm.setRecoveryMnemonic(phraseA)
         vm.setPassphrase("p")
         vm.runRecoveryScan()
@@ -98,7 +98,7 @@ class RecoveryScanPhraseBindingTest {
             try { CompletableDeferred<Unit>().await() } finally { cancelled = true }
             fundedElsewhere
         }
-        val vm = OnboardingViewModel(walletManager, pinManager, scanService)
+        val vm = onboardingViewModel(walletManager, pinManager, scanService)
         vm.setRecoveryMnemonic(phraseA)
         vm.runRecoveryScan()
         assertTrue(started.isCompleted)
@@ -111,7 +111,7 @@ class RecoveryScanPhraseBindingTest {
 
     @Test fun `the scan for the current phrase still publishes`() {
         coEvery { scanService.scan(phraseB, any()) } returns fundedElsewhere
-        val vm = OnboardingViewModel(walletManager, pinManager, scanService)
+        val vm = onboardingViewModel(walletManager, pinManager, scanService)
         vm.setRecoveryMnemonic(phraseA)
         vm.setRecoveryMnemonic(phraseB)
         vm.runRecoveryScan()

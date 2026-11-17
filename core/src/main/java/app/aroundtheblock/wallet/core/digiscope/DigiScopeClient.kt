@@ -7,6 +7,7 @@ import app.aroundtheblock.wallet.core.hub.DigiRunnerStats
 import app.aroundtheblock.wallet.core.hub.LeaderboardEntry
 import app.aroundtheblock.wallet.core.hub.UserInfo
 import app.aroundtheblock.wallet.core.network.BoundedBody
+import app.aroundtheblock.wallet.core.wallets.ActiveWallet
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -82,7 +83,9 @@ class DigiScopeClient(
         .followSslRedirects(false)
         .build()
 
-    private val tokenStore = HubTokenStore(context)
+    private val appContext: Context = context.applicationContext ?: context
+
+    private val tokenStore = HubTokenStore(context, ActiveWallet.scope(context))
 
     private var jwtToken: String? = null
 
@@ -484,6 +487,21 @@ class DigiScopeClient(
         val token = jwtToken
         jwtToken = null
         tokenStore.clear()
+        if (!token.isNullOrBlank()) revokeSession(token)
+    }
+
+    /**
+     * [HubSessionRevoke] for any wallet on the device: the token [scope]'s store holds is sent once to
+     * `POST /api/auth/logout`, as [logout] sends the running one. Reads the store only — erasing it is
+     * the caller's next step. Never throws; the request is queued, not awaited.
+     */
+    fun revokeStoredSession(scope: app.aroundtheblock.wallet.core.wallets.WalletScope) {
+        val token = try {
+            HubTokenStore(appContext, scope).load()
+        } catch (e: Exception) {
+            android.util.Log.w("DigiScope", "stored session not read for revoke: ${e.javaClass.simpleName}")
+            null
+        }
         if (!token.isNullOrBlank()) revokeSession(token)
     }
 

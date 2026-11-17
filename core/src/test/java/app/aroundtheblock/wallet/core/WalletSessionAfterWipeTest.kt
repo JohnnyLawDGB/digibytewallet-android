@@ -56,6 +56,7 @@ class WalletSessionAfterWipeTest {
         val aliases = present.toMutableSet()
         override fun contains(alias: String) = alias in aliases
         override fun delete(alias: String) { aliases.remove(alias) }
+        override fun aliases(): List<String> = aliases.toList()
     }
 
     /** One device: its stores, its keystore, its native session, and the order things happened in. */
@@ -76,12 +77,7 @@ class WalletSessionAfterWipeTest {
             override fun eraseSyncData(): Boolean { journal += "erase sync"; return real.eraseSyncData() }
             override fun eraseDatabase(): Boolean { journal += "erase database"; return real.eraseDatabase() }
         }
-        val ksm = mockk<KeyStoreManager>(relaxed = true).also {
-            every { it.deleteKey() } answers {
-                keystore.delete(KeyStoreManager.KEY_ALIAS)
-                keystore.delete(KeyStoreManager.KEY_ALIAS + KeyStoreManager.AUTH_ALIAS_SUFFIX)
-            }
-        }
+        val ksm = mockk<KeyStoreManager>(relaxed = true)
 
         val seedStore get() = prefs.prefsFor("dgb_wallet_seed")
 
@@ -100,6 +96,8 @@ class WalletSessionAfterWipeTest {
             utxoManager = mockk(relaxed = true),
             dataEraser = eraser,
             quiesceNative = quiesce,
+            keystoreAliases = keystore,
+            allWalletIds = { listOf(app.aroundtheblock.wallet.core.wallets.WalletIds.LEGACY) },
         )
     }
 

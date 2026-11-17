@@ -56,6 +56,7 @@
     <string name="verify_success_title">已验证！</string>
     <string name="verify_retry_title">再试一次</string>
     <string name="verify_success_body">您的恢复助记词已安全记录。现在设置 PIN 码。</string>
+    <string name="verify_success_body_add">您的恢复助记词已安全记录。您的应用 PIN 码已在保护此钱包。</string>
     <string name="verify_retry_body">部分答案不正确。请检查您的恢复助记词后重试。</string>
     <string name="verify_setup_pin">设置 PIN 码</string>
     <string name="verify_try_again">再试一次</string>
@@ -432,9 +433,9 @@
     <string name="sec_biometric_no">此设备不支持</string>
     <string name="sec_autolock">自动锁定超时</string>
     <string name="sec_wipe_after">输错 %1$d 次 PIN 后清除</string>
-    <string name="sec_wipe_after_on">已开启：输错 %1$d 次 PIN 后清除钱包</string>
+    <string name="sec_wipe_after_on_all">已开启：输错 %1$d 次 PIN 后清除所有钱包</string>
     <string name="sec_wipe_after_off">已关闭：额外防止 PIN 暴力破解</string>
-    <string name="sec_wipe_after_body">开启后，连续 %1$d 次输入错误的 PIN 码将从本设备永久清除此钱包：包括助记种子、密钥和历史记录。\n\n在设备上此操作不可撤销。您的资金只能通过恢复助记词找回。</string>
+    <string name="sec_wipe_after_body_all">开启后，连续 %1$d 次输入错误的 PIN 码将从本设备永久清除所有钱包：包括恢复助记词、密钥和历史记录。\n\n在设备上此操作不可撤销。资金只能通过各钱包的恢复助记词找回。</string>
     <string name="sec_wipe_after_ack">我的恢复助记词已备份</string>
     <string name="sec_wipe_after_enabled">已开启输错 %1$d 次清除</string>
     <string name="sec_recovery_phrase">恢复助记词</string>
@@ -445,7 +446,7 @@
     <string name="sec_danger_zone">危险区域</string>
     <string name="sec_wipe_wallet">清除钱包</string>
     <string name="sec_wipe_wallet_sub">从本设备移除所有钱包数据</string>
-    <string name="sec_wipe_wallet_body">此操作无法撤销。\n\n所有钱包数据、密钥和交易历史将从本设备永久删除。\n\n继续之前请确认您已备份恢复助记词。</string>
+    <string name="sec_wipe_all_body">此操作无法撤销。\n\n本设备上的所有钱包都将被删除：包括恢复助记词、密钥和交易历史。\n\n继续之前请确认已备份每个钱包的恢复助记词。</string>
     <string name="sec_wipe_everything">清除全部</string>
     <string name="sec_verify_pin">验证当前 PIN 码</string>
     <string name="sec_verify_pin_sub">请输入当前 PIN 码以继续</string>
@@ -743,4 +744,97 @@
     <string name="sec_seed_key_no_lock">未绑定：此手机未设置屏幕锁定。请在 Android 设置中设置。</string>
     <string name="sec_seed_key_lock_removed">此钱包设置后屏幕锁定被移除，因此即使设置了新的锁定，其密钥也无法再打开。趁钱包仍处于打开状态，请确认已记下恢复短语，或立即转移您的资金：下次应用启动时，钱包将需要其恢复短语。</string>
     <string name="sec_seed_key_cannot_bind">未绑定：以前屏幕锁定留下的密钥已失效，因此此钱包的密钥无法在本次安装中绑定。清除钱包并用恢复短语恢复即可绑定。</string>
+
+    <!-- Multi-wallet: adding a wallet through onboarding (ADD mode). -->
+    <string name="wallet_default_name">钱包 %1$d</string>
+    <string name="wallet_add_title">添加钱包</string>
+    <string name="wallet_add_create">创建新钱包</string>
+    <string name="wallet_add_restore">用助记词恢复钱包</string>
+    <string name="wallet_add_pin_note">应用 PIN 保护所有钱包，无需设置新的 PIN。</string>
+    <string name="wallet_add_duplicate">此助记词已在应用中，名为“%1$s”。</string>
+    <string name="wallet_add_duplicate_switch">打开 %1$s</string>
+    <string name="wallet_add_cap">此网络已有 %1$d 个钱包。请先移除一个再添加。</string>
+    <string name="wallet_add_saving">正在添加钱包…</string>
+    <string name="wallet_add_failed">无法添加钱包。未做任何更改。</string>
+    <!-- Wallet switcher, Manage wallets and removing a wallet (multi-wallet). -->
+    <string name="wallet_chip_cd">钱包：%1$s。切换钱包</string>
+    <string name="wallet_switcher_title">你的钱包</string>
+    <string name="wallet_switcher_active">使用中</string>
+    <string name="wallet_switcher_not_synced">尚未同步</string>
+    <string name="wallet_switcher_balance_dgb">%1$s DGB</string>
+    <string name="wallet_switcher_balance_with_dd">%1$s · %2$s DigiDollar</string>
+    <string name="wallet_switcher_both_networks">在主网和测试网上使用</string>
+    <string name="wallet_switcher_add">添加钱包</string>
+    <string name="wallet_switcher_manage">管理</string>
+    <string name="wallet_switcher_failed">无法打开该钱包。未做任何更改。</string>
+    <string name="wallet_switcher_digistamp_note">如果您在浏览器中使用 DigiStamp，它可能仍以您切换前的钱包登录。</string>
+    <string name="wallet_manage_title">管理钱包</string>
+    <string name="wallet_manage_rename">重命名</string>
+    <string name="wallet_manage_move_up">上移</string>
+    <string name="wallet_manage_move_down">下移</string>
+    <string name="wallet_manage_remove">移除</string>
+    <string name="wallet_manage_rename_title">重命名钱包</string>
+    <string name="wallet_manage_rename_hint">最多 %1$d 个字符，且不能与其他钱包重名。</string>
+    <string name="wallet_manage_rename_invalid">请使用 1 到 %1$d 个字符，且名称不能与其他钱包相同。</string>
+    <string name="wallet_manage_save">保存</string>
+    <string name="wallet_remove_title">移除 %1$s？</string>
+    <string name="wallet_remove_backup_warning">移除钱包会将其从这部手机上删除。只有它的恢复短语能找回它，因此继续之前请确认你已抄下短语。</string>
+    <string name="wallet_remove_both_networks">此钱包在主网和测试网上使用。移除后两者中都会移除。</string>
+    <string name="wallet_remove_last">这是这部手机上的最后一个钱包。移除它会清除整个应用，包括应用 PIN。</string>
+    <string name="wallet_remove_continue">我有我的短语</string>
+    <string name="wallet_remove_type_prompt">请输入钱包名称 %1$s 以确认。</string>
+    <string name="wallet_remove_name_label">钱包名称</string>
+    <string name="wallet_remove_confirm">移除钱包</string>
+    <string name="wallet_remove_auth_subtitle">确认以移除此钱包</string>
+    <string name="wallet_remove_removing">正在移除钱包…</string>
+    <string name="wallet_remove_done">钱包已移除。</string>
+    <string name="wallet_remove_db_key_kept">钱包已从列表中移除。其中一部分只能在应用重启后清除，这会自动进行。</string>
+    <string name="wallet_remove_failed">钱包已从列表中移除，但未完全清除。其余部分会在应用下次启动时清除。</string>
+    <string name="wallet_remove_not_removed">钱包未被移除。未做任何更改。</string>
+    <string name="hub_signed_in_wallet">已使用钱包 %1$s 登录</string>
+    <string name="seedview_wallet_name">钱包：%1$s</string>
+    <string name="hub_handle_field_label">昵称</string>
+    <string name="hub_handle_field_hint">例如 DigiByte_Fan</string>
+    <string name="hub_handle_check">检查</string>
+    <string name="hub_handle_register">注册</string>
+    <string name="seedview_title">助记词</string>
+    <string name="seedview_done_hide">完成 — 隐藏助记词</string>
+    <plurals name="sync_notif_synced">
+        <item quantity="other">已同步 — 已连接 %1$d 个节点</item>
+    </plurals>
+    <plurals name="sync_notif_syncing">
+        <item quantity="other">正在同步 %1$d%% — %2$d 个节点</item>
+    </plurals>
+    <string name="sync_notif_connecting">正在连接节点…</string>
+    <string name="sync_notif_via_tor">" · 通过 Tor"</string>
+    <string name="hub_handle_title">选择你的昵称</string>
+    <string name="hub_handle_intro">你在社区中的匿名身份。3-20 个字符，仅限字母、数字和下划线。</string>
+    <string name="hub_handle_available_desc">可用</string>
+    <string name="hub_handle_taken_desc">已被占用</string>
+    <string name="hub_handle_is_available">@%1$s 可用！</string>
+    <string name="hub_handle_tap_check">点按“检查”以确认是否可用</string>
+    <string name="seedview_warn_title">切勿分享你的助记词</string>
+    <string name="seedview_warn_body">任何人拿到这些单词都能盗走你的资金。</string>
+    <string name="seedview_words_title">你的 %1$d 词助记词</string>
+    <string name="seedview_write_down">请按顺序抄下这些单词并妥善保管。</string>
+
+    <!-- Quick start of a restored wallet (multi-wallet step 1, Task 15) -->
+    <string name="quickstart_title">更快显示余额？</string>
+    <string name="quickstart_body">此钱包会在同步时在本机上私密地查找其历史记录，这可能需要一段时间。您也可以现在向服务器查询其余额。该数字未经验证，在同步证实之前不可花费。</string>
+    <string name="quickstart_skip">跳过并私密同步</string>
+    <string name="quickstart_own_node">询问我自己的节点（%1$s）</string>
+    <string name="quickstart_own_node_note">您的节点将收到此钱包的地址。不会向 digiscope.me 发送任何内容。</string>
+    <string name="quickstart_digiscope">询问 digiscope.me</string>
+    <string name="quickstart_digiscope_disclosure">这会将此钱包的地址发送到 digiscope.me。之后 digiscope.me 可以将此钱包与您的其他钱包关联起来。</string>
+    <string name="quickstart_digiscope_confirm">将地址发送到 digiscope.me</string>
+    <string name="quickstart_running">正在查询余额…</string>
+    <string name="quickstart_found">%2$s 报告 %1$s DGB，尚未验证。</string>
+    <string name="quickstart_found_dd">以及 %1$s DigiDollar，尚未验证。</string>
+    <string name="quickstart_failed">查询没有响应。钱包同步时仍会找到其余额。</string>
+    <string name="quickstart_continue">继续</string>
+    <string name="quickstart_unverified">%2$s 报告 %1$s DGB，尚未验证</string>
+    <string name="quickstart_unverified_dd">报告 %1$s DigiDollar，尚未验证</string>
+    <string name="quickstart_unverified_sub">在同步证实之前不可花费，也不计入您的余额。</string>
+    <string name="quickstart_running_skip">不等待，继续</string>
+    <string name="quickstart_incomplete">查询未能完成，因此不显示数字。钱包同步时仍会找到其余额。</string>
 </resources>

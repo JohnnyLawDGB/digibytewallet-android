@@ -19,8 +19,9 @@
 //             whose header anchor (BRRecoveryBirthCheckpointHeight) is at or below that height
 //   order_*   BRChainRebuild.h against the order of the calls in Android's source: WalletManager.kt
 //             (argv[2]), HistoryRebuildOnUpgrade.kt (argv[3]), ReconcileScreen.kt (argv[4]),
-//             SyncService.kt (argv[5]); and the rebuild has no early return or throw after its
-//             first clear (before it, the steps the clears depend on stop it)
+//             SyncService.kt (argv[5]), AppRestart.kt (argv[6]) and FreshStartAfterWipe.kt (argv[7],
+//             the restart after a rebuild ends the process); and the rebuild has no early return
+//             or throw after its first clear (before it, the steps the clears depend on stop it)
 //   vectors_* every line of the core's vectors/scan-floor/vectors.txt (argv[1]) agrees with the
 //             model (run.sh separately checks the file is the generator's current output)
 //
@@ -1013,34 +1014,56 @@ static long posIn(const char *s, const char *e, const char *token)
     return (p && p < e) ? (long)(p - s) : -1;
 }
 
-static void order_matches_android_source(const char *wmPath, const char *hrPath, const char *rsPath)
+// The process restart ReconcileScreen calls after a rebuild, AppRestart.restart, ends the process:
+// it hands over to RelaunchInFreshProcess.startFreshWithoutHandOver, whose relaunch (on either
+// thread) kills this process after starting the fresh one.
+static int restartEndsTheProcess(const char *ar, const char *fs)
 {
     int ok = 1;
-    char *wm = slurp(wmPath), *hr = slurp(hrPath), *rs = slurp(rsPath);
-    CHECK(wm && hr && rs);
-    if (wm && hr && rs) {
+    const char *arEnd, *swEnd, *rlEnd;
+    const char *restart = span(ar, "override fun restart(context: Context) {", "\n        }\n", &arEnd);
+    const char *without = span(fs, "fun startFreshWithoutHandOver(appContext: Context) {", "\n    }\n", &swEnd);
+    const char *relaunch = span(fs, "private fun relaunch(appContext: Context, incomplete: Boolean?) {", "\n    }\n", &rlEnd);
+    CHECK(restart && without && relaunch);
+    if (restart && without && relaunch) {
+        CHECK(posIn(restart, arEnd, "RelaunchInFreshProcess.startFreshWithoutHandOver(app)") >= 0);
+        // both branches (on the main thread, and posted to it) run the relaunch
+        long direct = posIn(without, swEnd, "relaunch(appContext, null)");
+        CHECK(direct >= 0 && posIn(without + direct + 1, swEnd, "relaunch(appContext, null)") >= 0);
+        CHECK(posIn(relaunch, rlEnd, "android.os.Process.killProcess(android.os.Process.myPid())") >= 0);
+    }
+    return ok;
+}
+
+static void order_matches_android_source(const char *wmPath, const char *hrPath, const char *rsPath,
+                                         const char *arPath, const char *fsPath)
+{
+    int ok = 1;
+    char *wm = slurp(wmPath), *hr = slurp(hrPath), *rs = slurp(rsPath), *ar = slurp(arPath), *fs = slurp(fsPath);
+    CHECK(wm && hr && rs && ar && fs);
+    if (wm && hr && rs && ar && fs) {
         const char *wmEnd, *fromEnd, *clrEnd;
         const char *body = span(wm, "fun rebuildFromChainRescan(): Boolean {", "fun rebuildFromChainRescanFrom(", &wmEnd);
         const char *from = span(wm, "fun rebuildFromChainRescanFrom(", "\n    }\n", &fromEnd);
         const char *clr = span(hr, "fun clearTransactionCacheForRebuild(", "\n}\n", &clrEnd);
         CHECK(body && from && clr);
         if (body && from && clr) {
-            long clearCall = posIn(body, wmEnd, "clearTransactionCacheForRebuild(context)");
+            long clearCall = posIn(body, wmEnd, "clearTransactionCacheForRebuild(context, scope)");
             // (major, minor): the call's place in rebuildFromChainRescan, and inside the shared clear
             long key[BR_CHAIN_REBUILD_STEP_KINDS][2];
             const char *tok[BR_CHAIN_REBUILD_STEP_KINDS] = { 0 };
             tok[BR_CHAIN_REBUILD_STOP_SYNC] = "stopSyncForRebuild()";
-            tok[BR_CHAIN_REBUILD_ARM_RERUN] = "HistoryRebuildOnUpgrade.armRerun(context)";
-            tok[BR_CHAIN_REBUILD_FLOOR_FROM_CACHE] = "HistoryRebuildOnUpgrade.floorFromCache(context)";
-            tok[BR_CHAIN_REBUILD_CLEAR_OUTGOING_STORE] = "OutgoingTxStore(context).clearAll()";
+            tok[BR_CHAIN_REBUILD_ARM_RERUN] = "HistoryRebuildOnUpgrade.armRerun(context, scope = scope)";
+            tok[BR_CHAIN_REBUILD_FLOOR_FROM_CACHE] = "HistoryRebuildOnUpgrade.floorFromCache(context, scope = scope)";
+            tok[BR_CHAIN_REBUILD_CLEAR_OUTGOING_STORE] = "OutgoingTxStore(context, scope).clearAll()";
             tok[BR_CHAIN_REBUILD_SET_FLOOR_AT_BIRTH] = "cfBirthHeightToPersist(birth)";
             const char *ctok[BR_CHAIN_REBUILD_STEP_KINDS] = { 0 };
             ctok[BR_CHAIN_REBUILD_CLEAR_TX_CACHE] = ".remove(\"saved_transactions\")";
             ctok[BR_CHAIN_REBUILD_CLEAR_FILTER_CHAIN] = ".remove(\"saved_filter_headers\")";
             ctok[BR_CHAIN_REBUILD_CLEAR_SAVED_BLOCKS] = ".remove(\"saved_blocks\")";
             ctok[BR_CHAIN_REBUILD_CLEAR_SYNC_STATE] = ".remove(\"has_synced\")";
-            ctok[BR_CHAIN_REBUILD_CLEAR_SCAN_LEDGER] = "CfScanLedgerStore.delete(context)";
-            ctok[BR_CHAIN_REBUILD_CLEAR_ABANDONMENT] = "CfAbandonmentStore.clear(context)";
+            ctok[BR_CHAIN_REBUILD_CLEAR_SCAN_LEDGER] = "CfScanLedgerStore.delete(context, scope)";
+            ctok[BR_CHAIN_REBUILD_CLEAR_ABANDONMENT] = "CfAbandonmentStore.clear(context, scope)";
             CHECK(clearCall >= 0);
             for (int k = 0; k < BR_CHAIN_REBUILD_STEP_KINDS; k++) {
                 key[k][0] = key[k][1] = -1;
@@ -1049,8 +1072,12 @@ static void order_matches_android_source(const char *wmPath, const char *hrPath,
             }
             // the rest of the derived stores the shared clear removes, after the step they belong to
             CHECK(posIn(clr, clrEnd, ".remove(\"last_dd_balance\")") > key[BR_CHAIN_REBUILD_CLEAR_SYNC_STATE][1]);
-            CHECK(posIn(clr, clrEnd, "FilterHeaderStore.delete(context)") >= 0);
-            CHECK(posIn(clr, clrEnd, "SavedBlockStore.delete(context)") >= 0);
+            CHECK(posIn(clr, clrEnd, "FilterHeaderStore.delete(context, scope)") >= 0);
+            CHECK(posIn(clr, clrEnd, "SavedBlockStore.delete(context, scope)") >= 0);
+            // the prefs keys above are removed from the rebuilt wallet's own sync-data file, and the
+            // tx-graph file goes with them
+            CHECK(posIn(clr, clrEnd, "getSharedPreferences(WalletStores.prefsName(\"dgb_sync_data\", scope)") >= 0);
+            CHECK(posIn(clr, clrEnd, "SavedTransactionsStore.delete(context, scope)") >= 0);
             key[BR_CHAIN_REBUILD_RELOAD][0] = LONG_MAX; key[BR_CHAIN_REBUILD_RELOAD][1] = 0;
             key[BR_CHAIN_REBUILD_LOWER_FLOOR_TO][0] = -2; key[BR_CHAIN_REBUILD_LOWER_FLOOR_TO][1] = 0;
 
@@ -1067,13 +1094,14 @@ static void order_matches_android_source(const char *wmPath, const char *hrPath,
                 }
             }
             // the rebuild from a height lowers the floor, then runs the rebuild
-            long lower = posIn(from, fromEnd, "HistoryRebuildOnUpgrade.lowerFloorTo(context, height)");
+            long lower = posIn(from, fromEnd, "HistoryRebuildOnUpgrade.lowerFloorTo(context, height, scope)");
             long then = posIn(from, fromEnd, "rebuildFromChainRescan()");
             CHECK(lower >= 0 && then > lower);
             // the reload: each rebuild call in ReconcileScreen is followed by the process restart
+            CHECK(restartEndsTheProcess(ar, fs));
             int calls = 0;
             for (const char *p = strstr(rs, "walletManager.rebuildFromChainRescan"); p; p = strstr(p + 1, "walletManager.rebuildFromChainRescan")) {
-                const char *exitAt = strstr(p, "Runtime.getRuntime().exit(0)");
+                const char *exitAt = strstr(p, "app.aroundtheblock.wallet.AppRestart.restart(context)");
                 const char *next = strstr(p + 1, "walletManager.rebuildFromChainRescan");
                 CHECK(exitAt && (! next || exitAt < next));
                 calls++;
@@ -1081,7 +1109,7 @@ static void order_matches_android_source(const char *wmPath, const char *hrPath,
             CHECK(calls == 2);
         }
     }
-    free(wm); free(hr); free(rs);
+    free(wm); free(hr); free(rs); free(ar); free(fs);
     result("order_matches_android_source", ok);
 }
 
@@ -1101,9 +1129,9 @@ static void order_reload_matches_android_source(const char *wmPath, const char *
         CHECK(load && sync);
         if (load && sync) {
             long at[BR_CHAIN_REBUILD_RELOAD_COUNT];
-            at[BR_CHAIN_REBUILD_RERUN_ON_LOAD] = posIn(load, e1, "HistoryRebuildOnUpgrade.beforeWalletLoad(context)");
-            at[BR_CHAIN_REBUILD_LOAD_SKIPS_CACHE] = posIn(load, e1, "HistoryRebuildOnUpgrade.isInProgress(context)");
-            at[BR_CHAIN_REBUILD_RESTORE_AT_FLOOR_TIME] = posIn(load, e1, "creationTimeForRestore(creationTime, HistoryRebuildOnUpgrade.floorTime(context))");
+            at[BR_CHAIN_REBUILD_RERUN_ON_LOAD] = posIn(load, e1, "HistoryRebuildOnUpgrade.beforeWalletLoad(context, scope = scope)");
+            at[BR_CHAIN_REBUILD_LOAD_SKIPS_CACHE] = posIn(load, e1, "HistoryRebuildOnUpgrade.isInProgress(context, scope = scope)");
+            at[BR_CHAIN_REBUILD_RESTORE_AT_FLOOR_TIME] = posIn(load, e1, "creationTimeForRestore(creationTime, HistoryRebuildOnUpgrade.floorTime(context, scope = scope))");
             at[BR_CHAIN_REBUILD_SYNC_START_FLOOR_STEP] = (long)(e1 - load) + 1;   // SyncService, after the load
             for (int i = 0; i < BR_CHAIN_REBUILD_RELOAD_COUNT; i++) CHECK(at[i] >= 0);
             for (int i = 1; i < BR_CHAIN_REBUILD_RELOAD_COUNT; i++) {
@@ -1160,7 +1188,7 @@ static void order_rebuild_has_no_early_exit(const char *wmPath)
     if (wm) {
         stripCommentsAndStrings(wm, strlen(wm));
         const char *names[] = { "fun rebuildFromChainRescan(): Boolean {", "fun rebuildFromChainRescanFrom(height: Long): Boolean {" };
-        const char *firstClear[] = { "clearTransactionCacheForRebuild(context)", "rebuildFromChainRescan()" };
+        const char *firstClear[] = { "clearTransactionCacheForRebuild(context, scope)", "rebuildFromChainRescan()" };
         for (int f = 0; f < 2; f++) {
             const char *e;
             const char *b = span(wm, names[f], "\n    }\n", &e);
@@ -1334,7 +1362,8 @@ int main(int argc, char **argv)
     model_agrees_checkpoint_time_on_the_real_tables();
     prop_lowered_floor_time_anchors_at_or_below_the_height();
     prop_rebuild_reaches_a_cached_tx_below_the_birth_anchor();
-    order_matches_android_source(argc > 2 ? argv[2] : NULL, argc > 3 ? argv[3] : NULL, argc > 4 ? argv[4] : NULL);
+    order_matches_android_source(argc > 2 ? argv[2] : NULL, argc > 3 ? argv[3] : NULL, argc > 4 ? argv[4] : NULL,
+                                 argc > 6 ? argv[6] : NULL, argc > 7 ? argv[7] : NULL);
     order_reload_matches_android_source(argc > 2 ? argv[2] : NULL, argc > 5 ? argv[5] : NULL);
     order_rebuild_has_no_early_exit(argc > 2 ? argv[2] : NULL);
     vectors_match_the_model(argc > 1 ? argv[1] : NULL);

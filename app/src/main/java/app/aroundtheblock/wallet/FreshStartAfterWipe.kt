@@ -249,16 +249,31 @@ internal object RelaunchInFreshProcess : ProcessRestart {
         }
     }
 
-    private fun relaunch(appContext: Context, incomplete: Boolean) {
+    /**
+     * The same relaunch with no hand-over extras, for a restart that is not a wipe (a wallet or
+     * network switch): [AppRestart] is the caller. One relaunch routine, parameterised.
+     */
+    fun startFreshWithoutHandOver(appContext: Context) {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            relaunch(appContext, null)
+        } else {
+            Handler(Looper.getMainLooper()).post { relaunch(appContext, null) }
+        }
+    }
+
+    /** [incomplete] null: no hand-over extras at all (not a wipe). */
+    private fun relaunch(appContext: Context, incomplete: Boolean?) {
         val launch = Intent.makeRestartActivityTask(ComponentName(appContext, MainActivity::class.java))
-            .putExtra(FreshStartAfterWipe.EXTRA_STARTED_AFTER_WIPE, true)
-            .putExtra(FreshStartAfterWipe.EXTRA_WIPE_INCOMPLETE, incomplete)
+        if (incomplete != null) {
+            launch.putExtra(FreshStartAfterWipe.EXTRA_STARTED_AFTER_WIPE, true)
+                .putExtra(FreshStartAfterWipe.EXTRA_WIPE_INCOMPLETE, incomplete)
+        }
         try {
             appContext.startActivity(launch)
         } catch (t: Throwable) {
             Log.w("FreshStartAfterWipe", "relaunch not taken (${t.javaClass.simpleName}); ending the process anyway")
         }
-        Log.i("FreshStartAfterWipe", "seed gone: ending this process, starting a fresh one (complete=${!incomplete})")
+        Log.i("FreshStartAfterWipe", "ending this process, starting a fresh one (handOver=${incomplete != null})")
         android.os.Process.killProcess(android.os.Process.myPid())
     }
 }

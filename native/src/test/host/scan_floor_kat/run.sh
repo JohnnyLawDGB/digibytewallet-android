@@ -5,8 +5,9 @@
 #
 # Also BRSavedTransactions.h's BRSavedTransactionsFloorMinima (HistoryRebuildOnUpgrade.summarize).
 # Includes the bridge's checkpoint_time.h, which the core's lookup is compared against on the real
-# checkpoint tables, and reads WalletManager.kt, HistoryRebuildOnUpgrade.kt, ReconcileScreen.kt and
-# SyncService.kt from this checkout to hold the rebuild and reload order to the order of the calls.
+# checkpoint tables, and reads WalletManager.kt, HistoryRebuildOnUpgrade.kt, ReconcileScreen.kt,
+# SyncService.kt, AppRestart.kt and FreshStartAfterWipe.kt (the restart after a rebuild ends the
+# process) from this checkout to hold the rebuild and reload order to the order of the calls.
 # Every step, FLOOR_FROM_CACHE included, has its call in Android's source (its token is in the main
 # file). Built with -Wall -Wextra -Werror; only -Wno-unused-parameter, for BRChainParams.h.
 #
@@ -42,6 +43,8 @@ WM="$REPO_ROOT/core/src/main/java/app/aroundtheblock/wallet/core/WalletManager.k
 HR="$REPO_ROOT/core/src/main/java/app/aroundtheblock/wallet/core/sync/HistoryRebuildOnUpgrade.kt"
 RS="$REPO_ROOT/app/src/main/java/app/aroundtheblock/wallet/ui/settings/ReconcileScreen.kt"
 SS="$REPO_ROOT/app/src/main/java/app/aroundtheblock/wallet/service/SyncService.kt"
+AR="$REPO_ROOT/app/src/main/java/app/aroundtheblock/wallet/AppRestart.kt"
+FS="$REPO_ROOT/app/src/main/java/app/aroundtheblock/wallet/FreshStartAfterWipe.kt"
 export ASAN_OPTIONS="halt_on_error=1 abort_on_error=1 symbolize=0"
 SAN_RE='ERROR: AddressSanitizer|ERROR: LeakSanitizer|runtime error:'
 
@@ -101,7 +104,7 @@ red_arm() {
     local reds=" $* " out rc c
     build "$BUILD_DIR/$seam" "-D$seam" || { echo "GATE FAILURE: the $seam arm did not compile."; FAIL=1; return; }
     echo "--- COMPARISON ARM (-D$seam): its RED cases MUST fail, every other case pass ---"
-    out="$("$BUILD_DIR/$seam" "$VECTORS" "$WM" "$HR" "$RS" "$SS" 2>&1)"; rc=$?
+    out="$("$BUILD_DIR/$seam" "$VECTORS" "$WM" "$HR" "$RS" "$SS" "$AR" "$FS" 2>&1)"; rc=$?
     <<<"$out" grep -Eq "$SAN_RE" && { echo "  [$seam] GATE FAILURE: sanitizer report"; FAIL=1; }
     [ $rc -eq 0 ] && { echo "  [$seam] GATE FAILURE: the comparison arm exited 0; it proves nothing"; FAIL=1; }
     for c in "${ALL_CASES[@]}"; do
@@ -136,7 +139,7 @@ red_arm CHAIN_REBUILD_FLOOR_RED kt_rebuild_arms_the_rerun_and_keeps_the_floor_ti
 
 echo "--- SHIPPED ARM: every case MUST pass, ALL PASS, exit 0, no sanitizer report ---"
 build "$BUILD_DIR/green" || { echo "GATE FAILURE: shipped arm did not compile."; exit 1; }
-out="$("$BUILD_DIR/green" "$VECTORS" "$WM" "$HR" "$RS" "$SS" 2>&1)"; rc=$?
+out="$("$BUILD_DIR/green" "$VECTORS" "$WM" "$HR" "$RS" "$SS" "$AR" "$FS" 2>&1)"; rc=$?
 <<<"$out" grep -Eq "$SAN_RE" && { echo "  [green] GATE FAILURE: sanitizer report"; FAIL=1; }
 if [ $rc -ne 0 ] || ! <<<"$out" grep -q "^ALL PASS$"; then
     echo "  [green] GATE FAILURE: shipped arm did not pass (rc=$rc)"; <<<"$out" grep -E "^FAIL:|^  " | sed 's/^/      /'; FAIL=1

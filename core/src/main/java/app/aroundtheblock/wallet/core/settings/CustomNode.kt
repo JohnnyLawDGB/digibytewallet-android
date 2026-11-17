@@ -2,7 +2,10 @@ package app.aroundtheblock.wallet.core.settings
 
 import android.content.Context
 import app.aroundtheblock.wallet.core.bridge.NativeBridge
-import app.aroundtheblock.wallet.core.networkSuffix
+import app.aroundtheblock.wallet.core.wallets.ActiveWallet
+import app.aroundtheblock.wallet.core.wallets.StoreScope
+import app.aroundtheblock.wallet.core.wallets.WalletScope
+import app.aroundtheblock.wallet.core.wallets.storageSuffix
 
 /** A user-configured DigiByte node to use as a priority compact-filter peer. */
 data class CustomNode(val host: String, val port: Int) {
@@ -61,24 +64,24 @@ object CustomNodePrefs {
     private const val KEY_EXCLUSIVE = "custom_node_exclusive"
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-    private fun key(base: String, ctx: Context) = base + networkSuffix(ctx)
+    private fun key(base: String, scope: WalletScope) = base + storageSuffix(scope, StoreScope.NETWORK)
 
-    fun isEnabled(ctx: Context): Boolean = prefs(ctx).getBoolean(key(KEY_ENABLED, ctx), false)
-    fun hostPort(ctx: Context): String? = prefs(ctx).getString(key(KEY_HOSTPORT, ctx), null)
-    fun setEnabled(ctx: Context, enabled: Boolean) =
-        prefs(ctx).edit().putBoolean(key(KEY_ENABLED, ctx), enabled).apply()
-    fun setHostPort(ctx: Context, hostPort: String) =
-        prefs(ctx).edit().putString(key(KEY_HOSTPORT, ctx), hostPort.trim()).apply()
+    fun isEnabled(ctx: Context, scope: WalletScope = ActiveWallet.scope(ctx)): Boolean = prefs(ctx).getBoolean(key(KEY_ENABLED, scope), false)
+    fun hostPort(ctx: Context, scope: WalletScope = ActiveWallet.scope(ctx)): String? = prefs(ctx).getString(key(KEY_HOSTPORT, scope), null)
+    fun setEnabled(ctx: Context, enabled: Boolean, scope: WalletScope = ActiveWallet.scope(ctx)) =
+        prefs(ctx).edit().putBoolean(key(KEY_ENABLED, scope), enabled).apply()
+    fun setHostPort(ctx: Context, hostPort: String, scope: WalletScope = ActiveWallet.scope(ctx)) =
+        prefs(ctx).edit().putString(key(KEY_HOSTPORT, scope), hostPort.trim()).apply()
 
     /** Optional user-facing label for the configured node (e.g. "My Node"). */
-    fun label(ctx: Context): String? = prefs(ctx).getString(key(KEY_LABEL, ctx), null)
-    fun setLabel(ctx: Context, label: String?) =
+    fun label(ctx: Context, scope: WalletScope = ActiveWallet.scope(ctx)): String? = prefs(ctx).getString(key(KEY_LABEL, scope), null)
+    fun setLabel(ctx: Context, label: String?, scope: WalletScope = ActiveWallet.scope(ctx)) =
         prefs(ctx).edit().apply {
-            if (label.isNullOrBlank()) remove(key(KEY_LABEL, ctx)) else putString(key(KEY_LABEL, ctx), label.trim())
+            if (label.isNullOrBlank()) remove(key(KEY_LABEL, scope)) else putString(key(KEY_LABEL, scope), label.trim())
         }.apply()
 
     /** When true, the own node is the ONLY peer dialed (see NativeBridge.setPinnedPeer). */
-    fun isExclusive(ctx: Context): Boolean = prefs(ctx).getBoolean(key(KEY_EXCLUSIVE, ctx), false)
-    fun setExclusive(ctx: Context, exclusive: Boolean) =
-        prefs(ctx).edit().putBoolean(key(KEY_EXCLUSIVE, ctx), exclusive).apply()
+    fun isExclusive(ctx: Context, scope: WalletScope = ActiveWallet.scope(ctx)): Boolean = prefs(ctx).getBoolean(key(KEY_EXCLUSIVE, scope), false)
+    fun setExclusive(ctx: Context, exclusive: Boolean, scope: WalletScope = ActiveWallet.scope(ctx)) =
+        prefs(ctx).edit().putBoolean(key(KEY_EXCLUSIVE, scope), exclusive).apply()
 }

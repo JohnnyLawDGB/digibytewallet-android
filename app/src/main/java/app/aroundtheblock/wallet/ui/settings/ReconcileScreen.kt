@@ -376,13 +376,7 @@ fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
                                 requestSyncResumeNearTip(context)
                                 return@launch
                             }
-                            val li = context.packageManager.getLaunchIntentForPackage(context.packageName)
-                            li?.addFlags(
-                                android.content.Intent.FLAG_ACTIVITY_NEW_TASK or
-                                    android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK
-                            )
-                            context.startActivity(li)
-                            Runtime.getRuntime().exit(0)
+                            app.aroundtheblock.wallet.AppRestart.restart(context)
                         }
                     }
                 },
@@ -563,13 +557,7 @@ fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
                                                 requestSyncResumeNearTip(context)
                                                 return@launch
                                             }
-                                            val li = context.packageManager.getLaunchIntentForPackage(context.packageName)
-                                            li?.addFlags(
-                                                android.content.Intent.FLAG_ACTIVITY_NEW_TASK or
-                                                    android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK
-                                            )
-                                            context.startActivity(li)
-                                            Runtime.getRuntime().exit(0)
+                                            app.aroundtheblock.wallet.AppRestart.restart(context)
                                         }
                                     }
                                 },

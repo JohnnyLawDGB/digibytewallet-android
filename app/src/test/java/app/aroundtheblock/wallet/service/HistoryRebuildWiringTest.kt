@@ -151,7 +151,7 @@ class HistoryRebuildWiringTest {
         assertTrue("gated on a loaded wallet, not on a non-zero anchor", between.contains("NativeBridge.isWalletLoaded()"))
         assertTrue("a floor time alone is applied too", between.contains("HistoryRebuildOnUpgrade.floorPending("))
         assertTrue(between.contains("floorHint > 0L || floorPending"))
-        assertTrue(between.contains("\"cf_birth_height\""))
+        assertTrue(between.contains("birthKey"))
         val clear = between.indexOf("HistoryRebuildOnUpgrade.clearFloorHint(")
         assertTrue(clear >= 0)
         assertTrue("the hint is cleared only when the step says so", between.substring(0, clear).contains("if (step.clearHint)"))

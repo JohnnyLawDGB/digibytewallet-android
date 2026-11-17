@@ -71,7 +71,9 @@ val bottomNavScreens =
 /** Routes that should NOT show the bottom navigation bar. */
 private val fullScreenRoutes = setOf(
     PIN_STORE_UNAVAILABLE_ROUTE,
-    "onboarding",
+    ONBOARDING_ROUTE,
+    ADD_COMMIT_ROUTE,
+    QUICK_START_ROUTE,
     "seed_display/{wordCount}",
     "seed_verify",
     "seed_passphrase",
@@ -162,7 +164,7 @@ fun AppNavigation(
         // shouldRouteToOnboardingAfterWipe.
         if (shouldRouteToOnboardingAfterWipe(walletState, currentRoute)) {
             android.util.Log.w("AppNavigation", "wallet wiped on route=$currentRoute — routing to onboarding")
-            navController.navigate("onboarding") {
+            navController.navigate(onboardingRoute(OnboardingMode.FIRST_RUN)) {
                 popUpTo(0) { inclusive = true }
                 launchSingleTop = true
             }
@@ -257,7 +259,11 @@ fun AppNavigation(
             modifier = Modifier.padding(padding)
         ) {
             // ── Onboarding flow ───────────────────────────────────────────────
-            composable("onboarding") {
+            // FIRST_RUN sets the app up; ADD adds a wallet beside the ones it holds (no PIN setup).
+            composable(
+                ONBOARDING_ROUTE,
+                arguments = listOf(navArgument(ONBOARDING_MODE_ARG) { defaultValue = ONBOARDING_MODE_DEFAULT }),
+            ) {
                 OnboardingScreen(navController = navController)
             }
 
@@ -265,7 +271,7 @@ fun AppNavigation(
                 val wordCount = backStackEntry.arguments?.getString("wordCount")?.toIntOrNull() ?: 12
                 // Share ViewModel across onboarding flow so mnemonic persists between screens
                 val parentEntry = remember(backStackEntry) {
-                    navController.getBackStackEntry("onboarding")
+                    navController.getBackStackEntry(ONBOARDING_ROUTE)
                 }
                 val sharedViewModel: app.aroundtheblock.wallet.ui.onboarding.OnboardingViewModel = hiltViewModel(parentEntry)
                 SeedDisplayScreen(
@@ -277,7 +283,7 @@ fun AppNavigation(
 
             composable("seed_verify") { backStackEntry ->
                 val parentEntry = remember(backStackEntry) {
-                    navController.getBackStackEntry("onboarding")
+                    navController.getBackStackEntry(ONBOARDING_ROUTE)
                 }
                 val sharedViewModel: app.aroundtheblock.wallet.ui.onboarding.OnboardingViewModel = hiltViewModel(parentEntry)
                 SeedVerifyScreen(navController = navController, viewModel = sharedViewModel)
@@ -285,7 +291,7 @@ fun AppNavigation(
 
             composable("seed_passphrase") { backStackEntry ->
                 val parentEntry = remember(backStackEntry) {
-                    navController.getBackStackEntry("onboarding")
+                    navController.getBackStackEntry(ONBOARDING_ROUTE)
                 }
                 val sharedViewModel: app.aroundtheblock.wallet.ui.onboarding.OnboardingViewModel = hiltViewModel(parentEntry)
                 app.aroundtheblock.wallet.ui.onboarding.PassphraseScreen(
@@ -296,7 +302,7 @@ fun AppNavigation(
 
             composable("mnemonic_input") { backStackEntry ->
                 val parentEntry = remember(backStackEntry) {
-                    navController.getBackStackEntry("onboarding")
+                    navController.getBackStackEntry(ONBOARDING_ROUTE)
                 }
                 val sharedViewModel: app.aroundtheblock.wallet.ui.onboarding.OnboardingViewModel = hiltViewModel(parentEntry)
                 MnemonicInputScreen(navController = navController, viewModel = sharedViewModel)
@@ -304,7 +310,7 @@ fun AppNavigation(
 
             composable("recovery_scan") { backStackEntry ->
                 val parentEntry = remember(backStackEntry) {
-                    navController.getBackStackEntry("onboarding")
+                    navController.getBackStackEntry(ONBOARDING_ROUTE)
                 }
                 val sharedViewModel: app.aroundtheblock.wallet.ui.onboarding.OnboardingViewModel = hiltViewModel(parentEntry)
                 app.aroundtheblock.wallet.ui.onboarding.RecoveryScanScreen(
@@ -314,21 +320,37 @@ fun AppNavigation(
 
             composable("recovery_date") { backStackEntry ->
                 val parentEntry = remember(backStackEntry) {
-                    navController.getBackStackEntry("onboarding")
+                    navController.getBackStackEntry(ONBOARDING_ROUTE)
                 }
                 val sharedViewModel: app.aroundtheblock.wallet.ui.onboarding.OnboardingViewModel = hiltViewModel(parentEntry)
                 RecoveryDateScreen(navController = navController, viewModel = sharedViewModel)
             }
 
+            composable(QUICK_START_ROUTE) { backStackEntry ->
+                val parentEntry = remember(backStackEntry) {
+                    navController.getBackStackEntry(ONBOARDING_ROUTE)
+                }
+                val sharedViewModel: app.aroundtheblock.wallet.ui.onboarding.OnboardingViewModel = hiltViewModel(parentEntry)
+                app.aroundtheblock.wallet.ui.onboarding.QuickStartScreen(navController = navController, viewModel = sharedViewModel)
+            }
+
+            composable(ADD_COMMIT_ROUTE) { backStackEntry ->
+                val parentEntry = remember(backStackEntry) {
+                    navController.getBackStackEntry(ONBOARDING_ROUTE)
+                }
+                val sharedViewModel: app.aroundtheblock.wallet.ui.onboarding.OnboardingViewModel = hiltViewModel(parentEntry)
+                AddWalletCommitScreen(navController = navController, viewModel = sharedViewModel)
+            }
+
             composable("pin_setup") { backStackEntry ->
                 // Get the shared onboarding ViewModel if we came from the onboarding
                 // flow. If pin_setup is the startDestination (wallet exists but no PIN),
-                // "onboarding" won't be on the back stack — use own entry instead.
+                // the onboarding entry won't be on the back stack — use own entry instead.
                 val hasOnboarding = remember(backStackEntry) {
-                    runCatching { navController.getBackStackEntry("onboarding") }.isSuccess
+                    runCatching { navController.getBackStackEntry(ONBOARDING_ROUTE) }.isSuccess
                 }
                 val vmEntry = remember(backStackEntry) {
-                    if (hasOnboarding) navController.getBackStackEntry("onboarding")
+                    if (hasOnboarding) navController.getBackStackEntry(ONBOARDING_ROUTE)
                     else backStackEntry
                 }
                 val sharedViewModel: app.aroundtheblock.wallet.ui.onboarding.OnboardingViewModel = hiltViewModel(vmEntry)
@@ -433,8 +455,14 @@ fun AppNavigation(
                     // autostart=true: the banner's button is labelled "Scan for missing
                     // transactions", so tapping it must START the scan, not just open the
                     // screen that has another button on it.
-                    onNavigateReconcile = { navController.navigate("settings_reconcile?autostart=true") }
+                    onNavigateReconcile = { navController.navigate("settings_reconcile?autostart=true") },
+                    onNavigateAddWallet = { navController.navigate(onboardingRoute(OnboardingMode.ADD)) },
+                    onNavigateManageWallets = { navController.navigate("manage_wallets") },
                 )
+            }
+
+            composable("manage_wallets") {
+                app.aroundtheblock.wallet.ui.wallets.ManageWalletsScreen(onBack = { navController.popBackStack() })
             }
 
             composable(Screen.Digistamp.route) {

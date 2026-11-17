@@ -82,7 +82,7 @@ class SavedTransactionsCheckpointTest {
         val count = wm.indexOf("syncPrefs.getLong(SavedTransactionsStore.KEY_COUNT, 0L)")
         val flag = wm.lastIndexOf("syncPrefs.getBoolean(\"transactions_checkpointed\", false)", count)
         val record = wm.indexOf("SavedTransactionsCheckpoint.recordRestore(syncPrefs, null, 0L, checkpointedCount)")
-        val build = wm.indexOf("NativeBridge.restoreWalletFromBytes(seedBytes, restoreTime, storedPass)")
+        val build = wm.indexOf("restoreNative(seedBytes, restoreTime, storedPass)")
         assertTrue("the restore no longer reads the count beside the flag", count > 0 && flag in 0 until count)
         assertTrue("the restore no longer records a lost file as short, before the build", record in (count + 1) until build)
         val sync = File(repo, "app/src/main/java/app/aroundtheblock/wallet/service/SyncService.kt").readText()
@@ -145,10 +145,10 @@ class SavedTransactionsCheckpointTest {
 
     @Test fun `the restore records its load before the wallet is built from it`() {
         val wm = File("src/main/java/app/aroundtheblock/wallet/core/WalletManager.kt").readText()
-        val read = wm.indexOf("SavedTransactionsStore.load(context)")
-        val load = wm.indexOf("loaded = NativeBridge.loadSerializedTransactions(savedTx)")
+        val read = wm.indexOf("SavedTransactionsStore.load(context, scope)")
+        val load = wm.indexOf("loaded = loadTxNative(savedTx)")
         val record = wm.indexOf("SavedTransactionsCheckpoint.recordRestore(syncPrefs, savedTx, loaded.toLong())")
-        val build = wm.indexOf("NativeBridge.restoreWalletFromBytes(seedBytes, restoreTime, storedPass)")
+        val build = wm.indexOf("restoreNative(seedBytes, restoreTime, storedPass)")
         assertTrue("the restore no longer reads the file store", read > 0)
         assertTrue("the restore no longer records a short load", record > 0)
         assertTrue("read, load, record, build: in that order", read < load && load < record && record < build)

@@ -17,6 +17,13 @@ import app.aroundtheblock.wallet.core.digiid.DigiIdManager
 import app.aroundtheblock.wallet.core.ipfs.AssetMetadataService
 import app.aroundtheblock.wallet.core.ipfs.IpfsClient
 import app.aroundtheblock.wallet.core.security.*
+import app.aroundtheblock.wallet.core.wallets.ActiveWallet
+import app.aroundtheblock.wallet.core.wallets.WalletManagerFactory
+import app.aroundtheblock.wallet.core.wallets.WalletProvisioner
+import app.aroundtheblock.wallet.core.wallets.WalletRegistry
+import app.aroundtheblock.wallet.core.wallets.WalletRemoval
+import app.aroundtheblock.wallet.core.wallets.WalletStoreEraser
+import app.aroundtheblock.wallet.core.wallets.WalletStores
 import okhttp3.OkHttpClient
 import javax.inject.Singleton
 
@@ -28,7 +35,36 @@ object AppModule {
     fun provideTorManager(@ApplicationContext context: Context): TorManager = TorManager(context)
 
     @Provides @Singleton
-    fun provideKeyStoreManager(@ApplicationContext context: Context): KeyStoreManager = KeyStoreManager(context)
+    fun provideKeyStoreManager(@ApplicationContext context: Context): KeyStoreManager =
+        KeyStoreManager(context, WalletStores.keyAlias(ActiveWallet.scope(context)))
+
+    @Provides @Singleton
+    fun provideWalletRegistry(@ApplicationContext context: Context): WalletRegistry = ActiveWallet.registry(context)
+
+    /** A [WalletManager] over another wallet's scope and aliases, for storing its record (adding a wallet). */
+    @Provides @Singleton
+    fun provideWalletManagerFactory(
+        @ApplicationContext context: Context,
+        um: UtxoManager,
+    ): WalletManagerFactory = WalletManagerFactory { scope ->
+        WalletManager(context, KeyStoreManager(context, WalletStores.keyAlias(scope)), um, scope = scope)
+    }
+
+    /** Erases one wallet's scope (adding a wallet that does not complete; removing one). */
+    @Provides @Singleton
+    fun provideWalletStoreEraser(@ApplicationContext context: Context): WalletStoreEraser = WalletStoreEraser(context)
+
+    @Provides @Singleton
+    fun provideWalletProvisioner(
+        registry: WalletRegistry,
+        walletManagerFactory: WalletManagerFactory,
+        eraser: WalletStoreEraser,
+    ): WalletProvisioner = WalletProvisioner(
+        registry,
+        walletManagerFactory,
+        eraser,
+        deriveSeed = { m, p -> app.aroundtheblock.wallet.core.bridge.NativeBridge.mnemonicToSeed(m, p) },
+    )
 
     @Provides @Singleton
     fun providePinManager(@ApplicationContext context: Context): PinManager = PinManager(context)
@@ -48,11 +84,13 @@ object AppModule {
     fun provideDatabase(@ApplicationContext context: Context): WalletDatabase = provideDatabaseInner(context)
 
     private fun provideDatabaseInner(context: Context): WalletDatabase {
-        // Per-network DB file (e.g. "wallet.db" mainnet / "wallet_testnet.db"
+        // Per-wallet, per-network DB file (legacy: "wallet.db" mainnet / "wallet_testnet.db"
         // testnet) so a testnet session never opens the mainnet DB, and vice
         // versa. The key record stays unsuffixed/shared — the same password
         // encrypts either network's DB file, no cross-network trust issue.
-        val dbFileName = "wallet${networkSuffix(context)}.db"
+        val dbFileName = app.aroundtheblock.wallet.core.wallets.WalletStores.databaseName(
+            app.aroundtheblock.wallet.core.wallets.ActiveWallet.scope(context),
+        )
         return app.aroundtheblock.wallet.core.db.DatabaseKeyProvisioner.openWalletDatabase(context, dbFileName)
     }
 
@@ -116,10 +154,54 @@ object AppModule {
         um: UtxoManager,
         am: AssetManager,
         identitySessions: app.aroundtheblock.wallet.IdentitySessionEraser,
+        digiScopeClient: dagger.Lazy<DigiScopeClient>,
     ): WalletManager =
         WalletManager(
             context, ksm, um, assetManager = am, identitySessions = identitySessions,
+            // Taken lazily: only a wipe needs the Hub client.
+            hubRevoke = hubSessionRevoke(digiScopeClient),
             markErasureOwed = { app.aroundtheblock.wallet.FreshStartAfterWipe.markErasureOwed(context) },
+            // The same wallet the KeyStoreManager above and every store resolve to.
+            scope = ActiveWallet.scope(context),
+        )
+
+    /**
+     * Removing one wallet. The running wallet is only marked (the caller restarts and housekeeping
+     * erases it at the next launch); the last wallet on the device is the full wipe.
+     */
+    @Provides @Singleton
+    fun provideWalletRemoval(
+        @ApplicationContext context: Context,
+        registry: WalletRegistry,
+        eraser: WalletStoreEraser,
+        walletManager: WalletManager,
+        pinManager: PinManager,
+        digiScopeClient: dagger.Lazy<DigiScopeClient>,
+    ): WalletRemoval = WalletRemoval(
+        registry,
+        eraser,
+        activeScope = ActiveWallet.scope(context),
+        wipeAll = { walletManager.wipeThenReleasePin(pinManager) },
+        revokeHub = hubSessionRevoke(digiScopeClient),
+    )
+
+    /** A wallet's Hub session ended on the server before its token is erased (wipe and removal). */
+    private fun hubSessionRevoke(client: dagger.Lazy<DigiScopeClient>) =
+        app.aroundtheblock.wallet.core.digiscope.HubSessionRevoke { scope -> client.get().revokeStoredSession(scope) }
+
+    /** Wallet switching: persist the active id, end the web session, restart (Task 9). */
+    @Provides @Singleton
+    fun provideWalletSwitcher(
+        @ApplicationContext context: Context,
+        registry: WalletRegistry,
+        identitySessions: app.aroundtheblock.wallet.IdentitySessionEraser,
+    ): app.aroundtheblock.wallet.WalletSwitcher =
+        app.aroundtheblock.wallet.WalletSwitcher(
+            registry = registry,
+            testnet = { ActiveWallet.scope(context).testnet },
+            currentId = { ActiveWallet.scope(context).walletId },
+            endWebSession = { identitySessions.endWebSessionOnly() },
+            restart = { app.aroundtheblock.wallet.AppRestart.restart(context) },
         )
 
     /**

@@ -56,6 +56,7 @@
     <string name="verify_success_title">確認できました</string>
     <string name="verify_retry_title">もう一度お試しください</string>
     <string name="verify_success_body">リカバリーフレーズが安全に記録されました。次に PIN を設定してください。</string>
+    <string name="verify_success_body_add">リカバリーフレーズが安全に記録されました。このウォレットはすでにアプリの PIN で保護されています。</string>
     <string name="verify_retry_body">一部の回答が正しくありませんでした。リカバリーフレーズを確認して、もう一度お試しください。</string>
     <string name="verify_setup_pin">PIN を設定</string>
     <string name="verify_try_again">もう一度試す</string>
@@ -432,9 +433,9 @@
     <string name="sec_biometric_no">この端末では利用できません</string>
     <string name="sec_autolock">自動ロックまでの時間</string>
     <string name="sec_wipe_after">PIN を %1$d 回間違えたら消去</string>
-    <string name="sec_wipe_after_on">オン：PIN を %1$d 回間違えるとウォレットを消去します</string>
+    <string name="sec_wipe_after_on_all">オン：PIN を %1$d 回間違えるとすべてのウォレットを消去します</string>
     <string name="sec_wipe_after_off">オフ：PIN 総当たりへの追加の保護</string>
-    <string name="sec_wipe_after_body">オンにすると、PIN を連続で %1$d 回間違えた時点で、このウォレット（シード・鍵・履歴）を端末から完全に消去します。\n\n端末上では取り消せません。資金はリカバリーフレーズからのみ復元できます。</string>
+    <string name="sec_wipe_after_body_all">オンにすると、PIN を連続で %1$d 回間違えた時点で、この端末のすべてのウォレット（リカバリーフレーズ・鍵・履歴）を完全に消去します。\n\n端末上では取り消せません。資金は各ウォレットのリカバリーフレーズからのみ復元できます。</string>
     <string name="sec_wipe_after_ack">リカバリーフレーズをバックアップ済みです</string>
     <string name="sec_wipe_after_enabled">%1$d 回で消去を有効にしました</string>
     <string name="sec_recovery_phrase">リカバリーフレーズ</string>
@@ -445,7 +446,7 @@
     <string name="sec_danger_zone">危険な操作</string>
     <string name="sec_wipe_wallet">ウォレットを消去</string>
     <string name="sec_wipe_wallet_sub">この端末からすべてのウォレットデータを削除します</string>
-    <string name="sec_wipe_wallet_body">この操作は取り消せません。\n\nすべてのウォレットデータ、鍵、取引履歴がこの端末から完全に削除されます。\n\n続行する前に、リカバリーフレーズをバックアップしてあることを確認してください。</string>
+    <string name="sec_wipe_all_body">この操作は取り消せません。\n\nこの端末のすべてのウォレット（リカバリーフレーズ・鍵・取引履歴）が削除されます。\n\n続行する前に、各ウォレットのリカバリーフレーズをバックアップしてあることを確認してください。</string>
     <string name="sec_wipe_everything">すべて消去</string>
     <string name="sec_verify_pin">現在の PIN を確認</string>
     <string name="sec_verify_pin_sub">続行するには現在の PIN を入力してください</string>
@@ -743,4 +744,97 @@
     <string name="sec_seed_key_no_lock">結び付けられていません：このスマートフォンには画面ロックがありません。Android の設定で設定してください。</string>
     <string name="sec_seed_key_lock_removed">このウォレットの設定後に画面ロックが解除されたため、新しいロックを設定しても、その鍵はもう開けません。ウォレットが開いているうちに、復元フレーズが書き留めてあるか確認するか、今すぐ資金を移動してください。次にアプリが起動したとき、ウォレットには復元フレーズが必要です。</string>
     <string name="sec_seed_key_cannot_bind">結び付けられていません：以前の画面ロックの鍵が使えなくなっているため、このインストールではこのウォレットの鍵を結び付けられません。ウォレットを消去し、復元フレーズから復元すると結び付けられます。</string>
+
+    <!-- Multi-wallet: adding a wallet through onboarding (ADD mode). -->
+    <string name="wallet_default_name">ウォレット %1$d</string>
+    <string name="wallet_add_title">ウォレットを追加</string>
+    <string name="wallet_add_create">新しいウォレットを作成</string>
+    <string name="wallet_add_restore">リカバリーフレーズからウォレットを復元</string>
+    <string name="wallet_add_pin_note">アプリの PIN がすべてのウォレットを保護します。新しい PIN を設定する必要はありません。</string>
+    <string name="wallet_add_duplicate">このリカバリーフレーズは「%1$s」としてすでにアプリにあります。</string>
+    <string name="wallet_add_duplicate_switch">%1$s を開く</string>
+    <string name="wallet_add_cap">このネットワークにはすでに %1$d 個のウォレットがあります。追加するには 1 つ削除してください。</string>
+    <string name="wallet_add_saving">ウォレットを追加しています…</string>
+    <string name="wallet_add_failed">ウォレットを追加できませんでした。何も変更されていません。</string>
+    <!-- Wallet switcher, Manage wallets and removing a wallet (multi-wallet). -->
+    <string name="wallet_chip_cd">ウォレット：%1$s。ウォレットを切り替え</string>
+    <string name="wallet_switcher_title">あなたのウォレット</string>
+    <string name="wallet_switcher_active">使用中</string>
+    <string name="wallet_switcher_not_synced">まだ同期されていません</string>
+    <string name="wallet_switcher_balance_dgb">%1$s DGB</string>
+    <string name="wallet_switcher_balance_with_dd">%1$s · %2$s DigiDollar</string>
+    <string name="wallet_switcher_both_networks">メインネットとテストネットで使用</string>
+    <string name="wallet_switcher_add">ウォレットを追加</string>
+    <string name="wallet_switcher_manage">管理</string>
+    <string name="wallet_switcher_failed">そのウォレットを開けませんでした。何も変更されていません。</string>
+    <string name="wallet_switcher_digistamp_note">ブラウザで DigiStamp を使っている場合、切り替え前のウォレットでサインインしたままになっていることがあります。</string>
+    <string name="wallet_manage_title">ウォレットの管理</string>
+    <string name="wallet_manage_rename">名前を変更</string>
+    <string name="wallet_manage_move_up">上へ移動</string>
+    <string name="wallet_manage_move_down">下へ移動</string>
+    <string name="wallet_manage_remove">削除</string>
+    <string name="wallet_manage_rename_title">ウォレット名を変更</string>
+    <string name="wallet_manage_rename_hint">%1$d 文字以内で、他のウォレットと重ならない名前。</string>
+    <string name="wallet_manage_rename_invalid">1〜%1$d 文字で、他のウォレットにない名前を使ってください。</string>
+    <string name="wallet_manage_save">保存</string>
+    <string name="wallet_remove_title">%1$s を削除しますか？</string>
+    <string name="wallet_remove_backup_warning">ウォレットを削除すると、このスマートフォンから消去されます。元に戻せるのはリカバリーフレーズだけです。続ける前にフレーズを書き留めてあることを確認してください。</string>
+    <string name="wallet_remove_both_networks">このウォレットはメインネットとテストネットで使われています。削除すると両方から削除されます。</string>
+    <string name="wallet_remove_last">これはこのスマートフォンで最後のウォレットです。削除するとアプリのPINを含め、アプリが消去されます。</string>
+    <string name="wallet_remove_continue">フレーズは控えてあります</string>
+    <string name="wallet_remove_type_prompt">確認のため、ウォレット名 %1$s を入力してください。</string>
+    <string name="wallet_remove_name_label">ウォレット名</string>
+    <string name="wallet_remove_confirm">ウォレットを削除</string>
+    <string name="wallet_remove_auth_subtitle">このウォレットを削除するには確認してください</string>
+    <string name="wallet_remove_removing">ウォレットを削除しています…</string>
+    <string name="wallet_remove_done">ウォレットを削除しました。</string>
+    <string name="wallet_remove_db_key_kept">ウォレットは一覧から外れました。一部はアプリの再起動後にのみ消去でき、これは自動で行われます。</string>
+    <string name="wallet_remove_failed">ウォレットは一覧から外れましたが、完全には消去されていません。残りは次回アプリの起動時に消去されます。</string>
+    <string name="wallet_remove_not_removed">ウォレットは削除されませんでした。何も変更されていません。</string>
+    <string name="hub_signed_in_wallet">ウォレット %1$s でサインイン中</string>
+    <string name="seedview_wallet_name">ウォレット: %1$s</string>
+    <string name="hub_handle_field_label">ハンドル</string>
+    <string name="hub_handle_field_hint">例: DigiByte_Fan</string>
+    <string name="hub_handle_check">確認</string>
+    <string name="hub_handle_register">登録</string>
+    <string name="seedview_title">リカバリーフレーズ</string>
+    <string name="seedview_done_hide">完了 — フレーズを隠す</string>
+    <plurals name="sync_notif_synced">
+        <item quantity="other">同期済み — %1$d 件のピアに接続中</item>
+    </plurals>
+    <plurals name="sync_notif_syncing">
+        <item quantity="other">同期中 %1$d%% — ピア %2$d 件</item>
+    </plurals>
+    <string name="sync_notif_connecting">ピアに接続中…</string>
+    <string name="sync_notif_via_tor">" · Tor 経由"</string>
+    <string name="hub_handle_title">ハンドルを選択</string>
+    <string name="hub_handle_intro">コミュニティでの匿名のIDです。3〜20文字、英数字とアンダースコアのみ使えます。</string>
+    <string name="hub_handle_available_desc">使用できます</string>
+    <string name="hub_handle_taken_desc">使用済み</string>
+    <string name="hub_handle_is_available">@%1$s は使用できます！</string>
+    <string name="hub_handle_tap_check">「確認」をタップして使用可否を確かめます</string>
+    <string name="seedview_warn_title">リカバリーフレーズは絶対に共有しないでください</string>
+    <string name="seedview_warn_body">この単語を知っている人は誰でも資金を盗めます。</string>
+    <string name="seedview_words_title">%1$d 語のリカバリーフレーズ</string>
+    <string name="seedview_write_down">この単語を順番どおりに書き留め、安全に保管してください。</string>
+
+    <!-- Quick start of a restored wallet (multi-wallet step 1, Task 15) -->
+    <string name="quickstart_title">残高を早く表示しますか？</string>
+    <string name="quickstart_body">このウォレットは同期しながら、この端末上で非公開に履歴を見つけます。時間がかかる場合があります。代わりに、今すぐサーバーに残高を問い合わせることもできます。この金額は未確認で、同期で証明されるまで使えません。</string>
+    <string name="quickstart_skip">スキップして非公開で同期</string>
+    <string name="quickstart_own_node">自分のノードに問い合わせる（%1$s）</string>
+    <string name="quickstart_own_node_note">あなたのノードがこのウォレットのアドレスを受け取ります。digiscope.me には何も送信されません。</string>
+    <string name="quickstart_digiscope">digiscope.me に問い合わせる</string>
+    <string name="quickstart_digiscope_disclosure">このウォレットのアドレスを digiscope.me に送信します。digiscope.me はこのウォレットをあなたの他のウォレットと結び付けられるようになります。</string>
+    <string name="quickstart_digiscope_confirm">アドレスを digiscope.me に送信</string>
+    <string name="quickstart_running">残高を確認しています…</string>
+    <string name="quickstart_found">%2$s の報告：%1$s DGB（未確認）</string>
+    <string name="quickstart_found_dd">および %1$s DigiDollar（未確認）</string>
+    <string name="quickstart_failed">問い合わせに応答がありませんでした。ウォレットは同期しながら残高を見つけます。</string>
+    <string name="quickstart_continue">続ける</string>
+    <string name="quickstart_unverified">%2$s の報告：%1$s DGB（未確認）</string>
+    <string name="quickstart_unverified_dd">%1$s DigiDollar の報告（未確認）</string>
+    <string name="quickstart_unverified_sub">同期で証明されるまで使えず、残高にも含まれません。</string>
+    <string name="quickstart_running_skip">待たずに続ける</string>
+    <string name="quickstart_incomplete">問い合わせを完了できなかったため、金額は表示しません。ウォレットは同期しながら残高を見つけます。</string>
 </resources>

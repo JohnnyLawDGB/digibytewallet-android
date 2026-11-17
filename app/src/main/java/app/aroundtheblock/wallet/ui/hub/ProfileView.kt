@@ -60,6 +60,7 @@ fun HubAccountStrip(viewModel: ProfileViewModel) {
     val authTitle = stringResource(R.string.did_auth_title)
     val authSubtitle = stringResource(R.string.did_auth_subtitle, "DigiScope")
     var showHandleSheet by remember { mutableStateOf(false) }
+    val walletName = app.aroundtheblock.wallet.ui.wallets.rememberActiveWalletName()
 
     when (val state = profileState) {
         is ProfileState.NotLoggedIn -> AccountPromptCard(
@@ -102,6 +103,18 @@ fun HubAccountStrip(viewModel: ProfileViewModel) {
         // Signed in with a handle: the chat is the content. Loading or a failed profile load
         // shows nothing here; the tab reloads the profile each time it opens.
         else -> Unit
+    }
+
+    // Which wallet the Hub account is signed in as, once signed in (with or without a handle).
+    if (profileState is ProfileState.NoHandle || profileState is ProfileState.HasProfile) {
+        walletName?.let { name ->
+            Text(
+                text = stringResource(R.string.hub_signed_in_wallet, name),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
+            )
+        }
     }
 }
 
@@ -212,13 +225,13 @@ private fun RegisterHandleContent(
         // Header
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
-                text = "Choose Your Handle",
+                text = stringResource(R.string.hub_handle_title),
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface
             )
             Text(
-                text = "Your pseudonymous community identity. 3-20 characters, alphanumeric and underscore only.",
+                text = stringResource(R.string.hub_handle_intro),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -255,8 +268,8 @@ private fun RegisterHandleContent(
             OutlinedTextField(
                 value = handleInput,
                 onValueChange = onHandleChange,
-                label = { Text("Handle") },
-                placeholder = { Text("e.g. DigiByte_Fan") },
+                label = { Text(stringResource(R.string.hub_handle_field_label)) },
+                placeholder = { Text(stringResource(R.string.hub_handle_field_hint)) },
                 leadingIcon = {
                     Text(
                         "@",
@@ -277,13 +290,13 @@ private fun RegisterHandleContent(
                         )
                         handleAvailable == true -> Icon(
                             Icons.Default.CheckCircle,
-                            contentDescription = "Available",
+                            contentDescription = stringResource(R.string.hub_handle_available_desc),
                             tint = DigiByteGreen,
                             modifier = Modifier.size(20.dp)
                         )
                         handleAvailable == false -> Icon(
                             Icons.Default.Cancel,
-                            contentDescription = "Taken",
+                            contentDescription = stringResource(R.string.hub_handle_taken_desc),
                             tint = MaterialTheme.colorScheme.error,
                             modifier = Modifier.size(20.dp)
                         )
@@ -310,14 +323,14 @@ private fun RegisterHandleContent(
             // Availability status text
             when (handleAvailable) {
                 true -> Text(
-                    "@$handleInput is available!",
+                    stringResource(R.string.hub_handle_is_available, handleInput),
                     style = MaterialTheme.typography.labelSmall,
                     color = DigiByteGreen
                 )
                 false -> {} // Error message shown below
                 null -> if (handleInput.length in 3..20) {
                     Text(
-                        "Tap \"Check\" to verify availability",
+                        stringResource(R.string.hub_handle_tap_check),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -364,7 +377,7 @@ private fun RegisterHandleContent(
                 enabled = handleInput.length >= 3 && !isCheckingHandle && !isRegistering,
                 modifier = Modifier.weight(1f)
             ) {
-                Text("Check")
+                Text(stringResource(R.string.hub_handle_check))
             }
 
             // Register
@@ -381,7 +394,7 @@ private fun RegisterHandleContent(
                         strokeWidth = 2.dp
                     )
                 } else {
-                    Text("Register", color = Color.White)
+                    Text(stringResource(R.string.hub_handle_register), color = Color.White)
                 }
             }
         }

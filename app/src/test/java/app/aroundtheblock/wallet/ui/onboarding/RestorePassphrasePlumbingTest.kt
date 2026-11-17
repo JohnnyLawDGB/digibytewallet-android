@@ -60,7 +60,7 @@ class RestorePassphrasePlumbingTest {
     }
 
     @Test fun `the passphrase entered at restore reaches recoverWallet`() {
-        val vm = OnboardingViewModel(walletManager, pinManager, scanService)
+        val vm = onboardingViewModel(walletManager, pinManager, scanService)
         vm.setRecoveryMnemonic("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about")
         vm.setPassphrase("correct horse")
         vm.setRecoveryTimestamp(1767225600L)
@@ -74,7 +74,7 @@ class RestorePassphrasePlumbingTest {
     }
 
     @Test fun `no passphrase restores with null, exactly like a wallet created without one`() {
-        val vm = OnboardingViewModel(walletManager, pinManager, scanService)
+        val vm = onboardingViewModel(walletManager, pinManager, scanService)
         vm.setRecoveryMnemonic("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about")
         vm.setPassphrase(null)
 
@@ -85,7 +85,7 @@ class RestorePassphrasePlumbingTest {
     }
 
     @Test fun `the restore never runs the server scan on its own`() {
-        val vm = OnboardingViewModel(walletManager, pinManager, scanService)
+        val vm = onboardingViewModel(walletManager, pinManager, scanService)
         vm.setRecoveryMnemonic("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about")
 
         restore(vm)
@@ -105,7 +105,7 @@ class RestorePassphrasePlumbingTest {
         every { empty.anyBackendUnreachable } returns false
         io.mockk.coEvery { scanService.scan(any(), any()) } returns empty
 
-        val vm = OnboardingViewModel(walletManager, pinManager, scanService)
+        val vm = onboardingViewModel(walletManager, pinManager, scanService)
         vm.setRecoveryMnemonic("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about")
         vm.setPassphrase("correct horse")
         vm.runRecoveryScan()

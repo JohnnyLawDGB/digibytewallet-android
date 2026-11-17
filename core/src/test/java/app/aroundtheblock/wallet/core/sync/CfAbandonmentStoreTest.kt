@@ -298,6 +298,8 @@ internal fun fakeContext(): Context {
     every { ctx.getSharedPreferences(any(), any()) } answers {
         stores.getOrPut(firstArg()) { FakeSharedPreferences() }
     }
+    // Its own application context, so ActiveWallet reads the network from these stores.
+    every { ctx.applicationContext } returns ctx
     return ctx
 }
 

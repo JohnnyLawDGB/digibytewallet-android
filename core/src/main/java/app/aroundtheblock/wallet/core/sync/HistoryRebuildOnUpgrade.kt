@@ -4,7 +4,11 @@ import android.content.Context
 import android.content.SharedPreferences
 import app.aroundtheblock.wallet.core.OutgoingTxStore
 import app.aroundtheblock.wallet.core.bridge.NativeBridge
-import app.aroundtheblock.wallet.core.networkSuffix
+import app.aroundtheblock.wallet.core.wallets.ActiveWallet
+import app.aroundtheblock.wallet.core.wallets.StoreScope
+import app.aroundtheblock.wallet.core.wallets.WalletScope
+import app.aroundtheblock.wallet.core.wallets.WalletStores
+import app.aroundtheblock.wallet.core.wallets.storageSuffix
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -110,7 +114,7 @@ object HistoryRebuildOnUpgrade {
     /** The outcome of the most recent evaluation in this process, null before the first. */
     val lastOutcome: StateFlow<Outcome?> = _lastOutcome.asStateFlow()
 
-    /** Per network (suffix), the outcome already reached in this process. See [beforeWalletLoad]. */
+    /** Per wallet and network (its [storageSuffix]), the outcome already reached in this process. See [beforeWalletLoad]. */
     private val evaluated = ConcurrentHashMap<String, Outcome>()
 
     // ── Pure parts ───────────────────────────────────────────────────────────
@@ -215,14 +219,14 @@ object HistoryRebuildOnUpgrade {
 
     // ── Android runner ───────────────────────────────────────────────────────
 
-    private fun statePrefs(context: Context): SharedPreferences =
-        context.getSharedPreferences(PREFS_BASE + networkSuffix(context), Context.MODE_PRIVATE)
+    private fun statePrefs(context: Context, scope: WalletScope): SharedPreferences =
+        context.getSharedPreferences(WalletStores.prefsName(PREFS_BASE, scope), Context.MODE_PRIVATE)
 
-    private fun syncPrefs(context: Context): SharedPreferences =
-        context.getSharedPreferences(SYNC_PREFS_BASE + networkSuffix(context), Context.MODE_PRIVATE)
+    private fun syncPrefs(context: Context, scope: WalletScope): SharedPreferences =
+        context.getSharedPreferences(WalletStores.prefsName(SYNC_PREFS_BASE, scope), Context.MODE_PRIVATE)
 
-    fun readState(context: Context): State {
-        val p = statePrefs(context)
+    fun readState(context: Context, scope: WalletScope = ActiveWallet.scope(context)): State {
+        val p = statePrefs(context, scope)
         return State(
             done = p.getBoolean(KEY_DONE, false),
             inProgress = p.getBoolean(KEY_IN_PROGRESS, false),
@@ -241,10 +245,11 @@ object HistoryRebuildOnUpgrade {
     fun runAtProcessStart(
         context: Context,
         nowMs: Long = System.currentTimeMillis(),
+        scope: WalletScope = ActiveWallet.scope(context),
         checkpointTimeAtOrBelow: (Long) -> Long = ::nativeCheckpointTimeAtOrBelow,
     ): Outcome {
-        val outcome = evaluate(context, nowMs, checkpointTimeAtOrBelow)
-        evaluated[networkSuffix(context)] = outcome
+        val outcome = evaluate(context, nowMs, scope, checkpointTimeAtOrBelow)
+        evaluated[storageSuffix(scope, StoreScope.WALLET_AND_NETWORK)] = outcome
         return outcome
     }
 
@@ -258,10 +263,11 @@ object HistoryRebuildOnUpgrade {
     fun beforeWalletLoad(
         context: Context,
         nowMs: Long = System.currentTimeMillis(),
+        scope: WalletScope = ActiveWallet.scope(context),
         checkpointTimeAtOrBelow: (Long) -> Long = ::nativeCheckpointTimeAtOrBelow,
     ): Outcome {
-        evaluated[networkSuffix(context)]?.let { return it }
-        return runAtProcessStart(context, nowMs, checkpointTimeAtOrBelow)
+        evaluated[storageSuffix(scope, StoreScope.WALLET_AND_NETWORK)]?.let { return it }
+        return runAtProcessStart(context, nowMs, scope, checkpointTimeAtOrBelow)
     }
 
     /** The native table lookup; 0 when the library cannot answer. The native library is loaded
@@ -269,15 +275,15 @@ object HistoryRebuildOnUpgrade {
     private fun nativeCheckpointTimeAtOrBelow(height: Long): Long =
         runCatching { NativeBridge.getCheckpointTimeAtOrBelow(height) }.getOrDefault(0L)
 
-    private fun evaluate(context: Context, nowMs: Long, checkpointTimeAtOrBelow: (Long) -> Long): Outcome {
-        val state = readState(context)
+    private fun evaluate(context: Context, nowMs: Long, scope: WalletScope, checkpointTimeAtOrBelow: (Long) -> Long): Outcome {
+        val state = readState(context, scope)
         if (state.done) return publish(Outcome(OutcomeKind.NOT_NEEDED))
 
-        val sync = syncPrefs(context)
+        val sync = syncPrefs(context, scope)
         // The file store (TX-CKPT-CAP), migrating a legacy hex key once; an unreadable one is empty.
-        val cacheBytes = runCatching { SavedTransactionsStore.load(context) }.getOrNull()
+        val cacheBytes = runCatching { SavedTransactionsStore.load(context, scope) }.getOrNull()
         val summary = summarize(cacheBytes)
-        val pending = runCatching { OutgoingTxStore(context).pendingTxids().size }.getOrDefault(0)
+        val pending = runCatching { OutgoingTxStore(context, scope).pendingTxids().size }.getOrDefault(0)
 
         return when (decide(state, summary, pending, nowMs)) {
             Decision.NOT_NEEDED -> {
@@ -287,7 +293,7 @@ object HistoryRebuildOnUpgrade {
                 // land, `done` is not stamped either.
                 check(sync.edit().commit()) { "sync state not durable; not marking the rebuild done" }
                 check(
-                    statePrefs(context).edit()
+                    statePrefs(context, scope).edit()
                         .putBoolean(KEY_DONE, true)
                         .putBoolean(KEY_IN_PROGRESS, false)
                         .putLong(KEY_DEFERRED_SINCE_MS, 0L)
@@ -301,13 +307,13 @@ object HistoryRebuildOnUpgrade {
                 // move it (that would shorten the cap once the clock is right again); a clock that
                 // was ahead at the stamp lengthens the deferral instead, which only delays.
                 if (state.deferredSinceMs <= 0L) {
-                    statePrefs(context).edit().putLong(KEY_DEFERRED_SINCE_MS, nowMs).commit()
+                    statePrefs(context, scope).edit().putLong(KEY_DEFERRED_SINCE_MS, nowMs).commit()
                 }
                 log("rebuild deferred: $pending recorded send(s) not settled")
                 publish(Outcome(OutcomeKind.DEFERRED))
             }
             Decision.RUN -> {
-                run(context, state, summary, checkpointTimeAtOrBelow)
+                run(context, state, summary, scope, checkpointTimeAtOrBelow)
                 publish(Outcome(OutcomeKind.RAN, summary.records))
             }
         }
@@ -323,10 +329,16 @@ object HistoryRebuildOnUpgrade {
      * checkpoint more than a week older) is then at or below the floor height whatever the records'
      * times say (zero, or later than their block).
      */
-    private fun run(context: Context, state: State, summary: CacheSummary, checkpointTimeAtOrBelow: (Long) -> Long) {
+    private fun run(
+        context: Context,
+        state: State,
+        summary: CacheSummary,
+        scope: WalletScope,
+        checkpointTimeAtOrBelow: (Long) -> Long,
+    ) {
         val floor = floorFromDiscardedCache(state, summary, checkpointTimeAtOrBelow)
         check(
-            statePrefs(context).edit()
+            statePrefs(context, scope).edit()
                 .putBoolean(KEY_IN_PROGRESS, true)
                 .putLong(KEY_FLOOR_HINT, floor.height)
                 .putLong(KEY_FLOOR_TIME, floor.time)
@@ -338,9 +350,9 @@ object HistoryRebuildOnUpgrade {
             "rebuilding history from the chain: discarding ${summary.records} cached record(s), " +
                 "floor height ${floor.height}, floor time ${floor.time} (checkpoint time ${floor.checkpointTime})",
         )
-        check(clearTransactionCacheForRebuild(context)) { "transaction cache clear did not land; retried next start" }
+        check(clearTransactionCacheForRebuild(context, scope)) { "transaction cache clear did not land; retried next start" }
         check(
-            statePrefs(context).edit()
+            statePrefs(context, scope).edit()
                 .putBoolean(KEY_DONE, true)
                 .putBoolean(KEY_IN_PROGRESS, false)
                 .putLong(KEY_DEFERRED_SINCE_MS, 0L)
@@ -353,8 +365,8 @@ object HistoryRebuildOnUpgrade {
      * is nothing to rebuild. [forgetFloor] drops the floor hints too, for a different wallet
      * (create, recover, seed change); a manual rebuild of the same wallet keeps them.
      */
-    fun markNotNeeded(context: Context, forgetFloor: Boolean = false): Boolean {
-        val e = statePrefs(context).edit()
+    fun markNotNeeded(context: Context, forgetFloor: Boolean = false, scope: WalletScope = ActiveWallet.scope(context)): Boolean {
+        val e = statePrefs(context, scope).edit()
             .putBoolean(KEY_DONE, true)
             .putBoolean(KEY_IN_PROGRESS, false)
             .putLong(KEY_DEFERRED_SINCE_MS, 0L)
@@ -370,8 +382,8 @@ object HistoryRebuildOnUpgrade {
      * saved tip. A persisted floor already at or below the anchor is kept. Returns whether the write
      * landed.
      */
-    fun requestFloorAtAnchor(context: Context): Boolean =
-        statePrefs(context).edit().putBoolean(KEY_FLOOR_PENDING, true).commit()
+    fun requestFloorAtAnchor(context: Context, scope: WalletScope = ActiveWallet.scope(context)): Boolean =
+        statePrefs(context, scope).edit().putBoolean(KEY_FLOOR_PENDING, true).commit()
 
     /**
      * Carry the compact-filter floor down to [height] for the next rebuild: the floor height and time
@@ -383,10 +395,11 @@ object HistoryRebuildOnUpgrade {
     fun lowerFloorTo(
         context: Context,
         height: Long,
+        scope: WalletScope = ActiveWallet.scope(context),
         checkpointTimeAtOrBelow: (Long) -> Long = ::nativeCheckpointTimeAtOrBelow,
     ): Boolean {
         if (height <= 0L) return false
-        val p = statePrefs(context)
+        val p = statePrefs(context, scope)
         val hint = lowerFloor(p.getLong(KEY_FLOOR_HINT, 0L), height)
         val checkpointTime = runCatching { checkpointTimeAtOrBelow(hint) }.getOrDefault(0L)
         val time = lowerFloor(p.getLong(KEY_FLOOR_TIME, 0L), checkpointTime)
@@ -398,21 +411,21 @@ object HistoryRebuildOnUpgrade {
     }
 
     /** True while a rebuild has started clearing and not finished (the cache may be partial). */
-    fun isInProgress(context: Context): Boolean = statePrefs(context).getBoolean(KEY_IN_PROGRESS, false)
+    fun isInProgress(context: Context, scope: WalletScope = ActiveWallet.scope(context)): Boolean = statePrefs(context, scope).getBoolean(KEY_IN_PROGRESS, false)
 
     /** The pending floor height for the compact-filter scan, 0 = none. */
-    fun floorHint(context: Context): Long = statePrefs(context).getLong(KEY_FLOOR_HINT, 0L)
+    fun floorHint(context: Context, scope: WalletScope = ActiveWallet.scope(context)): Long = statePrefs(context, scope).getLong(KEY_FLOOR_HINT, 0L)
 
     /** The floor time for the native checkpoint anchor (unix seconds), 0 = none. */
-    fun floorTime(context: Context): Long = statePrefs(context).getLong(KEY_FLOOR_TIME, 0L)
+    fun floorTime(context: Context, scope: WalletScope = ActiveWallet.scope(context)): Long = statePrefs(context, scope).getLong(KEY_FLOOR_TIME, 0L)
 
     /** A recorded floor (height or time) not yet carried into the scan start. */
-    fun floorPending(context: Context): Boolean = statePrefs(context).getBoolean(KEY_FLOOR_PENDING, false)
+    fun floorPending(context: Context, scope: WalletScope = ActiveWallet.scope(context)): Boolean = statePrefs(context, scope).getBoolean(KEY_FLOOR_PENDING, false)
 
-    /** The floor has been carried into `cf_birth_height`; forget the height and the pending marker.
+    /** The floor has been carried into the wallet's floor key ([WalletStores.cfBirthHeightKey] of [scope]); forget the height and the pending marker.
      *  The floor time stays: it keeps the header anchor low on later loads. */
-    fun clearFloorHint(context: Context) {
-        statePrefs(context).edit().remove(KEY_FLOOR_HINT).remove(KEY_FLOOR_PENDING).commit()
+    fun clearFloorHint(context: Context, scope: WalletScope = ActiveWallet.scope(context)) {
+        statePrefs(context, scope).edit().remove(KEY_FLOOR_HINT).remove(KEY_FLOOR_PENDING).commit()
     }
 
     private fun publish(outcome: Outcome): Outcome {
@@ -430,8 +443,8 @@ object HistoryRebuildOnUpgrade {
      * and the process exit is cleared again by the runner at the next start. Returns whether the
      * commit landed.
      */
-    fun armRerun(context: Context): Boolean =
-        statePrefs(context).edit()
+    fun armRerun(context: Context, scope: WalletScope = ActiveWallet.scope(context)): Boolean =
+        statePrefs(context, scope).edit()
             .putBoolean(KEY_DONE, false)
             .putBoolean(KEY_IN_PROGRESS, true)
             .commit()
@@ -445,8 +458,8 @@ object HistoryRebuildOnUpgrade {
      * the rerun stays armed, which only defers the rebuild to the next start (its run carries the
      * cache's floor before it clears).
      */
-    fun disarmRerun(context: Context, prior: State): Boolean =
-        statePrefs(context).edit()
+    fun disarmRerun(context: Context, prior: State, scope: WalletScope = ActiveWallet.scope(context)): Boolean =
+        statePrefs(context, scope).edit()
             .putBoolean(KEY_DONE, prior.done)
             .putBoolean(KEY_IN_PROGRESS, prior.inProgress)
             .putLong(KEY_FLOOR_HINT, prior.floorHint)
@@ -462,13 +475,14 @@ object HistoryRebuildOnUpgrade {
      */
     fun floorFromCache(
         context: Context,
+        scope: WalletScope = ActiveWallet.scope(context),
         checkpointTimeAtOrBelow: (Long) -> Long = ::nativeCheckpointTimeAtOrBelow,
     ): Boolean {
         // The cache lives in the TX-CKPT-CAP file store on this line, as run() reads it: reading the
         // old prefs key here would summarize nothing and carry no floor (the bug FLOOR_FROM_CACHE fixes).
-        val summary = summarize(runCatching { SavedTransactionsStore.load(context) }.getOrNull())
-        val floor = floorFromDiscardedCache(readState(context), summary, checkpointTimeAtOrBelow)
-        val landed = statePrefs(context).edit()
+        val summary = summarize(runCatching { SavedTransactionsStore.load(context, scope) }.getOrNull())
+        val floor = floorFromDiscardedCache(readState(context, scope), summary, checkpointTimeAtOrBelow)
+        val landed = statePrefs(context, scope).edit()
             .putLong(KEY_FLOOR_HINT, floor.height)
             .putLong(KEY_FLOOR_TIME, floor.time)
             .putBoolean(KEY_FLOOR_PENDING, floor.pending)
@@ -487,8 +501,12 @@ object HistoryRebuildOnUpgrade {
      * first; the flag is dropped only after it returned, so a clear that throws is retried at the
      * next start. Returns whether a clear ran.
      */
-    suspend fun clearRoomTransactionsIfPending(context: Context, clear: suspend () -> Unit): Boolean {
-        val p = statePrefs(context)
+    suspend fun clearRoomTransactionsIfPending(
+        context: Context,
+        scope: WalletScope = ActiveWallet.scope(context),
+        clear: suspend () -> Unit,
+    ): Boolean {
+        val p = statePrefs(context, scope)
         if (!p.getBoolean(KEY_ROOM_CLEAR_PENDING, false)) return false
         val ok = runCatching { clear() }
             .onFailure { runCatching { android.util.Log.w(TAG, "transaction table clear failed; retried next start", it) } }
@@ -511,13 +529,12 @@ object HistoryRebuildOnUpgrade {
  * network: the tx cache, the filter-header chain, the saved block headers, `has_synced`,
  * `last_balance`, `last_dd_balance`, the CF scan ledger and its surfaced band. Shared by the manual
  * [app.aroundtheblock.wallet.core.WalletManager.rebuildFromChainRescan] and [HistoryRebuildOnUpgrade] so the two
- * cannot drift. It does NOT touch recorded sends ([OutgoingTxStore]) or `cf_birth_height`; the
+ * cannot drift. It does NOT touch recorded sends ([OutgoingTxStore]) or the wallet's floor key ([WalletStores.cfBirthHeightKey]); the
  * manual path handles those itself. Synchronous (`commit`): callers may end the process next.
  * Returns false when the prefs commit did not land or a store file is still on disk.
  */
-fun clearTransactionCacheForRebuild(context: Context): Boolean {
-    val suffix = networkSuffix(context)
-    val committed = context.getSharedPreferences("dgb_sync_data$suffix", Context.MODE_PRIVATE).edit()
+fun clearTransactionCacheForRebuild(context: Context, scope: WalletScope = ActiveWallet.scope(context)): Boolean {
+    val committed = context.getSharedPreferences(WalletStores.prefsName("dgb_sync_data", scope), Context.MODE_PRIVATE).edit()
         .remove("saved_transactions")   // legacy key of the tx graph — the file store is authoritative now
         .remove("saved_filter_headers") // CF chain re-anchors at the floor
         .remove("saved_blocks")         // legacy key belt-and-suspenders — file store is authoritative now
@@ -526,9 +543,9 @@ fun clearTransactionCacheForRebuild(context: Context): Boolean {
         .remove("last_balance")
         .remove("last_dd_balance")      // the DigiDollar balance snapshot the wallet screen starts from
         .commit()
-    val txCacheGone = SavedTransactionsStore.delete(context) // the tx graph — re-derived from chain (TX-CKPT-CAP file)
-    FilterHeaderStore.delete(context) // the file-backed CF-header chain (synchronous)
-    SavedBlockStore.delete(context)   // and the file-backed saved-blocks window (I2 fix)
+    val txCacheGone = SavedTransactionsStore.delete(context, scope) // the tx graph — re-derived from chain (TX-CKPT-CAP file)
+    FilterHeaderStore.delete(context, scope) // the file-backed CF-header chain (synchronous)
+    SavedBlockStore.delete(context, scope)   // and the file-backed saved-blocks window (I2 fix)
     // …and the file-backed CF SCAN LEDGER. This is load-bearing, not tidiness
     // (paced-convoy fetch, spec Part E / GATE 3(iii)): on the next start startSync() Inits
     // the native ledger fresh at `abandonedBelow = 0`, and SyncService then feeds whatever
@@ -539,14 +556,14 @@ fun clearTransactionCacheForRebuild(context: Context): Boolean {
     // it" half of the recovery guarantee would be a lie, and the B2 valve's residual (it can
     // only prove refusal by the peers it is connected to, so a servable height CAN be
     // abandoned) would become permanent silent loss instead of a recoverable inconvenience.
-    CfScanLedgerStore.delete(context)
+    CfScanLedgerStore.delete(context, scope)
     // The surfaced band goes with it: after the re-Init `abandonedBelow` really is 0, so there
     // is nothing left to recover and nothing to nag about.
-    CfAbandonmentStore.clear(context)
+    CfAbandonmentStore.clear(context, scope)
     // Read back: a store file that is still there means the clear did not land.
     val filesGone = listOf(
-        FilterHeaderStore.file(context), SavedBlockStore.file(context), CfScanLedgerStore.file(context),
-        SavedTransactionsStore.file(context),
+        FilterHeaderStore.file(context, scope), SavedBlockStore.file(context, scope), CfScanLedgerStore.file(context, scope),
+        SavedTransactionsStore.file(context, scope),
     ).none { runCatching { it.exists() }.getOrDefault(true) }
     return committed && txCacheGone && filesGone
 }

@@ -61,6 +61,7 @@ fun SeedVerifyScreen(
         if (showResult) {
             VerifyResultScreen(
                 allCorrect = allCorrect,
+                successLabels = verifySuccessLabels(viewModel.mode),
                 onRetry = {
                     currentQuestion = 0
                     selectedAnswer = null
@@ -231,9 +232,24 @@ private fun QuestionCard(
     }
 }
 
+/** The success screen's body and button text. */
+internal data class VerifySuccessLabels(val body: Int, val button: Int)
+
+/**
+ * What the success screen says comes next. The first run sets up the PIN; adding a wallet never
+ * does — one app PIN guards every wallet, so an add neither creates nor changes it.
+ */
+internal fun verifySuccessLabels(mode: OnboardingMode): VerifySuccessLabels =
+    if (mode == OnboardingMode.ADD) {
+        VerifySuccessLabels(R.string.verify_success_body_add, R.string.recover_continue)
+    } else {
+        VerifySuccessLabels(R.string.verify_success_body, R.string.verify_setup_pin)
+    }
+
 @Composable
 private fun VerifyResultScreen(
     allCorrect: Boolean,
+    successLabels: VerifySuccessLabels,
     onRetry: () -> Unit,
     onShowPhrase: () -> Unit,
     onContinue: () -> Unit
@@ -259,7 +275,7 @@ private fun VerifyResultScreen(
 
         Text(
             text = if (allCorrect)
-                stringResource(R.string.verify_success_body)
+                stringResource(successLabels.body)
             else
                 stringResource(R.string.verify_retry_body),
             style = MaterialTheme.typography.bodyLarge,
@@ -279,7 +295,7 @@ private fun VerifyResultScreen(
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = DigiByteBlue)
             ) {
-                Text(stringResource(R.string.verify_setup_pin), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(successLabels.button), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             }
         } else {
             Button(

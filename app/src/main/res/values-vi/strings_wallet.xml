@@ -56,6 +56,7 @@
     <string name="verify_success_title">Đã xác minh!</string>
     <string name="verify_retry_title">Hãy thử lại</string>
     <string name="verify_success_body">Cụm từ khôi phục của bạn đã được ghi lại an toàn. Bây giờ hãy thiết lập mã PIN.</string>
+    <string name="verify_success_body_add">Cụm từ khôi phục của bạn đã được ghi lại an toàn. Mã PIN của ứng dụng đã bảo vệ ví này.</string>
     <string name="verify_retry_body">Một số câu trả lời chưa đúng. Vui lòng kiểm tra lại cụm từ khôi phục và thử lại.</string>
     <string name="verify_setup_pin">Thiết lập mã PIN</string>
     <string name="verify_try_again">Thử lại</string>
@@ -432,9 +433,9 @@
     <string name="sec_biometric_no">Không khả dụng trên thiết bị này</string>
     <string name="sec_autolock">Thời gian tự khóa</string>
     <string name="sec_wipe_after">Xóa sau %1$d lần sai PIN</string>
-    <string name="sec_wipe_after_on">Bật: ví sẽ bị xóa sau %1$d lần nhập sai PIN</string>
+    <string name="sec_wipe_after_on_all">Bật: mọi ví sẽ bị xóa sau %1$d lần nhập sai PIN</string>
     <string name="sec_wipe_after_off">Tắt: thêm lớp bảo vệ chống dò PIN</string>
-    <string name="sec_wipe_after_body">Khi bật, %1$d lần nhập sai PIN liên tiếp sẽ XÓA VĨNH VIỄN ví này (cụm từ gốc, khóa và lịch sử) khỏi thiết bị.\n\nTrên thiết bị, điều này không thể hoàn tác. Tiền của bạn chỉ có thể khôi phục từ cụm từ khôi phục.</string>
+    <string name="sec_wipe_after_body_all">Khi bật, %1$d lần nhập sai PIN liên tiếp sẽ XÓA VĨNH VIỄN mọi ví trên thiết bị này: cụm từ khôi phục, khóa và lịch sử.\n\nTrên thiết bị, điều này không thể hoàn tác. Tiền chỉ có thể khôi phục từ cụm từ khôi phục của từng ví.</string>
     <string name="sec_wipe_after_ack">Tôi đã sao lưu cụm từ khôi phục</string>
     <string name="sec_wipe_after_enabled">Đã bật xóa sau %1$d lần</string>
     <string name="sec_recovery_phrase">Cụm từ khôi phục</string>
@@ -445,7 +446,7 @@
     <string name="sec_danger_zone">Vùng nguy hiểm</string>
     <string name="sec_wipe_wallet">Xóa ví</string>
     <string name="sec_wipe_wallet_sub">Xóa toàn bộ dữ liệu ví khỏi thiết bị này</string>
-    <string name="sec_wipe_wallet_body">Không thể hoàn tác.\n\nToàn bộ dữ liệu ví, khóa và lịch sử giao dịch sẽ bị xóa vĩnh viễn khỏi thiết bị này.\n\nHãy chắc chắn bạn đã sao lưu cụm từ khôi phục trước khi tiếp tục.</string>
+    <string name="sec_wipe_all_body">Không thể hoàn tác.\n\nMọi ví trên thiết bị này sẽ bị xóa: cụm từ khôi phục, khóa và lịch sử giao dịch.\n\nHãy chắc chắn bạn đã sao lưu cụm từ khôi phục của từng ví trước khi tiếp tục.</string>
     <string name="sec_wipe_everything">Xóa tất cả</string>
     <string name="sec_verify_pin">Xác minh mã PIN hiện tại</string>
     <string name="sec_verify_pin_sub">Nhập mã PIN hiện tại để tiếp tục</string>
@@ -743,4 +744,97 @@
     <string name="sec_seed_key_no_lock">Chưa gắn: điện thoại này không có khóa màn hình. Hãy đặt trong cài đặt Android.</string>
     <string name="sec_seed_key_lock_removed">Khóa màn hình đã bị gỡ sau khi ví này được thiết lập, nên khóa của ví không còn mở được nữa, kể cả với khóa màn hình mới. Khi ví vẫn đang mở, hãy kiểm tra rằng cụm từ khôi phục đã được ghi lại, hoặc chuyển tiền của bạn ngay: lần tới ứng dụng khởi động, ví sẽ cần cụm từ khôi phục.</string>
     <string name="sec_seed_key_cannot_bind">Chưa gắn: một khóa còn lại từ khóa màn hình trước không còn hoạt động, nên khóa của ví này không thể gắn trên bản cài đặt này. Xóa ví rồi khôi phục từ cụm từ khôi phục sẽ gắn được.</string>
+
+    <!-- Multi-wallet: adding a wallet through onboarding (ADD mode). -->
+    <string name="wallet_default_name">Ví %1$d</string>
+    <string name="wallet_add_title">Thêm ví</string>
+    <string name="wallet_add_create">Tạo ví mới</string>
+    <string name="wallet_add_restore">Khôi phục ví từ cụm từ khôi phục</string>
+    <string name="wallet_add_pin_note">Mã PIN của ứng dụng bảo vệ mọi ví. Bạn không cần đặt mã PIN mới.</string>
+    <string name="wallet_add_duplicate">Cụm từ khôi phục này đã có trong ứng dụng với tên “%1$s”.</string>
+    <string name="wallet_add_duplicate_switch">Mở %1$s</string>
+    <string name="wallet_add_cap">Mạng này đã có %1$d ví. Hãy xóa một ví để thêm ví khác.</string>
+    <string name="wallet_add_saving">Đang thêm ví…</string>
+    <string name="wallet_add_failed">Không thể thêm ví. Không có gì bị thay đổi.</string>
+    <!-- Wallet switcher, Manage wallets and removing a wallet (multi-wallet). -->
+    <string name="wallet_chip_cd">Ví: %1$s. Chuyển ví</string>
+    <string name="wallet_switcher_title">Các ví của bạn</string>
+    <string name="wallet_switcher_active">Đang dùng</string>
+    <string name="wallet_switcher_not_synced">Chưa đồng bộ</string>
+    <string name="wallet_switcher_balance_dgb">%1$s DGB</string>
+    <string name="wallet_switcher_balance_with_dd">%1$s · %2$s DigiDollar</string>
+    <string name="wallet_switcher_both_networks">Dùng trên mainnet và testnet</string>
+    <string name="wallet_switcher_add">Thêm ví</string>
+    <string name="wallet_switcher_manage">Quản lý</string>
+    <string name="wallet_switcher_failed">Không thể mở ví đó. Không có gì thay đổi.</string>
+    <string name="wallet_switcher_digistamp_note">Nếu bạn dùng DigiStamp trong trình duyệt, nó có thể vẫn đăng nhập bằng ví bạn vừa chuyển đi.</string>
+    <string name="wallet_manage_title">Quản lý ví</string>
+    <string name="wallet_manage_rename">Đổi tên</string>
+    <string name="wallet_manage_move_up">Lên trên</string>
+    <string name="wallet_manage_move_down">Xuống dưới</string>
+    <string name="wallet_manage_remove">Xóa</string>
+    <string name="wallet_manage_rename_title">Đổi tên ví</string>
+    <string name="wallet_manage_rename_hint">Tối đa %1$d ký tự, và không trùng tên ví khác.</string>
+    <string name="wallet_manage_rename_invalid">Dùng từ 1 đến %1$d ký tự và tên không ví nào khác có.</string>
+    <string name="wallet_manage_save">Lưu</string>
+    <string name="wallet_remove_title">Xóa %1$s?</string>
+    <string name="wallet_remove_backup_warning">Xóa ví sẽ xóa nó khỏi điện thoại này. Chỉ cụm từ khôi phục mới có thể lấy lại ví, vì vậy hãy chắc chắn bạn đã ghi lại cụm từ trước khi tiếp tục.</string>
+    <string name="wallet_remove_both_networks">Ví này được dùng trên mainnet và testnet. Xóa ví sẽ xóa khỏi cả hai.</string>
+    <string name="wallet_remove_last">Đây là ví cuối cùng trên điện thoại này. Xóa ví sẽ xóa ứng dụng, kể cả mã PIN của ứng dụng.</string>
+    <string name="wallet_remove_continue">Tôi đã có cụm từ</string>
+    <string name="wallet_remove_type_prompt">Nhập tên ví, %1$s, để xác nhận.</string>
+    <string name="wallet_remove_name_label">Tên ví</string>
+    <string name="wallet_remove_confirm">Xóa ví</string>
+    <string name="wallet_remove_auth_subtitle">Xác nhận để xóa ví này</string>
+    <string name="wallet_remove_removing">Đang xóa ví…</string>
+    <string name="wallet_remove_done">Đã xóa ví.</string>
+    <string name="wallet_remove_db_key_kept">Ví đã khỏi danh sách. Một phần chỉ có thể xóa khi ứng dụng khởi động lại, và việc đó tự diễn ra.</string>
+    <string name="wallet_remove_failed">Ví đã khỏi danh sách nhưng chưa được xóa hết. Phần còn lại sẽ được xóa vào lần khởi động ứng dụng tới.</string>
+    <string name="wallet_remove_not_removed">Ví chưa bị xóa. Không có gì thay đổi.</string>
+    <string name="hub_signed_in_wallet">Đã đăng nhập bằng ví %1$s</string>
+    <string name="seedview_wallet_name">Ví: %1$s</string>
+    <string name="hub_handle_field_label">Biệt danh</string>
+    <string name="hub_handle_field_hint">vd. DigiByte_Fan</string>
+    <string name="hub_handle_check">Kiểm tra</string>
+    <string name="hub_handle_register">Đăng ký</string>
+    <string name="seedview_title">Cụm từ khôi phục</string>
+    <string name="seedview_done_hide">Xong — Ẩn cụm từ</string>
+    <plurals name="sync_notif_synced">
+        <item quantity="other">Đã đồng bộ — %1$d peer đang kết nối</item>
+    </plurals>
+    <plurals name="sync_notif_syncing">
+        <item quantity="other">Đang đồng bộ %1$d%% — %2$d peer</item>
+    </plurals>
+    <string name="sync_notif_connecting">Đang kết nối với các peer…</string>
+    <string name="sync_notif_via_tor">" · qua Tor"</string>
+    <string name="hub_handle_title">Chọn biệt danh của bạn</string>
+    <string name="hub_handle_intro">Danh tính ẩn danh của bạn trong cộng đồng. 3-20 ký tự, chỉ gồm chữ, số và dấu gạch dưới.</string>
+    <string name="hub_handle_available_desc">Có thể dùng</string>
+    <string name="hub_handle_taken_desc">Đã có người dùng</string>
+    <string name="hub_handle_is_available">@%1$s có thể dùng!</string>
+    <string name="hub_handle_tap_check">Chạm \"Kiểm tra\" để xác minh biệt danh có dùng được không</string>
+    <string name="seedview_warn_title">Không bao giờ chia sẻ cụm từ khôi phục của bạn</string>
+    <string name="seedview_warn_body">Bất kỳ ai có những từ này đều có thể lấy cắp tiền của bạn.</string>
+    <string name="seedview_words_title">Cụm từ khôi phục %1$d từ của bạn</string>
+    <string name="seedview_write_down">Hãy ghi các từ này theo đúng thứ tự và cất giữ an toàn.</string>
+
+    <!-- Quick start of a restored wallet (multi-wallet step 1, Task 15) -->
+    <string name="quickstart_title">Hiển thị số dư sớm hơn?</string>
+    <string name="quickstart_body">Ví này sẽ tìm lịch sử của nó một cách riêng tư trên điện thoại này khi đồng bộ, việc này có thể mất một lúc. Thay vào đó, bạn có thể hỏi máy chủ số dư của nó ngay bây giờ. Con số này chưa được xác minh và không thể chi tiêu cho đến khi quá trình đồng bộ chứng minh.</string>
+    <string name="quickstart_skip">Bỏ qua và đồng bộ riêng tư</string>
+    <string name="quickstart_own_node">Hỏi nút của riêng tôi (%1$s)</string>
+    <string name="quickstart_own_node_note">Nút của bạn nhận các địa chỉ của ví này. Không có gì được gửi tới digiscope.me.</string>
+    <string name="quickstart_digiscope">Hỏi digiscope.me</string>
+    <string name="quickstart_digiscope_disclosure">Thao tác này gửi các địa chỉ của ví này tới digiscope.me. Khi đó digiscope.me có thể liên kết ví này với các ví khác của bạn.</string>
+    <string name="quickstart_digiscope_confirm">Gửi các địa chỉ tới digiscope.me</string>
+    <string name="quickstart_running">Đang tra cứu số dư…</string>
+    <string name="quickstart_found">%2$s báo %1$s DGB, chưa được xác minh.</string>
+    <string name="quickstart_found_dd">Và %1$s DigiDollar, chưa được xác minh.</string>
+    <string name="quickstart_failed">Tra cứu không phản hồi. Ví vẫn sẽ tìm thấy số dư khi đồng bộ.</string>
+    <string name="quickstart_continue">Tiếp tục</string>
+    <string name="quickstart_unverified">%2$s báo %1$s DGB, chưa được xác minh</string>
+    <string name="quickstart_unverified_dd">Báo %1$s DigiDollar, chưa được xác minh</string>
+    <string name="quickstart_unverified_sub">Không thể chi tiêu và không tính vào số dư cho đến khi đồng bộ chứng minh.</string>
+    <string name="quickstart_running_skip">Tiếp tục mà không chờ</string>
+    <string name="quickstart_incomplete">Không thể hoàn tất tra cứu nên không hiển thị con số nào. Ví vẫn sẽ tìm thấy số dư khi đồng bộ.</string>
 </resources>

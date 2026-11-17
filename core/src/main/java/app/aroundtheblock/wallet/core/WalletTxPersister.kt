@@ -4,6 +4,9 @@ import android.content.Context
 import app.aroundtheblock.wallet.core.bridge.NativeBridge
 import app.aroundtheblock.wallet.core.sync.SavedTransactionsCheckpoint
 import app.aroundtheblock.wallet.core.sync.SavedTransactionsStore
+import app.aroundtheblock.wallet.core.wallets.ActiveWallet
+import app.aroundtheblock.wallet.core.wallets.WalletScope
+import app.aroundtheblock.wallet.core.wallets.WalletStores
 
 /**
  * The one writer of the wallet's transaction checkpoint ([SavedTransactionsStore]): every path that
@@ -20,6 +23,7 @@ class WalletTxPersister(
     private val context: Context,
     private val source: Source = Source.Native,
     private val nowMs: () -> Long = System::currentTimeMillis,
+    private val scope: WalletScope = ActiveWallet.scope(context),
 ) {
 
     /** The native set. An interface so the host JVM tests can stand in for the JNI library. */
@@ -79,7 +83,7 @@ class WalletTxPersister(
             return Result.FAILED
         }
         if (shouldAbort()) return Result.ABORTED
-        if (!SavedTransactionsStore.write(context, data, epoch)) return Result.FAILED
+        if (!SavedTransactionsStore.write(context, data, epoch, scope)) return Result.FAILED
         lastDeclaredCount = SavedTransactionsCheckpoint.declaredCount(data) ?: 0L
         runCatching { SavedTransactionsCheckpoint.noteWriterAccepted(diagPrefs()) }
         return Result.WRITTEN
@@ -88,5 +92,5 @@ class WalletTxPersister(
     /** [persistCheckpoint] for the post-broadcast callers: true when a checkpoint file was written. */
     fun persist(): Boolean = persistCheckpoint() == Result.WRITTEN
 
-    private fun diagPrefs() = context.getSharedPreferences("dgb_diag", Context.MODE_PRIVATE)
+    private fun diagPrefs() = context.getSharedPreferences(WalletStores.prefsName("dgb_diag", scope), Context.MODE_PRIVATE)
 }

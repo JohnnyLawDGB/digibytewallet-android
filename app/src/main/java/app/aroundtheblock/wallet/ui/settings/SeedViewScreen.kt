@@ -102,7 +102,7 @@ fun SeedViewScreen(
             .background(Color(0xFF0A1628))
     ) {
         TopAppBar(
-            title = { Text("Recovery Phrase", color = Color.White) },
+            title = { Text(stringResource(R.string.seedview_title), color = Color.White) },
             navigationIcon = {
                 IconButton(onClick = { navController.popBackStack() }) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = Color.White)
@@ -117,6 +117,15 @@ fun SeedViewScreen(
                 .padding(horizontal = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            // Which wallet's phrase this is: with several wallets, words shown unlabelled are easy to file under the wrong one.
+            app.aroundtheblock.wallet.ui.wallets.rememberActiveWalletName()?.let { name ->
+                Text(
+                    stringResource(R.string.seedview_wallet_name, name),
+                    color = Color(0xFFB0BEC5),
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+            }
             // Warning banner
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -131,13 +140,13 @@ fun SeedViewScreen(
                     Icon(Icons.Default.Warning, null, tint = DigiByteRed, modifier = Modifier.size(22.dp))
                     Column {
                         Text(
-                            "Never share your recovery phrase",
+                            stringResource(R.string.seedview_warn_title),
                             color = DigiByteRed,
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            "Anyone with these words can steal your funds.",
+                            stringResource(R.string.seedview_warn_body),
                             color = Color(0xFFB0BEC5),
                             style = MaterialTheme.typography.bodySmall
                         )
@@ -198,7 +207,7 @@ fun SeedViewScreen(
                 Spacer(Modifier.height(20.dp))
 
                 Text(
-                    text = "Your ${backup.words.size}-word Recovery Phrase",
+                    text = stringResource(R.string.seedview_words_title, backup.words.size),
                     style = MaterialTheme.typography.titleMedium,
                     color = Color.White,
                     fontWeight = FontWeight.SemiBold
@@ -207,7 +216,7 @@ fun SeedViewScreen(
                 Spacer(Modifier.height(4.dp))
 
                 Text(
-                    text = "Write these words down in order and store them safely.",
+                    text = stringResource(R.string.seedview_write_down),
                     style = MaterialTheme.typography.bodySmall,
                     color = Color(0xFF8899AA)
                 )
@@ -294,7 +303,7 @@ fun SeedViewScreen(
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A2742))
             ) {
-                Text("Done — Hide Phrase", color = Color.White)
+                Text(stringResource(R.string.seedview_done_hide), color = Color.White)
             }
 
             Spacer(Modifier.height(16.dp))

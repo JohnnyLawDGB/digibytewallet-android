@@ -186,23 +186,30 @@ fun RecoveryDateScreen(
                 onClick = {
                     val ts = selectedOption?.timestamp ?: fullRescan.timestamp
                     viewModel.setRecoveryTimestamp(ts)
-                    if (restoreStarting) return@Button
-                    restoreStarting = true
-                    // KS-BIND: the probe, the one prompt if needed, and the restore run in the
-                    // ViewModel's scope, in one coroutine, so leaving this screen cannot orphan them.
-                    viewModel.recoverWallet(
-                        seedKeyPromptFor(
-                            biometricAuth,
-                            context as? androidx.fragment.app.FragmentActivity,
-                            ksbPromptTitle, ksbPromptSubtitle,
-                        ),
-                    ) { success ->
-                        restoreStarting = false
-                        if (success) {
-                            navController.navigate("pin_setup") {
-                                popUpTo("onboarding") { inclusive = true }
+                    if (viewModel.mode == OnboardingMode.FIRST_RUN) {
+                        if (restoreStarting) return@Button
+                        restoreStarting = true
+                        // KS-BIND: the probe, the one prompt if needed, and the restore run in the
+                        // ViewModel's scope, in one coroutine, so leaving this screen cannot orphan them.
+                        viewModel.recoverWallet(
+                            seedKeyPromptFor(
+                                biometricAuth,
+                                context as? androidx.fragment.app.FragmentActivity,
+                                ksbPromptTitle, ksbPromptSubtitle,
+                            ),
+                        ) { success ->
+                            restoreStarting = false
+                            if (success) {
+                                navController.navigate("pin_setup") {
+                                    popUpTo(ONBOARDING_ROUTE) { inclusive = true }
+                                }
                             }
                         }
+                    } else {
+                        // ADD mode: no restore of the running wallet and no PIN setup. The optional
+                        // quick start comes first (skipping is its default); then the commit step
+                        // writes only the new wallet's record, with the date just stored.
+                        navController.navigate(QUICK_START_ROUTE) { launchSingleTop = true }
                     }
                 },
                 enabled = selectedOption != null,

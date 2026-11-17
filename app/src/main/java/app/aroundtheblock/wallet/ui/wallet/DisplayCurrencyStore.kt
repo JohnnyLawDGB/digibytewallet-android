@@ -31,10 +31,13 @@ object DisplayCurrencyStore {
      * prices' file, network-suffixed). It moved there from `dgb_sync_data` so a wipe, a restore and
      * the crash-loop breaker keep it (owner decision, 2026-11-12); that object moves an old value.
      *
-     * The suffix matters: testnet and mainnet keep separate choices, and dropping it would make a
+     * The suffix matters (the network one: every wallet shares the choice): testnet and mainnet keep separate choices, and dropping it would make a
      * testnet currency choice leak into mainnet.
      */
-    private fun suffix(context: Context) = app.aroundtheblock.wallet.core.networkSuffix(context)
+    private fun suffix(context: Context) = app.aroundtheblock.wallet.core.wallets.storageSuffix(
+        app.aroundtheblock.wallet.core.wallets.ActiveWallet.scope(context),
+        app.aroundtheblock.wallet.core.wallets.StoreScope.NETWORK,
+    )
 
     /**
      * Resolve the effective currency from both stores.

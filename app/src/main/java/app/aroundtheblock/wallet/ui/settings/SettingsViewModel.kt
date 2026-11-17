@@ -214,17 +214,7 @@ class SettingsViewModel @Inject constructor(
     fun setNetworkTestnet(enabled: Boolean) {
         context.getSharedPreferences("dgb_settings", Context.MODE_PRIVATE)
             .edit().putBoolean("dgb_network_testnet", enabled).commit()
-        restartApp()
-    }
-
-    /** Relaunch the app's own launcher activity in a fresh task, then kill this process. */
-    private fun restartApp() {
-        val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
-        if (launchIntent != null) {
-            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-            context.startActivity(launchIntent)
-        }
-        Runtime.getRuntime().exit(0)
+        app.aroundtheblock.wallet.AppRestart.restart(context)
     }
 
     // ── Custom / own node (Advanced section) ──────────────────────────────────

@@ -71,7 +71,7 @@ class OnboardingPassphraseWipeTest {
     }
 
     @Test fun `every onboarding passphrase byte is zero after onCleared()`() {
-        val vm = OnboardingViewModel(walletManager, pinManager, scanService)
+        val vm = onboardingViewModel(walletManager, pinManager, scanService)
         vm.setPassphrase("correct horse battery staple")
         val bytes = held(vm)
         assertNotNull("precondition: the ViewModel holds the passphrase", bytes)
@@ -89,7 +89,7 @@ class OnboardingPassphraseWipeTest {
             given = secondArg()
             throw IllegalStateException("the record write did not land")
         }
-        val vm = OnboardingViewModel(walletManager, pinManager, scanService)
+        val vm = onboardingViewModel(walletManager, pinManager, scanService)
         vm.setPassphrase("correct horse battery staple")
         val bytes = held(vm)!!
 
@@ -109,7 +109,7 @@ class OnboardingPassphraseWipeTest {
             given = thirdArg()
             throw IllegalStateException("the record write did not land")
         }
-        val vm = OnboardingViewModel(walletManager, pinManager, scanService)
+        val vm = onboardingViewModel(walletManager, pinManager, scanService)
         vm.setRecoveryMnemonic(phrase)
         vm.setPassphrase("correct horse battery staple")
         val bytes = held(vm)!!
@@ -127,7 +127,7 @@ class OnboardingPassphraseWipeTest {
     @Test fun `every onboarding passphrase byte is zero after a create that reports failure`() {
         var given: ByteArray? = null
         every { walletManager.createWallet(any(), any()) } answers { given = secondArg(); false }
-        val vm = OnboardingViewModel(walletManager, pinManager, scanService)
+        val vm = onboardingViewModel(walletManager, pinManager, scanService)
         vm.setPassphrase("correct horse battery staple")
         val bytes = held(vm)!!
 

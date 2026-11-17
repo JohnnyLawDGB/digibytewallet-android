@@ -67,6 +67,9 @@ class OnboardingHardcodedStringTest {
         "ui/asset/TransferRuleCard.kt",
         "ui/recovery/RecoverFundsScreen.kt",
         "ui/settings/NetworkInfoScreen.kt",
+        // Multi-wallet step 1: the Hub names the wallet it is signed in as; the recovery phrase screen names its wallet.
+        "ui/hub/ProfileView.kt",
+        "ui/settings/SeedViewScreen.kt",
         "ui/settings/AboutScreen.kt",
         "ui/settings/SecuritySettingsScreen.kt",
         "ui/settings/DisplaySettingsScreen.kt",
@@ -84,6 +87,16 @@ class OnboardingHardcodedStringTest {
         "ui/onboarding/MnemonicInputScreen.kt",
         "ui/onboarding/RecoveryScanScreen.kt",
         "ui/onboarding/RecoveryDateScreen.kt",
+        // Adding a wallet (onboarding in ADD mode): its last step, the one screen of its own.
+        "ui/onboarding/AddWalletCommitScreen.kt",
+        // The restored wallet's opt-in quick start: a privacy disclosure (what is sent, and to whom).
+        "ui/onboarding/QuickStartScreen.kt",
+        // The wallet switcher: the chip on the Wallet tab, its sheet, Manage, and removing a wallet.
+        "ui/wallets/WalletsViewModel.kt",
+        "ui/wallets/WalletChip.kt",
+        "ui/wallets/WalletSwitcherSheet.kt",
+        "ui/wallets/ManageWalletsScreen.kt",
+        "ui/wallets/RemoveWalletDialog.kt",
         // AppNavigation is deliberately NOT here. It is a router: ~100 of its literals are route
         // names and argument keys, so an every-literal scan would need an allow-list longer than
         // the file and would stop meaning anything. Its user-visible text is three toast/label
@@ -97,6 +110,9 @@ class OnboardingHardcodedStringTest {
         "seed_display/{wordCount}", "seed_display/\$selectedWordCount",
         "settings_security", "settings_network", "settings_display", "settings_reconcile",
         "settings_about",
+        // Onboarding's mode argument and the add flow's routes (OnboardingRoutes.kt).
+        "onboarding?mode={mode}", "onboarding?mode=", "first_run", "add",
+        "add_wallet_commit", "restore_quick_start",
     )
 
     /** Compose animation labels, log tags, and format fragments. */
@@ -107,6 +123,8 @@ class OnboardingHardcodedStringTest {
         "dgb_settings", "digiid://", "connection refused", "backstop wipe failed",
         // KS-BIND: the no-screen-lock notice's pref keys.
         "ksb_no_lock_notice_due", "ksb_no_lock_notice_ack",
+        // The wallet switcher's last-known balance reader: a prefs file and its keys.
+        "dgb_sync_data", "has_synced", "last_balance", "last_dd_balance", "WalletsViewModel",
         // Ticker, network name and unit — brand-class, never translated (see strings_wallet.xml).
         "DGB", "TESTNET", "USD",
         // Composites of already-localised parts plus a ticker or a bare number.
@@ -162,6 +180,9 @@ class OnboardingHardcodedStringTest {
         // Restore: a word field's label is its 1-based position number, and a scanned path's
         // balance is a value plus the ticker — neither has a sentence to translate.
         "\${index + 1}", "\${fmt.format(dgb)} DGB",
+        // Hub handle sheet and recovery phrase grid: a truncated address, a lazy-grid item key and a
+        // word's 1-based position number.
+        "\${address.take(10)}…\${address.takeLast(8)}", "passphrase", "\${idx + 1}.",
     )
 
     private val quoted = Regex("\"([^\"\\n]{2,})\"")

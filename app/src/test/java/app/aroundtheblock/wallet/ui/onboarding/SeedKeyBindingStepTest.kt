@@ -76,7 +76,7 @@ class SeedKeyBindingStepTest {
     }
 
     private fun vm(wm: WalletManager) =
-        OnboardingViewModel(wm, mockk<PinManager>(relaxed = true), mockk<RecoveryScanService>(relaxed = true))
+        onboardingViewModel(wm, mockk<PinManager>(relaxed = true), mockk<RecoveryScanService>(relaxed = true))
             .also { it.setRecoveryMnemonic(phrase) }
 
     private fun create(vm: OnboardingViewModel, prompt: (suspend () -> Unit)?): Boolean? {

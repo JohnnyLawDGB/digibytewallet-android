@@ -5,6 +5,9 @@ import android.content.SharedPreferences
 import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import app.aroundtheblock.wallet.core.wallets.ActiveWallet
+import app.aroundtheblock.wallet.core.wallets.WalletScope
+import app.aroundtheblock.wallet.core.wallets.WalletStores
 
 /**
  * Persistence for the Hub session JWT.
@@ -31,11 +34,26 @@ class HubTokenStore internal constructor(
     secureProvider: () -> SharedPreferences,
     private val resetSecure: () -> Unit = {},
 ) {
-    constructor(context: Context) : this(
-        context.applicationContext.getSharedPreferences(LEGACY_PREFS_NAME, Context.MODE_PRIVATE),
-        { encryptedPrefs(context.applicationContext) },
-        { context.applicationContext.deleteSharedPreferences(SECURE_PREFS_NAME) },
+    /** One wallet's Hub session: its own plain and encrypted stores, never another wallet's. */
+    constructor(context: Context, scope: WalletScope) : this(
+        context,
+        scope,
+        { name -> encryptedPrefs(context.applicationContext, name) },
     )
+
+    internal constructor(
+        context: Context,
+        scope: WalletScope,
+        secureFactory: (String) -> SharedPreferences,
+    ) : this(
+        context.applicationContext.getSharedPreferences(
+            WalletStores.prefsName(LEGACY_PREFS_NAME, scope), Context.MODE_PRIVATE,
+        ),
+        { secureFactory(WalletStores.prefsName(SECURE_PREFS_NAME, scope)) },
+        { context.applicationContext.deleteSharedPreferences(WalletStores.prefsName(SECURE_PREFS_NAME, scope)) },
+    )
+
+    constructor(context: Context) : this(context, ActiveWallet.scope(context))
 
     private val secure: SharedPreferences by lazy(secureProvider)
 
@@ -55,9 +73,13 @@ class HubTokenStore internal constructor(
         guarded("save") { secure.edit().putString(KEY_JWT, token).commit() }
     }
 
+    /**
+     * A store without the token is not written: a commit to a store whose file is gone (a wipe
+     * deleted it) writes an empty file back under that wallet's name.
+     */
     fun clear() {
-        guarded("clear") { secure.edit().remove(KEY_JWT).commit() }
-        legacy.edit().remove(KEY_JWT).commit()
+        guarded("clear") { if (secure.contains(KEY_JWT)) secure.edit().remove(KEY_JWT).commit() }
+        if (legacy.contains(KEY_JWT)) legacy.edit().remove(KEY_JWT).commit()
     }
 
     /**
@@ -72,11 +94,12 @@ class HubTokenStore internal constructor(
      * removal did not land.
      */
     fun clearConfirmed(): Boolean {
+        // As [clear]: a store without the token is not written.
         val secureCleared = guarded("clear") {
-            secure.edit().remove(KEY_JWT).commit() && !secure.contains(KEY_JWT)
+            (!secure.contains(KEY_JWT) || secure.edit().remove(KEY_JWT).commit()) && !secure.contains(KEY_JWT)
         } ?: runCatching { !secure.contains(KEY_JWT) }.getOrDefault(true)
         val legacyCleared = runCatching {
-            legacy.edit().remove(KEY_JWT).commit() && !legacy.contains(KEY_JWT)
+            (!legacy.contains(KEY_JWT) || legacy.edit().remove(KEY_JWT).commit()) && !legacy.contains(KEY_JWT)
         }.getOrDefault(false)
         return secureCleared && legacyCleared
     }
@@ -102,13 +125,13 @@ class HubTokenStore internal constructor(
         const val SECURE_PREFS_NAME = "dgb_hub_session"
         const val KEY_JWT = "dgb_jwt"
 
-        private fun encryptedPrefs(context: Context): SharedPreferences {
+        private fun encryptedPrefs(context: Context, fileName: String): SharedPreferences {
             val masterKey = MasterKey.Builder(context)
                 .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
                 .build()
             return EncryptedSharedPreferences.create(
                 context,
-                SECURE_PREFS_NAME,
+                fileName,
                 masterKey,
                 EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
                 EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,

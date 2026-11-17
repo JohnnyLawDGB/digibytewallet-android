@@ -106,7 +106,7 @@ fun SecuritySettingsScreen(
     val wipeResult by viewModel.wipeResult.collectAsStateWithLifecycle()
     LaunchedEffect(wipeResult) {
         if (wipeResult is WipeResult.Success) {
-            navController.navigate("onboarding") {
+            navController.navigate(app.aroundtheblock.wallet.ui.onboarding.onboardingRoute(app.aroundtheblock.wallet.ui.onboarding.OnboardingMode.FIRST_RUN)) {
                 popUpTo(0) { inclusive = true }
             }
         }
@@ -225,7 +225,7 @@ fun SecuritySettingsScreen(
                         iconTint = DigiByteRed,
                         title = stringResource(R.string.sec_wipe_after, PinManager.WIPE_THRESHOLD),
                         subtitle = if (wipeAfterNEnabled)
-                                       stringResource(R.string.sec_wipe_after_on, PinManager.WIPE_THRESHOLD)
+                                       stringResource(R.string.sec_wipe_after_on_all, PinManager.WIPE_THRESHOLD)
                                    else stringResource(R.string.sec_wipe_after_off),
                         onClick = {
                             if (wipeAfterNEnabled) viewModel.setWipeAfterN(false)
@@ -525,7 +525,7 @@ fun SecuritySettingsScreen(
                     },
                     text = {
                         Text(
-                            stringResource(R.string.sec_wipe_wallet_body),
+                            stringResource(R.string.sec_wipe_all_body),
                             color = Color(0xFFB0BEC5),
                             style = MaterialTheme.typography.bodyMedium
                         )
@@ -560,7 +560,7 @@ fun SecuritySettingsScreen(
                     text = {
                         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             Text(
-                                stringResource(R.string.sec_wipe_after_body, PinManager.WIPE_THRESHOLD),
+                                stringResource(R.string.sec_wipe_after_body_all, PinManager.WIPE_THRESHOLD),
                                 color = Color(0xFFB0BEC5),
                                 style = MaterialTheme.typography.bodyMedium
                             )

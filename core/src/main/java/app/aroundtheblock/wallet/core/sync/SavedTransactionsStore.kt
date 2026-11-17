@@ -1,8 +1,9 @@
 package app.aroundtheblock.wallet.core.sync
 
 import android.content.Context
-import app.aroundtheblock.wallet.core.WALLET_NETWORK_SUFFIXES
-import app.aroundtheblock.wallet.core.networkSuffix
+import app.aroundtheblock.wallet.core.wallets.ActiveWallet
+import app.aroundtheblock.wallet.core.wallets.WalletScope
+import app.aroundtheblock.wallet.core.wallets.WalletStores
 import java.io.File
 
 /**
@@ -39,12 +40,13 @@ object SavedTransactionsStore {
     /** In the network's `dgb_sync_data`: the record count of the last checkpoint that landed. */
     const val KEY_COUNT = "saved_transactions_count"
 
-    fun file(ctx: Context): File = File(ctx.filesDir, FILE_BASE + networkSuffix(ctx) + ".bin")
+    fun file(ctx: Context, scope: WalletScope = ActiveWallet.scope(ctx)): File = File(ctx.filesDir, WalletStores.fileName(FILE_BASE, scope))
 
-    private fun tmpFile(ctx: Context): File = File(ctx.filesDir, FILE_BASE + networkSuffix(ctx) + ".bin.tmp")
+    private fun tmpFile(ctx: Context, scope: WalletScope): File =
+        File(ctx.filesDir, WalletStores.fileName(FILE_BASE, scope) + ".tmp")
 
-    private fun legacyPrefs(ctx: Context) =
-        ctx.getSharedPreferences(LEGACY_PREFS + networkSuffix(ctx), Context.MODE_PRIVATE)
+    private fun legacyPrefs(ctx: Context, scope: WalletScope) =
+        ctx.getSharedPreferences(WalletStores.prefsName(LEGACY_PREFS, scope), Context.MODE_PRIVATE)
 
     private val ioLock = Any()
     @Volatile private var epoch = 0L
@@ -57,17 +59,17 @@ object SavedTransactionsStore {
      * Persist [bytes] atomically, unless a [delete] has run since [snapshotEpoch]. Returns true only
      * when the file now holds exactly these bytes.
      */
-    fun write(ctx: Context, bytes: ByteArray, snapshotEpoch: Long): Boolean = synchronized(ioLock) {
+    fun write(ctx: Context, bytes: ByteArray, snapshotEpoch: Long, scope: WalletScope = ActiveWallet.scope(ctx)): Boolean = synchronized(ioLock) {
         if (epoch != snapshotEpoch) return false
-        writeLocked(ctx, bytes)
+        writeLocked(ctx, bytes, scope)
     }
 
-    private fun writeLocked(ctx: Context, bytes: ByteArray): Boolean {
+    private fun writeLocked(ctx: Context, bytes: ByteArray, scope: WalletScope): Boolean {
         // STORE-DURABILITY: tmp, fsync, rename, directory fsync; a failed rename keeps the live checkpoint.
-        val landed = DurableFile.write(file(ctx), tmpFile(ctx), bytes)
+        val landed = DurableFile.write(file(ctx, scope), tmpFile(ctx, scope), bytes)
         // The file is the checkpoint now: a legacy copy left behind is older, and would be pinned again.
         if (landed) runCatching {
-            legacyPrefs(ctx).edit()
+            legacyPrefs(ctx, scope).edit()
                 .remove(LEGACY_KEY)
                 .putLong(KEY_COUNT, SavedTransactionsCheckpoint.declaredCount(bytes)?.coerceAtLeast(0L) ?: 0L)
                 .commit()
@@ -95,9 +97,9 @@ object SavedTransactionsStore {
     }
 
     /** Whether a checkpoint is stored (the file, or a legacy key not yet migrated). */
-    fun exists(ctx: Context): Boolean =
-        runCatching { file(ctx).exists() }.getOrDefault(false) ||
-            runCatching { legacyPrefs(ctx).contains(LEGACY_KEY) }.getOrDefault(false)
+    fun exists(ctx: Context, scope: WalletScope = ActiveWallet.scope(ctx)): Boolean =
+        runCatching { file(ctx, scope).exists() }.getOrDefault(false) ||
+            runCatching { legacyPrefs(ctx, scope).contains(LEGACY_KEY) }.getOrDefault(false)
 
     /**
      * The stored checkpoint, or null when there is none. In order:
@@ -110,41 +112,42 @@ object SavedTransactionsStore {
      *  - no file but a complete tmp file (a write that synced but did not get to its rename): renamed
      *    into place and returned. A partial tmp file is ignored.
      */
-    fun load(ctx: Context): ByteArray? = synchronized(ioLock) {
-        val f = file(ctx)
+    fun load(ctx: Context, scope: WalletScope = ActiveWallet.scope(ctx)): ByteArray? = synchronized(ioLock) {
+        val f = file(ctx, scope)
         val fileThere = runCatching { f.exists() }.getOrDefault(false)
-        val legacyHex = runCatching { legacyPrefs(ctx).getString(LEGACY_KEY, null) }.getOrNull()
+        val legacyHex = runCatching { legacyPrefs(ctx, scope).getString(LEGACY_KEY, null) }.getOrNull()
         if (legacyHex != null) {
             val bytes = FilterHeaderStore.decodeHexOrNull(legacyHex)
             if (bytes != null) {
-                writeLocked(ctx, bytes) // removes the key only if the file landed
+                writeLocked(ctx, bytes, scope) // removes the key only if the file landed
                 return bytes
             }
             if (!fileThere) return ByteArray(0)
         }
         if (fileThere) return runCatching { f.readBytes() }.getOrElse { ByteArray(0) }
-        DurableFile.recoverTmp(f, tmpFile(ctx), ::isComplete)
+        DurableFile.recoverTmp(f, tmpFile(ctx, scope), ::isComplete)
     }
 
     /** Delete this network's checkpoint: file, tmp and legacy key. Bumps the epoch so an in-flight
      *  [write] snapshotted before now is dropped. Returns whether, read back, none is left. */
-    fun delete(ctx: Context): Boolean = synchronized(ioLock) {
+    fun delete(ctx: Context, scope: WalletScope = ActiveWallet.scope(ctx)): Boolean = synchronized(ioLock) {
         epoch++
-        runCatching { DurableFile.delete(file(ctx), tmpFile(ctx)) }
-        val keyGone = runCatching { legacyPrefs(ctx).edit().remove(LEGACY_KEY).remove(KEY_COUNT).commit() }.getOrDefault(false)
-        keyGone && !runCatching { file(ctx).exists() || tmpFile(ctx).exists() }.getOrDefault(true)
+        runCatching { DurableFile.delete(file(ctx, scope), tmpFile(ctx, scope)) }
+        val keyGone = runCatching { legacyPrefs(ctx, scope).edit().remove(LEGACY_KEY).remove(KEY_COUNT).commit() }.getOrDefault(false)
+        keyGone && !runCatching { file(ctx, scope).exists() || tmpFile(ctx, scope).exists() }.getOrDefault(true)
     }
 
     /** [delete] for EVERY network, for a full wallet reset. Returns true only when, read back, no
      *  file is left and every legacy key's removal was written. */
     fun deleteAllNetworks(ctx: Context): Boolean = synchronized(ioLock) {
         epoch++
-        WALLET_NETWORK_SUFFIXES.map { net ->
-            val bin = File(ctx.filesDir, "$FILE_BASE$net.bin")
-            val tmp = File(ctx.filesDir, "$FILE_BASE$net.bin.tmp")
+        listOf(false, true).map { testnet ->
+            val scope = WalletScope.legacy(testnet)
+            val bin = file(ctx, scope)
+            val tmp = tmpFile(ctx, scope)
             DurableFile.delete(bin, tmp)
             val legacyGone = runCatching {
-                ctx.getSharedPreferences(LEGACY_PREFS + net, Context.MODE_PRIVATE).edit().remove(LEGACY_KEY).remove(KEY_COUNT).commit()
+                legacyPrefs(ctx, scope).edit().remove(LEGACY_KEY).remove(KEY_COUNT).commit()
             }.getOrDefault(false)
             !bin.exists() && !tmp.exists() && legacyGone
         }.all { it }

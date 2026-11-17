@@ -4,12 +4,15 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
 import app.aroundtheblock.wallet.core.digiscope.HubTokenStore
-import app.aroundtheblock.wallet.core.security.KeyStoreManager
 import app.aroundtheblock.wallet.core.sync.CfAbandonmentStore
 import app.aroundtheblock.wallet.core.sync.CfScanLedgerStore
 import app.aroundtheblock.wallet.core.sync.FilterHeaderStore
 import app.aroundtheblock.wallet.core.sync.SavedBlockStore
 import app.aroundtheblock.wallet.core.sync.SavedTransactionsStore
+import app.aroundtheblock.wallet.core.wallets.StoreScope
+import app.aroundtheblock.wallet.core.wallets.WalletScope
+import app.aroundtheblock.wallet.core.wallets.WalletStores
+import app.aroundtheblock.wallet.core.wallets.storageSuffix
 
 /**
  * The persistent, non-native side of a complete wallet wipe, factored behind an
@@ -26,7 +29,14 @@ import app.aroundtheblock.wallet.core.sync.SavedTransactionsStore
  * again, and every Keystore alias is absent when asked again. A wipe may only claim what it
  * checked, so no step may drop a write result on the floor (`WalletWipeSourceGateTest`).
  * Every network-suffixed store is cleared for EVERY network ([WALLET_NETWORK_SUFFIXES]), not
- * only the selected one — there is one seed, so there is one wipe.
+ * only the selected one — the legacy wallet's one seed serves both.
+ *
+ * There is one wipe for every wallet: one PIN guards them all. These steps are the `legacy`
+ * wallet's stores (the names 4.1.4 used) and the device-wide ones the wipe also clears (the
+ * database password's record, the peer caches); [WalletManager.wipeWallet] erases every other
+ * wallet through `WalletStoreEraser`'s phases, and deletes and reads back every wallet's seed key
+ * aliases itself. `WalletDataEraserReachTest` holds these steps to every per-wallet store in
+ * [WalletStores].
  */
 interface WalletDataEraser {
     /** Clear the encrypted-seed prefs (`dgb_wallet_seed`). MUST run first. */
@@ -56,7 +66,8 @@ interface WalletDataEraser {
     /**
      * Clear the per-wallet state no other step owns: the filter-peer and Dandelion peer caches
      * (`dgb_filter_peers<net>`, `dgb_dandelion_peers<net>`), the asset history bookkeeping
-     * (`dgb_asset_backfill`, `dgb_asset_heal`), the reconcile bookkeeping (`dgb_reconcile<net>`)
+     * (`dgb_asset_backfill`, `dgb_asset_heal`), the quick-start choice (`dgb_quickstart`), the
+     * reconcile bookkeeping (`dgb_reconcile<net>`)
      * with the one-time history rebuild state (`dgb_history_rebuild<net>`),
      * and the compact-filter scan floor (`cf_birth_height` in `dgb_settings`). The scan floor
      * belongs to the wallet that set it: the next wallet starts from its own birthday. Nothing
@@ -65,16 +76,11 @@ interface WalletDataEraser {
     fun eraseLeftoverState(): Boolean
     /** Remove the persisted Hub session token, from the encrypted store and the legacy one. */
     fun eraseHubSession(): Boolean
-    /**
-     * READ-BACK, deletes nothing: true only on a positive statement that neither seed key alias
-     * (`dgb_wallet_master`, `dgb_wallet_master_v2`) exists. A keystore that cannot answer is
-     * "not absent".
-     */
-    fun seedKeyAbsent(): Boolean
 }
 
-/** Every suffix a network-suffixed store or file can carry (see [networkSuffix]). */
-internal val WALLET_NETWORK_SUFFIXES = listOf("", "_testnet")
+/** Every network suffix the full wipe walks for the `legacy` wallet (see [storageSuffix]). */
+internal val WALLET_NETWORK_SUFFIXES: List<String> =
+    listOf(false, true).map { storageSuffix(WalletScope.legacy(it), StoreScope.NETWORK) }
 
 /**
  * The sessions a wallet's identity opened outside the wallet's own stores — the Hub login held
@@ -101,26 +107,52 @@ fun interface WalletSessionStop {
 /**
  * What one run of [WalletManager.wipeWallet] established.
  *
- * @property seedGone READ-BACK after the erase: the seed store's write landed, no saved wallet
- *   is readable, and neither seed key alias exists. Never inferred from "no step threw".
- * @property everythingCleared every other store reported cleared (both networks), the identity
- *   sessions ended, every session running for the wallet stopped, and the native session stopped.
+ * @property seedGone READ-BACK after the erase, over EVERY wallet on the device: every seed
+ *   record's write landed, no wallet's seed record is readable, and no seed key alias of any
+ *   wallet exists. Never inferred from "no step threw".
+ * @property everythingCleared every other store of every wallet reported cleared (both networks),
+ *   the registry was cleared, the identity sessions ended, every session running for the wallet
+ *   stopped, and the native session stopped.
  */
 data class WipeReport(val seedGone: Boolean, val everythingCleared: Boolean) {
     /** The only result an entry point may treat as "the wallet was wiped". */
     val verified: Boolean get() = seedGone && everythingCleared
 }
 
-/** The two Keystore operations the eraser needs, behind a seam so it runs on a plain JVM. */
-internal interface KeystoreAliases {
+/** The Keystore operations the erasers and the wipe need, behind a seam so they run on a plain JVM. */
+interface KeystoreAliases {
     fun contains(alias: String): Boolean
     fun delete(alias: String)
+    /** Every alias the Keystore holds now. */
+    fun aliases(): List<String>
 }
 
 internal object AndroidKeystoreAliases : KeystoreAliases {
     private fun keyStore() = java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
     override fun contains(alias: String): Boolean = keyStore().containsAlias(alias)
     override fun delete(alias: String) { keyStore().deleteEntry(alias) }
+    override fun aliases(): List<String> = keyStore().aliases().toList()
+}
+
+/**
+ * After a write to [store] that did not land, put [held] — what the view showed before that
+ * write, which is what the file still holds — back into the view. The rewrite carries the same
+ * content the file has, so whether or not it lands, the file and this process agree.
+ */
+internal fun readWhatTheFileHolds(tag: String, name: String, store: SharedPreferences, held: Map<String, *>) {
+    val editor = store.edit().clear()
+    for ((key, value) in held) {
+        when (value) {
+            is String -> editor.putString(key, value)
+            is Long -> editor.putLong(key, value)
+            is Int -> editor.putInt(key, value)
+            is Boolean -> editor.putBoolean(key, value)
+            is Float -> editor.putFloat(key, value)
+            is Set<*> -> editor.putStringSet(key, value.filterIsInstance<String>().toSet())
+        }
+    }
+    val rewritten = editor.commit()
+    Log.w(tag, "$name: write not confirmed; this process reads what the file holds (rewrite landed=$rewritten)")
 }
 
 /**
@@ -137,7 +169,18 @@ class AndroidWalletDataEraser internal constructor(
     private val hubTokenStore: () -> HubTokenStore,
 ) : WalletDataEraser {
 
-    constructor(context: Context) : this(context, AndroidKeystoreAliases, { HubTokenStore(context) })
+    /**
+     * The Hub session step erases LEGACY's stores (`dgb_digiscope`, `dgb_hub_session`), never the
+     * active wallet's: with another wallet active, the store `HubTokenStore(context)` resolves is
+     * that wallet's (erased by `WalletStoreEraser`), and legacy's token would survive for the next
+     * wallet made as `legacy` to inherit. The Hub stores are not network-suffixed, so one scope
+     * names them on both networks.
+     */
+    constructor(context: Context) : this(
+        context,
+        AndroidKeystoreAliases,
+        { HubTokenStore(context, WalletScope.legacy(false)) },
+    )
 
     /**
      * Clear one preferences file: true only when the write LANDED. The in-memory view of a
@@ -153,30 +196,11 @@ class AndroidWalletDataEraser internal constructor(
     private fun clearPrefs(name: String): Boolean = step("clear $name") {
         val store = context.getSharedPreferences(name, Context.MODE_PRIVATE)
         val held = store.all
+        // Nothing to clear: no commit, which on a store with no file would create an empty one.
+        if (held.isEmpty()) return@step true
         val landed = store.edit().clear().commit()
-        if (!landed) readWhatTheFileHolds(name, store, held)
+        if (!landed) readWhatTheFileHolds(TAG, name, store, held)
         landed
-    }
-
-    /**
-     * After a write to [store] that did not land, put [held] — what the view showed before that
-     * write, which is what the file still holds — back into the view. The rewrite carries the same
-     * content the file has, so whether or not it lands, the file and this process agree.
-     */
-    private fun readWhatTheFileHolds(name: String, store: SharedPreferences, held: Map<String, *>) {
-        val editor = store.edit().clear()
-        for ((key, value) in held) {
-            when (value) {
-                is String -> editor.putString(key, value)
-                is Long -> editor.putLong(key, value)
-                is Int -> editor.putInt(key, value)
-                is Boolean -> editor.putBoolean(key, value)
-                is Float -> editor.putFloat(key, value)
-                is Set<*> -> editor.putStringSet(key, value.filterIsInstance<String>().toSet())
-            }
-        }
-        val rewritten = editor.commit()
-        Log.w(TAG, "$name: write not confirmed; this process reads what the file holds (rewrite landed=$rewritten)")
     }
 
     /** [clearPrefs] for [base] on EVERY network. All are attempted even when one refuses. */
@@ -248,8 +272,8 @@ class AndroidWalletDataEraser internal constructor(
 
     override fun eraseDatabase(): Boolean {
         // Deletes every DB file + the DB password (prefs + Keystore alias).
-        // Does NOT touch "dgb_wallet_master": that seed key is destroyed separately via
-        // KeyStoreManager.deleteKey() in wipeWallet.
+        // Does NOT touch "dgb_wallet_master": every wallet's seed key is deleted separately, by
+        // wipeWallet, once every seed record is gone.
         // BOTH networks' databases go, and every copy recovery set aside
         // (DatabaseFiles.setAside — recovery never removes those; this wipe is the one place that
         // does). Most asides could not be opened once the password below is gone, but one set
@@ -289,6 +313,8 @@ class AndroidWalletDataEraser internal constructor(
         val diag = clearPrefs("dgb_diag")
         // The log-tag key: the next wallet's logs must not correlate with this one's (4.1.3, review R7).
         val logTag = clearPrefs(LogTag.PREFS)
+        // The quick-start choice and what it showed: this wallet's.
+        val quickstart = clearPrefs(WalletStores.prefsName("dgb_quickstart", WalletScope.legacy(false)))
         // NOT Settings → Display → Show prices (PricePrefs, "dgb_price"): a device setting, like the
         // own node (dgb_settings) and the balance mask (dgb_privacy), it survives a wipe or a restore
         // (owner decision, 2026-11-09). The cached price itself is in the database erased above.
@@ -297,20 +323,18 @@ class AndroidWalletDataEraser internal constructor(
         val scanFloor = step("scan floor") {
             val settings = context.getSharedPreferences("dgb_settings", Context.MODE_PRIVATE)
             val held = settings.all
-            val landed = settings.edit().remove("cf_birth_height").commit()
+            // This full wipe is the legacy wallet's: its floor key (`cf_birth_height`).
+            val floorKey = WalletStores.cfBirthHeightKey(WalletScope.legacy(false))
+            if (!settings.contains(floorKey)) return@step true
+            val landed = settings.edit().remove(floorKey).commit()
             // As clearPrefs: a write that did not land leaves this process reading the file.
-            if (!landed) readWhatTheFileHolds("dgb_settings", settings, held)
+            if (!landed) readWhatTheFileHolds(TAG, "dgb_settings", settings, held)
             landed
         }
-        return filterPeers && dandelionPeers && reconcile && assetBackfill && assetHeal && diag && logTag && scanFloor
+        return filterPeers && dandelionPeers && reconcile && assetBackfill && assetHeal && diag && logTag && quickstart && scanFloor
     }
 
     override fun eraseHubSession(): Boolean = step("hub session") { hubTokenStore().clearConfirmed() }
-
-    override fun seedKeyAbsent(): Boolean = step("wallet key read-back") {
-        !keystore.contains(KeyStoreManager.KEY_ALIAS) &&
-            !keystore.contains(KeyStoreManager.KEY_ALIAS + KeyStoreManager.AUTH_ALIAS_SUFFIX)
-    }
 
     private companion object {
         const val TAG = "WalletDataEraser"

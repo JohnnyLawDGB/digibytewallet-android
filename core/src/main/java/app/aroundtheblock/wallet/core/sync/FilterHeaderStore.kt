@@ -1,8 +1,9 @@
 package app.aroundtheblock.wallet.core.sync
 
 import android.content.Context
-import app.aroundtheblock.wallet.core.WALLET_NETWORK_SUFFIXES
-import app.aroundtheblock.wallet.core.networkSuffix
+import app.aroundtheblock.wallet.core.wallets.ActiveWallet
+import app.aroundtheblock.wallet.core.wallets.WalletScope
+import app.aroundtheblock.wallet.core.wallets.WalletStores
 import java.io.File
 
 /**
@@ -41,12 +42,13 @@ object FilterHeaderStore {
      */
     internal const val MAX_LEGACY_MIGRATE_HEX = 16 * 1024 * 1024
 
-    fun file(ctx: Context): File = File(ctx.filesDir, FILE_BASE + networkSuffix(ctx) + ".bin")
+    fun file(ctx: Context, scope: WalletScope = ActiveWallet.scope(ctx)): File = File(ctx.filesDir, WalletStores.fileName(FILE_BASE, scope))
 
-    private fun tmpFile(ctx: Context): File = File(ctx.filesDir, FILE_BASE + networkSuffix(ctx) + ".bin.tmp")
+    private fun tmpFile(ctx: Context, scope: WalletScope): File =
+        File(ctx.filesDir, WalletStores.fileName(FILE_BASE, scope) + ".tmp")
 
-    private fun legacyPrefs(ctx: Context) =
-        ctx.getSharedPreferences(LEGACY_PREFS + networkSuffix(ctx), Context.MODE_PRIVATE)
+    private fun legacyPrefs(ctx: Context, scope: WalletScope) =
+        ctx.getSharedPreferences(WalletStores.prefsName(LEGACY_PREFS, scope), Context.MODE_PRIVATE)
 
     private val ioLock = Any()
     @Volatile private var epoch = 0L
@@ -63,17 +65,17 @@ object FilterHeaderStore {
      * when the file now holds [bytes], [StoreWrite.OBSOLETE] for a dropped stale snapshot (not a
      * failure), and [StoreWrite.FAILED] with the previous file kept as it was (STORE-DURABILITY).
      */
-    fun write(ctx: Context, bytes: ByteArray, snapshotEpoch: Long): StoreWrite = synchronized(ioLock) {
+    fun write(ctx: Context, bytes: ByteArray, snapshotEpoch: Long, scope: WalletScope = ActiveWallet.scope(ctx)): StoreWrite = synchronized(ioLock) {
         if (epoch != snapshotEpoch) return StoreWrite.OBSOLETE // a delete() invalidated this snapshot
-        if (writeLocked(ctx, bytes)) StoreWrite.LANDED else StoreWrite.FAILED
+        if (writeLocked(ctx, bytes, scope)) StoreWrite.LANDED else StoreWrite.FAILED
     }
 
-    private fun legacy(ctx: Context) = DurableFile.LegacyKey({ legacyPrefs(ctx) }, LEGACY_KEY, MAX_LEGACY_MIGRATE_HEX)
+    private fun legacy(ctx: Context, scope: WalletScope) = DurableFile.LegacyKey({ legacyPrefs(ctx, scope) }, LEGACY_KEY, MAX_LEGACY_MIGRATE_HEX)
 
     /** STORE-DURABILITY ([DurableFile]): true only when the file now holds [bytes]; a failed write
      *  leaves the previous file as it was. A write that lands also removes a legacy key still there. */
-    private fun writeLocked(ctx: Context, bytes: ByteArray): Boolean =
-        DurableFile.write(file(ctx), tmpFile(ctx), bytes).also { landed -> if (landed) legacy(ctx).afterLanded() }
+    private fun writeLocked(ctx: Context, bytes: ByteArray, scope: WalletScope): Boolean =
+        DurableFile.write(file(ctx, scope), tmpFile(ctx, scope), bytes).also { landed -> if (landed) legacy(ctx, scope).afterLanded() }
 
     /**
      * Load the chain for restore, by the one legacy-key rule ([DurableFile.LegacyKey]): a
@@ -82,30 +84,30 @@ object FilterHeaderStore {
      * one is dropped. Then the file; then a complete tmp file (a write that synced but was
      * killed before its rename, recovered into place). Returns null if none / dropped.
      */
-    fun load(ctx: Context): ByteArray? = synchronized(ioLock) {
-        val f = file(ctx)
+    fun load(ctx: Context, scope: WalletScope = ActiveWallet.scope(ctx)): ByteArray? = synchronized(ioLock) {
+        val f = file(ctx, scope)
         // The legacy key first ([DurableFile.LegacyKey]): a readable one is the newer copy.
-        when (val key = legacy(ctx).read()) {
+        when (val key = legacy(ctx, scope).read()) {
             is DurableFile.LegacyKey.Read.Usable -> {
-                writeLocked(ctx, key.bytes) // removes the key only if the file landed
+                writeLocked(ctx, key.bytes, scope) // removes the key only if the file landed
                 return key.bytes
             }
-            DurableFile.LegacyKey.Read.Unusable -> legacy(ctx).remove()
+            DurableFile.LegacyKey.Read.Unusable -> legacy(ctx, scope).remove()
             DurableFile.LegacyKey.Read.Absent -> Unit
         }
         if (f.exists()) return runCatching { f.readBytes() }.getOrNull()
         // STORE-DURABILITY: a write that synced its tmp but was killed before the rename.
-        DurableFile.recoverTmp(f, tmpFile(ctx), ::isComplete)
+        DurableFile.recoverTmp(f, tmpFile(ctx, scope), ::isComplete)
     }
 
     /** Delete the persisted chain (file, tmp, and legacy prefs key). Used on re-anchor /
      *  reset. Bumps the epoch so any in-flight [write] captured before now is dropped,
      *  and is serialized with [write] on [ioLock] so it can't be resurrected. */
-    fun delete(ctx: Context) {
+    fun delete(ctx: Context, scope: WalletScope = ActiveWallet.scope(ctx)) {
         synchronized(ioLock) {
             epoch++
-            runCatching { DurableFile.delete(file(ctx), tmpFile(ctx)) }
-            runCatching { legacyPrefs(ctx).edit().remove(LEGACY_KEY).apply() }
+            runCatching { DurableFile.delete(file(ctx, scope), tmpFile(ctx, scope)) }
+            runCatching { legacyPrefs(ctx, scope).edit().remove(LEGACY_KEY).apply() }
         }
     }
 
@@ -116,12 +118,13 @@ object FilterHeaderStore {
      */
     fun deleteAllNetworks(ctx: Context): Boolean = synchronized(ioLock) {
         epoch++
-        WALLET_NETWORK_SUFFIXES.map { net ->
-            val bin = File(ctx.filesDir, "$FILE_BASE$net.bin")
-            val tmp = File(ctx.filesDir, "$FILE_BASE$net.bin.tmp")
+        listOf(false, true).map { testnet ->
+            val scope = WalletScope.legacy(testnet)
+            val bin = file(ctx, scope)
+            val tmp = tmpFile(ctx, scope)
             DurableFile.delete(bin, tmp)
             val legacyGone = runCatching {
-                ctx.getSharedPreferences(LEGACY_PREFS + net, Context.MODE_PRIVATE).edit().remove(LEGACY_KEY).commit()
+                legacyPrefs(ctx, scope).edit().remove(LEGACY_KEY).commit()
             }.getOrDefault(false)
             !bin.exists() && !tmp.exists() && legacyGone
         }.all { it }

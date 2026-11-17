@@ -68,7 +68,7 @@ class TransactionCheckpointPreflightTest {
             ".remove(SavedTransactionsCheckpoint.KEY_SHORT_RESTORE)",
             "CfScanLedgerStore.delete(this@SyncService)",
             "val birth = NativeBridge.getWalletBirthCheckpointHeight()",
-            "putLong(\"cf_birth_height\", birth)",
+            "putLong(birthKey, birth)",
         )) assertTrue("the rebuild no longer does: $step", block.contains(step))
         // The record goes in the same commit that drops the frontier, never before it.
         val commit = block.substring(block.indexOf("prefs.edit()"), block.indexOf(".commit()") + 1)

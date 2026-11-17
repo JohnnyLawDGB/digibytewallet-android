@@ -56,6 +56,7 @@
     <string name="verify_success_title">Terverifikasi!</string>
     <string name="verify_retry_title">Mari coba lagi</string>
     <string name="verify_success_body">Frasa pemulihan Anda sudah dicatat dengan aman. Sekarang atur PIN.</string>
+    <string name="verify_success_body_add">Frasa pemulihan Anda sudah dicatat dengan aman. PIN aplikasi Anda sudah melindungi dompet ini.</string>
     <string name="verify_retry_body">Beberapa jawaban salah. Periksa kembali frasa pemulihan Anda lalu coba lagi.</string>
     <string name="verify_setup_pin">Atur PIN</string>
     <string name="verify_try_again">Coba lagi</string>
@@ -432,9 +433,9 @@
     <string name="sec_biometric_no">Tidak tersedia di perangkat ini</string>
     <string name="sec_autolock">Waktu Kunci Otomatis</string>
     <string name="sec_wipe_after">Hapus setelah %1$d PIN salah</string>
-    <string name="sec_wipe_after_on">Aktif: dompet dihapus setelah %1$d PIN salah</string>
+    <string name="sec_wipe_after_on_all">Aktif: semua dompet dihapus setelah %1$d PIN salah</string>
     <string name="sec_wipe_after_off">Nonaktif: perlindungan ekstra dari brute-force PIN</string>
-    <string name="sec_wipe_after_body">Jika aktif, %1$d entri PIN salah berturut-turut akan MENGHAPUS PERMANEN dompet ini (seed, kunci, dan riwayat) dari perangkat ini.\n\nIni tidak dapat dibatalkan di perangkat. Dana Anda hanya bisa dipulihkan dari frasa pemulihan.</string>
+    <string name="sec_wipe_after_body_all">Jika aktif, %1$d entri PIN salah berturut-turut akan MENGHAPUS PERMANEN semua dompet di perangkat ini: frasa pemulihan, kunci, dan riwayat.\n\nIni tidak dapat dibatalkan di perangkat. Dana hanya bisa dipulihkan dari frasa pemulihan masing-masing dompet.</string>
     <string name="sec_wipe_after_ack">Frasa pemulihan saya sudah dicadangkan</string>
     <string name="sec_wipe_after_enabled">Hapus-setelah-%1$d aktif</string>
     <string name="sec_recovery_phrase">Frasa Pemulihan</string>
@@ -445,7 +446,7 @@
     <string name="sec_danger_zone">Zona Berbahaya</string>
     <string name="sec_wipe_wallet">Hapus Dompet</string>
     <string name="sec_wipe_wallet_sub">Hapus semua data dompet dari perangkat ini</string>
-    <string name="sec_wipe_wallet_body">Ini tidak dapat dibatalkan.\n\nSemua data dompet, kunci, dan riwayat transaksi akan dihapus permanen dari perangkat ini.\n\nPastikan frasa pemulihan Anda sudah dicadangkan sebelum melanjutkan.</string>
+    <string name="sec_wipe_all_body">Ini tidak dapat dibatalkan.\n\nSemua dompet di perangkat ini akan dihapus: frasa pemulihan, kunci, dan riwayat transaksi.\n\nPastikan frasa pemulihan setiap dompet sudah dicadangkan sebelum melanjutkan.</string>
     <string name="sec_wipe_everything">Hapus Semuanya</string>
     <string name="sec_verify_pin">Verifikasi PIN Saat Ini</string>
     <string name="sec_verify_pin_sub">Masukkan PIN Anda saat ini untuk melanjutkan</string>
@@ -743,4 +744,97 @@
     <string name="sec_seed_key_no_lock">Tidak terikat: ponsel ini tidak memiliki kunci layar. Atur di pengaturan Android.</string>
     <string name="sec_seed_key_lock_removed">Kunci layar dihapus setelah dompet ini disiapkan, sehingga kuncinya tidak dapat dibuka lagi, bahkan dengan kunci layar baru. Selagi dompet masih terbuka, pastikan frasa pemulihan Anda sudah tercatat, atau pindahkan dana Anda sekarang: saat aplikasi berikutnya dimulai, dompet akan memerlukan frasa pemulihannya.</string>
     <string name="sec_seed_key_cannot_bind">Tidak terikat: kunci dari kunci layar sebelumnya tidak berfungsi lagi, sehingga kunci dompet ini tidak dapat diikat pada instalasi ini. Menghapus dompet lalu memulihkannya dari frasa pemulihannya akan mengikatnya.</string>
+
+    <!-- Multi-wallet: adding a wallet through onboarding (ADD mode). -->
+    <string name="wallet_default_name">Dompet %1$d</string>
+    <string name="wallet_add_title">Tambah dompet</string>
+    <string name="wallet_add_create">Buat dompet baru</string>
+    <string name="wallet_add_restore">Pulihkan dompet dari frasa pemulihannya</string>
+    <string name="wallet_add_pin_note">PIN aplikasi melindungi setiap dompet. Anda tidak perlu mengatur PIN baru.</string>
+    <string name="wallet_add_duplicate">Frasa pemulihan ini sudah ada di aplikasi sebagai “%1$s”.</string>
+    <string name="wallet_add_duplicate_switch">Buka %1$s</string>
+    <string name="wallet_add_cap">Jaringan ini sudah memiliki %1$d dompet. Hapus satu untuk menambah yang lain.</string>
+    <string name="wallet_add_saving">Menambahkan dompet…</string>
+    <string name="wallet_add_failed">Dompet tidak dapat ditambahkan. Tidak ada yang diubah.</string>
+    <!-- Wallet switcher, Manage wallets and removing a wallet (multi-wallet). -->
+    <string name="wallet_chip_cd">Dompet: %1$s. Ganti dompet</string>
+    <string name="wallet_switcher_title">Dompet Anda</string>
+    <string name="wallet_switcher_active">Sedang digunakan</string>
+    <string name="wallet_switcher_not_synced">Belum disinkronkan</string>
+    <string name="wallet_switcher_balance_dgb">%1$s DGB</string>
+    <string name="wallet_switcher_balance_with_dd">%1$s · %2$s DigiDollar</string>
+    <string name="wallet_switcher_both_networks">Digunakan di mainnet dan testnet</string>
+    <string name="wallet_switcher_add">Tambah dompet</string>
+    <string name="wallet_switcher_manage">Kelola</string>
+    <string name="wallet_switcher_failed">Dompet itu tidak dapat dibuka. Tidak ada yang diubah.</string>
+    <string name="wallet_switcher_digistamp_note">Jika Anda memakai DigiStamp di browser, DigiStamp mungkin masih masuk sebagai dompet yang Anda tinggalkan.</string>
+    <string name="wallet_manage_title">Kelola dompet</string>
+    <string name="wallet_manage_rename">Ganti nama</string>
+    <string name="wallet_manage_move_up">Pindah ke atas</string>
+    <string name="wallet_manage_move_down">Pindah ke bawah</string>
+    <string name="wallet_manage_remove">Hapus</string>
+    <string name="wallet_manage_rename_title">Ganti nama dompet</string>
+    <string name="wallet_manage_rename_hint">Hingga %1$d karakter, dan bukan nama dompet lain.</string>
+    <string name="wallet_manage_rename_invalid">Gunakan 1 sampai %1$d karakter dan nama yang tidak dimiliki dompet lain.</string>
+    <string name="wallet_manage_save">Simpan</string>
+    <string name="wallet_remove_title">Hapus %1$s?</string>
+    <string name="wallet_remove_backup_warning">Menghapus dompet akan menghapusnya dari ponsel ini. Hanya frasa pemulihannya yang dapat mengembalikannya, jadi pastikan Anda sudah mencatat frasanya sebelum melanjutkan.</string>
+    <string name="wallet_remove_both_networks">Dompet ini digunakan di mainnet dan testnet. Menghapusnya akan menghapus dari keduanya.</string>
+    <string name="wallet_remove_last">Ini dompet terakhir di ponsel ini. Menghapusnya akan menghapus aplikasi, termasuk PIN aplikasi Anda.</string>
+    <string name="wallet_remove_continue">Saya punya frasa saya</string>
+    <string name="wallet_remove_type_prompt">Ketik nama dompet, %1$s, untuk mengonfirmasi.</string>
+    <string name="wallet_remove_name_label">Nama dompet</string>
+    <string name="wallet_remove_confirm">Hapus dompet</string>
+    <string name="wallet_remove_auth_subtitle">Konfirmasi untuk menghapus dompet ini</string>
+    <string name="wallet_remove_removing">Menghapus dompet…</string>
+    <string name="wallet_remove_done">Dompet telah dihapus.</string>
+    <string name="wallet_remove_db_key_kept">Dompet sudah tidak ada di daftar. Sebagian hanya dapat dihapus setelah aplikasi dimulai ulang, dan itu terjadi dengan sendirinya.</string>
+    <string name="wallet_remove_failed">Dompet sudah tidak ada di daftar tetapi belum terhapus seluruhnya. Sisanya dihapus saat aplikasi dimulai berikutnya.</string>
+    <string name="wallet_remove_not_removed">Dompet tidak dihapus. Tidak ada yang diubah.</string>
+    <string name="hub_signed_in_wallet">Masuk dengan dompet %1$s</string>
+    <string name="seedview_wallet_name">Dompet: %1$s</string>
+    <string name="hub_handle_field_label">Nama panggilan</string>
+    <string name="hub_handle_field_hint">mis. DigiByte_Fan</string>
+    <string name="hub_handle_check">Periksa</string>
+    <string name="hub_handle_register">Daftar</string>
+    <string name="seedview_title">Frasa Pemulihan</string>
+    <string name="seedview_done_hide">Selesai — Sembunyikan Frasa</string>
+    <plurals name="sync_notif_synced">
+        <item quantity="other">Tersinkron — %1$d peer terhubung</item>
+    </plurals>
+    <plurals name="sync_notif_syncing">
+        <item quantity="other">Menyinkronkan %1$d%% — %2$d peer</item>
+    </plurals>
+    <string name="sync_notif_connecting">Menghubungkan ke peer…</string>
+    <string name="sync_notif_via_tor">" · melalui Tor"</string>
+    <string name="hub_handle_title">Pilih Nama Panggilan Anda</string>
+    <string name="hub_handle_intro">Identitas komunitas anonim Anda. 3-20 karakter, hanya huruf, angka, dan garis bawah.</string>
+    <string name="hub_handle_available_desc">Tersedia</string>
+    <string name="hub_handle_taken_desc">Sudah dipakai</string>
+    <string name="hub_handle_is_available">@%1$s tersedia!</string>
+    <string name="hub_handle_tap_check">Ketuk \"Periksa\" untuk memeriksa ketersediaan</string>
+    <string name="seedview_warn_title">Jangan pernah membagikan frasa pemulihan Anda</string>
+    <string name="seedview_warn_body">Siapa pun yang memiliki kata-kata ini dapat mencuri dana Anda.</string>
+    <string name="seedview_words_title">Frasa Pemulihan %1$d kata Anda</string>
+    <string name="seedview_write_down">Tulis kata-kata ini secara berurutan dan simpan dengan aman.</string>
+
+    <!-- Quick start of a restored wallet (multi-wallet step 1, Task 15) -->
+    <string name="quickstart_title">Tampilkan saldo lebih cepat?</string>
+    <string name="quickstart_body">Dompet ini akan menemukan riwayatnya secara pribadi di ponsel ini saat sinkronisasi, yang bisa memakan waktu. Sebagai gantinya, Anda dapat menanyakan saldonya ke server sekarang. Angka ini belum diverifikasi dan tidak dapat dibelanjakan sampai sinkronisasi membuktikannya.</string>
+    <string name="quickstart_skip">Lewati dan sinkronkan secara pribadi</string>
+    <string name="quickstart_own_node">Tanya node saya sendiri (%1$s)</string>
+    <string name="quickstart_own_node_note">Node Anda menerima alamat dompet ini. Tidak ada yang dikirim ke digiscope.me.</string>
+    <string name="quickstart_digiscope">Tanya digiscope.me</string>
+    <string name="quickstart_digiscope_disclosure">Ini mengirim alamat dompet ini ke digiscope.me. Setelah itu digiscope.me dapat mengaitkan dompet ini dengan dompet Anda yang lain.</string>
+    <string name="quickstart_digiscope_confirm">Kirim alamat ke digiscope.me</string>
+    <string name="quickstart_running">Mencari saldo…</string>
+    <string name="quickstart_found">%2$s melaporkan %1$s DGB, belum diverifikasi.</string>
+    <string name="quickstart_found_dd">Dan %1$s DigiDollar, belum diverifikasi.</string>
+    <string name="quickstart_failed">Pencarian tidak menjawab. Dompet tetap akan menemukan saldonya saat sinkronisasi.</string>
+    <string name="quickstart_continue">Lanjutkan</string>
+    <string name="quickstart_unverified">%1$s DGB dilaporkan oleh %2$s, belum diverifikasi</string>
+    <string name="quickstart_unverified_dd">%1$s DigiDollar dilaporkan, belum diverifikasi</string>
+    <string name="quickstart_unverified_sub">Tidak dapat dibelanjakan dan tidak masuk saldo Anda sampai sinkronisasi membuktikannya.</string>
+    <string name="quickstart_running_skip">Lanjutkan tanpa menunggu</string>
+    <string name="quickstart_incomplete">Pencarian tidak dapat diselesaikan, jadi tidak ada angka yang ditampilkan. Dompet tetap akan menemukan saldonya saat sinkronisasi.</string>
 </resources>

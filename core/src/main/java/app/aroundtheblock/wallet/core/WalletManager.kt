@@ -25,6 +25,13 @@ import app.aroundtheblock.wallet.core.security.seedKeyReadinessFor
 import app.aroundtheblock.wallet.core.security.seedKeyStatusFor
 import app.aroundtheblock.wallet.core.security.boundKeyStateOnFailure
 import app.aroundtheblock.wallet.core.security.neverOpens
+import app.aroundtheblock.wallet.core.wallets.StoreScope
+import app.aroundtheblock.wallet.core.wallets.WalletIds
+import app.aroundtheblock.wallet.core.wallets.WalletOrigin
+import app.aroundtheblock.wallet.core.wallets.WalletRegistry
+import app.aroundtheblock.wallet.core.wallets.WalletScope
+import app.aroundtheblock.wallet.core.wallets.WalletStores
+import app.aroundtheblock.wallet.core.wallets.storageSuffix
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -87,6 +94,8 @@ private const val KEY_FINGERPRINT_V2 = "seed_fingerprint_v2"
 private const val KEY_ORIGIN = "wallet_origin"
 private const val ORIGIN_CREATED = "created"
 private const val ORIGIN_RESTORED = "restored"
+/** The network of a wallet other than `legacy` ([WalletStores.NETWORK_KEY]). */
+private const val KEY_NETWORK = WalletStores.NETWORK_KEY
 
 /** The version this release writes the seed record at: written whole, in one commit, saying whether it has a passphrase. */
 private const val SEED_RECORD_VERSION = 1
@@ -97,7 +106,7 @@ private val LEGACY_ENVELOPE_FIELDS = listOf("encrypted_seed", "encrypted_seed_iv
 
 /** Every field of the seed record. */
 private val SEED_RECORD_FIELDS = V2_ENVELOPE_FIELDS + LEGACY_ENVELOPE_FIELDS +
-    listOf(KEY_CREATION_TIME, KEY_RECORD_VERSION, KEY_HAS_PASSPHRASE, KEY_FINGERPRINT_V1, KEY_FINGERPRINT_V2, KEY_ORIGIN)
+    listOf(KEY_CREATION_TIME, KEY_RECORD_VERSION, KEY_HAS_PASSPHRASE, KEY_FINGERPRINT_V1, KEY_FINGERPRINT_V2, KEY_ORIGIN, KEY_NETWORK)
 
 /**
  * The creation time handed to native on a restore. Native picks the header anchor (and
@@ -137,6 +146,10 @@ class WalletManager @Suppress("LongParameterList") constructor(
     // cannot see those, so the app module supplies it (AppModule). Defaulted so pure-JVM
     // constructions keep compiling; the default has nothing to end and says so truthfully.
     private val identitySessions: IdentitySessionWipe = IdentitySessionWipe { true },
+    // Every wallet's Hub session is revoked on the server, best effort, before the wipe erases the
+    // tokens (AppModule wires DigiScopeClient.revokeStoredSession). Nothing to revoke by default.
+    private val hubRevoke: app.aroundtheblock.wallet.core.digiscope.HubSessionRevoke =
+        app.aroundtheblock.wallet.core.digiscope.HubSessionRevoke.NONE,
     /**
      * Marks the erasure owed, durably, BEFORE a wipe erases anything (4.1.2 row 24): a process death in
      * the seconds the wipe runs used to leave the Hub token, the DB key and the database with no retry
@@ -163,6 +176,32 @@ class WalletManager @Suppress("LongParameterList") constructor(
         { app.aroundtheblock.wallet.core.db.DatabaseKeyProvisioner.forContext(context).releaseLegacyWrap() },
     // The rebuild's STOP_SYNC step, injectable for the same reason as the above.
     private val stopSyncForRebuild: () -> Unit = { NativeBridge.stopSync() },
+    // The wallet this manager reads and writes. Every store call below passes it, so none falls
+    // back to the process's active wallet.
+    private val scope: WalletScope = WalletScope.legacy(isTestnet(context)),
+    // The native calls of restoreFromDisk and its waits, injectable for the same reason as the above.
+    private val restoreNative: (mnemonic: ByteArray, creationTime: Long, passphrase: ByteArray?) -> Boolean =
+        { m, t, p -> NativeBridge.restoreWalletFromBytes(m, t, p) },
+    private val stopSyncNative: () -> Unit = { NativeBridge.stopSync() },
+    private val peerCountNative: () -> Int = { NativeBridge.getPeerCount() },
+    private val loadTxNative: (records: ByteArray) -> Int = { NativeBridge.loadSerializedTransactions(it) },
+    private val sleep: (millis: Long) -> Unit = { Thread.sleep(it) },
+    // Read-back of every store of a scope (prefs incl. the seed record, files, database files, the
+    // floor key; not Keystore aliases). Injectable for the same reason as the above.
+    private val storesLeft: (WalletScope) -> Boolean =
+        { app.aroundtheblock.wallet.core.wallets.WalletStoreEraser(context).storesLeft(it) },
+    // The wipe removes every wallet (one PIN guards them all): it erases each wallet's record and
+    // stores through this eraser's phases, legacy's through [dataEraser].
+    private val scopeEraser: app.aroundtheblock.wallet.core.wallets.WalletStoreEraser =
+        app.aroundtheblock.wallet.core.wallets.WalletStoreEraser(context),
+    // Every seed key alias of every wallet, which the wipe deletes and reads back. Not
+    // [keyStoreManager], which is bound to this manager's own wallet.
+    private val keystoreAliases: KeystoreAliases = AndroidKeystoreAliases,
+    // Every wallet id on the device: the registry, the seed records on disk and the Keystore
+    // aliases. Injectable because in-memory test prefs create no files to list.
+    private val allWalletIds: () -> List<String> = {
+        app.aroundtheblock.wallet.core.wallets.ActiveWallet.everyWalletId(context) { keystoreAliases.aliases() }
+    },
 ) {
     // Sessions running for the wallet in this process (the sync service), stopped by every wipe
     // before it erases anything. See [WalletSessionStop].
@@ -180,13 +219,13 @@ class WalletManager @Suppress("LongParameterList") constructor(
     val syncFrontierSession = SyncFrontierSession()
 
     private val prefs: SharedPreferences =
-        context.getSharedPreferences("dgb_wallet_seed", Context.MODE_PRIVATE)
+        context.getSharedPreferences(WalletStores.seedRecordPrefs(scope), Context.MODE_PRIVATE)
 
     // Every address ever shown on the Receive screen, persisted so it can be re-pinned
     // into the native BIP158 watch set on each load — a receive to it can never fall
     // outside the derived gap window and be missed. See NativeBridge.addWatchedAddresses.
     private val watchedPrefs: SharedPreferences =
-        context.getSharedPreferences("dgb_watched_addrs", Context.MODE_PRIVATE)
+        context.getSharedPreferences(WalletStores.prefsName("dgb_watched_addrs", scope), Context.MODE_PRIVATE)
 
     // Off-main scope for the native watch-set pin. Deliberately NOT the caller's thread:
     // getReceiveAddress is invoked from Compose composition on the main thread, and the
@@ -208,7 +247,23 @@ class WalletManager @Suppress("LongParameterList") constructor(
      */
     fun mayHaveDigiIdHistoryElsewhere(): Boolean = prefs.getString(KEY_ORIGIN, null) != ORIGIN_CREATED
 
-    fun hasSavedWallet(): Boolean = prefs.contains("encrypted_seed") || prefs.contains("encrypted_seed_v2")
+    fun hasSavedWallet(): Boolean = holdsSeed(prefs)
+
+    private fun holdsSeed(record: SharedPreferences): Boolean =
+        record.contains("encrypted_seed") || record.contains("encrypted_seed_v2")
+
+    /** [scope]'s seed record holds a sealed seed (read from the store as this process sees it). */
+    private fun holdsSeedRecord(scope: WalletScope): Boolean =
+        holdsSeed(context.getSharedPreferences(WalletStores.seedRecordPrefs(scope), Context.MODE_PRIVATE))
+
+    /** Clear the registry `dgb_wallets`: true only when the write landed. */
+    private fun clearWalletRegistry(): Boolean {
+        val store = context.getSharedPreferences(WalletRegistry.PREFS, Context.MODE_PRIVATE)
+        val held = store.all
+        val landed = store.edit().clear().commit()
+        if (!landed) readWhatTheFileHolds("WalletManager", WalletRegistry.PREFS, store, held)
+        return landed
+    }
 
     /**
      * Whether PIN setup creates the wallet from the words onboarding holds.
@@ -307,8 +362,9 @@ class WalletManager @Suppress("LongParameterList") constructor(
                 // rescan()/first sync reads it.
                 val birth = runCatching { birthHeightNative() }.getOrDefault(0L)
                 val toPersist = cfBirthHeightToPersist(birth)
+                val birthKey = WalletStores.cfBirthHeightKey(scope)
                 context.getSharedPreferences("dgb_settings", Context.MODE_PRIVATE).edit().apply {
-                    if (toPersist != null) putLong("cf_birth_height", toPersist) else remove("cf_birth_height")
+                    if (toPersist != null) putLong(birthKey, toPersist) else remove(birthKey)
                 }.commit()
                 android.util.Log.i("WalletManager", "recoverWallet: persisted cf_birth_height=$toPersist (raw=$birth)")
                 rescanNative()
@@ -318,6 +374,46 @@ class WalletManager @Suppress("LongParameterList") constructor(
             mnemonicBytes.fill(0)
         }
     }
+
+    /**
+     * Store a wallet's record — one checked write, as [createWallet] — WITHOUT loading the wallet:
+     * nothing native is created, recovered or rescanned, and no sync data is cleared. This is how a
+     * wallet other than the one this process runs is added; it is loaded by [restoreFromDisk] once
+     * it is the active wallet.
+     *
+     * False, and nothing written (no key made either), when any store of the scope is still present
+     * ([app.aroundtheblock.wallet.core.wallets.WalletStoreEraser.storesLeft]): a record is never
+     * stored over a wallet's existing state. A leftover Keystore alias does not block it.
+     *
+     * @param passphrase NFKD UTF-8 bytes, or null. The CALLER owns and zeroes them; see [createWallet].
+     */
+    fun storeRecordOnly(mnemonic: String, passphrase: ByteArray?, creationTimeSecs: Long, origin: WalletOrigin): Boolean {
+        if (passphrase != null && (passphrase.size > Bip39Passphrase.MAX_BYTES || Bip39Passphrase.hasNul(passphrase))) return false
+        if (storesLeft(scope)) {
+            android.util.Log.w("WalletManager", "wallet record not stored: its scope already holds state")
+            return false
+        }
+        val mnemonicBytes = mnemonic.toByteArray(Charsets.UTF_8)
+        try {
+            val sealed = sealForNewRecord(mnemonicBytes, passphrase) ?: return false
+            val originValue = when (origin) {
+                WalletOrigin.CREATED -> ORIGIN_CREATED
+                WalletOrigin.RESTORED -> ORIGIN_RESTORED
+            }
+            val stored = storeSeedRecord(sealed, mnemonicBytes, passphrase, creationTimeSecs, originValue)
+            // A stored wallet that is not loaded is a locked one, as [init] reads it on the next start.
+            if (stored) _walletState.value = WalletState.Locked
+            return stored
+        } finally {
+            mnemonicBytes.fill(0)
+        }
+    }
+
+    /** The record's identity ([SeedFingerprint.v2] of the derived seed), or null when it holds none. */
+    fun recordIdentity(): String? = prefs.getString(KEY_FINGERPRINT_V2, null)
+
+    /** The record's mnemonic-based fingerprint (v1, records from before the derived identity), or null. */
+    fun recordFingerprintV1(): String? = prefs.getString(KEY_FINGERPRINT_V1, null)
 
     /**
      * Restore wallet from persisted encrypted seed on app restart.
@@ -362,18 +458,18 @@ class WalletManager @Suppress("LongParameterList") constructor(
             // CRITICAL: stop sync before replacing the wallet — the peer manager's
             // background threads are using the old wallet pointer. Freeing it
             // while they're running causes SIGSEGV.
-            NativeBridge.stopSync()
+            stopSyncNative()
             // Wait for peer manager threads to fully drain. 200ms was insufficient —
             // SIGSEGV crashes were observed on the DefaultDispatch thread after the
             // old wallet was freed. Poll peer count to confirm disconnection, with
             // a hard cap to avoid hanging.
             var waitMs = 0
-            while (NativeBridge.getPeerCount() > 0 && waitMs < 2000) {
-                Thread.sleep(100)
+            while (peerCountNative() > 0 && waitMs < 2000) {
+                sleep(100)
                 waitMs += 100
             }
             // Extra settle time for threads that may be mid-callback
-            Thread.sleep(300)
+            sleep(300)
 
             // Only clear saved blocks/peers if the seed has changed (e.g. after
             // uninstall/reinstall with a different mnemonic). On normal app restarts
@@ -403,7 +499,7 @@ class WalletManager @Suppress("LongParameterList") constructor(
             // causing BRWalletAmountSentByTx to return wrong values mid-rescan.
             // The wider bloom filter (830 addresses) takes effect naturally
             // on the next sync cycle without needing a full rescan.
-            val migrationPrefs = context.getSharedPreferences("dgb_sync_data" + networkSuffix(context), android.content.Context.MODE_PRIVATE)
+            val migrationPrefs = context.getSharedPreferences(WalletStores.prefsName("dgb_sync_data", scope), android.content.Context.MODE_PRIVATE)
             if (!migrationPrefs.getBoolean("bip84_migrated", false)) {
                 android.util.Log.i("WalletManager", "BIP84 upgrade detected — marking migration (no rescan)")
                 migrationPrefs.edit()
@@ -413,22 +509,22 @@ class WalletManager @Suppress("LongParameterList") constructor(
 
             // Load saved transactions BEFORE creating wallet — recoverWallet uses them
             // so the wallet starts with full tx history and balance is immediately spendable.
-            val syncPrefs = context.getSharedPreferences("dgb_sync_data" + networkSuffix(context), android.content.Context.MODE_PRIVATE)
+            val syncPrefs = context.getSharedPreferences(WalletStores.prefsName("dgb_sync_data", scope), android.content.Context.MODE_PRIVATE)
             // Rebuild transaction history once after an update: a cache written by an earlier
             // build is discarded here, before it is read. Normally already decided at process
             // start (DigiByteApp.onCreate); this covers a network this process has not evaluated.
             // A throw leaves it undone, to be retried on the next launch.
-            runCatching { HistoryRebuildOnUpgrade.beforeWalletLoad(context) }
+            runCatching { HistoryRebuildOnUpgrade.beforeWalletLoad(context, scope = scope) }
                 .onFailure { android.util.Log.w(HistoryRebuildOnUpgrade.TAG, "history rebuild check failed; retried next launch", it) }
             // A rebuild that started clearing and did not finish leaves a partial cache: do not load it.
             // TX-CKPT-CAP: the checkpoint is a file of raw bytes (SavedTransactionsStore), migrated once
             // from the legacy dgb_sync_data hex key, so no 50 MB string is pinned in the prefs map here.
-            val rebuildInProgress = HistoryRebuildOnUpgrade.isInProgress(context)
+            val rebuildInProgress = HistoryRebuildOnUpgrade.isInProgress(context, scope = scope)
             val savedTx = if (rebuildInProgress) {
                 android.util.Log.w(HistoryRebuildOnUpgrade.TAG, "history rebuild in progress; not loading the transaction cache")
                 null
             } else {
-                runCatching { SavedTransactionsStore.load(context) }
+                runCatching { SavedTransactionsStore.load(context, scope) }
                     .onFailure { android.util.Log.w("WalletManager", "transaction checkpoint read failed", it) }
                     .getOrElse { ByteArray(0) }   // present but unreadable: recorded as a short restore below
             }
@@ -457,7 +553,7 @@ class WalletManager @Suppress("LongParameterList") constructor(
                 var loaded = 0
                 try {
                     if (savedTx.size >= 4) {
-                        loaded = NativeBridge.loadSerializedTransactions(savedTx)
+                        loaded = loadTxNative(savedTx)
                         android.util.Log.i("WalletManager", "Loaded $loaded saved transactions for restore")
                     } else {
                         android.util.Log.w("WalletManager", "Unreadable transaction checkpoint — the restore continues without it")
@@ -485,8 +581,8 @@ class WalletManager @Suppress("LongParameterList") constructor(
             val creationTime = prefs.getLong(KEY_CREATION_TIME, 0L)
             // After a one-time history rebuild the anchor goes no later than the oldest record
             // the discarded cache held (creationTimeForRestore); otherwise unchanged.
-            val restoreTime = creationTimeForRestore(creationTime, HistoryRebuildOnUpgrade.floorTime(context))
-            val success = NativeBridge.restoreWalletFromBytes(seedBytes, restoreTime, storedPass)
+            val restoreTime = creationTimeForRestore(creationTime, HistoryRebuildOnUpgrade.floorTime(context, scope = scope))
+            val success = restoreNative(seedBytes, restoreTime, storedPass)
             if (success) {
                 _walletState.value = WalletState.Unlocked
                 // A passphrase stored with a NUL opened the wallet of the part before it; record that (R13).
@@ -618,7 +714,7 @@ class WalletManager @Suppress("LongParameterList") constructor(
         neverRelayed: suspend (txid: String, inputs: List<Pair<String, Int>>) -> Boolean = { _, _ -> false },
         nowS: Long = System.currentTimeMillis() / 1000L,
     ): StuckSendResult {
-        val store = OutgoingTxStore(context)
+        val store = OutgoingTxStore(context, scope)
 
         // Sovereign owned-address set, built ONCE for the whole pass (never a
         // third party) so dead-send phantom asset rows can be identified.
@@ -733,7 +829,7 @@ class WalletManager @Suppress("LongParameterList") constructor(
                 android.util.Log.w("WalletManager", "clearStuckSends: skipping row after exception", e)
             }
         }
-        if (dropped > 0) runCatching { WalletTxPersister(context).persist() }
+        if (dropped > 0) runCatching { WalletTxPersister(context, scope = scope).persist() }
         return StuckSendResult(
             dropped = dropped,
             kept = kept,
@@ -780,9 +876,9 @@ class WalletManager @Suppress("LongParameterList") constructor(
         // done. Without it nothing would repeat a clear that did not land: stop here. A commit
         // that returns false has still put the armed values in memory, where the next commit to
         // the file in this process would write them to disk: disarm on this path too.
-        val prior = HistoryRebuildOnUpgrade.readState(context)
-        if (!HistoryRebuildOnUpgrade.armRerun(context)) {
-            logRebuildStopped("armRerun", disarmedNote(HistoryRebuildOnUpgrade.disarmRerun(context, prior)))
+        val prior = HistoryRebuildOnUpgrade.readState(context, scope = scope)
+        if (!HistoryRebuildOnUpgrade.armRerun(context, scope = scope)) {
+            logRebuildStopped("armRerun", disarmedNote(HistoryRebuildOnUpgrade.disarmRerun(context, prior, scope)))
             return false
         }
         // FLOOR_FROM_CACHE before the cache goes: its oldest confirmed height and record time
@@ -790,8 +886,8 @@ class WalletManager @Suppress("LongParameterList") constructor(
         // again. If that does not land the cache's floor would be lost with it: stop, and put
         // the rerun back as it was (if that does not land either, the rerun stays armed, which
         // only defers the rebuild to the next start: its run carries the floor before it clears).
-        if (!HistoryRebuildOnUpgrade.floorFromCache(context)) {
-            logRebuildStopped("floorFromCache", disarmedNote(HistoryRebuildOnUpgrade.disarmRerun(context, prior)))
+        if (!HistoryRebuildOnUpgrade.floorFromCache(context, scope = scope)) {
+            logRebuildStopped("floorFromCache", disarmedNote(HistoryRebuildOnUpgrade.disarmRerun(context, prior, scope)))
             return false
         }
         // NOTE: synchronous (commit), NOT apply(). The caller kills the process
@@ -801,10 +897,10 @@ class WalletManager @Suppress("LongParameterList") constructor(
         // tip instead of the birth floor). The clear is shared with the one-time
         // history rebuild after an update, so the two cannot drift; see
         // clearTransactionCacheForRebuild for what it removes and why.
-        if (!clearTransactionCacheForRebuild(context)) {
+        if (!clearTransactionCacheForRebuild(context, scope)) {
             runCatching { android.util.Log.w(HistoryRebuildOnUpgrade.TAG, "manual rebuild: the clear did not fully land; the next start repeats it") }
         }
-        OutgoingTxStore(context).clearAll()
+        OutgoingTxStore(context, scope).clearAll()
         // Floor the compact-filter rescan at the wallet's birth so old tx blocks are
         // re-scanned and stamped (SyncService reads cf_birth_height on sync start).
         // If the birth height is unknown, REMOVE the pref rather than writing 0 —
@@ -813,8 +909,9 @@ class WalletManager @Suppress("LongParameterList") constructor(
         // record carries anything lower (the cache's floor above) into it at sync start.
         val birth = runCatching { NativeBridge.getWalletBirthCheckpointHeight() }.getOrDefault(0L)
         val toPersist = cfBirthHeightToPersist(birth)
+        val birthKey = WalletStores.cfBirthHeightKey(scope)
         context.getSharedPreferences("dgb_settings", Context.MODE_PRIVATE).edit().apply {
-            if (toPersist != null) putLong("cf_birth_height", toPersist) else remove("cf_birth_height")
+            if (toPersist != null) putLong(birthKey, toPersist) else remove(birthKey)
         }.commit()
         return true
     }
@@ -827,13 +924,13 @@ class WalletManager @Suppress("LongParameterList") constructor(
      * restarts the app, as for the plain rebuild.
      */
     fun rebuildFromChainRescanFrom(height: Long): Boolean {
-        if (!HistoryRebuildOnUpgrade.lowerFloorTo(context, height)) {
+        if (!HistoryRebuildOnUpgrade.lowerFloorTo(context, height, scope)) {
             // The record's values may still be in memory (a commit that returns false keeps them
             // there); they only ever lower the floor, so a later write of them costs a longer scan.
             logRebuildStopped(
                 "lowerFloorTo($height)",
                 "the rerun was not armed; the lowered floor may stay in the record (floor height " +
-                    "${HistoryRebuildOnUpgrade.floorHint(context)}, pending ${HistoryRebuildOnUpgrade.floorPending(context)})",
+                    "${HistoryRebuildOnUpgrade.floorHint(context, scope = scope)}, pending ${HistoryRebuildOnUpgrade.floorPending(context, scope = scope)})",
             )
             return false
         }
@@ -841,7 +938,7 @@ class WalletManager @Suppress("LongParameterList") constructor(
             if (!rebuilt) runCatching {
                 android.util.Log.w(
                     HistoryRebuildOnUpgrade.TAG,
-                    "rescan from $height: the floor was lowered (floor height ${HistoryRebuildOnUpgrade.floorHint(context)}) " +
+                    "rescan from $height: the floor was lowered (floor height ${HistoryRebuildOnUpgrade.floorHint(context, scope = scope)}) " +
                         "and stays in the record; the next sync start carries it into the stored floor",
                 )
             }
@@ -911,15 +1008,19 @@ class WalletManager @Suppress("LongParameterList") constructor(
     }
 
     /**
-     * Complete wallet wipe — destroys the seed AND all privacy-sensitive derived
-     * data (tx history, address set, recorded sends, filter-header chain, Room DB),
-     * so a security wipe (manual Settings OR the PIN wipe-after-N backstop) doesn't
-     * leave transaction history behind. Both paths call this single routine, and one
-     * run covers BOTH networks' stores and the identity sessions ([IdentitySessionWipe]).
+     * Complete wipe of EVERY wallet on the device — one PIN guards them all, so one wipe removes
+     * them all. It destroys each wallet's seed AND all privacy-sensitive derived data (tx history,
+     * address set, recorded sends, filter-header chain, Room DB), so a security wipe (manual
+     * Settings OR the PIN wipe-after-N backstop) doesn't leave transaction history behind. Both
+     * paths call this single routine, and one run covers every wallet ([allWalletIds]: the
+     * registry, the seed records on disk and the Keystore aliases), BOTH networks' stores, the
+     * registry `dgb_wallets` and the identity sessions ([IdentitySessionWipe]).
      *
-     * Order holds across a process death: the seed ciphertext is cleared FIRST, and its key once
-     * that removal is CONFIRMED — so a wipe cut short leaves hasSavedWallet()=false (no
-     * half-loadable wallet) and nothing that could decrypt a record that did survive, while a
+     * It runs each phase across every wallet before the next phase starts, never one wallet at a
+     * time: every seed record first; then, once every record reads back gone, every seed key alias
+     * of every wallet (legacy's `dgb_wallet_master(_v2)` included, whichever wallet is active);
+     * then every store. Order holds across a process death: a wipe cut short leaves no
+     * half-loadable wallet and nothing that could decrypt a record that did survive, while a
      * record that is still on the device keeps the key that opens it and stays the wallet its
      * PIN opened before this run. A wipe that could not finish is always one that can be run
      * again, from a device its owner can still open.
@@ -938,12 +1039,7 @@ class WalletManager @Suppress("LongParameterList") constructor(
      * this directly but go through [wipeThenReleasePin], which decides about the PIN from it.
      */
     suspend fun wipeWallet(): WipeReport {
-        fun attempt(what: String, block: () -> Boolean): Boolean = try {
-            block()
-        } catch (t: Throwable) {
-            android.util.Log.e("WalletManager", "wipe: $what did not complete (${t.javaClass.simpleName})")
-            false
-        }
+        fun attempt(what: String, block: () -> Boolean): Boolean = wipeStep(what, block)
 
         // Stop what runs the wallet's session in this process, so nothing it holds is written
         // after the erase below. Each one is asked, whatever the one before it did.
@@ -952,16 +1048,15 @@ class WalletManager @Suppress("LongParameterList") constructor(
             .all { it }
         // Stop sync and disconnect peers before destroying wallet.
         val quiesced = attempt("native quiesce") { quiesceNative(); true }
-        // Seed ciphertext FIRST (the ordering invariant above). The record is what holds the
-        // seed; the key only unwraps it. So the record's removal is CONFIRMED first — the write
-        // landed (the in-memory view of a preferences file shows an edit whether or not it
-        // reached the disk, so the write result is part of the evidence) and nothing is readable
-        // any more — and only then does the key go.
-        val seedErased = attempt("wallet record") { dataEraser.eraseSeedCiphertext() }
-        val recordGone = seedErased && attempt("wallet record read-back") { !hasSavedWallet() }
-        if (recordGone) {
-            attempt("wallet key") { keyStoreManager.deleteKey(); true } // judged by the read-back below
-        }
+        // Before anything is erased, while every token is still readable: ask the server to end each
+        // wallet's Hub session. Best effort, and not part of the report.
+        revokeHubSessions()
+        // Phase 1, every seed record of every wallet FIRST (the ordering invariant above).
+        val records = eraseEveryRecord()
+        val others = records.others
+        val recordGone = records.gone
+        // Phase 2, every listed wallet's seed key aliases, only once every record reads back gone.
+        if (recordGone) deleteSeedKeys(records)
         // Empty the UTXO table through the still-open handle BEFORE the database files are erased:
         // a write after the erase can create a file by name (a rollback journal) that the eraser's
         // read-back has already passed. Tidiness for this process only, not part of the report.
@@ -972,7 +1067,8 @@ class WalletManager @Suppress("LongParameterList") constructor(
         } catch (t: Throwable) {
             android.util.Log.w("WalletManager", "wipe: utxo cache not emptied (${t.javaClass.simpleName})")
         }
-        // Regenerable + privacy-sensitive persisted data, both networks.
+        // Phase 3. Regenerable + privacy-sensitive persisted data: legacy's on both networks, then
+        // every other wallet's on both networks (a wallet's own network is not trusted to be known).
         val storesCleared = listOf(
             attempt("sync data") { dataEraser.eraseSyncData() },
             attempt("peer cache") { dataEraser.eraseBloomPeerCache() },
@@ -982,11 +1078,17 @@ class WalletManager @Suppress("LongParameterList") constructor(
             attempt("database") { dataEraser.eraseDatabase() },
             attempt("leftover state") { dataEraser.eraseLeftoverState() },
             attempt("hub session") { dataEraser.eraseHubSession() },
+        ) + others.flatMap { listOf(it, it.copy(testnet = true)) }.map { wallet ->
+            attempt("wallet stores") { scopeEraser.eraseStores(wallet) }
+        } + listOf(
+            // The registry goes only once no wallet's record is left: while one is, the registry
+            // still lists it.
+            recordGone && attempt("wallet registry") { clearWalletRegistry() },
             attempt("identity sessions") { identitySessions.eraseIdentitySessions() },
-        ).all { it }
-        // READ-BACK, not "no step threw": the record's removal is confirmed (above) and neither
-        // seed key alias exists when the Keystore is asked again.
-        val seedGone = recordGone && attempt("wallet key read-back") { dataEraser.seedKeyAbsent() }
+        )
+        // READ-BACK, not "no step threw": the removal of every record is confirmed (above) and no
+        // seed key alias of any wallet exists when the Keystore is asked again.
+        val seedGone = seedOfEveryWalletGone(records)
 
         // The state says what is on the device: no wallet only when the seed is gone. Otherwise
         // the wallet still exists behind its PIN and its session has been stopped — Locked.
@@ -995,10 +1097,116 @@ class WalletManager @Suppress("LongParameterList") constructor(
         syncFrontierSession.reset()
         val report = WipeReport(
             seedGone = seedGone,
-            everythingCleared = sessionsStopped && quiesced && storesCleared,
+            everythingCleared = sessionsStopped && quiesced && storesCleared.all { it },
         )
+        // Last, so nothing of this run writes one back: a verified wipe leaves no file name that
+        // says another wallet existed (duress), nor the emptied registry and legacy seed record.
+        if (report.verified) records.listed?.let(::deleteWalletNamedPrefsFiles)
         return report
     }
+
+    /** [hubRevoke] for every wallet on the device. Never throws; the wipe does not wait on it. */
+    private fun revokeHubSessions() {
+        val ids = try {
+            (listOf(WalletIds.LEGACY) + allWalletIds()).filter(WalletIds::isValid).distinct()
+        } catch (t: Throwable) {
+            android.util.Log.w("WalletManager", "wipe: Hub sessions not revoked (${t.javaClass.simpleName})")
+            return
+        }
+        // The Hub stores are not network-suffixed: one scope per wallet names them.
+        ids.forEach { id -> wipeStep("hub revoke") { hubRevoke.revoke(WalletScope(id, testnet = false)); true } }
+    }
+
+    /**
+     * After a verified wipe: delete every preferences file whose name carries one of [listed]'s ids
+     * (the emptied stores the per-wallet erase deleted and anything written back since), plus the
+     * registry `dgb_wallets` and legacy's seed record `dgb_wallet_seed`, which the wipe clears and
+     * leaves. Best effort, logged by count only: what they held is already gone.
+     */
+    private fun deleteWalletNamedPrefsFiles(listed: Set<String>) {
+        val ids = listed.filter { it != WalletIds.LEGACY }
+        val legacyRecord = WalletStores.seedRecordPrefs(WalletScope.legacy(false))
+        val names = try {
+            java.io.File(context.dataDir, "shared_prefs").list().orEmpty().map { it.removeSuffix(".bak").removeSuffix(".xml") }.toSet()
+        } catch (t: Throwable) {
+            android.util.Log.w("WalletManager", "wipe: shared_prefs not listed (${t.javaClass.simpleName})")
+            return
+        }
+        val targets = names.filter { name -> name == WalletRegistry.PREFS || name == legacyRecord || ids.any { name.contains(it) } }
+        val left = targets.count { name -> !wipeStep("delete a preferences file") { context.deleteSharedPreferences(name) } }
+        if (left > 0) android.util.Log.w("WalletManager", "wipe: $left preferences files not deleted")
+    }
+
+    /** A wipe step: one that throws has not reported success. Logged by exception class only. */
+    private fun wipeStep(what: String, block: () -> Boolean): Boolean = try {
+        block()
+    } catch (t: Throwable) {
+        android.util.Log.e("WalletManager", "wipe: $what did not complete (${t.javaClass.simpleName})")
+        false
+    }
+
+    /**
+     * What [eraseEveryRecord] established: [gone] when every wallet was listed, every record's
+     * erase reported landed and no wallet's record reads back; [listed] the wallet ids it erased
+     * (null when they could not be listed); [others] every wallet but legacy.
+     */
+    private class RecordsErased(val gone: Boolean, val listed: Set<String>?, val others: List<WalletScope>)
+
+    /**
+     * Phase 1 of every wipe, over every wallet on the device (legacy always among them): erase each
+     * seed record, then read every one back. The record is what holds the seed; the key only unwraps
+     * it. So the removal of every record is CONFIRMED first — each write landed (the in-memory view
+     * of a preferences file shows an edit whether or not it reached the disk, so the write result is
+     * part of the evidence) and no record of any wallet is readable any more — and only then may any
+     * key go. An id set that cannot be read is one that cannot say every record is gone: legacy is
+     * still erased, and [RecordsErased.gone] is false.
+     */
+    private fun eraseEveryRecord(): RecordsErased {
+        val listed: List<String>? = try {
+            (listOf(WalletIds.LEGACY) + allWalletIds()).filter(WalletIds::isValid).distinct()
+        } catch (t: Throwable) {
+            android.util.Log.e("WalletManager", "wipe: wallet ids not listed (${t.javaClass.simpleName})")
+            null
+        }
+        // A seed record is one file for both networks, so the network here only names it.
+        val others = listed.orEmpty().filter { it != WalletIds.LEGACY }.map { WalletScope(it, testnet = false) }
+        val erased = listOf(wipeStep("wallet record") { dataEraser.eraseSeedCiphertext() }) +
+            others.map { wallet -> wipeStep("wallet record") { scopeEraser.eraseRecord(wallet) } }
+        val gone = listed != null && erased.all { it } &&
+            wipeStep("wallet record read-back") { (listOf(WalletScope.legacy(false)) + others).none(::holdsSeedRecord) }
+        return RecordsErased(gone, listed?.toSet(), others)
+    }
+
+    /**
+     * Phase 2 of every wipe, once [records] is gone: delete every seed key alias the Keystore lists
+     * of a wallet in [RecordsErased.listed] — legacy's `dgb_wallet_master(_v2)` included — through
+     * the Keystore itself: [keyStoreManager] is bound to this manager's wallet, and with another
+     * wallet active it would leave legacy's. An alias of a wallet that was not listed is left: its
+     * record was never looked for, and the read-back ([seedOfEveryWalletGone]) counts it, so the
+     * retry lists it. Legacy's key may still wrap the database password's record; the database and
+     * that record are erased by the wipe, so nothing needs it unwrapped first. Each delete is
+     * attempted; what it established is the caller's read-back.
+     */
+    private fun deleteSeedKeys(records: RecordsErased) {
+        val listed = records.listed ?: return
+        val seedAliases = try {
+            keystoreAliases.aliases().filter { WalletStores.walletIdOfAlias(it) in listed }
+        } catch (t: Throwable) {
+            android.util.Log.e("WalletManager", "wipe: wallet keys not listed (${t.javaClass.simpleName})")
+            return
+        }
+        seedAliases.forEach { alias -> wipeStep("wallet key") { keystoreAliases.delete(alias); true } }
+    }
+
+    /**
+     * The wipe's definition of "the seed is gone" ([WipeReport.seedGone]), for every wallet at once:
+     * [records] says no wallet's record is left, and the Keystore, asked again, holds no seed key
+     * alias of any wallet, listed or not. A Keystore that cannot answer is "not gone".
+     */
+    private fun seedOfEveryWalletGone(records: RecordsErased): Boolean =
+        records.gone && wipeStep("wallet key read-back") {
+            keystoreAliases.aliases().none { WalletStores.walletIdOfAlias(it) != null }
+        }
 
     /**
      * The ONE sequence every wipe entry point runs (Settings, the unlock screen, the spend
@@ -1059,11 +1267,15 @@ class WalletManager @Suppress("LongParameterList") constructor(
      * never add up to a device that can no longer be opened at all. After the bound the screen
      * asks this and then acts on the answer:
      *
-     *  - **true** — no wallet record is on this device, so there is nothing left for the owed wipe
-     *    to hold the screen for. The flag is released (and only the flag: the PIN store is
+     *  - **true** — no record of ANY wallet is on this device (the wipe's own first step,
+     *    [eraseEveryRecord]), so there is nothing left for the owed wipe to hold the screen for.
+     *    Every listed wallet's seed key is deleted first, as the wipe's second step, but a key that
+     *    will not go, or a Keystore that cannot be listed, does not hold the screen: a key with no
+     *    record protects nothing. The flag is released (and only the flag: the PIN store is
      *    untouched, as after any wipe that could not be verified) so onboarding can be offered and
      *    a wallet made from here on does not inherit a wipe owed to its predecessor.
-     *  - **false** — a wallet record is still on this device, so the hold has nothing left to
+     *  - **false** — a record of some wallet is still on this device (one PIN guards every wallet,
+     *    so it does not matter which), so the hold has nothing left to
      *    protect and the screen stands down and takes the PIN, which opens that wallet: a refused
      *    write leaves this process reading what the store's file still holds (see
      *    [AndroidWalletDataEraser]), so a load from the record finds it. The screen still acts on
@@ -1071,7 +1283,7 @@ class WalletManager @Suppress("LongParameterList") constructor(
      *    Either way the wipe stays owed: the launch backstop and each later entry to the unlock
      *    screen retry it.
      *
-     * The evidence is the store's own answer to the wipe's first step, asked once more, and not
+     * The evidence is the stores' own answer to the wipe's first step ([eraseEveryRecord]), asked once more, and not
      * the record read-back on its own. So only a store that TAKES the removal counts as a device
      * with no wallet left, and a store that still refuses its write keeps its owner on the unlock
      * screen — never at onboarding over a wallet that is still there.
@@ -1083,13 +1295,15 @@ class WalletManager @Suppress("LongParameterList") constructor(
     suspend fun releaseOwedWipeIfNoWalletIsLeft(
         pinManager: app.aroundtheblock.wallet.core.security.PinManager,
     ): Boolean = kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
-        val recordGone = try {
-            dataEraser.eraseSeedCiphertext() && !hasSavedWallet()
-        } catch (t: Throwable) {
-            android.util.Log.e("WalletManager", "wallet record not removable (${t.javaClass.simpleName})")
-            false // unknown is "still here": the screen stands down and the PIN decides
-        }
-        if (!recordGone) return@withContext false
+        // Every wallet's record, by the wipe's own first step: one PIN guards them all, so a record of
+        // ANY wallet still here is a wallet the owed wipe still holds the screen for. Unknown is
+        // "still here": the screen stands down and the PIN decides.
+        val records = eraseEveryRecord()
+        if (!records.gone) return@withContext false
+        // The keys are attempted, as the wipe's second step, but do not decide: a key with no record
+        // protects nothing, and one that will not go must not hold a device that has no wallet left
+        // at the unlock screen for ever (the PIN would open nothing). The owed erasure retries it.
+        deleteSeedKeys(records)
         // The flag goes, but the secrets the unverified wipes left (Hub token, DB key) are still owed
         // their erasure: the next launch finishes it (4.1.2 row 33).
         runCatching { markErasureOwed() }.onFailure {
@@ -1276,6 +1490,7 @@ class WalletManager @Suppress("LongParameterList") constructor(
             .putBoolean(KEY_HAS_PASSPHRASE, sealed.passphrase != null)
             .putInt(KEY_RECORD_VERSION, SEED_RECORD_VERSION)
             .putString(KEY_ORIGIN, origin)
+        if (!scope.isLegacy) edit.putString(KEY_NETWORK, if (scope.testnet) WalletStores.NETWORK_TESTNET else WalletStores.NETWORK_MAINNET)
         val landed = edit.commit()
         val readsBack = landed &&
             prefs.getInt(KEY_RECORD_VERSION, 0) == SEED_RECORD_VERSION &&
@@ -1642,8 +1857,8 @@ class WalletManager @Suppress("LongParameterList") constructor(
         // clear did not land.
         // The display currency used to live in this file and is a device setting: a create or a
         // restore keeps it (owner decision, 2026-11-12), so move it out before the clear.
-        app.aroundtheblock.wallet.core.settings.DisplayCurrencyPrefs.moveFromLegacy(context, networkSuffix(context))
-        val cleared = context.getSharedPreferences("dgb_sync_data" + networkSuffix(context), Context.MODE_PRIVATE)
+        app.aroundtheblock.wallet.core.settings.DisplayCurrencyPrefs.moveFromLegacy(context, storageSuffix(scope, StoreScope.NETWORK))
+        val cleared = context.getSharedPreferences(WalletStores.prefsName("dgb_sync_data", scope), Context.MODE_PRIVATE)
             .edit().clear().commit()
         // Drop ChainTipStore's in-memory mirror too — see the note in
         // AndroidWalletDataEraser.eraseSyncData. This helper backs createWallet and recoverWallet,
@@ -1655,21 +1870,21 @@ class WalletManager @Suppress("LongParameterList") constructor(
         // Without this, a fresh wallet (createWallet/recoverWallet) or a
         // seed-fingerprint-mismatch restore (restoreFromDisk) would inherit the
         // PREVIOUS wallet's saved-blocks window from disk.
-        SavedBlockStore.delete(context)
+        SavedBlockStore.delete(context, scope)
         // TX-CKPT-CAP: the transaction checkpoint moved out of dgb_sync_data too; a new wallet must
         // not restore the previous wallet's history from it.
-        SavedTransactionsStore.delete(context)
+        SavedTransactionsStore.delete(context, scope)
         // STORE-DURABILITY review: the scan ledger records which heights were evaluated for ONE wallet,
         // so after a seed change it is the wrong wallet's record; the header chain goes with it. Deleted
         // here, through delete() (epoch bump, tmp first), rather than left to the next start's restore
         // preflight to find (HEADER_WINDOW_MISSING) once the block window above is gone.
-        app.aroundtheblock.wallet.core.sync.FilterHeaderStore.delete(context)
-        app.aroundtheblock.wallet.core.sync.CfScanLedgerStore.delete(context)
+        app.aroundtheblock.wallet.core.sync.FilterHeaderStore.delete(context, scope)
+        app.aroundtheblock.wallet.core.sync.CfScanLedgerStore.delete(context, scope)
         // A new wallet (create, recover, seed change): every record cached from here on is
         // written by this build, so the one-time rebuild after an update has nothing to do. The
         // floor a previous wallet's rebuild recorded does not belong to this one.
         if (cleared) {
-            HistoryRebuildOnUpgrade.markNotNeeded(context, forgetFloor = true)
+            HistoryRebuildOnUpgrade.markNotNeeded(context, forgetFloor = true, scope = scope)
         } else {
             runCatching { android.util.Log.w(HistoryRebuildOnUpgrade.TAG, "sync data clear did not land; the one-time rebuild stays armed") }
         }
