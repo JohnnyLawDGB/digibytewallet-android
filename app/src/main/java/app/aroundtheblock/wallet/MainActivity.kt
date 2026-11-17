@@ -80,7 +80,7 @@ class MainActivity : FragmentActivity() {
     @Inject lateinit var keyStoreManager: KeyStoreManager
     @Inject lateinit var torManager: TorManager
     @Inject lateinit var walletConfigDao: WalletConfigDao
-    /** The active wallet's database: asked only whether it is on disk, by the auto-lock's one-time move. */
+    /** The active wallet's database: its name and its own config row go to the auto-lock's one-time move. */
     @Inject lateinit var walletDatabase: app.aroundtheblock.wallet.core.db.WalletDatabase
     @Inject lateinit var digiScopeClient: DigiScopeClient
     @Inject lateinit var okHttpClient: OkHttpClient
@@ -574,22 +574,24 @@ class MainActivity : FragmentActivity() {
 
     /**
      * The auto-lock timeout's one-time move out of the legacy wallet's database into [AutoLockPrefs],
-     * where every wallet reads it (multi-wallet step 1: one PIN, one lock policy). Legacy's database
-     * is read only when it is the one this process has open, from disk: the 4.1.4 timeout is in
-     * legacy's mainnet `wallet.db`, and another wallet's, testnet's or this session's temporary
-     * database says nothing about it. Until the move is answered the lock enforces the default
-     * (60 s, the shortest option). A timeout chosen since the update is never overwritten.
+     * where every wallet reads it (multi-wallet step 1: one PIN, one lock policy). Which database may
+     * answer it is decided in core, by [AutoLockPrefs.readLegacy], where it is tested: only legacy's
+     * mainnet `wallet.db` from disk holds the 4.1.4 timeout, and another wallet's, testnet's or this
+     * session's temporary database says nothing about it. This hands that decision the facts about
+     * the database this process has open, and nothing else: the wallet it was opened for, its name
+     * (null for the temporary one) and its own config row. Until the move is answered the lock
+     * enforces the default (60 s, the shortest option). A timeout chosen since the update is never
+     * overwritten.
      *
      * The Tor defaults need no such step: the Tor setting was always the install's (TorManager).
      */
     private suspend fun moveLegacyAutoLockTimeout() {
         AutoLockPrefs.migrateFromLegacy(applicationContext) {
-            val onDisk = walletDatabase.openHelper.databaseName != null
-            if (AutoLockPrefs.holdsLegacyTimeout(ActiveWallet.scope(applicationContext), onDisk)) {
-                AutoLockPrefs.Legacy.Answered(walletConfigDao.get()?.autoLockTimeoutMs)
-            } else {
-                AutoLockPrefs.Legacy.NotHere
-            }
+            AutoLockPrefs.readLegacy(
+                ActiveWallet.scope(applicationContext),
+                walletDatabase.openHelper.databaseName,
+                walletDatabase.walletConfigDao(),
+            )
         }
     }
 

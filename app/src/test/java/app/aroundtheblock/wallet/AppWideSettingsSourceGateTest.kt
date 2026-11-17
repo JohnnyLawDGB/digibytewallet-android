@@ -28,15 +28,20 @@ import java.io.File
 class AppWideSettingsSourceGateTest {
 
     private val appRoot = File("src/main/java/app/aroundtheblock/wallet")
-    private val torManager = File("../core/src/main/java/app/aroundtheblock/wallet/core/tor/TorManager.kt")
+    private val coreRoot = File("../core/src/main/java/app/aroundtheblock/wallet/core")
+    private val torManager = File(coreRoot, "tor/TorManager.kt")
+    private val autoLockPrefs = File(coreRoot, "settings/AutoLockPrefs.kt")
 
     private fun gate(file: File) = KotlinSourceGate.of(file.readText())
     private fun gate(rel: String) = gate(File(appRoot, rel))
-    private fun sources(): List<File> = appRoot.walkTopDown().filter { it.isFile && it.extension == "kt" }.toList()
+    private fun kotlinIn(root: File): List<File> = root.walkTopDown().filter { it.isFile && it.extension == "kt" }.toList()
+    private fun sources(): List<File> = kotlinIn(appRoot)
 
     @Test fun `the scan sees the sources at all`() {
         assertTrue("cannot see the app sources", sources().size > 100)
+        assertTrue("cannot see the core sources", kotlinIn(coreRoot).size > 100)
         assertTrue("cannot see TorManager", torManager.isFile)
+        assertTrue("cannot see AutoLockPrefs", autoLockPrefs.isFile)
         // The user's own Tor switch is a write the scan must see, or the literal-write check below is blind.
         assertEquals(
             "the scan no longer sees the Settings Tor switch write",
@@ -90,19 +95,41 @@ class AppWideSettingsSourceGateTest {
         assertTrue("setAutoLockTimeout is missing", set != null)
         assertEquals("the Security screen does not store the app-wide timeout", 1, vm.calls("AutoLockPrefs.setTimeoutMs", set!!).size)
         assertTrue("the Security screen still writes the timeout into the wallet database", vm.calls("walletConfigDao.upsert", set).isEmpty())
-        // The wallet database's column is read once, by the one-time move out of legacy's database.
+        // The one-time move out of legacy's database. Only legacy's own mainnet database from disk
+        // holds the 4.1.4 value, and "no row" in another wallet's, testnet's or a temporary database
+        // would finish the move with nothing. Which database may answer is decided in core, by
+        // AutoLockPrefs.readLegacy, which AutoLockPrefsTest runs; the launch hands it the facts about
+        // the database its process has open, and its block is that call and nothing else. Each fact
+        // has a way to lose the choice: the wallet scope (an added wallet's empty database answers),
+        // the name (null is how the temporary database is told apart), and the row (another database's).
         val move = main.calls("AutoLockPrefs.migrateFromLegacy")
         assertEquals("MainActivity runs the one-time move ${move.size} times; it has to be once", 1, move.size)
         val inMove = main.trailingBlock(move.single())
         assertTrue("the one-time move has no block to read legacy's database in", inMove != null)
-        // Only legacy's own mainnet database from disk holds the 4.1.4 value: "no row" in another
-        // wallet's, testnet's or a temporary database would finish the move with nothing.
-        assertEquals("the move does not ask whether the open database is legacy's own", 1, main.calls("AutoLockPrefs.holdsLegacyTimeout", inMove!!).size)
-        assertTrue("the move cannot tell a temporary database from legacy's on disk", main.code.substring(inMove).contains("walletDatabase.openHelper.databaseName"))
+        val decide = main.calls("AutoLockPrefs.readLegacy")
+        assertEquals("MainActivity asks core which database answers the move ${decide.size} times; it has to be once", 1, decide.size)
+        assertEquals(
+            "the move is not handed the wallet this process runs, its database's name and that database's own row",
+            listOf("ActiveWallet.scope(applicationContext)", "walletDatabase.openHelper.databaseName", "walletDatabase.walletConfigDao()"),
+            decide.single().arguments,
+        )
+        assertEquals(
+            "the one-time move's block is not core's answer alone",
+            decide.single().text, main.code.substring(inMove!!.first + 1, inMove.last).trim(),
+        )
+        // The wallet database's column is read once, by that decision: nowhere in the app, and in core
+        // only inside readLegacy. The entity's own declaration of the column is not a read.
         val column = Regex("""(?<!\w)autoLockTimeoutMs(?!\w)""")
-        val reads = sources().flatMap { f -> column.findAll(gate(f).code).map { f.name to it.range.first }.toList() }
-        val outsideMove = reads.filterNot { (name, at) -> name == "MainActivity.kt" && at in inMove }
-        assertEquals("the wallet database's auto-lock column is read outside the one-time move", emptyList<Pair<String, Int>>(), outsideMove)
-        assertEquals("the one-time move does not read legacy's column", 1, reads.size)
+        fun readsIn(files: List<File>) = files.flatMap { f ->
+            val code = gate(f).code
+            column.findAll(code).map { it.range.first }.filterNot { code.substring(0, it).trimEnd().endsWith("val") }.map { f to it }.toList()
+        }
+        assertEquals("an app source reads the wallet database's auto-lock column", emptyList<String>(), readsIn(sources()).map { (f, at) -> "${f.name}@$at" })
+        val decision = gate(autoLockPrefs).range("suspend fun readLegacy(", "\n    }")
+        assertTrue("AutoLockPrefs.readLegacy is missing", decision != null)
+        val coreReads = readsIn(kotlinIn(coreRoot))
+        val outsideDecision = coreReads.filterNot { (f, at) -> f.canonicalPath == autoLockPrefs.canonicalPath && at in decision!! }
+        assertEquals("the wallet database's auto-lock column is read outside the one-time move", emptyList<String>(), outsideDecision.map { (f, at) -> "${f.name}@$at" })
+        assertEquals("the one-time move does not read legacy's column", 1, coreReads.size)
     }
 }
