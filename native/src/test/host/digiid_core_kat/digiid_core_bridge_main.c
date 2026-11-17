@@ -447,8 +447,12 @@ static void print(void)
         "https://api.digiscope.me/api/digiid/callback", "https://example.com/cb", "https://example.com/",
         "https://example.com", "https://sub.domain-with-dash.co.uk/digiid/login.php", "http://192.168.1.10:3000/digiid",
         "https://Example.COM/cb", "https://site.example/login",
+        /* The three callback URLs Coinomi was measured signing in to (site_key_digibyte_coinomi_uris). */
+        "https://api.digiscope.me/api/digiid-probe/callback", "https://api.digiscope.me/api/auth/digiid/callback",
+        "https://digiscope.me/api/digiid-probe/callback",
     };
     static const char *login = "digiid://api.digiscope.me/api/auth/digiid/callback?x=00112233445566778899aabbccddeeff";
+    static const char *loginCallback = "https://api.digiscope.me/api/auth/digiid/callback";   /* the login's own callback URL */
     static const char *request = "digiid://example.com/callback?x=abc123";
     static const jchar emoji[] = { 'g', 'm', ' ', 0xD83D, 0xDE00, ' ', '!' };
 
@@ -477,6 +481,7 @@ static void print(void)
     printf("SIGN shared login format 2 %s\n", answerText(NativeBridge_signMessage(env, NULL, jascii(login), 2)));
     printf("SIGN shared empty format 0 %s\n", answerText(NativeBridge_signMessage(env, NULL, jascii(""), 0)));
     printf("SIGN site request %s\n", answerText(NativeBridge_signIdentityMessage(env, NULL, jascii(request), jascii(golden[0]), 0)));
+    printf("SIGN site login %s\n", answerText(NativeBridge_signIdentityMessage(env, NULL, jascii(login), jascii(loginCallback), 0)));
     printf("SIGN shared request %s\n", answerText(NativeBridge_signMessage(env, NULL, jascii(request), 0)));
     printf("SIGN site emoji %s\n", answerText(NativeBridge_signIdentityMessage(env, NULL, hostString(emoji, 7),
                                                                                 jascii("https://site.example/login"), 0)));

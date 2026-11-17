@@ -11,11 +11,14 @@
 //       slip13_identity_kat holds); every assertion of slip13_identity_kat and of identity_sign_bytes_kat
 //       (the bytes a message is signed over); the derivation inputs DigiIdRequestTest pins
 //       (request_golden_inputs: its golden callbackUrls and the letter-case one, each with the address
-//       the bridge derives for it); and DigiIdIdentityChoiceTest's request, whose two identities must
-//       differ and whose address is the address the login signs with (sign_site_request). Addresses and
-//       signatures are literals read off the REAL bridge by `digiid_core_bridge print` (run.sh builds it;
-//       its sweep holds the header to the bridge end to end). Keys are also derived here by a separate
-//       BIP32 written in this file (ckd below), not by the core's BRBIP32PrivKeyPath.
+//       the bridge derives for it); DigiIdIdentityChoiceTest's request, whose two identities must
+//       differ and whose address is the address the login signs with (sign_site_request); and the three
+//       callback URLs Coinomi was measured signing in to, under today's per-site master key "DigiByte
+//       seed" (site_key_digibyte_coinomi_uris: each address, and DigiScope's login signed with the
+//       identity of its own callback). Addresses and signatures are literals read off the REAL bridge by
+//       `digiid_core_bridge print` (run.sh builds it; its sweep holds the header to the bridge end to
+//       end). Keys are also derived here by a separate BIP32 written in this file (ckd below), not by the
+//       core's BRBIP32PrivKeyPath.
 //    2. BY THE BRIDGE'S OWN slip13.c, compiled into this binary: the path indexes are held to it.
 //    3. BY A MODEL. `b_...` below is the bridge's C written out line for line without JNI (a jstring
 //       becomes its bytes or its UTF-16 units, NULL a Java null). The sweep_* cases hold the header to
@@ -656,6 +659,73 @@ static void site_key_derivation(void)
     ck(BRDigiIdSiteKey(&key, seed, 64, REQUEST_CALLBACK, n, 0, WORK, 4 + n - 1) == BR_DIGIID_CAPACITY && allZero(&key, sizeof(key)),
        "too little work is CAPACITY, the key wiped");
     ck(BRDigiIdSiteKey(NULL, seed, 64, REQUEST_CALLBACK, n, 0, WORK, sizeof(WORK)) == BR_DIGIID_REFUSED, "no key is refused");
+}
+
+// Every header call site_key_digibyte_coinomi_uris makes, in one place: uri's per-site key at index 0 into *key,
+// its address into addr and, when msg is given, msg signed with it into answer (empty otherwise). All three
+// derive from today's per-site master key, HMAC-SHA512("DigiByte seed", seed) (BRBIP32PrivKeyPath's), which no
+// argument names yet. When one does, these calls are the case's only lines to change; its literals and checks
+// stay as they are. Nonzero when every call answered BR_DIGIID_OK.
+static int hDigiByteSite(BRKey *key, char addr[BR_DIGIID_ADDRESS_CAPACITY], char answer[BR_DIGIID_ANSWER_CAPACITY],
+                         const uint8_t *seed, const char *uri, const char *msg)
+{
+    size_t n = strlen(uri);
+    int ok = BRDigiIdSiteKey(key, seed, 64, uri, n, 0, WORK, sizeof(WORK)) == BR_DIGIID_OK;
+
+    ok = BRDigiIdAddress(addr, BR_DIGIID_ADDRESS_CAPACITY, seed, 64, 1, uri, n, 0, WORK, sizeof(WORK)) == BR_DIGIID_OK && ok;
+    answer[0] = '\0';
+    if (msg)
+        ok = BRDigiIdSignSite(answer, BR_DIGIID_ANSWER_CAPACITY, seed, 64, (const uint8_t *)msg, strlen(msg), uri, n, 0, WORK,
+                              sizeof(WORK)) == BR_DIGIID_OK && ok;
+    return ok;
+}
+
+// The per-site identity of the three callback URLs Coinomi was measured signing in to
+// (docs/superpowers/specs/2026-11-17-coinomi-digiid-design.md), as every per-site identity has it today: master
+// key "DigiByte seed", so none of them is the address Coinomi showed. Pinned before the master key becomes an
+// argument (characterize shared crypto, then change it). The addresses and the login's answer are the bridge's
+// (digiid_core_bridge print); each key is also this file's BIP32 from "DigiByte seed" and the bridge's
+// seed_derive_identity_key, byte for byte.
+static void site_key_digibyte_coinomi_uris(void)
+{
+    static const struct { const char *uri, *address, *loginAnswer; } V[] = {
+        { "https://api.digiscope.me/api/digiid-probe/callback", "DHawr8VSh4T2iEM9NxJdubbDTra31RKU94", NULL },
+        // DigiScope's login callback, LOGIN's own: LOGIN signed with its identity.
+        { "https://api.digiscope.me/api/auth/digiid/callback", "DKBDZRPxPz6qGseZKNNzSwW3zfaRr1FQNA",
+          "DKBDZRPxPz6qGseZKNNzSwW3zfaRr1FQNA|H6Y5Lov+rhzj1oz38NlPjC1XM80aNswPBThCuh4bS/SSFi9VH4xMrN317Cx/mtcsLAwNZt50r431nlfMGb741y4=" },
+        { "https://digiscope.me/api/digiid-probe/callback", "DS4cZJP33QZ2mc1bTy9RgHZ3nDznEzS5eh", NULL },
+    };
+    uint8_t seed[64];
+    char addr[BR_DIGIID_ADDRESS_CAPACITY], answer[BR_DIGIID_ANSWER_CAPACITY], keyAddr[75];
+    BRKey key, bridge;
+    size_t i;
+
+    seedOf(seed, ABANDON);
+    for (i = 0; i < N(V); i++) {
+        size_t n = strlen(V[i].uri);
+        uint32_t idx[4], path[5];
+
+        ck(hDigiByteSite(&key, addr, answer, seed, V[i].uri, V[i].loginAnswer ? LOGIN : NULL),
+           "%s at index 0: BRDigiIdSiteKey and BRDigiIdAddress answer%s", V[i].uri, V[i].loginAnswer ? ", BRDigiIdSignSite signs LOGIN" : "");
+        ck(strcmp(addr, V[i].address) == 0, "%s: the bridge's address (%s)", V[i].uri, addr);
+        slip13_indexes(idx, V[i].uri, n, 0);
+        path[0] = 13 | HARD; path[1] = idx[0] | HARD; path[2] = idx[1] | HARD; path[3] = idx[2] | HARD; path[4] = idx[3] | HARD;
+        ck(sameSecret(&key, ownSecret(seed, 64, path, 5)), "%s: the key is m/13'/A'/B'/C'/D' from \"DigiByte seed\" (this file's BIP32)",
+           V[i].uri);
+        memset(&bridge, 0, sizeof(bridge));
+        ck(b_seed_derive_identity_key(&bridge, seed, 64, V[i].uri, n, 0) && memcmp(&key, &bridge, sizeof(key)) == 0,
+           "%s: and the bridge's seed_derive_identity_key's, byte for byte", V[i].uri);
+        memset(keyAddr, 0, sizeof(keyAddr));
+        BRKeyAddress(&key, keyAddr, sizeof(keyAddr));
+        ck(strcmp(keyAddr, V[i].address) == 0, "%s: whose P2PKH address is that address", V[i].uri);
+        if (V[i].loginAnswer) {
+            ck(strcmp(answer, V[i].loginAnswer) == 0, "%s: LOGIN signed with it, the bridge's answer", V[i].uri);
+            ck(signsBytes(answer, (const uint8_t *)LOGIN, strlen(LOGIN)) && strncmp(answer, addr, strlen(addr)) == 0 &&
+               answer[strlen(addr)] == '|', "over LOGIN's bytes, by that address");
+        }
+        BRKeyClean(&key);
+        BRKeyClean(&bridge);
+    }
 }
 
 static void shared_key_derivation(void)
@@ -1417,7 +1487,8 @@ typedef struct { const char *name; void (*run)(void); } Case;
 static const Case CASES[] = {
     { "slip13_published_vectors", slip13_published_vectors }, { "slip13_identity_carried", slip13_identity_carried },
     { "slip13_index_values", slip13_index_values }, { "slip13_edges", slip13_edges },
-    { "site_key_derivation", site_key_derivation }, { "shared_key_derivation", shared_key_derivation },
+    { "site_key_derivation", site_key_derivation }, { "site_key_digibyte_coinomi_uris", site_key_digibyte_coinomi_uris },
+    { "shared_key_derivation", shared_key_derivation },
     { "message_prefix", message_prefix }, { "message_digest", message_digest }, { "utf8_bytes", utf8_bytes },
     { "uri_bytes", uri_bytes }, { "uri_identity", uri_identity },
     { "sign_shared_login", sign_shared_login }, { "sign_site_request", sign_site_request },

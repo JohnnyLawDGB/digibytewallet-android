@@ -3,10 +3,11 @@
 # Android bridge (bridge/slip13.c; seed_derive_identity_key in jni_wallet.c; sign_with_key, base64_encode,
 # write_varint, message_utf8, signMessage, signIdentityMessage and identityAddress in jni_wallet_sign.c). The
 # assertions of slip13_identity_kat and identity_sign_bytes_kat, the derivation inputs of DigiIdRequestTest
-# and the request of DigiIdIdentityChoiceTest run here, with SLIP-0013's published vector, beside a
-# line-for-line C model of the bridge that the header is compared with over fixed pseudo-random inputs. See
-# digiid_core_kat_main.c. Then the REAL bridge, booted over a host JNI, is held to the header answer for
-# answer (digiid_core_bridge_main.c).
+# and the request of DigiIdIdentityChoiceTest run here, with SLIP-0013's published vector and the per-site
+# identity today's master key ("DigiByte seed") gives the three callback URLs Coinomi was measured signing in
+# to (docs/superpowers/specs/2026-11-17-coinomi-digiid-design.md), beside a line-for-line C model of the
+# bridge that the header is compared with over fixed pseudo-random inputs. See digiid_core_kat_main.c. Then
+# the REAL bridge, booted over a host JNI, is held to the header answer for answer (digiid_core_bridge_main.c).
 #
 #   comparison  one arm per rule, -DDIGIID_UNFIXED=<bit> (BRDigiId.h): 1 the account index is hashed
 #               big-endian; 2 A..D are read big-endian; 4 A..D are not hardened; 8 a negative index is
@@ -66,6 +67,7 @@ CASES=(
     slip13_index_values:1,2
     slip13_edges:1,2
     site_key_derivation:1,2,4,8
+    site_key_digibyte_coinomi_uris:2,4,64,8192
     shared_key_derivation:4096
     message_prefix:32
     message_digest:64
