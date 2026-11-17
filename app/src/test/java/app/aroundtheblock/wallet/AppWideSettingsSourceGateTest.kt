@@ -32,8 +32,12 @@ import java.io.File
  * So the gate fixes where the setting is written (the user's answer, at the two places that take it,
  * and TorManager's new-install default), where those two places are called from (the user's own
  * action on Tor: the Network Info switch and the Tor prompt's buttons), that nothing outside
- * TorManager names its file, and that nothing reads the column. It reads names, not types: a read by
- * position (destructuring a row) or through reflection is beyond it.
+ * TorManager names its file, that inside TorManager only the setting's own setter writes it, and that
+ * nothing reads the column. It reads names, not types: a read by position (destructuring a row) or
+ * through reflection is beyond it.
+ *
+ * For the auto-lock timeout it fixes what reads and writes the value, and that every launch still
+ * runs its one-time move out of legacy's database.
  */
 class AppWideSettingsSourceGateTest {
 
@@ -257,6 +261,97 @@ class AppWideSettingsSourceGateTest {
         return null
     }
 
+    // ── TorManager's own writes of its file ─────────────────────────────────────────────────────
+
+    /**
+     * The Tor file's name or its setting's key spelt out: the file's anywhere in a string (a path to
+     * it too: `"shared_prefs/dgb_tor.xml"`), the key's as a string of its own, which is how a key is
+     * passed. A log line that mentions the key in a sentence is not a use of it.
+     */
+    private val spelt = Regex("""(?<!\w)dgb_tor(?!\w)|["]tor_enabled(?!\w)""")
+
+    /**
+     * Where the `edit` at [at] stands in TorManager and what it writes. The first statement of a
+     * property's setter reads "<property>'s setter, first: <statement>", the statement whole and read
+     * on through a line that continues it; anything else is named by its line and the code that opens
+     * its block.
+     */
+    private fun describeEdit(g: KotlinSourceGate, at: Int): String {
+        val code = g.code
+        val block = g.enclosingBlock(at) ?: return "outside every block: ${lineAt(code, at)}"
+        val head = headOf(code, block.first)
+        val receiver = Regex("""(?<!\w)prefs\s*\.\s*$""").find(code.substring(block.first + 1, at))
+            ?: return "not an edit of prefs: ${lineAt(code, at)} (in: $head)"
+        val start = block.first + 1 + receiver.range.first
+        val setter = if (head.endsWith("set(value)")) Regex("""(?<!\w)va[lr]\s+(\w+)""").findAll(head).lastOrNull()?.groupValues?.get(1) else null
+        val first = code.substring(block.first + 1, start).isBlank()
+        val statement = KotlinSourceGate.squeeze(code.substring(start, valueEnd(code, start - 1)))
+        return if (setter != null && first) "$setter's setter, first: $statement" else "${lineAt(code, at)} (in: $head)"
+    }
+
+    // ── Steps a function runs ──────────────────────────────────────────────────────────────────
+
+    /** The body `{ … }` of the function [signature] declares (it ends with the `(` of its parameters), or null when it has none. */
+    private fun bodyOf(g: KotlinSourceGate, signature: String): IntRange? {
+        val code = g.code
+        val at = code.indexOf(signature).takeIf { it >= 0 } ?: return null
+        val close = closerOf(code, at + signature.length - 1) ?: return null
+        val open = code.indexOf('{', close).takeIf { it >= 0 } ?: return null
+        // Between the parameters and the body only a return type may stand; `= …` is an expression body.
+        if (!Regex("""\s*(:\s*[\w.<>?, ]+)?\s*""").matches(code.substring(close + 1, open))) return null
+        return g.blockAt(open)
+    }
+
+    /**
+     * Why the statement that starts at [start] might not run each time the function whose body is
+     * [body] runs, or null when the code gives no reason: it stands in a lambda or a branch inside the
+     * body rather than in the body itself; code comes before it on its line (`if (…) step`); the code
+     * before it makes it the branch of an `if`, a `while`, a `for` or an `else` on the line before, or
+     * the right-hand side of an operator (`=`, `&&`, `||`, `?:`, …); or the function can return before
+     * it. A local or an anonymous function's `return` is that function's.
+     */
+    private fun whySkippable(g: KotlinSourceGate, body: IntRange, start: Int): String? {
+        val code = g.code
+        if (g.enclosingBlock(start) != body) return "it stands in a block inside the function, not in the function's own body"
+        if (code.substring(code.lastIndexOf('\n', start - 1) + 1, start).isNotBlank()) return "code comes before it on its line: ${lineAt(code, start)}"
+        val before = code.substring(body.first + 1, start).trimEnd()
+        if (before.endsWith(")")) {
+            val opener = openerAt(code, body.first + before.length)
+            val keyword = opener?.let { Regex("""(\w+)\s*$""").find(code.substring(maxOf(0, it - 40), it))?.groupValues?.get(1) }
+            if (keyword in setOf("if", "while", "for")) return "it is the branch of the `$keyword` before it: ${lineAt(code, body.first + before.length)}"
+        }
+        if (Regex("""(?<!\w)(else|do)$""").containsMatchIn(before)) return "it is the branch of the `else` or `do` before it"
+        if (Regex("""(=|&&|\|\||\?:|->|\.|\(|\[|,)$""").containsMatchIn(before)) return "it continues the expression before it: ${lineAt(code, body.first + before.length)}"
+        val returns = Regex("""(?<![\w@])return(?![\w@])""").findAll(code.substring(body.first + 1, start))
+            .map { body.first + 1 + it.range.first }
+            .filterNot { inNestedFunction(g, body, it) }
+        return returns.firstOrNull()?.let { "the function can return before it: ${lineAt(code, it)}" }
+    }
+
+    /** True when [at] stands in a function declared inside [body]: a local function, or an anonymous one. */
+    private fun inNestedFunction(g: KotlinSourceGate, body: IntRange, at: Int): Boolean {
+        var block = g.enclosingBlock(at)
+        while (block != null && block != body) {
+            if (isFunctionBody(g.code, block.first)) return true
+            block = g.enclosingBlock(block.first)
+        }
+        return false
+    }
+
+    /**
+     * True when the block at [open] is a function's body: its head ends with a signature, `fun`, a
+     * name or none, the parameters and a return type or none. A head can run back over earlier
+     * statements, so a `fun` somewhere in it is not enough (`fun f() = 1` on the line before a lambda).
+     */
+    private fun isFunctionBody(code: String, open: Int): Boolean {
+        val head = headOf(code, open)
+        val fn = Regex("""(?<!\w)fun(?!\w)""").findAll(head).lastOrNull() ?: return false
+        val rest = head.substring(fn.range.last + 1)
+        val paren = rest.indexOf('(').takeIf { it >= 0 && Regex("""[\s\w.<>,?]*""").matches(rest.substring(0, it)) } ?: return false
+        val close = closerOf(rest, paren) ?: return false
+        return Regex("""\s*(:\s*[\w.<>?, ]+)?\s*""").matches(rest.substring(close + 1))
+    }
+
     // ── The checks ─────────────────────────────────────────────────────────────────────────────
 
     @Test fun `the scan sees the sources at all`() {
@@ -294,7 +389,8 @@ class AppWideSettingsSourceGateTest {
 
     @Test fun `a launch applies the install's Tor defaults, never a wallet database's`() {
         val main = gate("MainActivity.kt")
-        val onCreate = main.range("override fun onCreate(", "override fun ")
+        // onCreate's own body: a function placed after it, which nothing may call, is not part of it.
+        val onCreate = bodyOf(main, "override fun onCreate(")
         assertTrue("MainActivity.onCreate is missing", onCreate != null)
         val defaults = main.calls("torManager.applyNewInstallDefaults", onCreate!!)
         assertEquals("onCreate applies the install's Tor defaults ${defaults.size} times; it has to be once", 1, defaults.size)
@@ -366,14 +462,58 @@ class AppWideSettingsSourceGateTest {
         assertEquals("the scan no longer sees TorManager's new-install default", 1, coreWrites.size)
         // Under the setting is TorManager's file. A write there, or a clear or a delete of it, changes
         // the setting as surely: a file with no setting in it reads as a new install, and the next
-        // launch writes Tor off.
+        // launch writes Tor off. Its constants are internal to core, so app code that names them does
+        // not compile; this check covers core as well, and a name spelt out ([spelt]). TorManager's own
+        // writes of the file are the next test's.
         val named = Regex("""(?<!\w)TorManager\s*\.\s*(Companion\s*\.\s*)?(PREFS|KEY_ENABLED)(?!\w)""")
-        val spelt = Regex("""["](dgb_tor|tor_enabled)(?!\w)""")
         val elsewhere = (sources() + coreSources()).filterNot { it.canonicalPath == torManager.canonicalPath }.flatMap { f ->
             val g = gate(f)
             (named.findAll(g.code) + spelt.findAll(g.written)).map { "${f.name}: ${lineAt(g.written, it.range.first)}" }.toList()
         }
         assertEquals("the Tor setting's file is named outside TorManager", emptyList<String>(), elsewhere)
+    }
+
+    @Test fun `TorManager writes its own file only in the setters of its two settings`() {
+        // The checks above stop at TorManager's door: nothing outside it names its file, and core's one
+        // write of `isEnabled` is the new-install default. A second writer of the file inside TorManager
+        // would pass them, and it changes the setting as surely as a write of `isEnabled`: a `remove` or
+        // a `clear` leaves a file the next launch reads as a new install, whose defaults write Tor off,
+        // and another `putBoolean` writes a value nobody chose. So TorManager opens the file once, as
+        // its private `prefs`; `prefs` never leaves it (every use is a read of it or an edit of it);
+        // the file and the setting keep the names 4.1.4 wrote them under (a new name reads as never
+        // written too); and each edit is one whole statement, the first of a setter: `isEnabled`'s,
+        // which every write of the setting goes through and which the checks above pin, and
+        // `upgradePromptShown`'s.
+        val g = gate(torManager)
+        val code = g.code
+        val opening = "private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)"
+        assertEquals(
+            "TorManager opens or deletes a preferences file other than once, as its own prefs",
+            listOf(opening),
+            (g.calls("getSharedPreferences") + g.calls("deleteSharedPreferences")).map { lineAt(code, it.range.first) },
+        )
+        assertEquals(
+            "TorManager names its file other than where it declares the name 4.1.4 wrote and opens it",
+            listOf(opening, "internal const val PREFS = \"dgb_tor\""),
+            Regex("""(?<!\w)PREFS(?!\w)""").findAll(code).map { lineAt(g.written, it.range.first) }.toList(),
+        )
+        assertEquals(
+            "TorManager spells its file's or its setting's name other than in their declarations, as 4.1.4 wrote them",
+            listOf("internal const val PREFS = \"dgb_tor\"", "internal const val KEY_ENABLED = \"tor_enabled\""),
+            spelt.findAll(g.written).map { lineAt(g.written, it.range.first) }.toList(),
+        )
+        val handedOn = Regex("""(?<!\w)prefs(?!\w)""").findAll(code)
+            .filterNot { m -> Regex("""^\s*\.\s*(get\w*|contains|edit)\s*\(""").containsMatchIn(code.substring(m.range.last + 1, minOf(code.length, m.range.last + 40))) }
+            .map { lineAt(code, it.range.first) }.toList()
+        assertEquals("TorManager's prefs is used other than by a read or an edit of its own: it can be edited where no check looks", listOf(opening), handedOn)
+        assertEquals(
+            "TorManager edits its file other than once in each setter",
+            listOf(
+                "isEnabled's setter, first: prefs.edit().putBoolean(KEY_ENABLED, value).apply()",
+                "upgradePromptShown's setter, first: prefs.edit().putBoolean(KEY_UPGRADE_PROMPT_SHOWN, value).apply()",
+            ),
+            Regex("""(?<!\w)edit(?!\w)""").findAll(code).map { describeEdit(g, it.range.first) }.toList(),
+        )
     }
 
     @Test fun `nothing reads the wallet database's Tor column`() {
@@ -443,6 +583,29 @@ class AppWideSettingsSourceGateTest {
         assertEquals(
             "the one-time move's block is not core's answer alone",
             decide.single().text, main.code.substring(inMove!!.first + 1, inMove.last).trim(),
+        )
+        // And every launch runs it. A private function nothing calls still compiles, so counting the
+        // move's call sites cannot see a launch that stopped running it, and every 4.1.4 user's chosen
+        // timeout would become the default in every wallet. So onCreate runs it: one statement of its
+        // own body, which nothing before it can skip, starting a coroutine that runs the move and
+        // nothing else; the function holds the move alone; and nothing else calls it.
+        val onCreate = bodyOf(main, "override fun onCreate(")
+        assertTrue("MainActivity.onCreate is missing", onCreate != null)
+        val runs = main.calls("moveLegacyAutoLockTimeout")
+        assertEquals("MainActivity calls moveLegacyAutoLockTimeout ${runs.size} times; it has to be once, from onCreate", 1, runs.size)
+        val coroutine = main.enclosingBlock(runs.single().range.first)
+        val launch = main.calls("lifecycleScope.launch", onCreate!!).singleOrNull { coroutine != null && main.trailingBlock(it) == coroutine }
+        assertTrue("onCreate does not start the one-time move in a coroutine of its own", launch != null)
+        assertEquals(
+            "onCreate's step for the one-time move is not a statement of its own",
+            "lifecycleScope.launch(Dispatchers.IO) { moveLegacyAutoLockTimeout() }",
+            KotlinSourceGate.squeeze(main.code.substring(launch!!.range.first, valueEnd(main.code, launch.range.first - 1))),
+        )
+        assertEquals("onCreate can skip the one-time move", null, whySkippable(main, onCreate, launch.range.first))
+        assertEquals(
+            "moveLegacyAutoLockTimeout does something other than the one-time move",
+            main.code.substring(move.single().range.first, inMove.last + 1),
+            bodyOf(main, "fun moveLegacyAutoLockTimeout(")?.let { main.code.substring(it.first + 1, it.last).trim() },
         )
         // The wallet database's column is read once, by that decision: nowhere in the app, and in core
         // only inside readLegacy. The entity's own declaration of the column is not a read.

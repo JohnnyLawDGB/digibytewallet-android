@@ -127,6 +127,9 @@ class TorManager(private val context: Context) {
     /** Where an app-made connection may go right now; see [TorRoute]. */
     fun route(): TorRoute = TorRoute.of(isEnabled, getSocksPort(), _clearnetFallbackAnnounced.value)
 
+    // The install's Tor file. Only the setters of isEnabled and upgradePromptShown write it, and it
+    // never leaves this class: a remove or a clear anywhere else would read as a new install at the
+    // next launch, which writes Tor off (AppWideSettingsSourceGateTest).
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     private val _enabled = MutableStateFlow(prefs.getBoolean(KEY_ENABLED, false))
@@ -422,9 +425,15 @@ class TorManager(private val context: Context) {
          * The install's Tor settings: one file for every wallet, in no wallet's scope and not
          * network-suffixed. No wallet store or database holds a copy (the Room `torEnabled` column is
          * no longer written), and neither the wipe nor removing a wallet clears it.
+         *
+         * Internal, so app code cannot name the file or its keys (it does not compile) and reaches
+         * the setting only through [isEnabled]. AppWideSettingsSourceGateTest holds the rest of core
+         * to the same, and this class to writing the file only in the setters of [isEnabled] and
+         * [upgradePromptShown]. Never renamed: a setting under another name reads as never written,
+         * and the next launch writes Tor off.
          */
-        const val PREFS = "dgb_tor"
-        const val KEY_ENABLED = "tor_enabled"
-        const val KEY_UPGRADE_PROMPT_SHOWN = "upgrade_prompt_shown"
+        internal const val PREFS = "dgb_tor"
+        internal const val KEY_ENABLED = "tor_enabled"
+        internal const val KEY_UPGRADE_PROMPT_SHOWN = "upgrade_prompt_shown"
     }
 }
