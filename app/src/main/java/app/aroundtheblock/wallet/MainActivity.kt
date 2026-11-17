@@ -30,8 +30,10 @@ import app.aroundtheblock.wallet.core.security.BiometricAuth
 import app.aroundtheblock.wallet.core.security.KeyStoreManager
 import app.aroundtheblock.wallet.core.security.OwnCredentialPromptExemption
 import app.aroundtheblock.wallet.core.security.PinManager
+import app.aroundtheblock.wallet.core.settings.AutoLockPrefs
 import app.aroundtheblock.wallet.core.tor.TorManager
 import app.aroundtheblock.wallet.core.tor.TorState
+import app.aroundtheblock.wallet.core.wallets.ActiveWallet
 import app.aroundtheblock.wallet.service.SyncService
 import app.aroundtheblock.wallet.ui.navigation.AppNavigation
 import app.aroundtheblock.wallet.ui.navigation.autoLockTimeoutOrDefault
@@ -78,6 +80,8 @@ class MainActivity : FragmentActivity() {
     @Inject lateinit var keyStoreManager: KeyStoreManager
     @Inject lateinit var torManager: TorManager
     @Inject lateinit var walletConfigDao: WalletConfigDao
+    /** The active wallet's database: asked only whether it is on disk, by the auto-lock's one-time move. */
+    @Inject lateinit var walletDatabase: app.aroundtheblock.wallet.core.db.WalletDatabase
     @Inject lateinit var digiScopeClient: DigiScopeClient
     @Inject lateinit var okHttpClient: OkHttpClient
     @Inject lateinit var assetManager: app.aroundtheblock.wallet.core.asset.AssetManager
@@ -164,11 +168,13 @@ class MainActivity : FragmentActivity() {
         // Capture digiid:// deep link from launching intent
         handleDigiIdIntent(intent)
 
-        // Handle new install vs Phase 1 upgrade Tor defaults.
-        // Runs on IO thread; UI state is surfaced via showTorUpgradeDialog flag.
-        lifecycleScope.launch {
-            applyTorDefaults()
-        }
+        // App-wide settings are decided from the install's own state, never from a wallet's
+        // database: since multi-wallet step 1 every wallet has its own, and one just added holds no
+        // config row. Tor: a new install is one whose Tor setting was never written, so adding,
+        // switching or removing a wallet cannot change it.
+        torManager.applyNewInstallDefaults()
+        // Auto-lock: one value for every wallet, moved once out of the legacy wallet's database.
+        lifecycleScope.launch(Dispatchers.IO) { moveLegacyAutoLockTimeout() }
 
         // If the wallet is already unlocked at launch (e.g. biometric kept the
         // session alive), start the foreground sync service immediately so the
@@ -203,12 +209,12 @@ class MainActivity : FragmentActivity() {
         // covers backgrounding, but a phone left unlocked face-up stayed on the wallet
         // graph indefinitely. RESUMED-scoped so the loop is suspended while backgrounded
         // (onStop already locked) and cannot fire during the PIN screen's own lifecycle
-        // churn. The timeout is read from the DAO on every tick, on IO, so a change in
-        // Settings takes effect without a restart and the main thread never touches Room.
+        // churn. The timeout is the app-wide one (AutoLockPrefs, the same for every wallet), read
+        // on every tick, on IO, so a change in Settings takes effect without a restart.
         // lockUi() is state-only — the existing LaunchedEffect(walletState) in AppNavigation
         // routes Locked → "unlock"; nothing here navigates and nothing here touches native.
-        // A missing wallet_config row (nothing seeds it) means the entity default, not
-        // "no lock"; a DAO failure is the only thing that skips a tick.
+        // No stored timeout (nothing is stored until one is chosen) means the default, not
+        // "no lock"; a failed read is the only thing that skips a tick.
         // Every unlock path — PIN, fingerprint, restore — ends in this state, so stamp it here
         // rather than in each screen. Not lifecycle-scoped: an unlock that lands while the
         // biometric sheet has us paused must still count.
@@ -224,7 +230,7 @@ class MainActivity : FragmentActivity() {
                     if (walletManager.walletState.value !is WalletState.Unlocked) continue
                     val (timeoutMs, hasPin) = withContext(Dispatchers.IO) {
                         runCatching {
-                            autoLockTimeoutOrDefault(walletConfigDao.get()?.autoLockTimeoutMs) to pinManager.pinAssumedForLock()
+                            autoLockTimeoutOrDefault(AutoLockPrefs.storedTimeoutMs(applicationContext)) to pinManager.pinAssumedForLock()
                         }
                             .onFailure { android.util.Log.w("MainActivity", "auto-lock: config read failed, skipping tick", it) }
                             .getOrNull()
@@ -245,14 +251,14 @@ class MainActivity : FragmentActivity() {
                 // first opened after the Phase 2 update.
                 var showTorPrompt by remember { mutableStateOf(false) }
                 val promptCallback: (Boolean) -> Unit = { enabled ->
+                    // The answer is the install's Tor setting (TorManager); the wallet database
+                    // gets no copy of it, only the "prompt shown" mark its own row carries.
                     torManager.isEnabled = enabled
                     torManager.upgradePromptShown = true
                     lifecycleScope.launch(Dispatchers.IO) {
                         val cfg = walletConfigDao.get()
                         if (cfg != null) {
-                            walletConfigDao.upsert(
-                                cfg.copy(torEnabled = enabled, torPromptShown = true)
-                            )
+                            walletConfigDao.upsert(cfg.copy(torPromptShown = true))
                         }
                     }
                     showTorPrompt = false
@@ -567,29 +573,24 @@ class MainActivity : FragmentActivity() {
     }
 
     /**
-     * Determine and apply Tor defaults based on install type:
-     * - New install (no wallet config row): enable Tor by default.
-     * - Phase 1 upgrade (config exists, torPromptShown = false): leave isEnabled alone;
-     *   the dialog in setContent() will handle it.
-     * - Normal run (torPromptShown = true): nothing to do.
+     * The auto-lock timeout's one-time move out of the legacy wallet's database into [AutoLockPrefs],
+     * where every wallet reads it (multi-wallet step 1: one PIN, one lock policy). Legacy's database
+     * is read only when it is the one this process has open, from disk: the 4.1.4 timeout is in
+     * legacy's mainnet `wallet.db`, and another wallet's, testnet's or this session's temporary
+     * database says nothing about it. Until the move is answered the lock enforces the default
+     * (60 s, the shortest option). A timeout chosen since the update is never overwritten.
+     *
+     * The Tor defaults need no such step: the Tor setting was always the install's (TorManager).
      */
-    private suspend fun applyTorDefaults() {
-        val cfg = withContext(Dispatchers.IO) { walletConfigDao.get() }
-        if (cfg == null) {
-            // New install — Tor OFF by default. In-app Tor (kmp-tor no-exec) has a
-            // broken SOCKS peer-routing path (the C core gets "connection refused"
-            // on the in-process listener and degrades to direct every session), so
-            // we neither enable nor promote it. Privacy by default is BIP158
-            // compact filters (address privacy); IP anonymity, for users who need
-            // it, is better served by Orbot or a system VPN. Tor stays available as
-            // an opt-in in Settings → Network Info. Re-evaluate when the no-exec
-            // SOCKS routing is fixed or Tor is removed (see ROADMAP).
-            torManager.isEnabled = false
-            torManager.upgradePromptShown = true
+    private suspend fun moveLegacyAutoLockTimeout() {
+        AutoLockPrefs.migrateFromLegacy(applicationContext) {
+            val onDisk = walletDatabase.openHelper.databaseName != null
+            if (AutoLockPrefs.holdsLegacyTimeout(ActiveWallet.scope(applicationContext), onDisk)) {
+                AutoLockPrefs.Legacy.Answered(walletConfigDao.get()?.autoLockTimeoutMs)
+            } else {
+                AutoLockPrefs.Legacy.NotHere
+            }
         }
-        // Upgrade case: cfg != null && !cfg.torPromptShown — the LaunchedEffect in
-        // setContent() now suppresses the legacy prompt (we don't promote Tor).
-        // Normal run: cfg != null && cfg.torPromptShown — nothing to do.
     }
 
     /**

@@ -19,12 +19,14 @@ import app.aroundtheblock.wallet.core.model.SyncState
 import app.aroundtheblock.wallet.core.model.deriveSyncFrontier
 import app.aroundtheblock.wallet.core.security.PinManager
 import app.aroundtheblock.wallet.core.security.PinVerifyResult
+import app.aroundtheblock.wallet.core.settings.AutoLockPrefs
 import app.aroundtheblock.wallet.core.settings.CustomNode
 import app.aroundtheblock.wallet.core.settings.CustomNodePrefs
 import app.aroundtheblock.wallet.core.settings.OwnNodeUri
 import app.aroundtheblock.wallet.core.tor.TorManager
 import app.aroundtheblock.wallet.core.tor.TorState
 import app.aroundtheblock.wallet.service.SyncService
+import app.aroundtheblock.wallet.ui.navigation.autoLockTimeoutOrDefault
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -128,8 +130,13 @@ class SettingsViewModel @Inject constructor(
     val fiatCurrency: StateFlow<String> = _config.map { it.fiatCurrency }
         .stateIn(viewModelScope, SharingStarted.Eagerly, "USD")
 
-    val autoLockTimeout: StateFlow<Long> = _config.map { it.autoLockTimeoutMs }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, 60_000L)
+    /**
+     * Settings → Security → Auto-lock: the app-wide value ([AutoLockPrefs]), the one the inactivity
+     * lock enforces in every wallet. Not the wallet database's column, which is the active wallet's
+     * since multi-wallet step 1.
+     */
+    private val _autoLockTimeout = MutableStateFlow(autoLockTimeoutOrDefault(AutoLockPrefs.storedTimeoutMs(context)))
+    val autoLockTimeout: StateFlow<Long> = _autoLockTimeout.asStateFlow()
 
     // ── Tor state ─────────────────────────────────────────────────────────────
     /** Live Tor state from TorManager. */
@@ -414,28 +421,28 @@ class SettingsViewModel @Inject constructor(
      * truth this deleted.
      */
 
+    /**
+     * Store the auto-lock timeout app-wide, for every wallet. The control then shows what the
+     * inactivity lock reads; a write that did not land is logged.
+     */
     fun setAutoLockTimeout(ms: Long) {
         viewModelScope.launch(Dispatchers.IO) {
-            val updated = (_config.value).copy(autoLockTimeoutMs = ms)
-            walletConfigDao.upsert(updated)
-            _config.value = updated
+            if (!AutoLockPrefs.setTimeoutMs(context, ms)) android.util.Log.w("SettingsViewModel", "auto-lock timeout write did not land")
+            _autoLockTimeout.value = autoLockTimeoutOrDefault(AutoLockPrefs.storedTimeoutMs(context))
         }
     }
 
     // ── Tor management ────────────────────────────────────────────────────────
     /**
-     * Toggle Tor on or off. Persists the choice to both TorManager prefs and
-     * WalletConfigEntity so both surfaces agree on the enabled state.
+     * Toggle Tor on or off. The setting is TorManager's, in the install's own `dgb_tor` file: one
+     * setting for every wallet, the one the sync service, the shared HTTP client and the core read.
+     * It is not copied into the wallet database: since multi-wallet step 1 that database is the
+     * active wallet's, so a copy there could only disagree, and nothing ever read it. Its
+     * `torEnabled` column stays, unwritten, so the schema does not change.
      */
     fun setTorEnabled(enabled: Boolean) {
         torManager.isEnabled = enabled
         _torEnabled.value = enabled
-        viewModelScope.launch(Dispatchers.IO) {
-            // Persist to Room so SyncService and new install logic can read it.
-            val updated = (_config.value).copy(torEnabled = enabled)
-            walletConfigDao.upsert(updated)
-            _config.value = updated
-        }
         if (enabled) {
             // Use startAsync() — TorManager's own scope survives ViewModel
             // destruction. Bootstrap takes 10-30s; viewModelScope would cancel
