@@ -36,6 +36,18 @@ Status: for owner approval (2026-11-16); builder-checked. Follow-on, separate de
 > - Rename rejects another wallet's shown default name.
 > - Machine-written warnings in the non-English locales (wipe, removal, backup) need a native-speaker review
 >   before release.
+>
+> **Waits for the owner (2026-11-17): a READY wallet with no record, erased at launch.** Launch
+> housekeeping (`WalletHousekeeping`) also erases the seed key aliases, the database and every other
+> store of a non-legacy READY wallet whose seed record is gone, and drops its entry once that erase
+> verified, so the wallet stops holding one of its network's 8 slots. It acts only when no sealed
+> seed can be read and no record file (`.xml` or `.xml.bak`) is on disk. Every other erase of a
+> wallet's seed key and database follows a request: a wipe, a removal the user confirmed, an add
+> that was abandoned. This one acts on what it finds at launch, so it changes when they are wiped: a
+> security decision that stays with the owner (`docs/development-process.md`, "Still Mark's,
+> always"). By reading, only a wipe leaves that state: it erases every record first and clears the
+> registry afterwards. The PR that brings this waits for his answer even with review and CI green;
+> the answer replaces this paragraph, with its date.
 
 
 ## Intent

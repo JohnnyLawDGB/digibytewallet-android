@@ -27,10 +27,10 @@ import org.junit.rules.TemporaryFolder
 
 /**
  * At launch, an add the process did not live to complete is erased, a removal is finished, and a
- * READY wallet whose seed record is gone (a wipe or an add cut short after the record went) is
- * erased and dropped, so it holds no slot toward the cap. An entry is dropped only when its erase
- * verified, so one that did not is retried at the next launch. Legacy, and a READY wallet that still
- * has its record, are never touched.
+ * READY wallet whose seed record is gone (left by a wipe that erased the records but did not clear
+ * the registry) is erased and dropped, so it holds no slot toward the cap. An entry is dropped only
+ * when its erase verified, so one that did not is retried at the next launch. Legacy, and a READY
+ * wallet that still has its record, are never touched.
  */
 class WalletHousekeepingTest {
 

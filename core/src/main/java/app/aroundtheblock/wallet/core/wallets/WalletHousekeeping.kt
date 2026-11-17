@@ -5,10 +5,10 @@ import android.util.Log
 
 /**
  * Launch-time cleanup of the wallet changes a process did not live to finish: an add that never
- * completed (PENDING), a removal (REMOVING), and a READY wallet whose seed record is gone (a wipe or
- * an add cut short after the record went). Runs in `Application.onCreate`, before anything opens
- * the database or starts the sync service, because removing the running wallet leaves its erase to
- * this (its database cannot be deleted under the live process).
+ * completed (PENDING), a removal (REMOVING), and a READY wallet whose seed record is gone (left by a
+ * wipe that erased the records but did not clear the registry). Runs in `Application.onCreate`,
+ * before anything opens the database or starts the sync service, because removing the running
+ * wallet leaves its erase to this (its database cannot be deleted under the live process).
  *
  * An entry is dropped only when its erase verified. One that did not keeps its state and is
  * retried at the next launch (legacy's key, for one, stays while the database password's record

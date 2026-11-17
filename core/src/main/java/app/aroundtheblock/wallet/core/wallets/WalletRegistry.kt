@@ -65,9 +65,10 @@ class WalletRegistry(
     }
 
     /**
-     * READY entries on either network whose seed record is gone: what a wipe or an add cut short
-     * after the record went leaves behind. [list] hides each one, yet each holds its slot toward the
-     * cap ([occupied]) until it is dropped. Never legacy, whose record going is what unlists it.
+     * READY entries on either network whose seed record is gone: what a wipe that erased the records
+     * but did not clear the registry leaves behind. [list] hides each one, yet each holds its slot
+     * toward the cap ([occupied]) until it is dropped. Never legacy, whose record going is what
+     * unlists it.
      */
     fun readyWithoutRecord(): List<WalletEntry> =
         load().entries.filter { it.id != WalletIds.LEGACY && it.state == EntryState.READY && !holdsRecord(it.id) }
