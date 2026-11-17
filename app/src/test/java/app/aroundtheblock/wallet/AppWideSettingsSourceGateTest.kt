@@ -15,19 +15,31 @@ import java.io.File
  *  - **Tor.** The launch read "this database has no config row" as a new install and wrote the Tor
  *    setting off. A wallet just added has no row, and adding one restarts into it, so its first
  *    launch turned a Tor user's setting off and every connection after it went direct. The setting
- *    itself was always the install's (TorManager's `dgb_tor`); the Room `torEnabled` column was
- *    written and read by nothing.
+ *    itself was always the install's (TorManager's `dgb_tor`); the Room `torEnabled` column is
+ *    written by nothing now and read by nothing.
  *  - **The auto-lock timeout**, read from the active wallet's row: a wallet just added enforced the
  *    default whatever the user had chosen, and a choice made in one wallet did not hold in another.
  *    One PIN and one lock policy cover every wallet (multi-wallet design).
  *
  * The behaviour is proven in core (`TorNewInstallDefaultsTest`, `AutoLockPrefsTest`). This gate
- * holds the app's call sites to it, because the way this regresses is a launch step or a settings
- * write that compiles and works for the one wallet it was tried with.
+ * holds the call sites to it, because the way this regresses is a launch step or a settings write
+ * that compiles and works for the one wallet it was tried with.
+ *
+ * For Tor that means every write, not only a literal one. A wallet's database can decide the setting
+ * through a literal (`isEnabled = false` because a row is missing) or through a value (`isEnabled =`
+ * the row's dead column); a write can name its receiver or leave it to `apply` or `with`; and a read
+ * of the column can route a Tor user direct without writing anything (a worker choosing its route).
+ * So the gate fixes where the setting is written (the user's answer, at the two places that take it,
+ * and TorManager's new-install default), where those two places are called from (the user's own
+ * action on Tor: the Network Info switch and the Tor prompt's buttons), that nothing outside
+ * TorManager names its file, and that nothing reads the column. It reads names, not types: a read by
+ * position (destructuring a row) or through reflection is beyond it.
  */
 class AppWideSettingsSourceGateTest {
 
-    private val appRoot = File("src/main/java/app/aroundtheblock/wallet")
+    /** Every app source set a build compiles: main, and each distribution's own. */
+    private val appRoots = listOf("main", "play", "sideload").map { File("src/$it/java/app/aroundtheblock/wallet") }
+    private val appRoot = appRoots.first()
     private val coreRoot = File("../core/src/main/java/app/aroundtheblock/wallet/core")
     private val torManager = File(coreRoot, "tor/TorManager.kt")
     private val autoLockPrefs = File(coreRoot, "settings/AutoLockPrefs.kt")
@@ -35,18 +47,233 @@ class AppWideSettingsSourceGateTest {
     private fun gate(file: File) = KotlinSourceGate.of(file.readText())
     private fun gate(rel: String) = gate(File(appRoot, rel))
     private fun kotlinIn(root: File): List<File> = root.walkTopDown().filter { it.isFile && it.extension == "kt" }.toList()
-    private fun sources(): List<File> = kotlinIn(appRoot)
+    private fun sources(): List<File> = appRoots.flatMap(::kotlinIn)
+    private fun coreSources(): List<File> = kotlinIn(coreRoot)
+
+    // ── Reading code: brackets, blocks and the statements that open them ───────────────────────
+
+    /** Where the bracket [at] stands in opens: the nearest `(`, `[` or `{` before it still open there. */
+    private fun openerAt(code: String, at: Int): Int? {
+        var depth = 0
+        for (i in at - 1 downTo 0) when (code[i]) {
+            ')', ']', '}' -> depth++
+            '(', '[', '{' -> if (depth == 0) return i else depth--
+        }
+        return null
+    }
+
+    /** The bracket that closes the one opening at [open]. */
+    private fun closerOf(code: String, open: Int): Int? {
+        var depth = 0
+        for (i in open until code.length) when (code[i]) {
+            '(', '[', '{' -> depth++
+            ')', ']', '}' -> if (--depth == 0) return i
+        }
+        return null
+    }
+
+    /**
+     * The code that opens the block at [open], read back to the end of the statement before it, or
+     * to the bracket the block is an argument in: a function's signature, what a lambda is handed
+     * to (`… onClick =`, `lifecycleScope.launch`), a class's header. Whitespace squeezed.
+     */
+    private fun headOf(code: String, open: Int): String {
+        var depth = 0
+        var at = open - 1
+        scan@ while (at >= 0) {
+            when (code[at]) {
+                ')', ']' -> depth++
+                '(', '[' -> if (depth == 0) break@scan else depth--
+                '}' -> if (depth == 0) break@scan else depth++
+                '{' -> if (depth == 0) break@scan else depth--
+                ';' -> if (depth == 0) break@scan
+            }
+            at--
+        }
+        return KotlinSourceGate.squeeze(code.substring(at + 1, open))
+    }
+
+    /** True when the block at [open] is a class's or an object's body, not a function's or a lambda's. */
+    private fun isClassBody(code: String, open: Int): Boolean =
+        Regex("""(?<![\w:.])(class|object|interface|fun)(?!\w)""").findAll(headOf(code, open)).lastOrNull()?.value.let { it != null && it != "fun" }
+
+    /**
+     * Where the value assigned by the `=` at [eq] ends: the end of its statement, read on through a
+     * line that starts by continuing it (`.`, `?.`, `?:`, `&&`, `||`, `as`), so `= enabled` with
+     * more on the next line is not read as `enabled`.
+     */
+    private fun valueEnd(code: String, eq: Int): Int {
+        var depth = 0
+        var at = eq + 1
+        scan@ while (at < code.length) {
+            when (code[at]) {
+                '(', '[', '{' -> depth++
+                ')', ']', '}' -> if (--depth < 0) break@scan
+                ';' -> if (depth == 0) break@scan
+                '\n' -> if (depth == 0 && code.substring(eq + 1, at).isNotBlank()) {
+                    val next = code.substring(at + 1, minOf(code.length, at + 200)).trimStart()
+                    if (continuations.none { next.startsWith(it) }) break@scan
+                }
+            }
+            at++
+        }
+        return at
+    }
+
+    private val continuations = listOf(".", "?.", "?:", "&&", "||", "as ", "as?")
+
+    /** The string literal [at] stands in, as written: from the quote before it to the quote after it. */
+    private fun literalAround(g: KotlinSourceGate, at: Int): String {
+        val open = g.code.lastIndexOf('"', at)
+        val close = g.code.indexOf('"', at)
+        return if (open < 0 || close < 0) "" else g.written.substring(open, close + 1)
+    }
+
+    /** The line of code [at] stands on, whitespace squeezed: how a finding is named. */
+    private fun lineAt(code: String, at: Int): String {
+        val start = code.lastIndexOf('\n', at - 1) + 1
+        val end = code.indexOf('\n', at).let { if (it < 0) code.length else it }
+        return KotlinSourceGate.squeeze(code.substring(start, end))
+    }
+
+    // ── Writes of the install's Tor setting ─────────────────────────────────────────────────────
+
+    /** One write of the install's Tor setting: the value it assigns, whole, and the block it stands in. */
+    private class TorWrite(val file: File, val line: String, val value: String, val head: String?, val body: String?) {
+        override fun toString() = "${file.name}: $line (assigns: $value)"
+    }
+
+    /**
+     * Every write of `isEnabled` in [file], whatever its receiver: `torManager.isEnabled = …`, and
+     * also `torManager.apply { isEnabled = … }` or `with(torManager) { isEnabled = … }`, which name no
+     * receiver, and a reference (`torManager::isEnabled`), through which it is set where no scan
+     * follows. A scan cannot know a receiver's type, so every `isEnabled` counts: app and core have
+     * no other. A named argument (`f(isEnabled = …)`) and a declaration are not writes.
+     */
+    private fun torWritesIn(file: File): List<TorWrite> {
+        val g = gate(file)
+        val code = g.code
+        fun write(at: Int, value: String): TorWrite {
+            val block = g.enclosingBlock(at)
+            return TorWrite(
+                file, lineAt(code, at), value,
+                head = block?.let { headOf(code, it.first) },
+                body = block?.let { code.substring(it.first + 1, it.last) },
+            )
+        }
+        val assigned = Regex("""(?<!\w)isEnabled\s*=(?!=)""").findAll(code)
+            .filterNot { m -> openerAt(code, m.range.first)?.let { code[it] } == '(' }
+            .filterNot { m -> Regex("""(?<!\w)va[lr]$""").containsMatchIn(code.substring(maxOf(0, m.range.first - 8), m.range.first).trimEnd()) }
+            .map { m -> write(m.range.first, KotlinSourceGate.squeeze(code.substring(m.range.last + 1, valueEnd(code, m.range.last)))) }
+        val referenced = Regex("""::\s*isEnabled(?!\w)""").findAll(code).map { write(it.range.first, "a reference to it") }
+        return (assigned + referenced).toList()
+    }
+
+    /**
+     * The user's own answer: [write] assigns `enabled`, whole, directly in the block [head] opens (a
+     * function's body, or a lambda whose one parameter is `enabled`), and nothing in that block
+     * declares another `enabled`, so what is written is what the user chose.
+     */
+    private fun isTheUsersAnswer(write: TorWrite, head: String?): Boolean {
+        if (head == null || write.value != "enabled" || write.head?.endsWith(head) != true) return false
+        var body = write.body ?: return false
+        if (head.endsWith("=")) {
+            val parameter = Regex("""^\s*enabled\s*->""").find(body) ?: return false
+            body = body.substring(parameter.range.last + 1)
+        }
+        return shadows.none { it.containsMatchIn(body) }
+    }
+
+    /** What declares an `enabled` of its own: `val enabled`, `val (enabled, …)`, `{ enabled -> }`, `(enabled: …)`. */
+    private val shadows = listOf(
+        Regex("""(?<!\w)va[lr]\s+enabled(?!\w)"""),
+        Regex("""(?<!\w)va[lr]\s*\([^)]*(?<!\w)enabled(?!\w)"""),
+        Regex("""(?<!\w)enabled\s*(->|:(?!:))"""),
+    )
+
+    // ── Reads of the wallet database's Tor column ───────────────────────────────────────────────
+
+    /** The plain name a `.` or `::` at [at] is applied to, or null when it is applied to anything longer. */
+    private fun receiverOf(code: String, at: Int): String? =
+        Regex("""(?<![\w.?!])(\w+)\s*$""").find(code.substring(maxOf(0, at - 60), at))?.groupValues?.get(1)
+
+    /**
+     * Each `torEnabled` in [code] read bare (no `.` or `::` before it, and neither a declaration nor
+     * a named argument) where no local or parameter `torEnabled` is in scope. Kotlin reads a bare
+     * name as a local or a parameter in scope first, and only then as a member of an implicit
+     * receiver (`with(cfg) { torEnabled }`, `cfg.run { … }`). With none in scope the read is a
+     * receiver's: a class's own member, or a wallet_config row's column.
+     */
+    private fun unscopedBareReads(code: String): List<Int> {
+        val scopes = mutableListOf<IntRange>()
+        val reads = mutableListOf<Int>()
+        for (m in Regex("""(?<!\w)torEnabled(?!\w)""").findAll(code)) {
+            val at = m.range.first
+            val before = code.substring(maxOf(0, at - 40), at).trimEnd()
+            val after = code.substring(m.range.last + 1, minOf(code.length, m.range.last + 40)).trimStart()
+            when {
+                before.endsWith(".") || before.endsWith("::") -> Unit
+                Regex("""(?<!\w)va[lr]$""").containsMatchIn(before) -> localScope(code, at)?.let(scopes::add)
+                after.startsWith("->") && isLambdaParameter(code, at, before) -> openerAt(code, at)?.let { open -> closerOf(code, open)?.let { scopes += open..it } }
+                after.startsWith(":") && !after.startsWith("::") -> parameterScope(code, at)?.let(scopes::add)
+                after.startsWith("=") && !after.startsWith("==") -> Unit
+                else -> reads += at
+            }
+        }
+        return reads.filter { read -> scopes.none { read in it } }
+    }
+
+    /** A name before `->` that a lambda declares (`{ torEnabled -> }`), not a `when` branch's condition. */
+    private fun isLambdaParameter(code: String, at: Int, before: String): Boolean {
+        if (!before.endsWith("{") && !before.endsWith(",")) return false
+        val open = openerAt(code, at) ?: return false
+        return code[open] == '{' && !Regex("""(?<!\w)when(\s*\(.*\))?$""").containsMatchIn(headOf(code, open))
+    }
+
+    /** Where a `val torEnabled` at [at] is in scope: the rest of its block, or null for a class's member. */
+    private fun localScope(code: String, at: Int): IntRange? {
+        val open = openerAt(code, at) ?: return null
+        if (code[open] != '{' || isClassBody(code, open)) return null
+        return closerOf(code, open)?.let { at..it }
+    }
+
+    /** Where a parameter `torEnabled: …` at [at] is in scope: its function's body, a block or `= expression`. */
+    private fun parameterScope(code: String, at: Int): IntRange? {
+        val open = openerAt(code, at) ?: return null
+        if (code[open] == '{') return closerOf(code, open)?.let { open..it }
+        var depth = 0
+        var i = (closerOf(code, open) ?: return null) + 1
+        while (i < code.length) {
+            when (code[i]) {
+                '(', '[' -> depth++
+                ')', ']' -> if (--depth < 0) return null
+                '{' -> if (depth == 0) return closerOf(code, i)?.let { i..it }
+                '=' -> if (depth == 0 && code.getOrNull(i + 1) != '=' && code.getOrNull(i - 1) !in setOf('!', '<', '>', '=')) return i..valueEnd(code, i)
+                ';', '}' -> if (depth == 0) return null
+                '\n' -> if (depth == 0 && code.substring(i + 1, minOf(code.length, i + 200)).trimStart().firstOrNull() !in setOf('{', '=', ':')) return null
+            }
+            i++
+        }
+        return null
+    }
+
+    // ── The checks ─────────────────────────────────────────────────────────────────────────────
 
     @Test fun `the scan sees the sources at all`() {
-        assertTrue("cannot see the app sources", sources().size > 100)
-        assertTrue("cannot see the core sources", kotlinIn(coreRoot).size > 100)
+        appRoots.forEach { assertTrue("cannot see the app source set $it", it.isDirectory) }
+        assertTrue("cannot see the app sources", kotlinIn(appRoot).size > 100)
+        assertTrue("cannot see the core sources", coreSources().size > 100)
         assertTrue("cannot see TorManager", torManager.isFile)
         assertTrue("cannot see AutoLockPrefs", autoLockPrefs.isFile)
-        // The user's own Tor switch is a write the scan must see, or the literal-write check below is blind.
+        // The user's own Tor switch is a write the scan must see, or the write checks below are blind.
         assertEquals(
             "the scan no longer sees the Settings Tor switch write",
-            1, Regex("""torManager\s*\.\s*isEnabled\s*=\s*enabled(?!\w)""").findAll(gate("ui/settings/SettingsViewModel.kt").code).count(),
+            listOf("enabled"), torWritesIn(File(appRoot, "ui/settings/SettingsViewModel.kt")).map { it.value },
         )
+        // Network Info reads its own `torEnabled` bare, in scope; with no scope the read check would see it.
+        val networkInfo = gate("ui/settings/NetworkInfoScreen.kt").code
+        assertTrue("the scan no longer sees Network Info read its torEnabled", Regex("""!\s*torEnabled(?!\w)""").containsMatchIn(networkInfo))
+        assertEquals("the scan no longer sees Network Info's torEnabled declared", emptyList<Int>(), unscopedBareReads(networkInfo))
         // The per-wallet "prompt shown" mark is still written by name: the named-argument check below reads these calls.
         assertTrue(
             "the scan cannot read the named arguments of a wallet_config copy",
@@ -71,16 +298,116 @@ class AppWideSettingsSourceGateTest {
         assertTrue("MainActivity.onCreate is missing", onCreate != null)
         val defaults = main.calls("torManager.applyNewInstallDefaults", onCreate!!)
         assertEquals("onCreate applies the install's Tor defaults ${defaults.size} times; it has to be once", 1, defaults.size)
-        // The only Tor writes left in the app are the user's own choice (the Settings switch, the old
-        // prompt's answer). A literal written there is a default the app decided, and app code sees
-        // only the active wallet's state to decide it from.
-        val literal = Regex("""torManager\s*\.\s*isEnabled\s*=\s*(true|false)(?!\w)""")
-        val decided = sources().flatMap { f -> literal.findAll(gate(f).code).map { "${f.name}: ${it.value}" }.toList() }
-        assertEquals("the app writes a Tor value the user did not choose", emptyList<String>(), decided)
         // The defaults themselves are decided where no wallet database can be seen.
         val tor = gate(torManager).code
         val sees = listOf("WalletConfig", "WalletDatabase", "walletConfigDao").filter { tor.contains(it) }
         assertEquals("TorManager reads a wallet database", emptyList<String>(), sees)
+    }
+
+    @Test fun `the install's Tor setting is written with the user's answer alone`() {
+        // App: the Settings switch and the old prompt's answer, once each, each writing its own
+        // parameter whole. Anything else the app writes there it decided, and app code sees only the
+        // active wallet's state to decide it from.
+        val takesTheAnswer = mapOf(
+            "SettingsViewModel.kt" to "fun setTorEnabled(enabled: Boolean)",
+            "MainActivity.kt" to "val promptCallback: (Boolean) -> Unit =",
+        )
+        val writes = sources().flatMap(::torWritesIn)
+        val notTheUsers = writes.filterNot { isTheUsersAnswer(it, takesTheAnswer[it.file.name]) }
+        assertEquals("the app writes a Tor value the user did not choose", emptyList<String>(), notTheUsers.map { it.toString() })
+        assertEquals(
+            "the app's Tor writes are not the Settings switch and the prompt's answer, once each",
+            takesTheAnswer.keys.sorted(), writes.map { it.file.name }.sorted(),
+        )
+        // Those two take the answer from the user's own action on Tor: a tap on the Network Info
+        // screen's Tor row or switch, and the old Tor prompt's buttons (called in a lambda handed to
+        // one, or handed to one as a reference). Called from anywhere else, a launch step or even
+        // another tap (adding a wallet, say), a value the app chose is written as surely as by a
+        // write of its own.
+        val userActions = listOf("onClick =", "onCheckedChange =", "onDismissRequest =")
+        val entries = Regex("""(?<!\w)(setTorEnabled|promptCallback)(?!\w)""")
+        class Use(val file: String, val name: String, val line: String, val fromUser: Boolean)
+        val uses = sources().flatMap { f ->
+            val g = gate(f)
+            val code = g.code
+            val torPrompt = g.calls("AlertDialog").filter { "R.string.tor_title" in it.text }
+            entries.findAll(code)
+                .filterNot { Regex("""(?<!\w)(fun|va[lr])$""").containsMatchIn(code.substring(maxOf(0, it.range.first - 8), it.range.first).trimEnd()) }
+                .map { m ->
+                    val called = code.substring(m.range.last + 1, minOf(code.length, m.range.last + 40)).trimStart().startsWith("(")
+                    val handedTo = if (called) {
+                        g.enclosingBlock(m.range.first)?.let { headOf(code, it.first) }
+                    } else {
+                        Regex("""(?<![\w.])\w+\s*::\s*$""").find(code.substring(maxOf(0, m.range.first - 200), m.range.first))
+                            ?.let { KotlinSourceGate.squeeze(code.substring(maxOf(0, m.range.first - 200), m.range.first).substring(0, it.range.first)) }
+                    }
+                    val onTap = handedTo != null && userActions.any { handedTo.endsWith(it) }
+                    val onTor = when (m.value) {
+                        "setTorEnabled" -> f.name == "NetworkInfoScreen.kt"
+                        else -> f.name == "MainActivity.kt" && torPrompt.any { m.range.first in it.range }
+                    }
+                    Use(f.name, m.value, lineAt(code, m.range.first), onTap && onTor)
+                }
+                .toList()
+        }
+        assertEquals(
+            "the user's Tor answer is taken from something other than their own action on Tor",
+            emptyList<String>(), uses.filterNot { it.fromUser }.map { "${it.file}: ${it.line}" },
+        )
+        assertTrue("the scan no longer sees the Network Info switch call setTorEnabled", uses.any { it.file == "NetworkInfoScreen.kt" && it.name == "setTorEnabled" })
+        assertTrue("the scan no longer sees the prompt's buttons call promptCallback", uses.any { it.file == "MainActivity.kt" && it.name == "promptCallback" })
+        // Core: one write, the new-install default, which TorManager makes only while its file holds
+        // no setting (TorNewInstallDefaultsTest runs it).
+        val coreWrites = coreSources().flatMap(::torWritesIn)
+        val outsideDefaults = coreWrites.filterNot {
+            it.file.canonicalPath == torManager.canonicalPath && it.head?.endsWith("fun applyNewInstallDefaults(): Boolean") == true
+        }
+        assertEquals("core writes the Tor setting outside TorManager's new-install defaults", emptyList<String>(), outsideDefaults.map { it.toString() })
+        assertEquals("the scan no longer sees TorManager's new-install default", 1, coreWrites.size)
+        // Under the setting is TorManager's file. A write there, or a clear or a delete of it, changes
+        // the setting as surely: a file with no setting in it reads as a new install, and the next
+        // launch writes Tor off.
+        val named = Regex("""(?<!\w)TorManager\s*\.\s*(Companion\s*\.\s*)?(PREFS|KEY_ENABLED)(?!\w)""")
+        val spelt = Regex("""["](dgb_tor|tor_enabled)(?!\w)""")
+        val elsewhere = (sources() + coreSources()).filterNot { it.canonicalPath == torManager.canonicalPath }.flatMap { f ->
+            val g = gate(f)
+            (named.findAll(g.code) + spelt.findAll(g.written)).map { "${f.name}: ${lineAt(g.written, it.range.first)}" }.toList()
+        }
+        assertEquals("the Tor setting's file is named outside TorManager", emptyList<String>(), elsewhere)
+    }
+
+    @Test fun `nothing reads the wallet database's Tor column`() {
+        // Nothing writes the column any more, so it holds nothing to read: a wallet just added has no
+        // row, and an older row holds whatever was last written there. Read to set Tor, or to route a
+        // connection, it sends a Tor user direct again, and a route needs no write the checks above see.
+        val member = Regex("""(\.|::)\s*torEnabled(?!\w)""")
+        // The one `torEnabled` member the app may read is the Settings ViewModel's flow of
+        // TorManager's setting, through a name its file declares as a SettingsViewModel.
+        fun memberReads(files: List<File>) = files.flatMap { f ->
+            val code = gate(f).code
+            val viewModels = Regex("""(?<!\w)(\w+)\s*:\s*SettingsViewModel(?!\w)""").findAll(code).map { it.groupValues[1] }.toSet()
+            member.findAll(code).map { m -> Triple(f.name, receiverOf(code, m.range.first)?.let { it in viewModels } == true, lineAt(code, m.range.first)) }.toList()
+        }
+        val app = memberReads(sources())
+        assertEquals("an app source reads the wallet database's Tor column", emptyList<String>(), app.filterNot { it.second }.map { "${it.first}: ${it.third}" })
+        assertTrue("the scan no longer sees Network Info read the Settings ViewModel's Tor flow", app.any { it.second && it.first == "NetworkInfoScreen.kt" })
+        assertEquals("a core source reads the wallet database's Tor column", emptyList<String>(), memberReads(coreSources()).map { "${it.first}: ${it.third}" })
+        // A read that names no receiver, where no local or parameter of that name is in scope.
+        val unscoped = (sources() + coreSources()).flatMap { f ->
+            val code = gate(f).code
+            unscopedBareReads(code).map { "${f.name}: ${lineAt(code, it)}" }
+        }
+        assertEquals("a source reads a torEnabled it does not declare: a receiver's, such as a wallet_config row's", emptyList<String>(), unscoped)
+        // And no query names the column (a string that names it and its table), except the migration
+        // that added it.
+        val sql = (sources() + coreSources()).filterNot { it.name.startsWith("Migration") }.flatMap { f ->
+            val g = gate(f)
+            Regex("""(?<!\w)torEnabled(?!\w)""").findAll(g.written)
+                .filter { g.code.substring(it.range).isBlank() }
+                .filter { m -> literalAround(g, m.range.first).contains("wallet_config") }
+                .map { "${f.name}: ${lineAt(g.written, it.range.first)}" }.toList()
+        }
+        assertEquals("a query names the wallet database's Tor column", emptyList<String>(), sql)
     }
 
     @Test fun `the auto-lock timeout is read and written as one app-wide value`() {
@@ -127,7 +454,7 @@ class AppWideSettingsSourceGateTest {
         assertEquals("an app source reads the wallet database's auto-lock column", emptyList<String>(), readsIn(sources()).map { (f, at) -> "${f.name}@$at" })
         val decision = gate(autoLockPrefs).range("suspend fun readLegacy(", "\n    }")
         assertTrue("AutoLockPrefs.readLegacy is missing", decision != null)
-        val coreReads = readsIn(kotlinIn(coreRoot))
+        val coreReads = readsIn(coreSources())
         val outsideDecision = coreReads.filterNot { (f, at) -> f.canonicalPath == autoLockPrefs.canonicalPath && at in decision!! }
         assertEquals("the wallet database's auto-lock column is read outside the one-time move", emptyList<String>(), outsideDecision.map { (f, at) -> "${f.name}@$at" })
         assertEquals("the one-time move does not read legacy's column", 1, coreReads.size)
