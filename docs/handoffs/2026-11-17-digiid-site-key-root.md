@@ -5,11 +5,11 @@ Written 2026-11-17 by the Android session, for the iOS and core session. Design:
 of "Order of work"). iOS facts are at iOS `develop` `776e6dd`, which pins core `fc35768`. They will
 drift.
 
-**Status (2026-11-17): open.** Step 1 is built, not merged: core `6a7742d` on
-`feat/digiid-site-key-root`, and this repo's branch of the same name (`ab564c3e3` characterizes the
-header before the change; `14b0c99d4` moves the pin and holds the new header). Review round 1 added
-core `c90a284` (a `hasUri` but 0 or 1 is refused) and `f263cdd` (`BRHMAC` clears both pads), held
-here by `a6f417421` and `b40565997`. §3 to §5 are iOS's.
+**Status (2026-11-17): open.** §3 to §5 are iOS's. How far step 1 has landed is `ROADMAP.md`'s to
+say (Phase 2, item 6), not this file's. In the core, step 1 is `6a7742d`, with review round 1's
+`c90a284` (a `hasUri` but 0 or 1 is refused) and `f263cdd` (`BRHMAC` clears both pads). Here,
+`ab564c3e3` characterizes the header before the change, `14b0c99d4` moves the pin and holds the new
+header, and `a6f417421` and `b40565997` hold round 1's two.
 
 Core and host-KAT work is the iOS and core session's lane (`docs/development-process.md`, "Two
 sessions, one Android repo"). Mark assigned step 1 to the Android session on 2026-11-17, as an
@@ -66,7 +66,8 @@ Step 2 is the first C caller of `BRDigiIdAddress` on Android: PR #267's design m
 `signIdentityMessage` and `identityAddress` onto `BRDigiIdSignSite` and `BRDigiIdAddress`. A root and
 `hasUri` swapped there is refused by the header (§1). Step 2 still owes a bridge test that holds
 `identityAddress` under `STANDARD` to the address `signIdentityMessage` signs with, as
-`address_root_hasuri_swapped` holds the header.
+`address_root_hasuri_swapped` holds the header. `ROADMAP.md` records it with step 2 (Phase 2,
+item 6), which is where step 2's PR reads its plan.
 
 ## 3. iOS: four calls stop compiling once the pin contains this change
 
@@ -91,10 +92,10 @@ move; the first move that contains the core merge carries these four edits.
 Linux skips two legs of `digiid_core_kat`'s portability gate, and core CI runs on Linux, so neither
 has run against the new header:
 
-- the `iphoneos` and `iphonesimulator` arm64 compile
-  (`native/src/test/host/digiid_core_kat/run.sh:217-226`);
-- Swift's C importer (`swiftc -typecheck -import-objc-header`, `run.sh:227-273`), whose snippet now
-  passes `BR_DIGIID_ROOT_DIGIBYTE` to all three calls.
+- the `iphoneos` and `iphonesimulator` arm64 compile (the leg of
+  `native/src/test/host/digiid_core_kat/run.sh` that sets `ios_note`);
+- Swift's C importer (`swiftc -typecheck -import-objc-header`, the leg that sets `swift_note`), whose
+  snippet now passes `BR_DIGIID_ROOT_DIGIBYTE` to all three calls.
 
 Run `run.sh` on the Mac at `feat/digiid-site-key-root`, or at any later commit that pins the new
 header. The gate's line must end `(iphoneos + iphonesimulator; Swift imports it)`.
@@ -105,6 +106,10 @@ the XCFramework build is what shows it.
 `hmac_residue_kat` (new, review round 1) has run only on Linux. It searches a thread's stack after
 `BRHMAC` returns, so it depends on how the platform lays out a stack it is given: its comparison arm
 must still find the old residue on a Mac, at -O0 and -O2, before its green arm there means anything.
+Read that off its `[red64-O0 <case>] failed, as it must` and `[red64-O2 <case>] …` lines, not off a
+`PASS`. Review round 2 changed its runner for macOS's bash 3.2: the empty `-m32` and flag arrays
+no longer stop it at its first build, and a run that stops before its verdict exits 1, where bash
+3.2 would have exited 0. That change has not run under bash 3.2 yet.
 
 ## 5. iOS: L2 tests to carry
 
@@ -171,3 +176,10 @@ Mark's ruling of 2026-11-17 (rule 7, recorded with this hand-off), the rule-7 ru
 `workflow_dispatch` of core CI on `develop` at that merge commit with
 `android_ref=feat/digiid-site-key-root`, and the Android pin PR follows it. Until that pin PR merges,
 a core PR whose CI tests against Android `develop` fails `digiid_core_kat` as well.
+
+A dispatch takes no commit: core CI checks the core out at `github.sha`, which for a dispatch is the
+head of `develop` when it is dispatched. So dispatch before anything else merges to core `develop`,
+and read the run's "Show what is under test" step: its `core:` line must name the merge commit, and
+its `android:` line must end `(feat/digiid-site-key-root)`. If `develop` has moved on, the `core:`
+line names the commit the run tested, and that commit, which contains the merge, is the one the pin
+takes once the run is green.

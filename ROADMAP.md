@@ -574,7 +574,14 @@ not — but the coupling ran through the duress PIN, which was cancelled
    its `STANDARD` rows give the addresses Coinomi showed, and arms
    131072, 262144, 524288 and 1048576 each fail exactly their cases.
    Steps 2 (the app), 3 (the UI) and 4 (watching Coinomi's fund paths:
-   core engine work, with multi-wallet step 2) are pending.
+   core engine work, with multi-wallet step 2) are pending. Step 2 is
+   done only with a bridge test that holds the bridge's
+   `identityAddress` under `STANDARD` to the address its
+   `signIdentityMessage` signs with, as `digiid_core_kat`'s
+   `address_root_hasuri_swapped` holds `BRDigiIdAddress` to
+   `BRDigiIdSignSite`. Until then the bridge is held to the header under
+   `DIGIBYTE` only, so two natives wired to different roots would show
+   one address and sign with another.
 
 **Effort:** S–M, reduced by the duress cancellation. Item 1 is shipped;
 5 is days; 3 is the riskiest (device-matrix testing); 4 is
