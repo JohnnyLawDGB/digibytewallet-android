@@ -1,6 +1,11 @@
 # Coinomi-compatible Digi-ID — design
 
 Status: **APPROVED by the owner 2026-11-17** (text and all four decisions below).
+Amended 2026-11-17 with the owner's OK, answering the three review findings on #266: fund watching is
+its own per-wallet setting, separate from sign-in; a Coinomi-mode wallet is never offered the
+shared-key choice; Coinomi's handling of a port or trailing slash is recorded as unmeasured, with how
+to measure it. Also recorded: the DigiScope server check (works as is) and the core API as built in
+step 1.
 Follows: `docs/superpowers/specs/2026-11-16-multi-wallet-design.md` (Non-goals: "Coinomi-compatible
 Digi-ID ... has its own design next"). Builds on `docs/specs/digiid-key-isolation.md`.
 
@@ -53,29 +58,34 @@ and lock it out of the sites it uses. It is a per-wallet property, never a globa
    the DigiScope account Coinomi created, not in a new one.
 3. **New wallets use the standard constant** for their per-site identities. Existing wallets keep
    `"DigiByte seed"`.
-4. **A Coinomi-mode wallet watches the Coinomi fund paths privately**, by compact filters.
+4. **A wallet restored from a Coinomi phrase watches the Coinomi fund paths privately**, by compact
+   filters, whatever its sign-in setting.
 
 ## Design
 
-### The two per-wallet properties
+### The per-wallet properties
 
-Each wallet record carries two values, written once and changed only by the user in Settings:
+Each wallet record carries three values, written once and changed only by the user in Settings:
 
 - **`siteKeyRoot`** — the BIP32 master-key constant for per-site identities: `DIGIBYTE` (`"DigiByte
   seed"`) or `STANDARD` (`"Bitcoin seed"`).
 - **`digiScopeIdentity`** — what DigiScope is signed with: `SHARED` (`m/0'/0/0`, today) or `SITE`
   (the per-site key of DigiScope's one login callback, below).
+- **`watchedAccounts`** — the other apps' accounts the sync engine also watches for this wallet:
+  empty, or Coinomi's two (BIP44 `m/44'/20'/0'` and BIP49 `m/49'/20'/0'`, "Funds on Coinomi's paths"
+  below).
 
-"Coinomi-compatible Digi-ID" in the UI is the pair `STANDARD` + `SITE`. Nothing else in the app reads
-the word Coinomi.
+"Coinomi-compatible sign-in" in the UI is the pair `STANDARD` + `SITE`. It never reads or writes
+`watchedAccounts`: turning sign-in compatibility off must never hide funds or take them out of the
+spend path (review finding P1 on #266). Nothing else in the app reads the word Coinomi.
 
-| How the wallet got here | `siteKeyRoot` | `digiScopeIdentity` |
-|---|---|---|
-| Upgraded from 4.1.x (legacy and every step-1 wallet) | `DIGIBYTE` | `SHARED` |
-| Created on this device after this ships | `STANDARD` | `SHARED` |
-| Restored, "HoldFast or the DigiByte app" | `DIGIBYTE` | `SHARED` |
-| Restored, "Coinomi" | `STANDARD` | `SITE` |
-| Restored, "another wallet" or "not sure" | `STANDARD` | `SHARED` |
+| How the wallet got here | `siteKeyRoot` | `digiScopeIdentity` | `watchedAccounts` |
+|---|---|---|---|
+| Upgraded from 4.1.x (legacy and every step-1 wallet) | `DIGIBYTE` | `SHARED` | empty |
+| Created on this device after this ships | `STANDARD` | `SHARED` | empty |
+| Restored, "HoldFast or the DigiByte app" | `DIGIBYTE` | `SHARED` | empty |
+| Restored, "Coinomi" | `STANDARD` | `SITE` | Coinomi's two |
+| Restored, "another wallet" or "not sure" | `STANDARD` | `SHARED` | empty |
 
 A missing value reads as the upgrade row, so an old record never changes identity. These live in the
 wallet's own store (`WalletStores` class WALLET), so they follow multi-wallet's per-wallet rules: a
@@ -83,14 +93,31 @@ wipe removes them, a switch reads the other wallet's.
 
 ### Core (shared with iOS)
 
-- `BRDigiIdSiteKey` takes the master-key constant as an argument (an enum, not a string), and the
-  bridge passes the wallet's `siteKeyRoot`. `BRBIP32BitIDKey` is left alone and is not used.
+- `BRDigiIdSiteKey`, `BRDigiIdSignSite` and `BRDigiIdAddress` take a **required** root, an enum
+  placed after `seedLen`: `BRDigiIdRoot`, `DIGIBYTE` = 1, `STANDARD` = 2. Zero and every other value
+  are refused, with the key wiped. There is no root-less variant, so no caller can sign per-site
+  without choosing. The shared identity (`BRDigiIdSharedKey`, `BRDigiIdSignShared`) takes none.
+  `DIGIBYTE` keeps today's derivation call; `STANDARD` derives through `BRBIP32PrivKeyArrayPath` with
+  `BR_DERIVATION_HMAC_STANDARD` (`BRDerivationProfiles.h`), so neither string gains a copy. The bridge
+  passes the wallet's `siteKeyRoot` in step 2. `BRBIP32BitIDKey` is left alone and is not used.
+- **Landing (owner, 2026-11-17).** The signatures change, so Android `develop`'s host KAT cannot
+  compile against the merged core until the pin moves. A dispatch run of core CI on `develop`
+  against the companion Android branch is the green run the pin waits for
+  (`docs/development-process.md` rule 7). iOS passes `DIGIBYTE` at its four call sites at its next pin
+  move (hand-off in `docs/handoffs/`).
 - **Characterize before editing** (this repo's rule for shared crypto): first commit a KAT that pins
   today's `"DigiByte seed"` outputs for the three `U`s above and for the existing Digi-ID vectors;
   it must stay green through the change. Then add the `STANDARD` rows from the table, which must fail
   on the unchanged code (red before green) and pass after.
-- The URI bytes rule in `BRDigiId.h` (verbatim, `BRDigiIdUriBytesFromUtf16`) is unchanged; the probe
-  shows Coinomi hashes the same `https://host/path` string `DigiIdRequest.callbackUrl` builds.
+- The URI bytes rule in `BRDigiId.h` (verbatim, `BRDigiIdUriBytesFromUtf16`) is unchanged. For the three
+  measured callbacks, which have no port and no trailing slash, Coinomi hashes the same
+  `https://host/path` string `DigiIdRequest.callbackUrl` builds. **Unmeasured (review finding P2 on
+  #266):** a callback that already carries an explicit port (`:443`) or a trailing slash. HoldFast
+  keeps both, as written (`DigiIdRequestTest`, and `digiid_core_kat` pins those spellings as distinct
+  identities). Whether Coinomi keeps or strips them is not known, so a Coinomi-mode sign-in to such a
+  site may not reach the account Coinomi made. Two probe scans settle it (one callback with `:443`,
+  one with a trailing `/`). Until then, no test vector claims Coinomi parity for those spellings, and
+  the `"DigiByte seed"` rule must not change for them in any case (anti-goal 1).
 
 ### App: one DigiScope identity, everywhere
 
@@ -110,9 +137,25 @@ active wallet:
 No other code may sign for a DigiScope host. A source gate fails the build on a `signMessage` or
 `signIdentityMessage` call outside `DigiScopeIdentity` and `DigiIdManager`.
 
-**To verify on the server before building (compendium):** that Hub quick-login and content-signature
-checks accept any address in the account's `user_addresses`, not only the first. The login does
-(auto-provision binds the address it saw). If they do not, the server change lands first.
+Why the three must move together: after every successful DigiScope QR login or step-up,
+`DigiIdManager` runs `quickLogin()`, which today always signs with `m/0'/0/0`. A Coinomi-mode wallet
+that switched only the QR signer would have quick-login provision a new account, and
+`DigiScopeClient.login` would store that account's token over the right one: a silent account switch.
+
+`DigiScopeIdentity.address()` replaces `HubIdentity.address()`. That function is documented as
+`m/0'/0/0`'s address but calls `getReceiveAddress(0, 0)`, which ignores its index and returns the
+wallet's first unused receive address. `ChatView` compares it with each message's author address
+(the account's primary), so the chat likely never marks your own messages as yours today. That was
+found by reading the code and has not been reproduced on a device.
+
+**Server check, answered 2026-11-17 (compendium `274720ac`, unchanged at `006e6ea7`):** no server change
+is needed. The login callback and quick-login check the signature against the address sent, then
+accept any address linked to the account, primary or not. Step-up accepts any address linked to that
+account. Hub chat signatures are stored without a check (the session decides). The one precondition
+is on the wallet: its per-site address must equal Coinomi's, which is the primary address of the
+account Coinomi's own login created. Any other address gets a new account (auto-provision, within
+the per-IP and global limits) or a 401 at step-up. Posting rights (Trust L2) belong to the account,
+so a Coinomi-mode wallet posts with the Coinomi account's level.
 
 ### App: the policy
 
@@ -122,8 +165,11 @@ checks accept any address in the account's `user_addresses`, not only the first.
   fixed `U` above).
 - A domain with a successful legacy login on record stays `LEGACY` (grandfathering, unchanged).
 - Every other domain: `PER_SITE` under `siteKeyRoot`.
-- The existing sign-time choice for restored wallets (`offersChoice`, 4.1.2 row 16) stays as it is
-  and offers the shared key or the per-site key under `siteKeyRoot`.
+- The existing sign-time choice for restored wallets (`offersChoice`, 4.1.2 row 16) is **never offered
+  to a Coinomi-mode wallet** (`STANDARD` + `SITE`): Coinomi never signed with the shared key, so the
+  choice could only sign the user in to an account Coinomi never made (review finding P2 on #266).
+  Every other restored wallet keeps the choice as today, between the shared key and the per-site key
+  under its `siteKeyRoot`.
 
 ### UI (every language in `AppLocale.SUPPORTED`, same commit)
 
@@ -133,7 +179,8 @@ checks accept any address in the account's `user_addresses`, not only the first.
 - **Settings → Digi-ID → "Coinomi-compatible sign-in"** for the active wallet. Turning it on or off
   first says, in plain words, that every site will see a different identity, sign-ins made the other
   way stop working, and the Hub signs this wallet out. Then it clears this wallet's Hub session and
-  Digi-ID history records, so nothing grandfathers across the change.
+  Digi-ID history records, so nothing grandfathers across the change. It does not touch
+  `watchedAccounts`: the wallet's Coinomi funds stay visible and spendable either way.
 - The Digi-ID approval screen shows the identity address it will sign with (it does today) and, for
   a Coinomi-mode wallet, says so.
 
@@ -144,8 +191,9 @@ The restore already finds Coinomi's DGB through **Recover funds** (BIP44 `m/44'/
 sweep, by sending the addresses to the reconcile server, after a warning, and multi-wallet's add mode
 skips it.
 
-For a Coinomi-mode wallet the sync engine also **watches** both accounts, receive and change chains
-with the usual gap limit, through compact filters on the phone. Its balance, history and spends
+For a wallet whose `watchedAccounts` holds Coinomi's two accounts (set by the restore answer
+"Coinomi", and never by the sign-in setting) the sync engine also **watches** both, receive and change
+chains with the usual gap limit, through compact filters on the phone. Its balance, history and spends
 include them, and nothing is sent to a server. Coins there are spent like any other: P2PKH and
 P2SH-P2WPKH signing are both in `BRTransactionSign`; change still goes to the wallet's own BIP84
 chain. Recover funds stays the opt-in quick check, and the restore offers it for a Coinomi phrase in
@@ -157,9 +205,10 @@ rebuilds the watch set per wallet anyway, not before.
 ## Order of work
 
 1. Core: characterization KAT, then the master-key argument and the `STANDARD` vectors.
-2. App: the two properties, `DigiScopeIdentity` and its source gate, the policy. Server check first.
+2. App: the three properties, `DigiScopeIdentity` and its source gate, the policy. (The server check
+   is answered above: no server change.)
 3. UI: the restore question and the Settings toggle, all languages.
-4. With multi-wallet step 2: watching the Coinomi fund paths.
+4. With multi-wallet step 2: watching the accounts in `watchedAccounts`.
 
 Steps 1–3 ship on their own: a restored Coinomi user signs in correctly from that release, and finds
 funds through Recover funds until step 4.
