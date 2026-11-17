@@ -4,10 +4,12 @@
 # write_varint, message_utf8, signMessage, signIdentityMessage and identityAddress in jni_wallet_sign.c). The
 # assertions of slip13_identity_kat and identity_sign_bytes_kat, the derivation inputs of DigiIdRequestTest
 # and the request of DigiIdIdentityChoiceTest run here, with SLIP-0013's published vector and the per-site
-# identity today's master key ("DigiByte seed") gives the three callback URLs Coinomi was measured signing in
-# to (docs/superpowers/specs/2026-11-17-coinomi-digiid-design.md), beside a line-for-line C model of the
-# bridge that the header is compared with over fixed pseudo-random inputs. See digiid_core_kat_main.c. Then
-# the REAL bridge, booted over a host JNI, is held to the header answer for answer (digiid_core_bridge_main.c).
+# identity each master-key root gives the three callback URLs Coinomi was measured signing in to
+# (docs/superpowers/specs/2026-11-17-coinomi-digiid-design.md): BR_DIGIID_ROOT_DIGIBYTE ("DigiByte seed", the
+# bridge's) and BR_DIGIID_ROOT_STANDARD ("Bitcoin seed": the addresses Coinomi showed, and BitID's published
+# vector); an unknown root is refused. Beside them a line-for-line C model of the bridge that the header is
+# compared with over fixed pseudo-random inputs. See digiid_core_kat_main.c. Then the REAL bridge, booted over a
+# host JNI, is held to the header answer for answer under the DigiByte root (digiid_core_bridge_main.c).
 #
 #   comparison  one arm per rule, -DDIGIID_UNFIXED=<bit> (BRDigiId.h): 1 the account index is hashed
 #               big-endian; 2 A..D are read big-endian; 4 A..D are not hardened; 8 a negative index is
@@ -18,13 +20,19 @@
 #               modified UTF-8; 4096 the shared identity is m/0'/1/0; 8192 unpadded base64; 16384 the URI's
 #               surrogate pairs as two three-byte halves (the JNI specification's form, which ART does not
 #               write); 32768 the URI written by the message's rules (U+0000 one byte, a lone surrogate '?');
-#               65536 BRDigiIdAddressWithKey leaves the caller's key unwiped. Each arm fails exactly the cases
-#               CASES lists for its bit and passes every other.
+#               65536 BRDigiIdAddressWithKey leaves the caller's key unwiped; 131072 every known root derives
+#               with "DigiByte seed" (the per-site master key before the root was an argument); 262144 every
+#               known root derives with "Bitcoin seed" (the constant swapped in place, which moves every
+#               existing identity); 524288 a root that is neither DIGIBYTE nor STANDARD is not refused (it
+#               derives with "DigiByte seed"). Each arm fails exactly the cases CASES lists for its bit and
+#               passes every other.
 #   shipped     -DDIGIID_UNFIXED=0: every case passes, exit 0.
-#   bridge      the shipped header against the bridge's own jni_wallet_sign.c / jni_wallet.c / slip13.c,
-#               over identity_sign_bytes_kat's host_jni stand-ins: every answer and refusal the same. Its
-#               host env's GetStringUTFChars writes what ART's does (a surrogate pair as four bytes), and the
-#               header gets the URI through BRDigiIdUriBytesFromUtf16.
+#   bridge      the shipped header under BR_DIGIID_ROOT_DIGIBYTE against the bridge's own jni_wallet_sign.c /
+#               jni_wallet.c / slip13.c, over identity_sign_bytes_kat's host_jni stand-ins: every answer and
+#               refusal the same. The bridge takes no root (its per-site master key is "DigiByte seed"), so
+#               BR_DIGIID_ROOT_STANDARD has no bridge answer to match until step 2 of the design; its cases in
+#               digiid_core_kat_main.c hold it. The host env's GetStringUTFChars writes what ART's does (a
+#               surrogate pair as four bytes), and the header gets the URI through BRDigiIdUriBytesFromUtf16.
 # All under ASan + UBSan, 64-bit; the shipped arm and the bridge comparison again 32-bit where a 32-bit link
 # works (said so, and skipped, where it does not: no 32-bit link on an arm64 Mac). The arms run with
 # detect_leaks=0; then every case runs once more on the shipped arm under LeakSanitizer where the platform
@@ -32,7 +40,8 @@
 #
 # Gates first: the header must test the seam's VALUE (#if, never #ifdef) with an #ifndef default.
 # Then:
-#   PORTABILITY GATE  the header includes only libc and the three core headers whose functions it calls,
+#   PORTABILITY GATE  the header includes only libc, the three core headers whose functions it calls and
+#                     BRDerivationProfiles.h (the standard master key's name; libc only, nothing to link),
 #                     reads no clock, does no I/O, allocates nothing and uses no rand(); builds clean under
 #                     -Wall -Wextra -Wpedantic -Werror at c99/c11/c17 (two TUs, the header included twice in
 #                     the second); for iphoneos/iphonesimulator, and through Swift's C importer (swiftc
@@ -63,35 +72,40 @@ SAN_RE='ERROR: AddressSanitizer|ERROR: LeakSanitizer|runtime error:'
 # <case>:<the comparison arms (bits of DIGIID_UNFIXED) that must fail it, comma-separated; - for none>
 CASES=(
     slip13_published_vectors:2
-    slip13_identity_carried:2,4
+    slip13_identity_carried:2,4,262144
     slip13_index_values:1,2
     slip13_edges:1,2
-    site_key_derivation:1,2,4,8
-    site_key_digibyte_coinomi_uris:2,4,64,8192
+    site_key_derivation:1,2,4,8,262144
+    site_key_digibyte_coinomi_uris:2,4,64,8192,262144
+    site_key_standard_coinomi_uris:2,4,64,8192,131072,262144
+    site_key_standard_bitid_vector:2,4,131072
     shared_key_derivation:4096
+    shared_address_both_roots:16,4096
+    unknown_root_refused:524288
     message_prefix:32
     message_digest:64
     utf8_bytes:1024,2048
     uri_bytes:16384,32768
-    uri_identity:2,4,64,8192,16384,32768
+    uri_identity:2,4,64,8192,16384,32768,262144
     sign_shared_login:64,256,4096,8192
-    sign_site_request:2,4,8,64,2048,4096,8192
-    request_golden_inputs:2,4
-    address_rules:1,2,4,8,16,4096
+    sign_site_request:2,4,8,64,2048,4096,8192,262144
+    request_golden_inputs:2,4,262144
+    address_rules:1,2,4,8,16,4096,262144
     sign_with_key_wipes:128,512
     address_with_key_wipes:128,65536
-    long_messages:2,4,32,64,4096,8192
-    edges:1,2,4,8,16,64,256,4096,8192
+    long_messages:2,4,32,64,4096,8192,262144
+    edges:1,2,4,8,16,64,256,4096,8192,262144
     buffer_edges:512
     sweep_indexes:1,2
-    sweep_keys:1,2,4,8,4096
-    sweep_sign:1,2,4,8,16,64,256,4096,8192
+    sweep_keys:1,2,4,8,4096,262144
+    sweep_sign:1,2,4,8,16,64,256,4096,8192,262144
     sweep_utf8:1024,2048
     sweep_uri_bytes:16384,32768
 )
 ARMS=(1:index-big-endian 2:words-big-endian 4:soft-path 8:negative-index 16:shared-any-index 32:compact-size
       64:single-sha 128:uncompressed 256:segwit-ignored 512:key-kept 1024:lone-surrogate-kept 2048:modified-utf8
-      4096:shared-path 8192:base64-unpadded 16384:uri-spec-pairs 32768:uri-as-message 65536:address-key-kept)
+      4096:shared-path 8192:base64-unpadded 16384:uri-spec-pairs 32768:uri-as-message 65536:address-key-kept
+      131072:root-ignored 262144:root-always-standard 524288:any-root)
 
 # ---- the seam is real ----------------------------------------------------------------------
 if [ ! -f "$HEADER" ]; then
@@ -148,7 +162,7 @@ strip_comments() {   # a C file with // and /* */ comments removed
 }
 CODE="$(strip_comments "$HEADER")"
 includes="$(grep -E '^[[:space:]]*#[[:space:]]*include' <<<"$CODE" | sed -E 's/.*include[[:space:]]*//; s/[[:space:]]+$//' | sort -u | tr '\n' ' ')"
-want='"BRBIP32Sequence.h" "BRCrypto.h" "BRKey.h" <stddef.h> <stdint.h> <string.h> '
+want='"BRBIP32Sequence.h" "BRCrypto.h" "BRDerivationProfiles.h" "BRKey.h" <stddef.h> <stdint.h> <string.h> '
 if [ "$includes" != "$want" ]; then
     echo "PORTABILITY GATE FAILED: the header includes $includes(want $want)"; FAIL=1
 fi
@@ -182,10 +196,10 @@ int main(void)
     size_t len = 0;
     int ok;
     BRBIP39DeriveKey(seed, "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about", NULL);
-    ok = BRDigiIdAddress(addr, sizeof(addr), seed, sizeof(seed), 0, NULL, 0, 0, work, sizeof(work)) == BR_DIGIID_OK &&
+    ok = BRDigiIdAddress(addr, sizeof(addr), seed, sizeof(seed), BR_DIGIID_ROOT_DIGIBYTE, 0, NULL, 0, 0, work, sizeof(work)) == BR_DIGIID_OK &&
          strcmp(addr, "DGAf4MmtdP6D6QY1KREaznT3DZwxeAkWyn") == 0 &&
-         BRDigiIdSignSite(out, sizeof(out), seed, sizeof(seed), (const uint8_t *)"m", 1, "https://example.com/callback", 28, 0, work,
-                          sizeof(work)) == BR_DIGIID_OK && strncmp(out, "DPeEMYki92jeUSDgjkrfrTMVpvGWCHYd68|", 35) == 0 &&
+         BRDigiIdSignSite(out, sizeof(out), seed, sizeof(seed), BR_DIGIID_ROOT_DIGIBYTE, (const uint8_t *)"m", 1, "https://example.com/callback",
+                          28, 0, work, sizeof(work)) == BR_DIGIID_OK && strncmp(out, "DPeEMYki92jeUSDgjkrfrTMVpvGWCHYd68|", 35) == 0 &&
          BRDigiIdUtf8FromUtf16(bytes, sizeof(bytes), &len, units, 3) == BR_DIGIID_OK && len == 5;
     mem_clean(seed, sizeof(seed));
     return (ok && strict_tu1()) ? 0 : 1;
@@ -231,14 +245,14 @@ var work = [UInt8](repeating: 0, count: BRDigiIdSignSiteWorkSize(uriLength, leng
 var out = [CChar](repeating: 0, count: Int(BR_DIGIID_ANSWER_CAPACITY))
 var addr = [CChar](repeating: 0, count: Int(BR_DIGIID_ADDRESS_CAPACITY))
 let workCount = work.count
-let signed: BRDigiIdStatus = BRDigiIdSignSite(&out, out.count, seed, seed.count, message, length, uriBytes, uriLength, 0,
-                                              &work, workCount)
+let signed: BRDigiIdStatus = BRDigiIdSignSite(&out, out.count, seed, seed.count, BR_DIGIID_ROOT_DIGIBYTE, message, length, uriBytes,
+                                              uriLength, 0, &work, workCount)
 let shared: BRDigiIdStatus = BRDigiIdSignShared(&out, out.count, seed, seed.count, message, length, 2, &work, workCount)
-let address: BRDigiIdStatus = BRDigiIdAddress(&addr, addr.count, seed, seed.count, 0, nil, 0, 0, &work, workCount)
+let address: BRDigiIdStatus = BRDigiIdAddress(&addr, addr.count, seed, seed.count, BR_DIGIID_ROOT_DIGIBYTE, 0, nil, 0, 0, &work, workCount)
 var idx = [UInt32](repeating: 0, count: 4)
 let indexes: BRDigiIdStatus = BRDigiIdSlip13Indexes(&idx, uriBytes, uriLength, 0, &work, workCount)
 var key = BRKey()
-let siteKey: BRDigiIdStatus = BRDigiIdSiteKey(&key, seed, seed.count, uriBytes, uriLength, 0, &work, workCount)
+let siteKey: BRDigiIdStatus = BRDigiIdSiteKey(&key, seed, seed.count, BR_DIGIID_ROOT_DIGIBYTE, uriBytes, uriLength, 0, &work, workCount)
 let keyAddress: BRDigiIdStatus = BRDigiIdAddressWithKey(&addr, addr.count, &key)
 print(uriStatus == BR_DIGIID_OK, signed == BR_DIGIID_OK, shared == BR_DIGIID_OK, address == BR_DIGIID_OK, indexes == BR_DIGIID_OK,
       utf8 == BR_DIGIID_OK, siteKey == BR_DIGIID_OK, keyAddress == BR_DIGIID_OK, DIGIID_UNFIXED, BR_DIGIID_MESSAGE_HEADER_LENGTH)
@@ -257,7 +271,7 @@ EOF
         FAIL=1; strict_ok=0
     fi
 fi
-[ $strict_ok -eq 1 ] && echo "portability gate: libc + three core headers, no clock/I/O/allocation/rand; clean at c99/c11/c17 ($ios_note; $swift_note)"
+[ $strict_ok -eq 1 ] && echo "portability gate: libc + four core headers, no clock/I/O/allocation/rand; clean at c99/c11/c17 ($ios_note; $swift_note)"
 
 # ---- the arms ------------------------------------------------------------------------------
 cat > "$BUILD_DIR/tu2.c" <<'EOF'
