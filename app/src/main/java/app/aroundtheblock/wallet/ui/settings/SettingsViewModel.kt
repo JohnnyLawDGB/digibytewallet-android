@@ -134,9 +134,15 @@ class SettingsViewModel @Inject constructor(
      * Settings → Security → Auto-lock: the app-wide value ([AutoLockPrefs]), the one the inactivity
      * lock enforces in every wallet. Not the wallet database's column, which is the active wallet's
      * since multi-wallet step 1.
+     *
+     * Observed, never copied: the launch's one-time move lands off the main thread and can land after
+     * this screen has opened, and a copy taken here would show the default while the lock enforces
+     * the moved value. The stored value as the screen opens, then each change
+     * [AutoLockPrefs.timeoutFlow] hears: the move, the setter below, the wipe.
      */
-    private val _autoLockTimeout = MutableStateFlow(autoLockTimeoutOrDefault(AutoLockPrefs.storedTimeoutMs(context)))
-    val autoLockTimeout: StateFlow<Long> = _autoLockTimeout.asStateFlow()
+    val autoLockTimeout: StateFlow<Long> = AutoLockPrefs.timeoutFlow(context)
+        .map(::autoLockTimeoutOrDefault)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, autoLockTimeoutOrDefault(AutoLockPrefs.storedTimeoutMs(context)))
 
     // ── Tor state ─────────────────────────────────────────────────────────────
     /** Live Tor state from TorManager. */
@@ -422,13 +428,12 @@ class SettingsViewModel @Inject constructor(
      */
 
     /**
-     * Store the auto-lock timeout app-wide, for every wallet. The control then shows what the
-     * inactivity lock reads; a write that did not land is logged.
+     * Store the auto-lock timeout app-wide, for every wallet. It only writes: [autoLockTimeout] hears
+     * the write and shows what the inactivity lock reads. A write that did not land is logged.
      */
     fun setAutoLockTimeout(ms: Long) {
         viewModelScope.launch(Dispatchers.IO) {
             if (!AutoLockPrefs.setTimeoutMs(context, ms)) android.util.Log.w("SettingsViewModel", "auto-lock timeout write did not land")
-            _autoLockTimeout.value = autoLockTimeoutOrDefault(AutoLockPrefs.storedTimeoutMs(context))
         }
     }
 

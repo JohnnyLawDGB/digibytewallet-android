@@ -36,8 +36,9 @@ import java.io.File
  * nothing reads the column. It reads names, not types: a read by position (destructuring a row) or
  * through reflection is beyond it.
  *
- * For the auto-lock timeout it fixes what reads and writes the value, and that every launch still
- * runs its one-time move out of legacy's database.
+ * For the auto-lock timeout it fixes what reads and writes the value, that every launch still runs
+ * its one-time move out of legacy's database, and that the Security screen shows the stored value as
+ * it changes, never a copy taken when the screen opened, which the move can land after.
  */
 class AppWideSettingsSourceGateTest {
 
@@ -621,5 +622,36 @@ class AppWideSettingsSourceGateTest {
         val outsideDecision = coreReads.filterNot { (f, at) -> f.canonicalPath == autoLockPrefs.canonicalPath && at in decision!! }
         assertEquals("the wallet database's auto-lock column is read outside the one-time move", emptyList<String>(), outsideDecision.map { (f, at) -> "${f.name}@$at" })
         assertEquals("the one-time move does not read legacy's column", 1, coreReads.size)
+    }
+
+    @Test fun `the Security screen shows the stored timeout as it is now, not a copy taken when it opened`() {
+        // The launch's one-time move runs off the main thread and can land after Settings → Security
+        // has opened. A copy of the stored timeout taken as the screen opened then shows the 60 s
+        // default while the inactivity lock enforces the moved value, until the screen is built
+        // again. So the ViewModel keeps no copy. Its auto-lock value is AutoLockPrefs.timeoutFlow,
+        // which hears every write of the stored value (AutoLockPrefsTest runs it), through the one
+        // default, collected from the ViewModel's start. The stored value is read directly once, as
+        // that flow's value until its own first answer: no MutableStateFlow, nor anything else, is
+        // handed a copy of it. And the setter only writes; the flow then shows what landed.
+        val vm = gate("ui/settings/SettingsViewModel.kt")
+        val code = vm.code
+        val declared = Regex("""(?<!\w)val\s+autoLockTimeout\s*:\s*StateFlow\s*<\s*Long\s*>\s*=(?!=)""").findAll(code).toList()
+        assertEquals("SettingsViewModel declares autoLockTimeout ${declared.size} times; it has to be once", 1, declared.size)
+        val eq = declared.single().range.last
+        val derivation = (eq + 1) until valueEnd(code, eq)
+        val derived = KotlinSourceGate.squeeze(code.substring(derivation)).replace(" .", ".")
+        val set = vm.range("fun setAutoLockTimeout(", "\n    }")
+        assertTrue("setAutoLockTimeout is missing", set != null)
+        val findings = buildList {
+            val fromItsFlow = "AutoLockPrefs.timeoutFlow(context).map(::autoLockTimeoutOrDefault)" +
+                ".stateIn(viewModelScope, SharingStarted.Eagerly, autoLockTimeoutOrDefault(AutoLockPrefs.storedTimeoutMs(context)))"
+            if (derived != fromItsFlow) add("autoLockTimeout is not the stored value's flow from the ViewModel's start: $derived")
+            Regex("""(?<!\w)storedTimeoutMs(?!\w)""").findAll(code).filterNot { it.range.first in derivation }
+                .forEach { add("a copy of the stored timeout, read outside its flow: ${lineAt(code, it.range.first)}") }
+            Regex("""\.\s*value\s*=(?!=)|(?<!\w)(emit|tryEmit|update|updateAndGet|getAndUpdate|compareAndSet)\s*[({]""")
+                .findAll(code.substring(set!!))
+                .forEach { add("setAutoLockTimeout sets the screen's value itself: ${lineAt(code, set.first + it.range.first)}") }
+        }
+        assertEquals("the Security screen can show a timeout the inactivity lock does not enforce", emptyList<String>(), findings)
     }
 }

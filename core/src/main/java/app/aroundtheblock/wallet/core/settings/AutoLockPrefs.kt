@@ -1,10 +1,16 @@
 package app.aroundtheblock.wallet.core.settings
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.util.Log
 import app.aroundtheblock.wallet.core.db.dao.WalletConfigDao
 import app.aroundtheblock.wallet.core.wallets.WalletScope
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 /**
  * Settings → Security → Auto-lock: how long the unlocked wallet may sit idle in the foreground before
@@ -50,6 +56,38 @@ object AutoLockPrefs {
         val p = prefs(ctx)
         if (p.contains(KEY_TIMEOUT_MS)) p.getLong(KEY_TIMEOUT_MS, DEFAULT_TIMEOUT_MS) else null
     }.getOrNull()
+
+    /**
+     * [storedTimeoutMs] now, and again each time it changes: what Settings → Security shows. The
+     * one-time move lands off the main thread at launch, possibly after the screen has opened, and a
+     * value read once as it opened would show the default while the lock enforces the moved one.
+     * The inactivity lock reads [storedTimeoutMs] on every tick and needs no flow.
+     *
+     * Every write is heard: the user's ([setTimeoutMs]), the move's ([migrateFromLegacy]) and the
+     * wipe's clear, which API 30+ reports with no key. Before API 30 a clear is not reported: a wipe
+     * that removes the seed ends the process, and after one that did not, a screen left open shows
+     * the old value while the lock enforces the default, the shortest.
+     *
+     * The listener is registered before the first value is read, so a write landing in between is in
+     * that value or heard after it. Each value is read and sent under one lock, so a value read
+     * earlier is never sent after one read later; the newest is kept when the collector falls behind,
+     * and an unchanged value is not sent twice. The flow holds its listener until it ends
+     * (SharedPreferences holds listeners weakly), then unregisters it. Never throws but for
+     * cancellation: a file that cannot be opened gives null, as [storedTimeoutMs] does, and nothing
+     * after it.
+     */
+    fun timeoutFlow(ctx: Context): Flow<Long?> = callbackFlow {
+        val sendLock = Any()
+        fun sendStored() { synchronized(sendLock) { trySend(storedTimeoutMs(ctx)) } }
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == null || key == KEY_TIMEOUT_MS) sendStored()
+        }
+        val registered = runCatching { prefs(ctx).also { it.registerOnSharedPreferenceChangeListener(listener) } }
+            .onFailure { runCatching { Log.w(TAG, "auto-lock timeout not observed (${it.javaClass.simpleName})") } }
+            .getOrNull()
+        sendStored()
+        awaitClose { runCatching { registered?.unregisterOnSharedPreferenceChangeListener(listener) } }
+    }.conflate().distinctUntilChanged()
 
     /** Store the user's choice. commit(), off the main thread: true when the write landed. */
     fun setTimeoutMs(ctx: Context, ms: Long): Boolean = synchronized(lock) {

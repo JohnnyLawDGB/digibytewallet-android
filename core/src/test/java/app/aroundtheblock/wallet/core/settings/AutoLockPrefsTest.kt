@@ -8,8 +8,15 @@ import app.aroundtheblock.wallet.core.wallets.WalletScope
 import app.aroundtheblock.wallet.core.wallets.WalletStores
 import io.mockk.every
 import io.mockk.mockk
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -31,7 +38,12 @@ import org.junit.Test
  * run that function itself. MainActivity's block is that one call over the database its process has
  * open (`AppWideSettingsSourceGateTest` holds it to exactly that); [launch] is the same block over a
  * stand-in database.
+ *
+ * The move runs at launch off the main thread, so it can land after Settings → Security has opened.
+ * The screen shows [AutoLockPrefs.timeoutFlow] (the same gate holds the ViewModel to that), and the
+ * last arms run that flow over a store that tells its listeners what the platform does.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class AutoLockPrefsTest {
 
     private val device = InMemoryPrefsFactory()
@@ -219,5 +231,92 @@ class AutoLockPrefsTest {
     @Test fun `the default is the wallet database's, unchanged by the move`() {
         assertEquals(WalletConfigEntity().autoLockTimeoutMs, AutoLockPrefs.DEFAULT_TIMEOUT_MS)
         assertEquals(60_000L, AutoLockPrefs.DEFAULT_TIMEOUT_MS)
+    }
+
+    // ── What Settings → Security shows ─────────────────────────────────────────────────────────────
+
+    /**
+     * Settings → Security opens: from now on, each value [AutoLockPrefs.timeoutFlow] sends, collected
+     * from the moment it opens, as the ViewModel's eager `stateIn` collects it.
+     */
+    private fun TestScope.screenOpens(): List<Long?> {
+        val shown = mutableListOf<Long?>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { AutoLockPrefs.timeoutFlow(ctx).toList(shown) }
+        return shown
+    }
+
+    @Test fun `a screen opened before the move landed shows the moved timeout once it lands`() = runTest {
+        // The launch's move is still to land: nothing is stored yet.
+        val shown = screenOpens()
+        assertEquals(listOf<Long?>(null), shown)
+        val readAsItOpened = AutoLockPrefs.storedTimeoutMs(ctx)
+
+        assertTrue(AutoLockPrefs.migrateFromLegacy(ctx, launch(legacyMain, WalletDb(WalletConfigEntity(autoLockTimeoutMs = chosenIn414)))))
+        runCurrent()
+
+        assertEquals("the screen did not hear the move land", listOf(null, chosenIn414), shown)
+        assertEquals(chosenIn414, enforced())
+        // The control: a value read once as the screen opened is not what the lock now enforces.
+        assertNotEquals("control: the value read as the screen opened is still enforced, so this cannot see the bug", enforced(), readAsItOpened ?: AutoLockPrefs.DEFAULT_TIMEOUT_MS)
+    }
+
+    @Test fun `a timeout the user chooses is shown as it is stored`() = runTest {
+        val shown = screenOpens()
+
+        assertTrue(AutoLockPrefs.setTimeoutMs(ctx, 5 * 60_000L))
+        assertTrue(AutoLockPrefs.setTimeoutMs(ctx, 30 * 60_000L))
+        runCurrent()
+
+        assertEquals(listOf(null, 5 * 60_000L, 30 * 60_000L), shown)
+        assertEquals(30 * 60_000L, enforced())
+    }
+
+    @Test fun `a move landing after the user chose shows no overwrite, and makes none`() = runTest {
+        val shown = screenOpens()
+        // Chosen in an added wallet's process; then a launch with legacy's database open moves its 4.1.4 value.
+        assertTrue(AutoLockPrefs.setTimeoutMs(ctx, 5 * 60_000L))
+        assertTrue(AutoLockPrefs.migrateFromLegacy(ctx, launch(legacyMain, WalletDb(WalletConfigEntity(autoLockTimeoutMs = chosenIn414)))))
+        runCurrent()
+
+        assertEquals("the screen showed the move overwrite the user's choice", listOf(null, 5 * 60_000L), shown)
+        assertEquals(5 * 60_000L, AutoLockPrefs.storedTimeoutMs(ctx))
+        assertTrue("the move was not marked done", AutoLockPrefs.legacyMoved(ctx))
+    }
+
+    @Test fun `the wipe's clear is shown as nothing stored, and a clear that changes nothing shows nothing new`() = runTest {
+        // A move that found no row: the file holds the move's mark and no timeout.
+        assertTrue(AutoLockPrefs.migrateFromLegacy(ctx, launch(legacyMain, WalletDb(row = null))))
+        val shown = screenOpens()
+
+        // The wipe clears the file (WalletDataEraser.clearPrefs); the platform tells a clear with no key.
+        assertTrue(file.edit().clear().commit())
+        runCurrent()
+        assertEquals("a clear that left the timeout unset was shown as a change", listOf<Long?>(null), shown)
+
+        assertTrue(AutoLockPrefs.setTimeoutMs(ctx, chosenIn414))
+        assertTrue(file.edit().clear().commit())
+        runCurrent()
+        assertEquals("the screen did not hear the wipe clear the timeout", listOf(null, chosenIn414, null), shown)
+        assertEquals(AutoLockPrefs.DEFAULT_TIMEOUT_MS, enforced())
+    }
+
+    @Test fun `a write landing as the screen starts listening is shown`() = runTest {
+        // Lands as the flow registers its listener, before it is added: the listener is never told of it.
+        file.beforeNextRegistration = { AutoLockPrefs.setTimeoutMs(ctx, chosenIn414) }
+
+        val shown = screenOpens()
+
+        assertEquals(chosenIn414, AutoLockPrefs.storedTimeoutMs(ctx))
+        assertEquals("a write that landed as the screen started listening was lost", listOf<Long?>(chosenIn414), shown)
+    }
+
+    @Test fun `the flow listens while it is collected and unregisters its listener when it ends`() = runTest {
+        // The platform holds listeners weakly: the flow keeps its own until it ends, then takes it off.
+        val screen = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { AutoLockPrefs.timeoutFlow(ctx).collect {} }
+        assertEquals("the flow is not listening while it is collected", 1, file.listenerCount)
+
+        screen.cancelAndJoin()
+
+        assertEquals("the flow left its listener registered after it ended", 0, file.listenerCount)
     }
 }
