@@ -111,7 +111,8 @@ little filter matching and nothing else.
 
 A missing value reads as the upgrade row, so an old record never changes identity. These live in the
 wallet's own store (`WalletStores` class WALLET), so they follow multi-wallet's per-wallet rules: a
-wipe removes them, a switch reads the other wallet's.
+wipe removes them, a switch reads the other wallet's. A fourth value, `previousSiteKeyRoot`, exists
+only while Coinomi-compatible sign-in is on (UI, below), in the same store under the same rules.
 
 ### Core (shared with iOS)
 
@@ -119,6 +120,9 @@ wipe removes them, a switch reads the other wallet's.
   placed after `seedLen`: `BRDigiIdRoot`, `DIGIBYTE` = 1, `STANDARD` = 2. Zero and every other value
   are refused, with the key wiped. There is no root-less variant, so no caller can sign per-site
   without choosing. The shared identity (`BRDigiIdSharedKey`, `BRDigiIdSignShared`) takes none.
+  `BRDigiIdAddress` checks the root on both branches. On its no-URI branch it always answers today's
+  shared `m/0'/0/0` address under `"DigiByte seed"`, whichever valid root it is given, so the shared
+  address it reports is the one `BRDigiIdSignShared` signs with. A KAT row pins this.
   `DIGIBYTE` keeps today's derivation call; `STANDARD` derives through `BRBIP32PrivKeyArrayPath` with
   `BR_DERIVATION_HMAC_STANDARD` (`BRDerivationProfiles.h`), so neither string gains a copy.
   `BRBIP32BitIDKey` is left alone and is not used. (This is the API as decided for step 1. It exists
@@ -168,8 +172,11 @@ address and signs for the active wallet:
   is one callback URL, so one key); a Coinomi user's existing account is bound to exactly this address
   (`DSsC7WWi…` in the vector).
 
-No other code may sign for a DigiScope host. A source gate fails the build on a `signMessage` or
-`signIdentityMessage` call outside `DigiScopeIdentity` and `DigiIdManager`.
+No other code may sign for a DigiScope host:
+- A source gate fails the build on any `signMessage` call outside `DigiScopeIdentity`, and on any
+  `signIdentityMessage` call outside `DigiScopeIdentity` and `DigiIdManager`.
+- A behaviour test checks that `DigiIdManager` signs a list host through `DigiScopeIdentity` and
+  never decides that key itself.
 
 Why the three must move together: after every successful DigiScope QR login or step-up,
 `DigiIdManager` runs `quickLogin()`, which today always signs with `m/0'/0/0`. A Coinomi-mode wallet
@@ -197,11 +204,23 @@ The policy is **Q4 A** (owner, 2026-11-10, recorded in the iOS repo's `docs/deci
 hand-off `docs/handoffs/2026-11-13-android-digiid.md` §1). Android adopts it in its own PR, before the
 Coinomi app work, and this design builds on it:
 
-- The **fixed list**: exactly `digiscope.me` and `api.digiscope.me`, byte for byte. It is read from
-  the core (`BRDigiIdUsesSharedIdentity`, a small core PR after step 1); until then it is the Kotlin
-  list in `IdentityKeyPolicy`. On a list host, the wallet's `digiScopeIdentity` decides:
-  `SHARED` signs with `m/0'/0/0`, and `SITE` with the per-site key of the fixed `U` above.
+- The **fixed list**: exactly `digiscope.me` and `api.digiscope.me`, byte for byte, compared
+  against the parsed (lower-cased) domain, as iOS does. On a list host, the wallet's
+  `digiScopeIdentity` decides: `SHARED` signs with `m/0'/0/0`, and `SITE` with the per-site key of the
+  fixed `U` above.
 - **Every other host** gets the per-site key under the wallet's `siteKeyRoot`.
+- **The whole choice lives in the core** (cross-platform contract §3: the choice of which key signs is
+  core logic; iOS hand-off §3).
+  - One header-only call takes the request's host, the wallet's `digiScopeIdentity` and `siteKeyRoot`,
+    and answers either `SHARED` or the per-site key with the URI and root to derive it from.
+  - The DigiScope login `U` is a core literal.
+  - The list-membership call is named for what it answers, "is a DigiScope host", not "uses the
+    shared identity", because a `SITE` wallet signs DigiScope per-site.
+  - Its host KAT covers hand-off §3's host cases, crossed with both `digiScopeIdentity` values and both
+    roots.
+  - Android and iOS only store the properties and pass them in. This is the small core PR after step 1
+    (the owner's 2026-11-17 OK for the list header, in its full shape).
+  - Until it lands, Android's Q4 A PR keeps the two-host list in `IdentityKeyPolicy`.
 - **This phone's login history never decides, and there is no sign-time choice.** History
   grandfathering, `offersChoice` and the restored-wallet identity card go (Q4 A). That also closes
   review finding P2 on #266 with no special case: no wallet, Coinomi-mode or not, is offered the
@@ -215,16 +234,22 @@ Coinomi app work, and this design builds on it:
   another wallet / not sure. One line each on what it changes ("signs in to sites as Coinomi did").
   First-run restore and multi-wallet add mode both show it.
 - **Settings → Digi-ID → "Coinomi-compatible sign-in"** for the active wallet. Turning it on or off
-  first says, in plain words, that every site will see a different identity, sign-ins made the other
-  way stop working, and the Hub signs this wallet out. Then it clears this wallet's Hub session.
-  - **On** stores the wallet's current pair, then sets `STANDARD` + `SITE`.
-  - **Off** restores the stored pair. A wallet restored as "Coinomi" has no stored pair, so off sets
-    `STANDARD` + `SHARED`: its per-site keys stay Coinomi's, and DigiScope goes back to the shared
-    key.
+  first says, in plain words, what actually changes, then clears this wallet's Hub session:
+  - the DigiScope identity and the Hub session always change;
+  - every other site changes only when `siteKeyRoot` changes (DigiByte to standard, or back), and only
+    then does the warning say that other sites' sign-ins made the other way stop working.
+  - **On** saves the wallet's current `siteKeyRoot` as a fourth per-wallet value,
+    `previousSiteKeyRoot`. It sits in the same WALLET store and is written in the same commit as the
+    pair change. On then sets `STANDARD` + `SITE`.
+  - **Off** sets `previousSiteKeyRoot` + `SHARED` and clears the saved value. A wallet restored as
+    "Coinomi" has none saved, so Off sets `STANDARD` + `SHARED`: its per-site keys stay Coinomi's, and
+    DigiScope goes back to the shared key.
   - Neither ever removes anything from `watchedAccounts`. On offers "Also watch Coinomi's accounts"
-    when they are not watched yet.
-- The Digi-ID approval screen shows the identity address it will sign with (it does today) and, for
-  a Coinomi-mode wallet, says so.
+    when they are not watched yet (from step 4, below).
+- **The approval screen always shows the address this login signs with.** On a list host the address
+  comes from `DigiScopeIdentity.address()`; elsewhere from `identityAddress(callbackUrl, 0)`. For a
+  Coinomi-mode wallet the screen also says so. This row is new in step 3: Q4 A removes the restored
+  wallet's identity card, which was the only place an address ever appeared.
 
 ### Funds on Coinomi's paths
 
@@ -234,7 +259,8 @@ sweep, by sending the addresses to the reconcile server, after a warning, and mu
 skips it.
 
 For a wallet whose `watchedAccounts` holds Coinomi's two accounts (set by the restore answer
-"Coinomi", and never by the sign-in setting) the sync engine also **watches** both, receive and change
+"Coinomi" from step 3, or by Settings → "Also watch Coinomi's accounts" from step 4; never by the
+sign-in setting), the sync engine also **watches** both, receive and change
 chains with the usual gap limit, through compact filters on the phone. Its balance, history and spends
 include them, and nothing is sent to a server. Coins there are spent like any other: P2PKH and
 P2SH-P2WPKH signing are both in `BRTransactionSign`; change still goes to the wallet's own BIP84
@@ -249,6 +275,12 @@ What makes that real (step 4):
   watching them (multi-wallet step 2).
 - Adding them to a wallet that already synced starts a back-scan of those chains from the wallet's
   birth height.
+- **Values written before step 4.** Step 3 writes `watchedAccounts` at a "Coinomi" restore, but
+  nothing watches them until step 4. On step 4's first run, every wallet whose `watchedAccounts`
+  names an account with no stored account key is treated as just added: at that wallet's next turn as
+  the active wallet (seed resident), its account keys are derived and stored, and a back-scan runs
+  from its birth height. An upgrade test starts from a steps 1–3 build with `watchedAccounts` set.
+  The Settings action ships with step 4, so nothing in steps 1–3 promises watching it cannot do.
 
 Recover funds stays the opt-in quick check. A first-run restore offers it for a Coinomi phrase. Add
 mode does not, because multi-wallet ruling F9 keeps its only server option to the quick start, whose
@@ -264,11 +296,13 @@ rebuilds the watch set per wallet anyway, not before.
 2. App: the three properties, `DigiScopeIdentity` and its source gate, the bridge's two per-site
    natives moved onto `BRDigiId.h`, the policy on top of Q4 A. (The server check is answered above:
    no server change.)
-3. UI: the restore question, the Settings toggle and "Also watch Coinomi's accounts", all languages.
-4. With multi-wallet step 2: watching the accounts in `watchedAccounts`.
+3. UI: the restore question, the Settings toggle and the approval screen's address row, all
+   languages.
+4. With multi-wallet step 2: watching the accounts in `watchedAccounts`, and the "Also watch Coinomi's
+   accounts" Settings action.
 
-Before step 2: Q4 A on Android (its own PR), and `BRDigiIdUsesSharedIdentity` in the core (its own
-small core PR, after step 1).
+Before step 2: Q4 A on Android (its own PR), and the core's identity choice (list membership plus the
+full choice, its own small core PR, after step 1).
 
 Steps 1–3 ship on their own: a restored Coinomi user signs in correctly from that release, and finds
 funds through Recover funds until step 4.
@@ -283,8 +317,11 @@ funds through Recover funds until step 4.
 
 ## Anti-goals (a failure even if it works)
 
-- **An identity moves without the user turning a setting.** No upgrade, restore default or code
-  change may alter which address an existing wallet signs any site with.
+- **An identity moves without the user turning a setting.** There is one owner-decided exception,
+  Q4 A (2026-11-10). From its release, every site off the list that Android kept on the shared key,
+  through this phone's login history or a restored wallet's pick, signs with its per-site key, the
+  same on every device. The Q4 A release notes say so. Beyond that, no upgrade, restore default or
+  code change may alter which address an existing wallet signs any site with.
 - **A server learns the wallet's addresses** to make Coinomi funds appear, outside the opt-in Recover
   funds screen.
 - **Two places decide the DigiScope key.** If the login and the Hub can disagree, the Hub rejects half
