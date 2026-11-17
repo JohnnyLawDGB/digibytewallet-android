@@ -563,6 +563,18 @@ not — but the coupling ran through the duress PIN, which was cancelled
    degrade + never-dial-direct-while-starting guard) — this item was
    stale. The one missing piece, the banner's "Retry now" action, is on
    `feat/tor-loud-fallback` (mark ✅ only when merged).
+6. **Coinomi-compatible Digi-ID.** A phrase restored from Coinomi signs
+   in to Digi-ID sites, DigiScope included, as the account Coinomi
+   signed in to. Approved 2026-11-17, in four steps:
+   `docs/superpowers/specs/2026-11-17-coinomi-digiid-design.md`.
+   Step 1, the core, is **done**: each per-site call in `BRDigiId.h`
+   takes the wallet's master-key root, `DIGIBYTE` ("DigiByte seed",
+   every per-site identity so far) or `STANDARD` ("Bitcoin seed",
+   Coinomi's), and no app's output changes. Shown by `digiid_core_kat`:
+   its `STANDARD` rows give the addresses Coinomi showed, and arms
+   131072, 262144 and 524288 each fail exactly their cases. Steps 2
+   (the app), 3 (the UI) and 4 (watching Coinomi's fund paths, with
+   multi-wallet step 2) are pending.
 
 **Effort:** S–M, reduced by the duress cancellation. Item 1 is shipped;
 5 is days; 3 is the riskiest (device-matrix testing); 4 is
