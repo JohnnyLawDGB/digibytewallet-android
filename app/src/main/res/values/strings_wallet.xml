@@ -607,12 +607,6 @@
     <!-- WARNING: the only signal that credentials may be intercepted. -->
     <string name="did_insecure_body">This site uses HTTP, not HTTPS. Your authentication may be intercepted.</string>
     <string name="did_callback_url">Callback URL</string>
-    <string name="did_identity_title">Which sign-in does this site know?</string>
-    <string name="did_identity_hint">Restored this wallet? Pick the identity you used on this site before. Once a sign-in works, the wallet remembers it.</string>
-    <string name="did_identity_per_site">Separate key for this site (original DigiByte app)</string>
-    <string name="did_identity_shared">Shared key for all sites (DigiByte wallet 3.x–4.0.76)</string>
-    <string name="did_identity_shared_note">The same on every site, so sites can link your sign-ins. Choose it only if this site knew you by it.</string>
-    <string name="did_identity_address">Address: %1$s</string>
     <string name="did_approve">Approve</string>
     <string name="did_deny">Deny</string>
     <string name="did_success">Authentication Successful</string>

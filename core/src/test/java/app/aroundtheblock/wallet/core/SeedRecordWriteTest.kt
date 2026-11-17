@@ -147,30 +147,19 @@ class SeedRecordWriteTest {
         assertEquals(1_600_000_000L, held["wallet_creation_time"])
     }
 
-    // 4.1.2 row 16: the record says how the wallet came to be here, in the same one write, so a
-    // wallet created on this device is never offered the shared Digi-ID identity.
-    @Test fun `a created wallet's record says it was created here and offers no shared identity`() {
+    // The record says how the wallet came to be here, in the same one write (added by 4.1.2 row 16).
+    // No Digi-ID identity reads it any more (Q4 A, IdentityKeyPolicy); it stays a record.
+    @Test fun `a created wallet's record says it was created here`() {
         val h = Harness()
-        val wm = h.walletManager()
-        assertTrue(wm.createWallet(phrase, null))
+        assertTrue(h.walletManager().createWallet(phrase, null))
         assertEquals("created", h.seedStore.inner.durable["wallet_origin"])
         assertTrue("the origin is not part of the one record write", "wallet_origin" in h.recordWrites.single().keys)
-        assertFalse(wm.mayHaveDigiIdHistoryElsewhere())
-        assertFalse("the next process forgets the origin", h.walletManager(reopened(h.seedStore.inner)).mayHaveDigiIdHistoryElsewhere())
     }
 
     @Test fun `a recovered wallet's record says it was restored`() {
         val h = Harness()
-        val wm = h.walletManager()
-        assertTrue(wm.recoverWallet(phrase, 1_600_000_000L, null))
+        assertTrue(h.walletManager().recoverWallet(phrase, 1_600_000_000L, null))
         assertEquals("restored", h.seedStore.inner.durable["wallet_origin"])
-        assertTrue(wm.mayHaveDigiIdHistoryElsewhere())
-    }
-
-    @Test fun `a record from before the origin field may have history elsewhere`() {
-        val h = Harness()
-        h.unversionedSeedOnly()
-        assertTrue(h.walletManager().mayHaveDigiIdHistoryElsewhere())
     }
 
     // 4.1.2 row 25: a NUL never reaches the native derivation, whichever caller passes it.

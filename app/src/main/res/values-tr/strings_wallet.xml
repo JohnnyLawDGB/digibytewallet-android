@@ -504,12 +504,6 @@
     <string name="did_insecure">Güvenli olmayan bağlantı</string>
     <string name="did_insecure_body">Bu site HTTPS değil HTTP kullanıyor. Kimlik doğrulamanız ele geçirilebilir.</string>
     <string name="did_callback_url">Geri dönüş URL\'si</string>
-    <string name="did_identity_title">Bu site hangi girişi tanıyor?</string>
-    <string name="did_identity_hint">Bu cüzdanı geri mi yüklediniz? Bu sitede daha önce kullandığınız kimliği seçin. Bir giriş başarılı olunca cüzdan bunu hatırlar.</string>
-    <string name="did_identity_per_site">Bu siteye özel anahtar (orijinal DigiByte uygulaması)</string>
-    <string name="did_identity_shared">Tüm siteler için ortak anahtar (DigiByte wallet 3.x–4.0.76)</string>
-    <string name="did_identity_shared_note">Her sitede aynıdır, bu yüzden siteler girişlerinizi ilişkilendirebilir. Yalnızca bu site sizi bununla tanıyorsa seçin.</string>
-    <string name="did_identity_address">Adres: %1$s</string>
     <string name="did_approve">Onayla</string>
     <string name="did_deny">Reddet</string>
     <string name="did_success">Kimlik doğrulama başarılı</string>

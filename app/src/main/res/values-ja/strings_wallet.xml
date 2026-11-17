@@ -501,12 +501,6 @@
     <string name="did_insecure">安全でない接続</string>
     <string name="did_insecure_body">このサイトは HTTPS ではなく HTTP を使用しています。認証が傍受される可能性があります。</string>
     <string name="did_callback_url">コールバック URL</string>
-    <string name="did_identity_title">このサイトが認識しているサインインはどれですか？</string>
-    <string name="did_identity_hint">このウォレットを復元しましたか？以前このサイトで使っていた ID を選んでください。サインインに成功すると、ウォレットがそれを記憶します。</string>
-    <string name="did_identity_per_site">このサイト専用のキー（元の DigiByte アプリ）</string>
-    <string name="did_identity_shared">全サイト共通のキー（DigiByte wallet 3.x–4.0.76）</string>
-    <string name="did_identity_shared_note">すべてのサイトで同じなので、サイト同士がサインインを関連付けられます。このサイトがこのキーであなたを認識していた場合のみ選んでください。</string>
-    <string name="did_identity_address">アドレス: %1$s</string>
     <string name="did_approve">承認</string>
     <string name="did_deny">拒否</string>
     <string name="did_success">認証に成功しました</string>
