@@ -291,6 +291,21 @@ Dandelion and Tor. Wallets differ only in how they are used.
 - Background sync (SyncWorker) catches up every wallet. BootGuard and the recreate sequence operate
   on the shared engine.
 
+**Found on the device in step 1 (owner, 2026-11-16 sweep of a retired test wallet on the Note 8).**
+- **The DGB Send screen needs MAX (send-all).** Today it has none: the `send_max` string exists
+  but only `AssetSendScreen` uses it. Emptying a wallet means working out balance minus fee by
+  hand, and an amount typed by eye leaves change behind in the wallet being emptied (the sweep
+  took two sends because of it). MAX spends every spendable output to one output with no change,
+  the fee taken from the amount. Moving funds out of a wallet before removing it is now a normal
+  multi-wallet task, so this belongs with step 2 even though it is not engine work.
+- **A switch must not look like a re-sync.** In step 1 a switch restarts the process, and the
+  switched-to wallet shows "Scanning… 99% · N blocks remaining" while it catches up the blocks
+  since it was last active (717 in the test, done in seconds). That is a resume near the tip
+  (`syncedResume=true`), but to the user it reads as a full re-sync. Step 2's single engine keeps
+  every wallet near the tip, so most of this goes away. What remains (a newly attached wallet's
+  back-scan, a watch-only wallet behind after a long background freeze) is labelled as catching
+  up, with a count of blocks and no percentage, and never uses the wording of a first sync.
+
 ## Left to the builder
 
 - Exact file and prefs key spellings, beyond the rule that the legacy wallet keeps its current
