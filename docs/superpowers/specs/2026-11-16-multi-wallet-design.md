@@ -48,6 +48,14 @@ Status: for owner approval (2026-11-16); builder-checked. Follow-on, separate de
 > always"). By reading, only a wipe leaves that state: it erases every record first and clears the
 > registry afterwards. The PR that brings this waits for his answer even with review and CI green;
 > the answer replaces this paragraph, with its date.
+>
+> **Part of the same decision (2026-11-19): that erase covers both networks.** Only a registry entry
+> says which network a wallet's stores were written under, and the wipe does not rely on it: it
+> erases every wallet under both. The launch erase above runs before the wipe a launch may still owe,
+> and it removes what a wipe finds a wallet by (the entry and the key aliases), so anything it left
+> under the other network would never be looked for again. It therefore erases the wallet's stores
+> under both networks first, and deletes the key aliases and drops the entry only once both read back
+> empty. Either network unverified keeps the entry and the key for the next launch.
 
 
 ## Intent

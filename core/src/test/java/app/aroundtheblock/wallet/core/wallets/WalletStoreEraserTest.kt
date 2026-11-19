@@ -56,6 +56,10 @@ class WalletStoreEraserTest {
     private val scopeB = WalletScope(idB, testnet = false)
     private val scopeC = WalletScope(idC, testnet = false)
 
+    /** B and C under the network their entries do not record. */
+    private val scopeBTest = WalletScope(idB, testnet = true)
+    private val scopeCTest = WalletScope(idC, testnet = true)
+
     /** The names a scope owns, from the one list. */
     private fun prefsOf(scope: WalletScope): Set<String> =
         (WalletStores.WALLET_AND_NETWORK_PREFS + WalletStores.WALLET_PREFS).map { WalletStores.prefsName(it, scope) }.toSet()
@@ -278,5 +282,65 @@ class WalletStoreEraserTest {
 
         assertEquals(ChainTipPolicy.UNKNOWN_TIP, ChainTipStore.read(d.ctx, scopeB))
         assertEquals(100L, ChainTipStore.read(d.ctx, legacyMain))
+    }
+
+    /** Legacy, B and C, each holding every store under BOTH networks. */
+    private fun everyWalletOnBothNetworks() = Device().apply {
+        populateAll()
+        populate(scopeBTest)
+        populate(scopeCTest)
+    }
+
+    @Test fun `phase 3 on both networks erases B's stores under both, and nothing of legacy or C under either`() {
+        val d = everyWalletOnBothNetworks()
+        val prefsBefore = d.prefsSnapshot()
+        val filesBefore = d.fileSnapshot()
+        val keysBefore = d.vault.keys.keys.toSet()
+
+        assertTrue(d.eraser.eraseStoresOnBothNetworks(scopeB))
+
+        // Phase 3 only: B's seed record is phase 1's, and it stays with every other wallet's store.
+        val ofB = prefsOf(scopeB) + prefsOf(scopeBTest) - WalletStores.seedRecordPrefs(scopeB)
+        for ((name, held) in prefsBefore) {
+            when (name) {
+                in ofB -> assertTrue("$name of B still holds data", d.prefs.prefsFor(name).all.isEmpty())
+                "dgb_settings" -> assertEquals(held - WalletStores.cfBirthHeightKey(scopeB), d.prefs.prefsFor(name).all)
+                else -> assertEquals("store $name changed", held, d.prefs.prefsFor(name).all)
+            }
+        }
+        val filesOfB = listOf(scopeB, scopeBTest)
+            .flatMap { s -> filesOf(s).map { "files/$it" } + dbFilesOf(s).map { "databases/$it" } }.toSet()
+        assertEquals(filesBefore - filesOfB, d.fileSnapshot())
+        assertEquals("phase 3 deletes no key", keysBefore, d.vault.keys.keys.toSet())
+        assertEquals("deleted a store of another wallet: ${d.deleted.toSet() - ofB}", ofB, d.deleted.toSet())
+    }
+
+    @Test fun `phase 3 on both networks reports a store left under either, and still erases the other`() {
+        for ((stuck, other) in listOf(scopeB to scopeBTest, scopeBTest to scopeB)) {
+            val d = everyWalletOnBothNetworks()
+            d.prefs.refuseWritesTo(WalletStores.prefsName("dgb_sync_data", stuck))
+
+            assertFalse("a store was left under testnet=${stuck.testnet}", d.eraser.eraseStoresOnBothNetworks(scopeB))
+
+            assertTrue(d.prefs.prefsFor(WalletStores.prefsName("dgb_sync_data", stuck)).all.isNotEmpty())
+            assertTrue(
+                "the network that could be erased was not",
+                d.prefs.prefsFor(WalletStores.prefsName("dgb_sync_data", other)).all.isEmpty(),
+            )
+            assertFalse(File(d.dbDir, WalletStores.databaseName(other)).exists())
+        }
+    }
+
+    @Test fun `for legacy, phase 3 on both networks is the phase 3 it already was`() {
+        val one = everyWalletOnBothNetworks()
+        val both = everyWalletOnBothNetworks()
+
+        assertEquals(one.eraser.eraseStores(legacyTest), both.eraser.eraseStoresOnBothNetworks(legacyTest))
+
+        // Not run a second time for the other network: legacy's phase 3 spans both.
+        assertEquals(one.deleted, both.deleted)
+        assertEquals(one.prefsSnapshot(), both.prefsSnapshot())
+        assertEquals(one.fileSnapshot(), both.fileSnapshot())
+        assertTrue("B was touched", both.eraser.storesLeft(scopeB) && both.eraser.storesLeft(scopeBTest))
     }
 }

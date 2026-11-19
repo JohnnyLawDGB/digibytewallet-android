@@ -2,12 +2,15 @@ package app.aroundtheblock.wallet.core.wallets
 
 import android.content.Context
 import android.util.Log
+import app.aroundtheblock.wallet.core.AndroidWalletDataEraser
 import app.aroundtheblock.wallet.core.FakeVault
 import app.aroundtheblock.wallet.core.InMemoryPrefsFactory
 import app.aroundtheblock.wallet.core.WalletManager
 import app.aroundtheblock.wallet.core.asKeystoreAliases
+import app.aroundtheblock.wallet.core.digiscope.HubTokenStore
 import app.aroundtheblock.wallet.core.hex
 import app.aroundtheblock.wallet.core.keyStoreManagerOver
+import app.aroundtheblock.wallet.core.leftNamedFor
 import app.aroundtheblock.wallet.core.sync.ChainTipStore
 import app.aroundtheblock.wallet.core.wipeTestContext
 import io.mockk.every
@@ -15,6 +18,7 @@ import io.mockk.mockk
 import io.mockk.mockkStatic
 import io.mockk.unmockkStatic
 import java.io.File
+import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -31,6 +35,10 @@ import org.junit.rules.TemporaryFolder
  * the registry) is erased and dropped, so it holds no slot toward the cap. An entry is dropped only
  * when its erase verified, so one that did not is retried at the next launch. Legacy, and a READY
  * wallet that still has its record, are never touched.
+ *
+ * A READY wallet with no record is erased on BOTH networks, as the wipe erases a wallet, its key and
+ * its entry last: once they are gone nothing names the wallet, and the wipe a launch still owes runs
+ * after this.
  */
 class WalletHousekeepingTest {
 
@@ -129,6 +137,9 @@ class WalletHousekeepingTest {
             assertTrue(eraser().eraseRecord(scope))
             assertTrue(eraser().anythingLeft(scope))
         }
+
+        /** Whatever is still on the device under wallet [id]'s name, on either network. */
+        fun namedFor(id: String): List<String> = leftNamedFor(id, prefs, root, vault)
 
         fun prefsSnapshot(): Map<String, Map<String, Any?>> = prefs.names().associateWith { prefs.prefsFor(it).all.toMap() }
 
@@ -233,6 +244,7 @@ class WalletHousekeepingTest {
         assertEquals(0, d.housekeeping().run())
         assertEquals(EntryState.READY, d.registry.find(cut.id)?.state)
         assertTrue(d.eraser().storesLeft(scope))
+        assertTrue("its key went before its stores read back gone", d.eraser().aliasesLeft(scope))
 
         // The next launch, whose write lands.
         d.prefs.prefsFor(sync).refuseWrites = false
@@ -333,5 +345,160 @@ class WalletHousekeepingTest {
         assertEquals(prefsBefore, d.prefsSnapshot())
         assertEquals(filesBefore, d.fileSnapshot())
         assertEquals(keysBefore, d.vault.keys.keys.toSet())
+    }
+
+    /**
+     * A READY wallet whose record a cut-short wipe took, holding stores under BOTH networks: its own
+     * ([own], the one its entry records) and the [other], which nothing but its id names.
+     */
+    private inner class Orphan(testnet: Boolean = false) {
+        val d = Device().apply { installLegacy() }
+        val entry = d.addReady(testnet)
+        val own = WalletScope(entry.id, testnet)
+        val other = WalletScope(entry.id, !testnet)
+
+        init {
+            d.leaveStores(own)
+            d.leaveStores(other)
+            d.cutShortWipe(own)
+        }
+    }
+
+    @Test fun `a READY wallet with no record is erased on both networks before it is dropped`() {
+        // Registered on either network: the stores under the other one are those no entry names.
+        for (testnet in listOf(false, true)) {
+            val o = Orphan(testnet)
+
+            assertEquals(1, o.d.housekeeping().run())
+
+            assertNull(o.d.registry.find(o.entry.id))
+            // Its entry, its record and its key are gone, so nothing could find a store left behind now.
+            assertEquals(
+                "left with nothing naming the wallet (registered on testnet=$testnet)",
+                emptyList<String>(),
+                o.d.namedFor(o.entry.id),
+            )
+            assertFalse(o.d.eraser().anythingLeft(o.own))
+            assertFalse(o.d.eraser().anythingLeft(o.other))
+            assertTrue(o.d.registry.canReserve(testnet))
+        }
+    }
+
+    @Test fun `a READY wallet with no record keeps its entry and its key while its other network cannot be verified`() {
+        val o = Orphan()
+        val otherSync = WalletStores.prefsName("dgb_sync_data", o.other)
+        o.d.prefs.refuseWritesTo(otherSync)
+
+        assertEquals(0, o.d.housekeeping().run())
+
+        assertEquals(EntryState.READY, o.d.registry.find(o.entry.id)?.state)
+        assertTrue(o.d.eraser().storesLeft(o.other))
+        assertTrue("its key went before its stores read back gone on both networks", o.d.eraser().aliasesLeft(o.own))
+
+        // The next launch, whose write lands.
+        o.d.prefs.prefsFor(otherSync).refuseWrites = false
+        assertEquals(1, o.d.housekeeping().run())
+        assertNull(o.d.registry.find(o.entry.id))
+        assertEquals(emptyList<String>(), o.d.namedFor(o.entry.id))
+    }
+
+    @Test fun `a database left under the other network keeps a READY wallet with no record for the next launch`() {
+        val o = Orphan(testnet = true)
+        // A database "file" that will not delete: a directory that is not empty.
+        val stuck = File(o.d.root, "databases/${WalletStores.databaseName(o.other)}")
+        assertTrue(stuck.delete() && stuck.mkdirs())
+        val held = File(stuck, "held").apply { writeBytes(byteArrayOf(7)) }
+
+        assertEquals(0, o.d.housekeeping().run())
+
+        assertEquals(EntryState.READY, o.d.registry.find(o.entry.id)?.state)
+        assertTrue(held.exists())
+        assertTrue("its key went before its stores read back gone on both networks", o.d.eraser().aliasesLeft(o.own))
+
+        // The next launch, when it deletes.
+        assertTrue(held.delete())
+        assertEquals(1, o.d.housekeeping().run())
+        assertNull(o.d.registry.find(o.entry.id))
+        assertEquals(emptyList<String>(), o.d.namedFor(o.entry.id))
+    }
+
+    /**
+     * The wipe a launch still owes after one was cut short (it runs from the first activity, after
+     * housekeeping), over the production id set: the registry, the seed records on disk and the
+     * Keystore aliases. It erases a wallet on both networks, but only a wallet it can still find.
+     */
+    private fun owedWipe(d: Device): WalletManager {
+        every { d.ctx.dataDir } returns d.root
+        val aliases = d.vault.asKeystoreAliases()
+        return WalletManager(
+            context = d.ctx,
+            keyStoreManager = keyStoreManagerOver(d.vault),
+            utxoManager = mockk(relaxed = true),
+            dataEraser = AndroidWalletDataEraser(d.ctx, aliases) {
+                HubTokenStore(d.prefs.prefsFor(HubTokenStore.LEGACY_PREFS_NAME), { d.prefs.prefsFor(HubTokenStore.SECURE_PREFS_NAME) })
+            },
+            quiesceNative = { },
+            scopeEraser = d.eraser(),
+            keystoreAliases = aliases,
+            allWalletIds = { ActiveWallet.everyWalletId(d.ctx) { aliases.aliases() } },
+        )
+    }
+
+    @Test fun `after a wipe cut short, the launch leaves nothing of the wallet for the owed wipe to miss`() {
+        val o = Orphan()
+
+        assertEquals(1, o.d.housekeeping().run())
+        val report = runBlocking { owedWipe(o.d).wipeWallet() }
+
+        assertTrue("$report", report.verified)
+        assertEquals("the wipe verified over what nothing names any more", emptyList<String>(), o.d.namedFor(o.entry.id))
+    }
+
+    @Test fun `a wallet housekeeping could not finish erasing is still found by the owed wipe`() {
+        val o = Orphan()
+        val otherSync = WalletStores.prefsName("dgb_sync_data", o.other)
+        o.d.prefs.refuseWritesTo(otherSync)
+
+        assertEquals(0, o.d.housekeeping().run())
+        // The write lands by the time the wipe runs.
+        o.d.prefs.prefsFor(otherSync).refuseWrites = false
+        val report = runBlocking { owedWipe(o.d).wipeWallet() }
+
+        assertTrue("$report", report.verified)
+        assertEquals(emptyList<String>(), o.d.namedFor(o.entry.id))
+    }
+
+    @Test fun `erasing a READY wallet with no record on both networks touches no other wallet and not legacy`() {
+        val d = Device()
+        d.installLegacy()
+        val keepMain = d.addReady()
+        val keepTest = d.addReady(testnet = true)
+        val cut = d.addReady()
+        // Every wallet, legacy included, holds something under BOTH networks.
+        for (id in listOf(WalletIds.LEGACY, keepMain.id, keepTest.id, cut.id)) {
+            for (net in listOf(false, true)) d.leaveStores(WalletScope(id, net))
+        }
+        // The wipe's first phase took legacy's record too: even so, legacy is never one of these.
+        d.cutShortWipe(WalletScope.legacy(false))
+        d.cutShortWipe(WalletScope(cut.id, false))
+        val prefsBefore = d.prefsSnapshot()
+        val filesBefore = d.fileSnapshot()
+        val keysBefore = d.vault.keys.keys.toSet()
+
+        assertEquals(1, d.housekeeping().run())
+
+        assertEquals(emptyList<String>(), d.namedFor(cut.id))
+        for ((name, held) in prefsBefore) {
+            when {
+                cut.id in name || name == WalletRegistry.PREFS -> Unit
+                name == "dgb_settings" ->
+                    assertEquals(held - WalletStores.cfBirthHeightKey(WalletScope(cut.id, false)), d.prefs.prefsFor(name).all)
+                else -> assertEquals("store $name changed", held, d.prefs.prefsFor(name).all)
+            }
+        }
+        assertEquals(filesBefore.filterKeys { cut.id !in it }, d.fileSnapshot())
+        assertEquals(keysBefore.filterNot { cut.id in it }.toSet(), d.vault.keys.keys.toSet())
+        assertEquals(listOf(keepMain.id), d.registry.list(false).map { it.id })
+        assertEquals(listOf(keepTest.id), d.registry.list(true).map { it.id })
     }
 }

@@ -211,7 +211,7 @@ class WalletRegistry(
     /**
      * Entries that hold a slot on [testnet]: every READY and PENDING entry (legacy while its record
      * exists). A READY entry whose record is gone still holds its slot until it is dropped
-     * ([readyWithoutRecord]; [WalletHousekeeping] drops it once its scope is erased).
+     * ([readyWithoutRecord]; [WalletHousekeeping] drops it once it is erased on both networks).
      */
     private fun occupied(testnet: Boolean, doc: Doc): List<WalletEntry> =
         listOfNotNull(legacyEntry(doc).takeIf { it.state == EntryState.READY && legacyRecordExists() }) +

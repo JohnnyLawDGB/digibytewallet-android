@@ -19,6 +19,11 @@ import android.util.Log
  * is left: the registry reads no sealed seed AND the eraser's read-back finds no record file. A record
  * file still on disk, even one no seed can be read from, leaves the wallet as it is. Legacy is never
  * one of these (its record going is what unlists it), nor is any READY wallet that has its record.
+ *
+ * Such a wallet is erased on BOTH networks, as the wipe erases a wallet, and before its key aliases
+ * and its entry go. With no record left, those two are all a wipe finds the wallet by, and this runs
+ * before the wipe a launch may still owe: an erase of the one network the entry records would leave
+ * whatever is under the other where nothing looks again.
  */
 class WalletHousekeeping internal constructor(
     private val registry: WalletRegistry,
@@ -27,8 +32,8 @@ class WalletHousekeeping internal constructor(
     constructor(context: Context) : this(ActiveWallet.registry(context), WalletStoreEraser(context))
 
     /**
-     * Erases each PENDING or REMOVING entry's scope, and the scope of each READY entry whose record
-     * is gone. Returns the number of entries dropped. Writes nothing when there is none of either.
+     * Erases each PENDING or REMOVING entry, and each READY entry whose record is gone. Returns the
+     * number of entries dropped. Writes nothing when there is none of either.
      */
     fun run(): Int {
         var dropped = 0
@@ -48,7 +53,10 @@ class WalletHousekeeping internal constructor(
                 Log.w(TAG, "a READY wallet's record reads empty but its file is still there; left as it is")
                 continue
             }
-            if (eraser.erase(scope).verified && registry.drop(entry.id)) {
+            // With no record left, the key guards nothing: it and this entry only name the wallet. So the
+            // stores go first, and the key and the entry only once both networks read back empty.
+            val erased = eraser.eraseStoresOnBothNetworks(scope) && eraser.erase(scope).verified
+            if (erased && registry.drop(entry.id)) {
                 dropped++
             } else {
                 Log.w(TAG, "a READY wallet with no record was not fully erased; retried at the next launch")

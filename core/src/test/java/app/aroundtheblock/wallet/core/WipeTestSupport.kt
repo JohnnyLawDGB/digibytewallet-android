@@ -101,6 +101,18 @@ internal fun wipeTestContext(prefs: InMemoryPrefsFactory, root: File): Context {
     return ctx
 }
 
+/**
+ * Whatever a test device still holds under wallet [id]'s name: prefs files with something in them,
+ * files under [root], seed key aliases and its key in `dgb_settings`. Read from the device itself and
+ * not through an eraser's read-back, so it also shows what an erase never looked for. For an id
+ * other than `legacy`, whose names carry none.
+ */
+internal fun leftNamedFor(id: String, prefs: InMemoryPrefsFactory, root: File, vault: FakeVault): List<String> =
+    prefs.names().toList().filter { id in it && prefs.prefsFor(it).all.isNotEmpty() }.map { "prefs:$it" } +
+        root.walkTopDown().filter { it.isFile }.map { it.relativeTo(root).path }.filter { id in it }.map { "file:$it" } +
+        vault.keys.keys.filter { id in it }.map { "alias:$it" } +
+        prefs.prefsFor("dgb_settings").all.keys.filter { id in it }.map { "setting:$it" }
+
 /** A [PinStore] over a map that remembers the order of its writes. */
 internal class RecordingPinStore : PinStore {
     val map = LinkedHashMap<String, Any>()
