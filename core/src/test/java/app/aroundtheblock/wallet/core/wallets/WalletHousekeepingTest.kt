@@ -368,10 +368,14 @@ class WalletHousekeepingTest {
         // Registered on either network: the stores under the other one are those no entry names.
         for (testnet in listOf(false, true)) {
             val o = Orphan(testnet)
+            // Legacy, the orphan and six more: the cap, so that the slot below is one only the drop can free.
+            val others = List(WalletRegistry.MAX_PER_NETWORK - 2) { o.d.addReady(testnet) }
+            assertFalse("the network is not at its cap", o.d.registry.canReserve(testnet))
 
             assertEquals(1, o.d.housekeeping().run())
 
             assertNull(o.d.registry.find(o.entry.id))
+            assertEquals(others.map { it.id }, others.mapNotNull { o.d.registry.find(it.id)?.takeIf { e -> e.state == EntryState.READY }?.id })
             // Its entry, its record and its key are gone, so nothing could find a store left behind now.
             assertEquals(
                 "left with nothing naming the wallet (registered on testnet=$testnet)",
@@ -380,7 +384,7 @@ class WalletHousekeepingTest {
             )
             assertFalse(o.d.eraser().anythingLeft(o.own))
             assertFalse(o.d.eraser().anythingLeft(o.other))
-            assertTrue(o.d.registry.canReserve(testnet))
+            assertTrue("its slot was not freed", o.d.registry.canReserve(testnet))
         }
     }
 
