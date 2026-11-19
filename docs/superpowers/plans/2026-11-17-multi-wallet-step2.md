@@ -17,7 +17,7 @@
 > changes carries an "**Amended by O7**" note. Four points G96 leaves to be designed are listed in
 > the ruling and in task E1; none is decided in this plan. Of O1-O17 none is open in step 2: O9 was
 > answered in direction on 2026-11-19 (the phrase first) and its multi-wallet rule is open as Q1 of
-> the design (Q1-Q6 there are Mark's).
+> the design (Mark answered its Q1-Q6 on 2026-11-19).
 > **Where this plan's text and a ruling differ, the ruling wins.**
 > - Each affected task and section carries a "**Rulings:**" line. Read those rulings before the
 >   task's text.
@@ -287,7 +287,7 @@ Also his:
 - **X-HUB**: ruled (O2, G95) and not [R8]. Nothing of it waits for him, unless its PR has to edit a seed or wipe gate;
 - **E2b**, only if he overrides D1.
 
-The open questions O1-O17 are listed at the end; after 2026-11-19 none is open in step 2 (O9 was answered in direction that day; its multi-wallet rule is open as Q1 of the lost-PIN design). O15 goes in the M2 packet and O16 in the M3 packet; O17 (whether an allow-list edit to a seed or wipe gate is [R8]) goes in A1's digest, because B6 waits on it. One test decides whether a PR that touches the wipe is [R8] (G1). M2 does not gate stage 4's start (G7).
+The open questions O1-O17 are listed at the end; after 2026-11-19 none is open in step 2 (O9 was answered in direction that day; its multi-wallet rule was answered that day as Q1 of the lost-PIN design). O15 goes in the M2 packet and O16 in the M3 packet; O17 (whether an allow-list edit to a seed or wipe gate is [R8]) goes in A1's digest, because B6 waits on it. One test decides whether a PR that touches the wipe is [R8] (G1). M2 does not gate stage 4's start (G7).
 
 ## Stages, target dates and exit checks
 
@@ -2753,7 +2753,7 @@ Rules for this task:
 - **O8** Whether S1's inert record writer may ship in a release before step 2, so more wallets hold a record when the engine ships.
   - **Answered (Mark, 2026-11-19):** yes. S1's inert record writer may ship in a release before step 2. It is still [R8]: its PR waits for him.
 - **O9** The lost-PIN path. iOS's D-3 asks for the phrase first; Android does not. This predates step 2 and is not built here (PD22).
-  - **Answered (Mark, 2026-11-19):** "Switch to the iOS flow" (the phrase first). As recommended with the question, not said by him: built outside step 2, after the 4.1.5 cut. Still his: Q1-Q6 of the design, `docs/superpowers/specs/2026-11-19-lost-pin-phrase-first-design.md`.
+  - **Answered (Mark, 2026-11-19):** "Switch to the iOS flow" (the phrase first). As recommended with the question, not said by him: built outside step 2, after the 4.1.5 cut. He answered Q1-Q6 of the design the same day, `docs/superpowers/specs/2026-11-19-lost-pin-phrase-first-design.md`.
 - **O10** (before the 4.1.5 cut) Should 4.1.5's wipe erase the reserved step-2 names (X-ROLLBACK c)?
   - **Answered (Mark, 2026-11-19):** yes. A wipe clears every file, so 4.1.5's wipe erases the reserved step-2 names (X-ROLLBACK c). It rides the 4.1.5 train as a row of the private scope file.
   - **Narrowed by O7 (2026-11-19, G96):** his yes stands, over a shorter list. Still reserved, and still to be erased by 4.1.5's wipe: the key-record prefs `dgb_wallet_keys` and `dgb_wallet_keys_<id>`, and the Keystore alias `dgb_wallet_keys_wrap`. No longer reserved: the `chain_*` files and `dgb_chain<net>`, which no step-2 build writes. The shared chain needs nothing from 4.1.5: its wipe already erases legacy's names on both networks. The private 4.1.5 scope row is to be narrowed to match. One thing can lengthen the list again: names for legacy's own band files, if that design (G96) needs new ones and fixes them before the cut.
@@ -2786,7 +2786,7 @@ Added by the independent review of the rulings (2026-11-19):
   - Recommended: (a). It costs one small PR and keeps every loosening of a seed or wipe gate in front of him. Until he answers, (a) is what the plan does.
   - **Answered (Mark, 2026-11-19): option (a).** An edit to a seed or wipe gate's allow-list is itself [R8]; B6's `WipeNativeStepsGateTest` entry lands as its own small [R8] PR ahead of B6.
 
-Open after 2026-11-19: **none in step 2.** O9 was answered in direction by Mark that day (the phrase first); its multi-wallet rule and five more questions are open as Q1-Q6 of `docs/superpowers/specs/2026-11-19-lost-pin-phrase-first-design.md`. O2 and O7 were answered by Mark that day and are recorded as G95 and G96.
+Open after 2026-11-19: **none in step 2.** O9 was answered in direction by Mark that day (the phrase first); its multi-wallet rule and five more questions, all answered by him that day, are Q1-Q6 of `docs/superpowers/specs/2026-11-19-lost-pin-phrase-first-design.md`. O2 and O7 were answered by Mark that day and are recorded as G95 and G96.
 
 Answered by a ruling: none. No ruling settles an existing question, because each is Mark's. Four are changed in scope:
 

@@ -202,7 +202,7 @@ no-phrase paragraph, in every language of `AppLocale.SUPPORTED` in the same comm
 `COVERED` in `OnboardingHardcodedStringTest`. The no-phrase paragraph is a wallet-loss warning and
 needs a native reader before it is called done.
 
-## 4. Multi-wallet: one PIN, several wallets — **OPEN FOR MARK**
+## 4. Multi-wallet: one PIN, several wallets — decided by Mark 2026-11-19: option A (Q1)
 
 On `develop` one PIN guards every wallet on both networks. With the PIN gone, whose phrase resets it?
 
@@ -270,28 +270,34 @@ Landing: one PR into `develop` after the 4.1.5 cut, independent review + green C
 - **Q1. Several wallets, one PIN: whose phrase resets it?** (a) any one wallet's, mainnet before
   testnet; (b) only the active wallet's; (c) every wallet's, each closed until its own phrase is
   typed. **Recommended: (a).** Until answered the PR cannot be finished for `develop`.
+  **Answered (Mark, 2026-11-19):** (a) any one wallet's phrase.
 - **Q2. Should the restore become PIN-first, like iOS (D-5)?** Then a stopped restore leaves no
   wallet at all and this screen is only ever seen after a fault. (a) yes, as a second small [R8]
   change after this one; (b) no. **Recommended: (a), separately.** It also closes the window in
   which a restored wallet sits open with no PIN (Q5).
+  **Answered (Mark, 2026-11-19):** (a) yes: the restore becomes PIN-first, as its own small owner-gated change after this one.
 - **Q3. Someone without the phrase: should the screen offer "Erase this wallet"?** (a) no button:
   the text says only the phrase opens it and that clearing the app's storage erases it (iOS has no
   button); (b) an erase button behind a typed confirmation. **Recommended: (a).** An erase with no
   PIN and no phrase is a way for anyone holding the phone to destroy the wallet from inside the app.
+  **Answered (Mark, 2026-11-19):** (a) no erase button.
 - **Q4. "Forgot PIN?" on the unlock screen** (iOS has it: the phrase resets a PIN that *is* set).
   (a) not in this change; (b) add it now, it is the same screen. **Recommended: (a)**: it lets the
   phrase bypass the PIN cooldown and wipe-after-N on purpose, which is a separate decision.
+  **Answered (Mark, 2026-11-19):** (a) no "Forgot PIN?" in this change.
 - **Q5. A restore that has not yet set its PIN can be finished without the phrase for as long as
   the app's process lives** (hours, with sync running), by anyone who opens the app. (a) accept it
   until Q2's PIN-first restore removes the case; (b) bound it: after the app has been in the
   background for a set time (say 5 minutes) the phrase is asked again; (c) do Q2 first, and build
   this with no exception at all. **Recommended: (a) if Q2 is yes, otherwise (b).** The window
   exists today with no bound and no phrase; (b) costs a re-check on resume that today's code has not.
+  **Answered (Mark, 2026-11-19):** (a) accepted until the PIN-first restore (Q2) removes the case.
 - **Q6. INT-2026-11-19-B** (private record; unreleased, `develop` only; read, not reproduced).
   Invariant: no onboarding path sets or replaces the app PIN while any wallet record exists. It is a
   PIN path, so it is yours. (a) such an onboarding asks for the current PIN first and keeps it,
   setting none; (b) it asks for a wallet's phrase, as this screen does; (c) leave it.
   **Recommended: (a)**, in this PR or its own, before a release ships multi-wallet.
+  **Answered (Mark, 2026-11-19):** (a) such an onboarding asks for the current PIN and keeps it, setting none; fixed before a release ships multi-wallet (private 4.1.5 row ONBOARD-KEEPS-PIN).
 
 ## 8. Not verified
 
