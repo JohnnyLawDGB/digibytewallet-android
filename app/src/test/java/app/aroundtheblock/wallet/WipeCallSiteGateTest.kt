@@ -28,10 +28,11 @@ class WipeCallSiteGateTest {
     )
 
     /**
-     * Restoring a wallet replaces a PIN left by an earlier install before there is any wallet
-     * for it to guard. It runs no wipe, so it is the one PIN clear outside the shared routine.
+     * No app file: the PIN store's clear is visible inside `core` only (INT-2026-11-19-B). A restore
+     * drops a PIN left by an earlier install through `OnboardingPin.clearStalePin`, which refuses
+     * while any wallet record exists.
      */
-    private val pinClearAllowed = setOf("ui/onboarding/OnboardingViewModel.kt")
+    private val pinClearAllowed = emptySet<String>()
 
     private fun code(file: File): String = file.readText()
         .replace(Regex("/\\*.*?\\*/", RegexOption.DOT_MATCHES_ALL), "")

@@ -32,7 +32,11 @@ Path from first launch through seed backup to a unlocked home screen.
 5. **Verify seed.** `SeedVerifyScreen.kt` quizzes 3 random positions
    from the mnemonic. Failure to recall → back to step 4. Success →
    step 6.
-6. **PIN setup.** `PinSetupScreen.kt` collects a 6-digit PIN twice.
+6. **PIN setup.** `PinSetupScreen.kt` collects a 6-digit PIN twice and stores it through
+   `OnboardingPin.setFirstPin` (the setup screens' only way to the PIN). While a wallet record
+   and a PIN are already stored, that call refuses: the flow asked for the current PIN on its
+   first screen instead, this step shows no keypad, and the stored PIN stays (INT-2026-11-19-B:
+   no onboarding path sets or replaces the app PIN while any wallet record exists).
    `PinManager.setPin(pin)`:
    - Generates 32-byte salt (`SecureRandom`).
    - Hashes PIN with Argon2id (t=3, m=64 MiB, p=4). Falls back to

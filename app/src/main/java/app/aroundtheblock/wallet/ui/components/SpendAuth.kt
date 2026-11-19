@@ -164,6 +164,20 @@ class SpendAuth internal constructor(private val vm: AuthGateViewModel) {
         }
     }
 
+    /**
+     * The in-app PIN alone, never a biometric: for the setup flow that starts while a wallet and
+     * its PIN are stored, which must take that PIN before it goes on (INT-2026-11-19-B). The same
+     * dialog as [authorize] falls through to, so a wrong PIN here counts, cools down and wipes
+     * exactly as anywhere else. False with no PIN to ask for. Must be called on Main.
+     */
+    suspend fun authorizeWithPin(subtitle: String): Boolean {
+        if (!vm.hasPin()) {
+            Log.w(TAG, "PIN entry denied: no PIN is stored or the PIN store cannot be read")
+            return false
+        }
+        return awaitPin(subtitle)
+    }
+
     private suspend fun awaitPin(subtitle: String): Boolean {
         // A second request while one dialog is open (double-tap) resolves the first as denied
         // rather than leaving two callers waiting on one keypad.

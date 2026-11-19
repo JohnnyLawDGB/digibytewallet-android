@@ -8,7 +8,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import app.aroundtheblock.wallet.core.WalletManager
 import app.aroundtheblock.wallet.core.prepareSeedKeyThenPrompt
 import app.aroundtheblock.wallet.core.bridge.NativeBridge
-import app.aroundtheblock.wallet.core.security.PinManager
+import app.aroundtheblock.wallet.core.security.OnboardingPin
 import app.aroundtheblock.wallet.core.wallets.ActiveWallet
 import app.aroundtheblock.wallet.core.wallets.AddResult
 import app.aroundtheblock.wallet.core.wallets.WalletEntry
@@ -38,7 +38,8 @@ import javax.inject.Inject
 @HiltViewModel
 class OnboardingViewModel @Inject constructor(
     private val walletManager: WalletManager,
-    private val pinManager: PinManager,
+    /** The only PIN writes these screens can reach: refused while the stored PIN guards a wallet. */
+    private val onboardingPin: OnboardingPin,
     private val recoveryScanService: app.aroundtheblock.wallet.core.recovery.RecoveryScanService,
     savedStateHandle: SavedStateHandle,
     private val provisioner: WalletProvisioner,
@@ -306,6 +307,53 @@ class OnboardingViewModel @Inject constructor(
     val passphraseVerdict: StateFlow<app.aroundtheblock.wallet.core.recovery.PassphraseScanVerdict.Outcome?> =
         _passphraseVerdict
 
+    // ── The stored app PIN while a wallet exists (INT-2026-11-19-B) ──────────
+    //
+    // Invariant: no onboarding path replaces or clears the app PIN while any wallet record exists.
+    // A first run that starts while a wallet and its PIN are stored (the selected network has no
+    // wallet, another one has) asks for that PIN before anything else and sets none.
+
+    /** [keepsStoredPin], read once per flow: what the flow found when it started. */
+    @Volatile private var keepsPinAtStart: Boolean? = null
+
+    /** The current app PIN was entered for this flow ([onCurrentPinVerified]). */
+    @Volatile private var currentPinVerified = false
+
+    /**
+     * Whether this flow keeps the stored app PIN: it then asks for that PIN before the phrase is
+     * shown or typed, shows no PIN setup and sets none. Decided when the flow starts, before it has
+     * written anything. Never in ADD mode, which touches no PIN and runs behind the unlock.
+     */
+    suspend fun keepsStoredPin(): Boolean {
+        if (mode != OnboardingMode.FIRST_RUN) return false
+        keepsPinAtStart?.let { return it }
+        return withContext(Dispatchers.IO) { storedPinGuardsAWallet() }.also { keepsPinAtStart = it }
+    }
+
+    /** The screen calls this once the app's PIN check has accepted the current PIN. */
+    fun onCurrentPinVerified() {
+        currentPinVerified = true
+    }
+
+    /** True until the current PIN has been entered, in a flow that keeps it: the buttons ask first. */
+    fun currentPinOwed(): Boolean = keepsPinAtStart == true && !currentPinVerified
+
+    /** A PIN store that cannot be read beside a wallet record counts as guarding it. */
+    private fun storedPinGuardsAWallet(): Boolean = try {
+        onboardingPin.mustKeepPin()
+    } catch (e: Exception) {
+        true
+    }
+
+    /**
+     * The write of a first-run wallet is refused while a stored PIN guards a wallet and this flow
+     * has not taken that PIN, however its screens were reached. Asked afresh, off the main thread.
+     */
+    private fun writeNeedsCurrentPin(): Boolean = !currentPinVerified && storedPinGuardsAWallet()
+
+    /** Who waits for the first-run create in flight; null when none runs. Main thread only. */
+    private var createWaiters: MutableList<(Boolean) -> Unit>? = null
+
     /** Create wallet from generated mnemonic. Clears mnemonic from memory when done. */
     fun createWallet(onResult: (Boolean) -> Unit) = createWallet(seedKeyPrompt = null, onResult = onResult)
 
@@ -319,12 +367,29 @@ class OnboardingViewModel @Inject constructor(
     fun createWallet(seedKeyPrompt: (suspend () -> Unit)?, onResult: (Boolean) -> Unit) {
         // This writes the RUNNING wallet's record. ADD mode writes only the new wallet's, through commitAdd.
         check(mode == OnboardingMode.FIRST_RUN) { "createWallet runs only on the first run" }
+        // One create at a time. A second call while one runs (PIN setup recomposed from nothing while
+        // it waits, which the kept-PIN step would turn into a second create by itself) gets the
+        // running create's answer instead of starting another over the same phrase.
+        createWaiters?.let { waiting ->
+            waiting += onResult
+            return
+        }
+        val waiters = mutableListOf(onResult)
+        createWaiters = waiters
+        val answer: (Boolean) -> Unit = { created ->
+            createWaiters = null
+            waiters.toList().forEach { it(created) }
+        }
         val phrase = _mnemonic.joinToString(" ")
         // This create's own copy: clearing the screen's copy (onCleared) never changes the bytes a
         // create in progress is using, and this one is zeroed however the create ends.
         val pass = _passphrase?.copyOf()
         viewModelScope.launch {
             _uiState.value = OnboardingUiState.Loading
+            if (refusedWithoutCurrentPin("Wallet creation failed", answer)) {
+                pass?.fill(0)
+                return@launch
+            }
             if (seedKeyPrompt != null) {
                 prepareSeedKeyThenPrompt(prepare = { walletManager.prepareSeedKeyForNewRecord() }, prompt = seedKeyPrompt)
             }
@@ -348,7 +413,7 @@ class OnboardingViewModel @Inject constructor(
             }
             wipeMnemonicFromMemory()
             _uiState.value = if (success) OnboardingUiState.WalletCreated else OnboardingUiState.Error("Wallet creation failed")
-            onResult(success)
+            answer(success)
         }
     }
 
@@ -365,6 +430,10 @@ class OnboardingViewModel @Inject constructor(
         val pass = _passphrase?.copyOf()
         viewModelScope.launch {
             _uiState.value = OnboardingUiState.Loading
+            if (refusedWithoutCurrentPin("Recovery failed", onResult)) {
+                pass?.fill(0)
+                return@launch
+            }
             if (seedKeyPrompt != null) {
                 prepareSeedKeyThenPrompt(prepare = { walletManager.prepareSeedKeyForNewRecord() }, prompt = seedKeyPrompt)
             }
@@ -381,10 +450,9 @@ class OnboardingViewModel @Inject constructor(
                     // never lands on the main thread.
                     // Only with no wallet record on the device: a PIN that protects another
                     // wallet (testnet wallets left after removing the only mainnet one) is not
-                    // stale, and clearing it would leave those wallets unprotected (F31).
-                    if (!registry.anyRecordExists()) {
-                        pinManager.clearPin()
-                    }
+                    // stale, and clearing it would leave those wallets unprotected (F31). The
+                    // rule is OnboardingPin's; this ViewModel holds no other way to the PIN.
+                    onboardingPin.clearStalePin()
                     walletManager.recoverWallet(phrase, ts, pass)
                 }
             } catch (e: CancellationException) {
@@ -519,11 +587,26 @@ class OnboardingViewModel @Inject constructor(
         }
     }
 
-    /** Set PIN via PinManager. */
+    /**
+     * The first run's wallet write is refused while [writeNeedsCurrentPin]: reported as a failed
+     * [message], with nothing written and the phrase left for the flow to end on its own.
+     */
+    private suspend fun refusedWithoutCurrentPin(message: String, onResult: (Boolean) -> Unit): Boolean {
+        if (!withContext(Dispatchers.Default) { writeNeedsCurrentPin() }) return false
+        runCatching { android.util.Log.w("OnboardingVM", "a wallet and its PIN are stored and the PIN was not entered; nothing written") }
+        _uiState.value = OnboardingUiState.Error(message)
+        onResult(false)
+        return true
+    }
+
+    /**
+     * Stores the PIN chosen at PIN setup. False, with nothing written, when it did not land or
+     * while the stored PIN guards a wallet ([OnboardingPin.setFirstPin]).
+     */
     fun setPin(pin: String, onResult: (Boolean) -> Unit) {
         viewModelScope.launch {
             val success = withContext(Dispatchers.Default) {
-                runCatching { pinManager.setPin(pin); true }.getOrDefault(false)
+                runCatching { onboardingPin.setFirstPin(pin); true }.getOrDefault(false)
             }
             onResult(success)
         }

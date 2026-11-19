@@ -397,7 +397,7 @@ class SettingsViewModel @Inject constructor(
     /** Sets [newPin]. True only when it landed on disk; false leaves the old PIN active (a
      *  PinStoreWriteException, or a store that cannot be used), and the screen says so. */
     suspend fun changePin(newPin: String): Boolean = withContext(Dispatchers.IO) {
-        runCatching { pinManager.setPin(newPin) }.onFailure {
+        runCatching { pinManager.changePin(newPin) }.onFailure {
             android.util.Log.e("SettingsViewModel", "PIN change did not persist (${it.javaClass.simpleName}); the old PIN stays")
         }.isSuccess
     }

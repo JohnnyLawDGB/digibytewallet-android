@@ -24,6 +24,7 @@ import androidx.navigation.NavController
 import app.aroundtheblock.wallet.ui.theme.DigiByteAccent
 import app.aroundtheblock.wallet.ui.theme.DigiByteBlue
 import app.aroundtheblock.wallet.ui.theme.DigiByteNavy
+import kotlinx.coroutines.launch
 
 @Composable
 fun OnboardingScreen(
@@ -38,6 +39,32 @@ fun OnboardingScreen(
         if (adding) value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { viewModel.canAddWallet() }
     }
     val canAdd = canAddAnswer == true
+
+    // INT-2026-11-19-B: no onboarding path sets or replaces the app PIN while any wallet record
+    // exists. A first run that starts while a wallet and its PIN are stored keeps that PIN: it is
+    // asked for here, before a phrase is shown or typed, and no PIN setup follows. Null until read
+    // (off the main thread); the buttons wait for it.
+    val keepsPin by produceState<Boolean?>(initialValue = if (adding) false else null) {
+        if (!adding) value = viewModel.keepsStoredPin()
+    }
+    // The app's one PIN dialog: a wrong PIN here counts, cools down and wipes as anywhere else.
+    val spendAuth = app.aroundtheblock.wallet.ui.components.rememberSpendAuth()
+    spendAuth.Dialogs()
+    val pinScope = rememberCoroutineScope()
+    val currentPinSubtitle = stringResource(R.string.sec_verify_pin_sub)
+    val afterCurrentPin: (() -> Unit) -> Unit = { go ->
+        if (viewModel.currentPinOwed()) {
+            pinScope.launch {
+                if (spendAuth.authorizeWithPin(currentPinSubtitle)) {
+                    viewModel.onCurrentPinVerified()
+                    go()
+                }
+            }
+        } else {
+            go()
+        }
+    }
+    val ready = canAdd && keepsPin != null
 
     Box(
         modifier = Modifier
@@ -79,7 +106,7 @@ fun OnboardingScreen(
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = stringResource(if (adding) R.string.wallet_add_pin_note else R.string.onb_tagline),
+                text = stringResource(if (adding || keepsPin == true) R.string.wallet_add_pin_note else R.string.onb_tagline),
                 style = MaterialTheme.typography.bodyMedium,
                 color = Color(0xFFB0BEC5),
                 textAlign = TextAlign.Center
@@ -118,10 +145,12 @@ fun OnboardingScreen(
             // Create wallet button
             Button(
                 onClick = {
-                    viewModel.setWordCount(selectedWordCount)
-                    navController.navigate("seed_display/$selectedWordCount")
+                    afterCurrentPin {
+                        viewModel.setWordCount(selectedWordCount)
+                        navController.navigate("seed_display/$selectedWordCount")
+                    }
                 },
-                enabled = canAdd,
+                enabled = ready,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp),
@@ -149,8 +178,8 @@ fun OnboardingScreen(
             // would have to satisfy. Sweeping stays one tap away in Settings -> Recover funds for
             // anyone who wants fresh keys.
             OutlinedButton(
-                onClick = { navController.navigate("mnemonic_input") },
-                enabled = canAdd,
+                onClick = { afterCurrentPin { navController.navigate("mnemonic_input") } },
+                enabled = ready,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp),
