@@ -43,6 +43,8 @@ fun SeedVerifyScreen(
     SecureWindow()
 
     val words = viewModel.getMnemonicWords()
+    // Decided when the flow started; the first screen has already read it.
+    val keepsPin by produceState(initialValue = false) { value = viewModel.keepsStoredPin() }
 
     // Build 3 quiz questions — stable, not recomposed on every render
     val questions = remember(words) { buildQuestions(words) }
@@ -61,7 +63,7 @@ fun SeedVerifyScreen(
         if (showResult) {
             VerifyResultScreen(
                 allCorrect = allCorrect,
-                successLabels = verifySuccessLabels(viewModel.mode),
+                successLabels = verifySuccessLabels(viewModel.mode, keepsPin),
                 onRetry = {
                     currentQuestion = 0
                     selectedAnswer = null
@@ -237,10 +239,11 @@ internal data class VerifySuccessLabels(val body: Int, val button: Int)
 
 /**
  * What the success screen says comes next. The first run sets up the PIN; adding a wallet never
- * does — one app PIN guards every wallet, so an add neither creates nor changes it.
+ * does — one app PIN guards every wallet, so an add neither creates nor changes it. Nor does a
+ * first run that starts while a wallet and its PIN are stored ([OnboardingViewModel.keepsStoredPin]).
  */
-internal fun verifySuccessLabels(mode: OnboardingMode): VerifySuccessLabels =
-    if (mode == OnboardingMode.ADD) {
+internal fun verifySuccessLabels(mode: OnboardingMode, keepsStoredPin: Boolean): VerifySuccessLabels =
+    if (mode == OnboardingMode.ADD || keepsStoredPin) {
         VerifySuccessLabels(R.string.verify_success_body_add, R.string.recover_continue)
     } else {
         VerifySuccessLabels(R.string.verify_success_body, R.string.verify_setup_pin)

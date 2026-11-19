@@ -76,6 +76,7 @@ class MainActivity : FragmentActivity() {
 
     @Inject lateinit var walletManager: WalletManager
     @Inject lateinit var pinManager: PinManager
+    @Inject lateinit var foregroundVisits: ForegroundVisits
     @Inject lateinit var biometricAuth: BiometricAuth
     @Inject lateinit var keyStoreManager: KeyStoreManager
     @Inject lateinit var torManager: TorManager
@@ -440,6 +441,10 @@ class MainActivity : FragmentActivity() {
 
     override fun onStop() {
         super.onStop()
+        // INT-2026-11-19-B: a PIN entered for a first-run setup is held for this stay in the
+        // foreground only. With no wallet on the selected network there is no lock below to re-gate
+        // it. A rotation or a language change is not leaving.
+        if (!isChangingConfigurations) foregroundVisits.left()
         // Every wallet, PIN or not, as iOS's enterBackground: the "reached Synced this session"
         // latch must be earned again after a resume.
         walletManager.enterBackground()

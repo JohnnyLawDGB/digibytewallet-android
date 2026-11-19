@@ -95,164 +95,218 @@ fun PinSetupScreen(
         biometricAvailable = activity?.let { biometricAuth.canAuthenticate(it) } ?: false
     }
 
+    // INT-2026-11-19-B: no onboarding path sets or replaces the app PIN while any wallet record
+    // exists. A flow that keeps the stored PIN (it took that PIN on its first screen) shows no
+    // keypad here and stores nothing: this step only creates the wallet and goes on. Null until
+    // read (off the main thread), as this screen opens.
+    val keepsPin by produceState<Boolean?>(initialValue = null) { value = viewModel.keepsStoredPin() }
+
+    // The kept-PIN step's ways forward when it did not go on by itself (KeptPinContent).
+    var pinDeclined by remember { mutableStateOf(false) }
+    val afterCurrentPin = rememberCurrentPinStep(
+        viewModel, navController,
+        onDeclined = {
+            pinDeclined = true
+            isPinSaving = false
+        },
+    )
+    val firstScreenBelow = remember { runCatching { navController.getBackStackEntry(ONBOARDING_ROUTE) }.isSuccess }
+    val startOver: () -> Unit = {
+        viewModel.resetError()
+        navController.popBackStack(ONBOARDING_ROUTE, inclusive = false)
+    }
+
+    // What follows the PIN step, with the PIN just stored or the stored one kept.
+    val createThenGoOn: () -> Unit = {
+        // Create the wallet if not already created.
+        // The mnemonic is still in the ViewModel
+        // from the seed display/verify flow.
+        val afterWalletReady: (Boolean) -> Unit = { success ->
+            if (success) {
+                // Kick off sync on the IO dispatcher — BRPeerManagerConnect
+                // opens sockets and can block for seconds on a cold start,
+                // which will ANR this callback chain if it runs on Main.
+                scope.launch {
+                    withContext(Dispatchers.IO) {
+                        runCatching {
+                            app.aroundtheblock.wallet.core.bridge.NativeBridge.startSync()
+                        }
+                    }
+                    val proceed: () -> Unit = {
+                        // The biometric offer belongs to setting a PIN: a flow that keeps the
+                        // stored one goes straight on.
+                        if (keepsPin != true && biometricAvailable && activity != null) {
+                            step = PinStep.BIOMETRIC
+                        } else {
+                            val dest = if (pendingLegacyRecovery) "recover_funds" else "wallet"
+                            navController.navigate(dest) {
+                                popUpTo(navController.graph.startDestinationId) { inclusive = true }
+                            }
+                        }
+                    }
+                    // KS-BIND: a device with no secure lock screen is told so, once
+                    // per install (NoScreenLockNoticeFlags), here at setup; Security
+                    // settings keeps the status line. Marked due first, so a notice
+                    // lost to the lock screen is shown again at the next unlock.
+                    val status = withContext(Dispatchers.IO) {
+                        runCatching { walletManager.seedKeyStatus() }.getOrNull()
+                    }
+                    // Only now: the keypad stays closed until the wallet exists and
+                    // the next screen (or the notice) is decided.
+                    isPinSaving = false
+                    if (status == app.aroundtheblock.wallet.core.security.SeedKeyStatus.NO_LOCK_SCREEN &&
+                        NoScreenLockNoticeFlags.markDueIfUnacknowledged(context)
+                    ) {
+                        NoScreenLockNoticeFlags.onScreen = true
+                        afterNotice = proceed
+                        showNoScreenLockNotice = true
+                    } else {
+                        proceed()
+                    }
+                }
+            } else {
+                isPinSaving = false
+                errorMessage = walletFailedMsg
+                currentInput = ""
+                step = PinStep.ENTER
+                firstPin = ""
+            }
+        }
+        // Create the wallet unless one is already STORED:
+        // the recovery flow stores it before PIN setup, and a
+        // recomposition finds the one made here. Never
+        // decided by what is loaded in memory — after a wipe
+        // in this process that can be the wiped wallet.
+        if (walletManager.pinSetupCreatesWallet()) {
+            // KS-BIND: the record is written by this create, so this is
+            // where the seed key must be usable. Usually the device unlock
+            // still covers it and nothing shows; otherwise ONE device-
+            // credential prompt, then the create (whatever its outcome),
+            // both in the ViewModel's scope so leaving this screen while
+            // the prompt is up cannot orphan the create.
+            // No wallet is open yet, so the prompt's onStop locks nothing.
+            // INT-2026-11-19-B: a flow that keeps the stored PIN took it on the first screen; it
+            // is asked for again here, at the write, only if the app has left the foreground
+            // since. A flow that has just set its own PIN holds it and is asked nothing.
+            afterCurrentPin {
+                viewModel.createWallet(
+                    seedKeyPromptFor(biometricAuth, activity, ksbPromptTitle, ksbPromptSubtitle),
+                    afterWalletReady,
+                )
+            }
+        } else {
+            afterWalletReady(walletManager.isWalletReady())
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFF0A1628))
     ) {
-        when (step) {
-            PinStep.ENTER, PinStep.CONFIRM -> {
-                PinEntryContent(
-                    step = step,
-                    currentInput = currentInput,
-                    errorMessage = errorMessage,
-                    onDigit = { digit ->
-                        if (currentInput.length < PIN_LENGTH) {
-                            currentInput += digit
-                            errorMessage = null
+        if (keepsPin == true) {
+            // The PIN was taken on the first screen: nothing to enter here unless the write asks
+            // for it again (createThenGoOn).
+            val start: () -> Unit = {
+                errorMessage = null
+                pinDeclined = false
+                isPinSaving = true
+                createThenGoOn()
+            }
+            LaunchedEffect(Unit) { start() }
+            KeptPinContent(
+                working = isPinSaving,
+                errorMessage = errorMessage,
+                // The PIN was not entered: asked again, nothing lost.
+                onContinue = start.takeIf { pinDeclined },
+                // The write failed and the phrase is gone from memory: back to the first screen.
+                onStartOver = startOver.takeIf { firstScreenBelow },
+            )
+        }
+        if (keepsPin == false) {
+            when (step) {
+                PinStep.ENTER, PinStep.CONFIRM -> {
+                    PinEntryContent(
+                        step = step,
+                        currentInput = currentInput,
+                        errorMessage = errorMessage,
+                        onDigit = { digit ->
+                            if (currentInput.length < PIN_LENGTH) {
+                                currentInput += digit
+                                errorMessage = null
 
-                            if (currentInput.length == PIN_LENGTH) {
-                                when (step) {
-                                    PinStep.ENTER -> {
-                                        firstPin = currentInput
-                                        currentInput = ""
-                                        step = PinStep.CONFIRM
-                                    }
-                                    PinStep.CONFIRM -> {
-                                        if (currentInput == firstPin) {
-                                            isPinSaving = true
-                                            viewModel.setPin(currentInput) { pinSuccess ->
-                                                if (pinSuccess) {
-                                                    // Create the wallet if not already created.
-                                                    // The mnemonic is still in the ViewModel
-                                                    // from the seed display/verify flow.
-                                                    val afterWalletReady: (Boolean) -> Unit = { success ->
-                                                        if (success) {
-                                                            // Kick off sync on the IO dispatcher — BRPeerManagerConnect
-                                                            // opens sockets and can block for seconds on a cold start,
-                                                            // which will ANR this callback chain if it runs on Main.
-                                                            scope.launch {
-                                                                withContext(Dispatchers.IO) {
-                                                                    runCatching {
-                                                                        app.aroundtheblock.wallet.core.bridge.NativeBridge.startSync()
-                                                                    }
-                                                                }
-                                                                val proceed: () -> Unit = {
-                                                                    if (biometricAvailable && activity != null) {
-                                                                        step = PinStep.BIOMETRIC
-                                                                    } else {
-                                                                        val dest = if (pendingLegacyRecovery) "recover_funds" else "wallet"
-                                                                        navController.navigate(dest) {
-                                                                            popUpTo(navController.graph.startDestinationId) { inclusive = true }
-                                                                        }
-                                                                    }
-                                                                }
-                                                                // KS-BIND: a device with no secure lock screen is told so, once
-                                                                // per install (NoScreenLockNoticeFlags), here at setup; Security
-                                                                // settings keeps the status line. Marked due first, so a notice
-                                                                // lost to the lock screen is shown again at the next unlock.
-                                                                val status = withContext(Dispatchers.IO) {
-                                                                    runCatching { walletManager.seedKeyStatus() }.getOrNull()
-                                                                }
-                                                                // Only now: the keypad stays closed until the wallet exists and
-                                                                // the next screen (or the notice) is decided.
-                                                                isPinSaving = false
-                                                                if (status == app.aroundtheblock.wallet.core.security.SeedKeyStatus.NO_LOCK_SCREEN &&
-                                                                    NoScreenLockNoticeFlags.markDueIfUnacknowledged(context)
-                                                                ) {
-                                                                    NoScreenLockNoticeFlags.onScreen = true
-                                                                    afterNotice = proceed
-                                                                    showNoScreenLockNotice = true
-                                                                } else {
-                                                                    proceed()
-                                                                }
-                                                            }
-                                                        } else {
-                                                            isPinSaving = false
-                                                            errorMessage = walletFailedMsg
-                                                            currentInput = ""
-                                                            step = PinStep.ENTER
-                                                            firstPin = ""
-                                                        }
-                                                    }
-                                                    // Create the wallet unless one is already STORED:
-                                                    // the recovery flow stores it before PIN setup, and a
-                                                    // recomposition finds the one made here. Never
-                                                    // decided by what is loaded in memory — after a wipe
-                                                    // in this process that can be the wiped wallet.
-                                                    if (walletManager.pinSetupCreatesWallet()) {
-                                                        // KS-BIND: the record is written by this create, so this is
-                                                        // where the seed key must be usable. Usually the device unlock
-                                                        // still covers it and nothing shows; otherwise ONE device-
-                                                        // credential prompt, then the create (whatever its outcome),
-                                                        // both in the ViewModel's scope so leaving this screen while
-                                                        // the prompt is up cannot orphan the create.
-                                                        // No wallet is open yet, so the prompt's onStop locks nothing.
-                                                        viewModel.createWallet(
-                                                            seedKeyPromptFor(biometricAuth, activity, ksbPromptTitle, ksbPromptSubtitle),
-                                                            afterWalletReady,
-                                                        )
-                                                    } else {
-                                                        afterWalletReady(walletManager.isWalletReady())
-                                                    }
-                                                } else {
-                                                    isPinSaving = false
-                                                    errorMessage = pinSaveFailedMsg
-                                                    currentInput = ""
-                                                    step = PinStep.ENTER
-                                                    firstPin = ""
-                                                }
-                                            }
-                                        } else {
-                                            errorMessage = pinMismatchMsg
+                                if (currentInput.length == PIN_LENGTH) {
+                                    when (step) {
+                                        PinStep.ENTER -> {
+                                            firstPin = currentInput
                                             currentInput = ""
-                                            firstPin = ""
-                                            step = PinStep.ENTER
+                                            step = PinStep.CONFIRM
                                         }
+                                        PinStep.CONFIRM -> {
+                                            if (currentInput == firstPin) {
+                                                isPinSaving = true
+                                                viewModel.setPin(currentInput) { pinSuccess ->
+                                                    if (pinSuccess) {
+                                                        createThenGoOn()
+                                                    } else {
+                                                        isPinSaving = false
+                                                        errorMessage = pinSaveFailedMsg
+                                                        currentInput = ""
+                                                        step = PinStep.ENTER
+                                                        firstPin = ""
+                                                    }
+                                                }
+                                            } else {
+                                                errorMessage = pinMismatchMsg
+                                                currentInput = ""
+                                                firstPin = ""
+                                                step = PinStep.ENTER
+                                            }
+                                        }
+                                        else -> {}
                                     }
-                                    else -> {}
                                 }
                             }
-                        }
-                    },
-                    onBackspace = {
-                        if (currentInput.isNotEmpty()) {
-                            currentInput = currentInput.dropLast(1)
-                            errorMessage = null
-                        }
-                    },
-                    isPinSaving = isPinSaving
-                )
-            }
-
-            PinStep.BIOMETRIC -> {
-                BiometricOptInContent(
-                    onEnable = {
-                        scope.launch {
-                            if (activity != null) {
-                                biometricAuth.authenticate(
-                                    activity,
-                                    title = context.getString(R.string.pin_biometric_prompt_title),
-                                    subtitle = context.getString(R.string.pin_biometric_prompt_subtitle)
-                                )
+                        },
+                        onBackspace = {
+                            if (currentInput.isNotEmpty()) {
+                                currentInput = currentInput.dropLast(1)
+                                errorMessage = null
                             }
-                            // Wallet already created before reaching biometric step.
-                            // Route to RecoverFundsScreen if the recovery scan found
-                            // funds on non-native paths; otherwise go straight to wallet.
+                        },
+                        isPinSaving = isPinSaving
+                    )
+                }
+
+                PinStep.BIOMETRIC -> {
+                    BiometricOptInContent(
+                        onEnable = {
+                            scope.launch {
+                                if (activity != null) {
+                                    biometricAuth.authenticate(
+                                        activity,
+                                        title = context.getString(R.string.pin_biometric_prompt_title),
+                                        subtitle = context.getString(R.string.pin_biometric_prompt_subtitle)
+                                    )
+                                }
+                                // Wallet already created before reaching biometric step.
+                                // Route to RecoverFundsScreen if the recovery scan found
+                                // funds on non-native paths; otherwise go straight to wallet.
+                                val dest = if (pendingLegacyRecovery) "recover_funds" else "wallet"
+                                navController.navigate(dest) {
+                                    popUpTo(ONBOARDING_ROUTE) { inclusive = true }
+                                }
+                            }
+                        },
+                        onSkip = {
+                            // Same routing logic as onEnable.
                             val dest = if (pendingLegacyRecovery) "recover_funds" else "wallet"
                             navController.navigate(dest) {
                                 popUpTo(ONBOARDING_ROUTE) { inclusive = true }
                             }
                         }
-                    },
-                    onSkip = {
-                        // Same routing logic as onEnable.
-                        val dest = if (pendingLegacyRecovery) "recover_funds" else "wallet"
-                        navController.navigate(dest) {
-                            popUpTo(ONBOARDING_ROUTE) { inclusive = true }
-                        }
-                    }
-                )
+                    )
+                }
             }
         }
 
@@ -270,6 +324,71 @@ fun PinSetupScreen(
                 afterNotice = null
                 next?.invoke()
             })
+        }
+    }
+}
+
+/**
+ * PIN setup for a flow that keeps the stored app PIN (INT-2026-11-19-B): no keypad and nothing to
+ * enter, only the wallet being made, or why it was not. When it is neither working nor done it
+ * offers one way forward: [onContinue] after the current PIN was not entered, [onStartOver] after
+ * the wallet could not be made.
+ */
+@Composable
+private fun KeptPinContent(
+    working: Boolean,
+    errorMessage: String?,
+    onContinue: (() -> Unit)?,
+    onStartOver: (() -> Unit)?,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 32.dp, vertical = 40.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text(
+            text = stringResource(R.string.wallet_add_pin_note),
+            style = MaterialTheme.typography.bodyMedium,
+            color = Color(0xFFB0BEC5),
+            textAlign = TextAlign.Center
+        )
+        errorMessage?.let {
+            Spacer(Modifier.height(12.dp))
+            Text(
+                text = it,
+                color = DigiByteRed,
+                style = MaterialTheme.typography.bodySmall,
+                textAlign = TextAlign.Center
+            )
+        }
+        if (working) {
+            Spacer(Modifier.height(16.dp))
+            CircularProgressIndicator(
+                modifier = Modifier.size(24.dp),
+                strokeWidth = 2.dp,
+                color = DigiByteAccent
+            )
+        } else {
+            val action = if (errorMessage != null) onStartOver else onContinue
+            if (action != null) {
+                Spacer(Modifier.height(24.dp))
+                Button(
+                    onClick = action,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = DigiByteBlue)
+                ) {
+                    Text(
+                        text = stringResource(if (errorMessage != null) R.string.verify_try_again else R.string.recover_continue),
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
         }
     }
 }

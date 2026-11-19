@@ -356,7 +356,12 @@ class PinManager internal constructor(
 
     // ── PIN storage ───────────────────────────────────────────────────────────
 
-    fun setPin(pin: String) {
+    /**
+     * Stores [pin] over whatever is stored. Visible inside `core` only (INT-2026-11-19-B): the app
+     * reaches it through [changePin] (Security settings) or [OnboardingPin.setFirstPin] (setup,
+     * refused while the stored PIN guards a wallet), never directly.
+     */
+    internal fun setPin(pin: String) {
         val salt = ByteArray(32).also { SecureRandom().nextBytes(it) }
         val (hashHex, method) = tryArgon2Hash(pin, salt) ?: run {
             Pair(hashWithPbkdf2(pin, salt).toHex(), "pbkdf2")
@@ -368,14 +373,22 @@ class PinManager internal constructor(
         )
     }
 
+    /**
+     * Replaces the PIN from Security settings, which has just taken the current one through
+     * [verifyPin]. Not for setup flows: those hold an [OnboardingPin] and nothing else.
+     */
+    fun changePin(newPin: String) = setPin(newPin)
+
     fun hasPin(): Boolean = store.contains(KEY_HASH)
 
     /** Clears the ENTIRE pin store — hash AND every rate-limit counter/flag —
      *  atomically. Used on wallet wipe / PIN reset. THROWS [PinStoreWriteException] when the store is
      *  still on disk afterwards (the sealed file deletes itself and the old store, and checks both are
      *  gone): the caller must not treat the PIN as cleared ([app.aroundtheblock.wallet.core.WalletManager.wipeThenReleasePin]
-     *  reports the wipe as not verified, and it is finished at the next launch). */
-    fun clearPin() {
+     *  reports the wipe as not verified, and it is finished at the next launch).
+     *  Visible inside `core` only (INT-2026-11-19-B): the app clears the PIN through a verified wipe
+     *  or [OnboardingPin.clearStalePin], never directly. */
+    internal fun clearPin() {
         store.clear() // throws when it did not land: the latch stays
         wipeOwedInProcess = false
     }

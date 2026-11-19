@@ -18,16 +18,24 @@ class SeedVerifyAddModeTest {
     private val screen = File("src/main/java/app/aroundtheblock/wallet/ui/onboarding/SeedVerifyScreen.kt")
 
     @Test fun `add mode's success screen promises no PIN`() {
-        assertEquals(VerifySuccessLabels(R.string.verify_success_body_add, R.string.recover_continue), verifySuccessLabels(OnboardingMode.ADD))
+        assertEquals(VerifySuccessLabels(R.string.verify_success_body_add, R.string.recover_continue), verifySuccessLabels(OnboardingMode.ADD, keepsStoredPin = false))
+    }
+
+    /** INT-2026-11-19-B: a first run that keeps the stored PIN sets none, so it promises none. */
+    @Test fun `a first run that keeps the stored PIN promises no PIN`() {
+        assertEquals(
+            VerifySuccessLabels(R.string.verify_success_body_add, R.string.recover_continue),
+            verifySuccessLabels(OnboardingMode.FIRST_RUN, keepsStoredPin = true),
+        )
     }
 
     @Test fun `the first run still sets up the PIN next`() {
-        assertEquals(VerifySuccessLabels(R.string.verify_success_body, R.string.verify_setup_pin), verifySuccessLabels(OnboardingMode.FIRST_RUN))
+        assertEquals(VerifySuccessLabels(R.string.verify_success_body, R.string.verify_setup_pin), verifySuccessLabels(OnboardingMode.FIRST_RUN, keepsStoredPin = false))
     }
 
     @Test fun `the screen takes its labels from the mode and never goes to PIN setup`() {
         val src = KotlinSourceGate.of(screen.readText())
-        assertTrue("the screen does not pick its labels by mode", src.code.contains("verifySuccessLabels(viewModel.mode)"))
+        assertTrue("the screen does not pick its labels by mode", src.code.contains("verifySuccessLabels(viewModel.mode, keepsPin)"))
         val toPin = src.calls("navController.navigate").filter { it.arguments.firstOrNull() == "\"pin_setup\"" }
         assertTrue("the seed check navigates to pin_setup", toPin.isEmpty())
         // The PIN wording is reached only through verifySuccessLabels, never written straight into the screen.

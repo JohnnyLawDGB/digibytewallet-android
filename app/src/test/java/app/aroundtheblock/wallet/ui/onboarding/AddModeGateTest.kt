@@ -85,21 +85,200 @@ class AddModeGateTest {
         val vm = gate("ui/onboarding/OnboardingViewModel.kt")
         val body = vm.bodyOf("commitAdd")
         assertTrue("scanner is blind: commitAdd adds nothing", vm.calls("provisioner.add", body).size == 1)
-        assertTrue("commitAdd touches the app PIN", !vm.code.substring(body).contains("pinManager."))
+        assertTrue("commitAdd touches the app PIN", !Regex("""(?i)pin(?:Manager)?\s*\.""").containsMatchIn(vm.code.substring(body)))
     }
 
-    @Test fun `a restore clears the PIN only when no wallet exists`() {
+    /**
+     * F31, and INT-2026-11-19-B: no onboarding path replaces or clears the app PIN while any wallet
+     * record exists. The rule is `OnboardingPin`'s (core, `OnboardingPinTest`); this pins that the
+     * ViewModel has no way to the PIN but that, so no caller can clear or set around it.
+     */
+    @Test fun `a restore clears the PIN only through the guard that knows whether a wallet exists`() {
         val vm = gate("ui/onboarding/OnboardingViewModel.kt")
-        val clears = vm.calls("pinManager.clearPin")
+        assertTrue("the onboarding ViewModel holds the PIN manager itself", !Regex("""(?<!\w)[pP]inManager(?!\w)""").containsMatchIn(vm.code))
+        val clears = vm.calls("onboardingPin.clearStalePin")
         assertEquals("scanner is blind: first-run restore no longer clears a stale PIN", 1, clears.size)
         val body = vm.bodyOf("recoverWallet", "fun recoverWallet(seedKeyPrompt")
         assertTrue("the PIN is cleared outside recoverWallet", clears.single().range.first in body)
-        val guarded = vm.branchesOn("!registry.anyRecordExists()", body)
-        assertTrue(
-            "the PIN is cleared while a wallet record may exist",
-            guarded.any { clears.single().range.first in it },
-        )
         assertTrue("recoverWallet does not refuse ADD mode", vm.calls("check", body).any { it.arguments == listOf("mode == OnboardingMode.FIRST_RUN") })
+        // Every use of the guard, by name: nothing else of it is reachable from here.
+        val uses = Regex("""onboardingPin\s*\.\s*(\w+)""").findAll(vm.code).map { it.groupValues[1] }.toSet()
+        assertEquals(setOf("mustKeepPin", "setFirstPin", "clearStalePin"), uses)
+    }
+
+    /** INT-2026-11-19-B: the only PIN replace the app can reach outside onboarding is Settings' change of a verified PIN. */
+    @Test fun `only Security settings replaces a PIN`() {
+        val replace = Regex("""\.\s*changePin\s*\(""")
+        val files = root.walkTopDown().filter { it.isFile && it.extension == "kt" }.toList()
+        assertTrue("scanner is blind: no sources", files.size > 50)
+        val callers = files.filter { replace.containsMatchIn(KotlinSourceGate.of(it.readText()).code) }.map { it.relativeTo(root).path }.sorted()
+        assertEquals(listOf("ui/settings/SecuritySettingsScreen.kt", "ui/settings/SettingsViewModel.kt"), callers)
+    }
+
+    /**
+     * INT-2026-11-19-B: a first run that keeps the stored PIN asks for it before the phrase is shown
+     * or typed, through the app's one PIN dialog (same counter, cooldown and wipe-after-N).
+     */
+    @Test fun `the first screen takes the current PIN before either flow starts`() {
+        val src = gate("ui/onboarding/OnboardingScreen.kt")
+        val gated = Regex("""(?<!\w)afterCurrentPin\s*\{""").findAll(src.code).mapNotNull { src.blockAt(it.range.last) }.toList()
+        assertEquals("scanner is blind: nothing runs behind the current-PIN step", 2, gated.size)
+        val navigations = src.calls("navController.navigate")
+        assertEquals("scanner is blind: the first screen starts two flows", 2, navigations.size)
+        for (nav in navigations) {
+            assertTrue("a flow starts without the current-PIN step: ${nav.text}", gated.any { nav.range.first in it })
+        }
+        assertTrue(
+            "the first screen's current-PIN step is not the shared one",
+            Regex("""val\s+afterCurrentPin\s*=\s*rememberCurrentPinStep\s*\(\s*viewModel\s*,\s*navController\s*\)""").containsMatchIn(src.code),
+        )
+        // No PIN check of its own: the screen never touches the PIN manager.
+        assertTrue(!Regex("""(?<!\w)verifyPin\s*\(""").containsMatchIn(src.code))
+
+        // Neither flow can start before it is known whether the PIN is kept: a tap in that window
+        // would find nothing owed and open the phrase screens unasked.
+        assertEquals(
+            "the buttons do not wait for the answer on whether the PIN is kept",
+            1, Regex("""val\s+ready\s*=\s*canAdd\s*&&\s*keepsPin\s*!=\s*null\s*\n""").findAll(src.code).count(),
+        )
+        val buttons = src.calls("Button") + src.calls("OutlinedButton")
+        assertEquals("scanner is blind: the first screen has two flow buttons", 2, buttons.size)
+        for (button in buttons) {
+            assertTrue("a flow button is live before the answer: ${button.arguments}", "enabled = ready" in button.arguments)
+            assertTrue("a flow button does not start behind the current-PIN step", gated.any { it.first in button.range })
+        }
+    }
+
+    /** The step itself: an owed PIN goes through the app's one PIN dialog, and only its yes goes on. */
+    @Test fun `the current-PIN step goes on only with the dialog's yes`() {
+        val src = gate("ui/onboarding/CurrentPinStep.kt")
+        val owed = src.branchesOn("viewModel.currentPinOwed()")
+        assertEquals("the current-PIN step does not ask whether the PIN is owed", 1, owed.size)
+        val asks = src.calls("spendAuth.authorizeWithPin", owed.single())
+        assertEquals("an owed PIN is not asked through the app's PIN dialog", 1, asks.size)
+        assertEquals("the step asks for a PIN outside the owed branch", 1, src.calls("spendAuth.authorizeWithPin").size)
+        val accepted = src.guardedBy(asks.single()) ?: error("the PIN dialog's answer guards nothing")
+        val marks = src.calls("viewModel.onCurrentPinVerified")
+        assertEquals(1, marks.size)
+        assertTrue("the PIN is marked entered without the dialog's yes", marks.single().range.first in accepted)
+        val goes = src.calls("go", owed.single())
+        assertEquals("with the PIN owed, the flow goes on more than once", 1, goes.size)
+        assertTrue("with the PIN owed, the flow goes on without the dialog's yes", goes.single().range.first in accepted)
+        assertTrue(!Regex("""(?<!\w)verifyPin\s*\(""").containsMatchIn(src.code))
+
+        // An owed PIN that cannot be asked for is not a silent dead end: the screen that says the
+        // PIN store cannot be read opens, and never as part of a yes.
+        val unreadable = src.branchesOn("!spendAuth.pinCanBeAsked()", owed.single())
+        assertEquals("a PIN that cannot be asked for is not told apart from a refused one", 1, unreadable.size)
+        val shown = src.calls("navController.navigate", unreadable.single())
+        assertEquals("an unreadable PIN store opens no screen", listOf("PIN_STORE_UNAVAILABLE_ROUTE"), shown.map { it.arguments.first() })
+        assertTrue("the unreadable-store screen opens on the dialog's yes", unreadable.single().first !in accepted)
+    }
+
+    /** The PIN is asked for again at each first-run write when it is no longer held, through the same step. */
+    @Test fun `each first-run write stands behind the current-PIN step`() {
+        val restore = gate("ui/onboarding/RecoveryDateScreen.kt")
+        val gated = Regex("""(?<!\w)afterCurrentPin\s*\{""").findAll(restore.code).mapNotNull { restore.blockAt(it.range.last) }.toList()
+        val restores = restore.calls("viewModel.recoverWallet")
+        assertEquals("scanner is blind: the birth-date screen starts no restore", 1, restores.size)
+        assertTrue("the restore starts outside the current-PIN step", gated.any { restores.single().range.first in it })
+        assertTrue(
+            "the restore's current-PIN step is not the shared one",
+            Regex("""val\s+afterCurrentPin\s*=\s*rememberCurrentPinStep\s*\(\s*viewModel\s*,\s*navController\s*\)""").containsMatchIn(restore.code),
+        )
+
+        val setup = gate("ui/onboarding/PinSetupScreen.kt")
+        val setupGated = Regex("""(?<!\w)afterCurrentPin\s*\{""").findAll(setup.code).mapNotNull { setup.blockAt(it.range.last) }.toList()
+        val creates = setup.calls("viewModel.createWallet")
+        assertEquals("scanner is blind: PIN setup creates no wallet", 1, creates.size)
+        assertTrue("the create starts outside the current-PIN step", setupGated.any { creates.single().range.first in it })
+        assertTrue(
+            "PIN setup's current-PIN step is not the shared one",
+            Regex("""val\s+afterCurrentPin\s*=\s*rememberCurrentPinStep\s*\(\s*viewModel\s*,\s*navController\s*,""").containsMatchIn(setup.code),
+        )
+    }
+
+    /** The PIN entered for a setup does not outlive the stay in the foreground: leaving is counted where the app is stopped. */
+    @Test fun `leaving the foreground is counted when the app stops`() {
+        val src = gate("MainActivity.kt")
+        val body = src.bodyOf("onStop")
+        val left = src.calls("foregroundVisits.left")
+        assertEquals("scanner is blind: nothing counts the app leaving the foreground", 1, left.size)
+        assertTrue("leaving the foreground is not counted in onStop", left.single().range.first in body)
+        val unless = src.branchesOn("!isChangingConfigurations", body)
+        assertEquals(1, unless.size)
+        assertTrue("leaving is counted under a condition other than a configuration change", left.single().range.first in unless.single())
+        assertEquals("the count stands under a second condition", body, src.enclosingBlock(left.single().range.first))
+    }
+
+    /** The PIN-only entry of the spend gate is the same dialog, and the gate has one PIN check. */
+    @Test fun `the PIN-only gate is the spend gate's own dialog`() {
+        val src = gate("ui/components/SpendAuth.kt")
+        val body = src.bodyOf("authorizeWithPin")
+        assertEquals("authorizeWithPin does not open the shared PIN dialog", 1, src.calls("awaitPin", body).size)
+        assertTrue("authorizeWithPin runs without a stored PIN", src.calls("vm.hasPin", body).isNotEmpty())
+        assertEquals("the spend gate checks a PIN in more than one place", 1, src.calls("vm.verifyPin").size)
+        assertEquals("the spend gate's wipe-after-N is not in its one dialog", 1, src.calls("vm.wipeWallet").size)
+
+        // With no PIN readable the gate answers no, and its only yes is the dialog's.
+        val none = src.branchesOn("!vm.hasPin()", body)
+        assertEquals("authorizeWithPin does not branch on a missing PIN", 1, none.size)
+        assertTrue("the dialog opens with no PIN to check", src.calls("awaitPin", none.single()).isEmpty())
+        val returns = Regex("""(?<!\w)return(?!\w)[^\n]*""").findAll(src.code.substring(body)).map { KotlinSourceGate.squeeze(it.value) }.toList()
+        assertEquals("authorizeWithPin answers something other than no, or the dialog's answer", listOf("return false", "return awaitPin(subtitle)"), returns)
+        assertTrue("the no is not the missing PIN's answer", Regex("""return\s+false""").containsMatchIn(src.code.substring(none.single())))
+    }
+
+    /** A flow that keeps the PIN shows no PIN keypad and stores no PIN. */
+    @Test fun `PIN setup shows its keypad only when the flow sets a PIN`() {
+        val src = gate("ui/onboarding/PinSetupScreen.kt")
+        val sets = src.branchesOn("keepsPin == false")
+        assertEquals("PIN setup does not branch on whether the flow keeps the PIN", 1, sets.size)
+        val keypads = src.calls("PinEntryContent")
+        assertEquals("scanner is blind: PIN setup shows no keypad", 1, keypads.size)
+        assertTrue("the keypad is shown to a flow that keeps the PIN", keypads.single().range.first in sets.single())
+        val stores = src.calls("viewModel.setPin")
+        assertEquals("scanner is blind: PIN setup stores no PIN", 1, stores.size)
+        assertTrue("a PIN is stored outside the keypad's branch", stores.single().range.first in sets.single())
+        val kept = src.branchesOn("keepsPin == true")
+        assertEquals(1, kept.size)
+        assertTrue("the kept-PIN branch stores a PIN", src.calls("viewModel.setPin", kept.single()).isEmpty())
+        assertEquals("the kept-PIN branch does not go on to the wallet", 1, src.calls("createThenGoOn", kept.single()).size)
+
+        // The biometric offer belongs to setting a PIN: a flow that keeps the stored one is not shown it.
+        val offers = Regex("""step\s*=\s*PinStep\.BIOMETRIC""").findAll(src.code).toList()
+        assertEquals("scanner is blind: PIN setup offers no biometric step", 1, offers.size)
+        val offered = src.branchesOn("keepsPin != true && biometricAvailable && activity != null")
+        assertEquals("the biometric offer is not held back from a flow that keeps the PIN", 1, offered.size)
+        assertTrue("the biometric offer is made outside that branch", offers.single().range.first in offered.single())
+    }
+
+    /**
+     * The kept-PIN step never ends on a screen with no control: after a create that failed it
+     * offers the way back to the first screen, after a PIN that was not entered it asks again.
+     */
+    @Test fun `the kept-PIN step offers a way forward when it did not go on`() {
+        val src = gate("ui/onboarding/PinSetupScreen.kt")
+        val kept = src.branchesOn("keepsPin == true").single()
+        val shown = src.calls("KeptPinContent", kept)
+        assertEquals("scanner is blind: the kept-PIN branch shows nothing", 1, shown.size)
+        val arguments = shown.single().arguments
+        assertTrue("a failed create offers no way back: $arguments", "onStartOver = startOver.takeIf { firstScreenBelow }" in arguments)
+        assertTrue("a PIN that was not entered is not asked again: $arguments", "onContinue = start.takeIf { pinDeclined }" in arguments)
+        val back = src.calls("navController.popBackStack")
+        assertEquals("scanner is blind: PIN setup pops to nothing", 1, back.size)
+        assertEquals("the way back is not to the first screen", "ONBOARDING_ROUTE", back.single().arguments.first())
+        val startOver = Regex("""val\s+startOver\s*:\s*\(\)\s*->\s*Unit\s*=\s*\{""").find(src.code) ?: error("no startOver")
+        assertTrue("startOver does not pop to the first screen", back.single().range.first in src.blockAt(startOver.range.last)!!)
+
+        val content = src.bodyOf("KeptPinContent", "private fun KeptPinContent(")
+        val buttons = src.calls("Button", content)
+        assertEquals("the kept-PIN content has no button", 1, buttons.size)
+        assertTrue("the button does not run the offered action", "onClick = action" in buttons.single().arguments)
+        assertTrue(
+            "after a failure the action is not the way back",
+            Regex("""val\s+action\s*=\s*if\s*\(\s*errorMessage\s*!=\s*null\s*\)\s*onStartOver\s+else\s+onContinue""").containsMatchIn(src.code.substring(content)),
+        )
     }
 
     @Test fun `add mode never creates through PIN setup`() {

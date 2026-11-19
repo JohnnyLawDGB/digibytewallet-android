@@ -39,6 +39,18 @@ fun OnboardingScreen(
     }
     val canAdd = canAddAnswer == true
 
+    // INT-2026-11-19-B: no onboarding path sets or replaces the app PIN while any wallet record
+    // exists. A first run that starts while a wallet and its PIN are stored keeps that PIN: it is
+    // asked for here, before a phrase is shown or typed, and no PIN setup follows. Null until read
+    // (off the main thread); the buttons wait for it.
+    val keepsPin by produceState<Boolean?>(initialValue = if (adding) false else null) {
+        if (!adding) value = viewModel.keepsStoredPin()
+    }
+    // The app's one PIN dialog, behind the step every first-run screen that needs the PIN shares.
+    val afterCurrentPin = rememberCurrentPinStep(viewModel, navController)
+    // Until it is known whether the PIN is kept, neither flow can start: a tap must find the answer.
+    val ready = canAdd && keepsPin != null
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -79,7 +91,7 @@ fun OnboardingScreen(
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = stringResource(if (adding) R.string.wallet_add_pin_note else R.string.onb_tagline),
+                text = stringResource(if (adding || keepsPin == true) R.string.wallet_add_pin_note else R.string.onb_tagline),
                 style = MaterialTheme.typography.bodyMedium,
                 color = Color(0xFFB0BEC5),
                 textAlign = TextAlign.Center
@@ -118,10 +130,12 @@ fun OnboardingScreen(
             // Create wallet button
             Button(
                 onClick = {
-                    viewModel.setWordCount(selectedWordCount)
-                    navController.navigate("seed_display/$selectedWordCount")
+                    afterCurrentPin {
+                        viewModel.setWordCount(selectedWordCount)
+                        navController.navigate("seed_display/$selectedWordCount")
+                    }
                 },
-                enabled = canAdd,
+                enabled = ready,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp),
@@ -149,8 +163,8 @@ fun OnboardingScreen(
             // would have to satisfy. Sweeping stays one tap away in Settings -> Recover funds for
             // anyone who wants fresh keys.
             OutlinedButton(
-                onClick = { navController.navigate("mnemonic_input") },
-                enabled = canAdd,
+                onClick = { afterCurrentPin { navController.navigate("mnemonic_input") } },
+                enabled = ready,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp),
