@@ -30,6 +30,7 @@ and file references. Kept in sync with `ROADMAP.md` phases.
 | BIP 340 | Schnorr Signatures | Implemented | `native/…/BRKey.c` (`BRKeySchnorrSign`), `native/…/secp256k1` (schnorrsig module) |
 | BIP 341 / 342 | Taproot / Tapscript | **Partial** — BIP 341 key-path (BIP 86) receive + signing shipped; no BIP 342 tapscript, no general Taproot spend UX (see §7) | `native/…/BRTransaction.c`, `native/…/BRKey.c`, `native/…/BRAddress.c` |
 | SLIP-0010 | Universal private key derivation | Not applicable (BIP 32 variant used directly) | — |
+| SLIP-0013 | Authentication using deterministic hierarchy | Implemented — Digi-ID's per-site identity (`m/13'/A'/B'/C'/D'`). In the core its master key is a root the caller passes: `DIGIBYTE` (`"DigiByte seed"`, the §1 variant) or `STANDARD` (`"Bitcoin seed"`). The Android bridge derives `DIGIBYTE` only, until step 2 of `ROADMAP.md` Phase 2 item 6 | `native/…/BRDigiId.h` (both roots); Android bridge: `native/…/bridge/slip13.c`, `jni_wallet.c` (`seed_derive_identity_key`) |
 | SLIP-0044 | Registered coin types | Implemented (coin type 20 for DigiByte) | `native/…/BRBIP32Sequence.c` |
 
 ## Details per BIP

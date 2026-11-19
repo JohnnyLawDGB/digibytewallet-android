@@ -5,6 +5,7 @@ import app.aroundtheblock.wallet.core.digiscope.HubTokenStore
 import app.aroundtheblock.wallet.core.security.KeyStoreManager
 import app.aroundtheblock.wallet.core.security.PinManager
 import app.aroundtheblock.wallet.core.security.PinStore
+import app.aroundtheblock.wallet.core.settings.AutoLockPrefs
 import app.aroundtheblock.wallet.core.settings.PricePrefs
 import app.aroundtheblock.wallet.core.sync.CfAbandonmentStore
 import app.aroundtheblock.wallet.core.sync.CfScanLedgerStore
@@ -365,7 +366,11 @@ class WalletWipeTest {
             "dgb_sync_data", "dgb_bloom_peers", "dgb_filter_peers", "dgb_dandelion_peers",
             "dgb_reconcile", "dgb_cf_abandonment", "dgb_history_rebuild",
         )
-        val sharedStores = listOf("dgb_watched_addrs", "dgb_outgoing_tx", "dgb_asset_backfill", "dgb_asset_heal", "dgb_db_key", "dgb_diag", "dgb_log_tag")
+        val sharedStores = listOf(
+            "dgb_watched_addrs", "dgb_outgoing_tx", "dgb_asset_backfill", "dgb_asset_heal", "dgb_db_key", "dgb_diag", "dgb_log_tag",
+            // App-wide since multi-wallet step 1, and still reset by the wipe (AutoLockPrefs).
+            AutoLockPrefs.PREFS,
+        )
 
         fun files(): List<File> = networks.flatMap { net ->
             listOf(
@@ -454,6 +459,24 @@ class WalletWipeTest {
         assertEquals("JPY", d.prefs.prefsFor(name("")).durable[key])
         assertEquals("GBP", d.prefs.prefsFor(name("_testnet")).durable[key])
         assertTrue("the sync blob is still cleared", d.prefs.prefsFor("dgb_sync_data").all.isEmpty())
+    }
+
+    /**
+     * The auto-lock timeout is app-wide lock policy since multi-wallet step 1 ([AutoLockPrefs]). It went
+     * with the wallet database while it lived there, and it goes with the PIN store the wipe releases:
+     * the wipe still resets it, to the default, as it always did.
+     */
+    @Test fun `a wipe resets the auto-lock timeout, as it did when the timeout lived in the wallet database`() = runTest {
+        val d = Device().apply { populate() }
+        val autoLock = d.prefs.prefsFor(AutoLockPrefs.PREFS)
+        autoLock.seed(AutoLockPrefs.KEY_TIMEOUT_MS, 30 * 60_000L)
+        autoLock.seed(AutoLockPrefs.KEY_LEGACY_MOVED, true)
+
+        val report = d.walletManager().wipeWallet()
+
+        assertTrue("$report", report.verified)
+        assertEquals("the wipe left the auto-lock timeout", emptyMap<String, Any?>(), autoLock.durable)
+        assertEquals(null, AutoLockPrefs.storedTimeoutMs(d.ctx))
     }
 
     @Test fun `a wipe keeps the Show prices switch but not the cached price`() = runTest {

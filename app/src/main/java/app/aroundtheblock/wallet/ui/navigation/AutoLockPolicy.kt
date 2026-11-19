@@ -1,12 +1,13 @@
 package app.aroundtheblock.wallet.ui.navigation
 
 import app.aroundtheblock.wallet.core.WalletState
-import app.aroundtheblock.wallet.core.db.entity.WalletConfigEntity
+import app.aroundtheblock.wallet.core.settings.AutoLockPrefs
 
 /**
  * Should the foreground UI lock for inactivity right now?
  *
- * The Security settings auto-lock timeout (`WalletConfigEntity.autoLockTimeoutMs`) was
+ * The Security settings auto-lock timeout (then `WalletConfigEntity.autoLockTimeoutMs`, now the
+ * app-wide [AutoLockPrefs]) was
  * stored and displayed but read by nothing (2026-08-30 external audit) — the only lock was
  * `MainActivity.onStop()`, so an unlocked phone left on a table stayed on the wallet graph
  * indefinitely. This is the decision half of the fix; `MainActivity` polls it and calls
@@ -50,13 +51,14 @@ fun shouldAutoLock(
 }
 
 /**
- * The effective auto-lock timeout for a `wallet_config` row that may not exist.
+ * The effective auto-lock timeout for an app-wide value ([AutoLockPrefs.storedTimeoutMs]) that may
+ * not exist. The one place the default is applied: the inactivity lock and Settings → Security both
+ * read through here, so the screen never shows one timeout while the lock enforces another.
  *
- * Nothing seeds the row on wallet create/restore — the only upserts are Settings writes that
- * themselves require an existing row — so `WalletConfigDao.get()` is null for every wallet
- * whose owner never opened Settings → Security. That screen displays the entity default in
- * that case (`SettingsViewModel.loadConfig`), so the lock must enforce the same default;
- * treating null as "skip this tick" left the setting inert for the common case.
+ * Nothing is stored until the owner picks a timeout (or the one-time move carries the one they
+ * picked before it was app-wide), so "nothing stored" is the common case and means the default,
+ * [AutoLockPrefs.DEFAULT_TIMEOUT_MS] (60 s, the wallet database's default before the move);
+ * treating it as "skip this tick" would leave the setting inert for most wallets.
  */
 fun autoLockTimeoutOrDefault(storedTimeoutMs: Long?): Long =
-    storedTimeoutMs ?: WalletConfigEntity().autoLockTimeoutMs
+    storedTimeoutMs ?: AutoLockPrefs.DEFAULT_TIMEOUT_MS

@@ -5,8 +5,10 @@ import android.util.Log
 import app.aroundtheblock.wallet.core.FakeVault
 import app.aroundtheblock.wallet.core.InMemoryPrefsFactory
 import app.aroundtheblock.wallet.core.asKeystoreAliases
+import app.aroundtheblock.wallet.core.settings.AutoLockPrefs
 import app.aroundtheblock.wallet.core.sync.ChainTipPolicy
 import app.aroundtheblock.wallet.core.sync.ChainTipStore
+import app.aroundtheblock.wallet.core.tor.TorManager
 import app.aroundtheblock.wallet.core.wipeTestContext
 import io.mockk.every
 import io.mockk.mockkStatic
@@ -71,6 +73,8 @@ class WalletStoreEraserTest {
     private val sharedPrefs = listOf(
         "dgb_bloom_peers", "dgb_bloom_peers_testnet", "dgb_price", "dgb_filter_peers",
         "dgb_db_key", "dgb_wallets", "dgb_pin_store",
+        // App-wide settings every wallet shares: removing a wallet changes neither Tor nor the auto-lock.
+        TorManager.PREFS, AutoLockPrefs.PREFS,
     )
 
     private inner class Device(releaseLegacyDbWrap: () -> Boolean = { true }) {

@@ -504,12 +504,6 @@
     <string name="did_insecure">असुरक्षित कनेक्शन</string>
     <string name="did_insecure_body">यह साइट HTTPS नहीं, HTTP उपयोग करती है। आपका प्रमाणीकरण इंटरसेप्ट हो सकता है।</string>
     <string name="did_callback_url">कॉलबैक URL</string>
-    <string name="did_identity_title">यह साइट कौन-सा साइन-इन पहचानती है?</string>
-    <string name="did_identity_hint">क्या आपने यह वॉलेट रिस्टोर किया है? वह पहचान चुनें जो आपने पहले इस साइट पर इस्तेमाल की थी। साइन-इन सफल होने के बाद वॉलेट इसे याद रखेगा।</string>
-    <string name="did_identity_per_site">इस साइट के लिए अलग कुंजी (मूल DigiByte ऐप)</string>
-    <string name="did_identity_shared">सभी साइटों के लिए साझा कुंजी (DigiByte wallet 3.x–4.0.76)</string>
-    <string name="did_identity_shared_note">यह हर साइट पर एक जैसी है, इसलिए साइटें आपके साइन-इन को जोड़ सकती हैं। इसे तभी चुनें जब यह साइट आपको इसी से पहचानती थी।</string>
-    <string name="did_identity_address">पता: %1$s</string>
     <string name="did_approve">स्वीकृत करें</string>
     <string name="did_deny">अस्वीकार करें</string>
     <string name="did_success">प्रमाणीकरण सफल</string>

@@ -2,6 +2,7 @@ package app.aroundtheblock.wallet.ui.navigation
 
 import app.aroundtheblock.wallet.core.WalletState
 import app.aroundtheblock.wallet.core.db.entity.WalletConfigEntity
+import app.aroundtheblock.wallet.core.settings.AutoLockPrefs
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -16,13 +17,15 @@ import org.junit.Test
  * `WalletConfigEntity.autoLockTimeoutMs` and read by NOTHING (2026-08-30 external audit).
  * A phone left face-up and unlocked on a table stayed on the wallet graph indefinitely; the
  * only lock was `MainActivity.onStop()`. The polling loop in MainActivity is the half that
- * needs a device; this function is the half that can be proven on the JVM.
+ * needs a device; this function is the half that can be proven on the JVM. (The timeout is
+ * app-wide since multi-wallet step 1, in `AutoLockPrefs`; core `AutoLockPrefsTest` covers it.)
  *
  * Two integration holes found in review live here as well, because the first cut kept them
  * outside the tested function:
- *  - nothing seeds the `wallet_config` row, so a fresh create/restore that never opens
- *    Settings → Security has `walletConfigDao.get() == null`; skipping the tick there meant
- *    the lock never fired for the common case while the screen displayed "1 minute".
+ *  - nothing is stored until a timeout is chosen (then: nothing seeded the `wallet_config` row),
+ *    so a fresh create/restore that never opens Settings → Security reads no value; skipping
+ *    the tick there meant the lock never fired for the common case while the screen displayed
+ *    "1 minute".
  *  - the wallet is Unlocked with NO PIN on `pin_setup` (fresh restore, lost-PIN restore);
  *    locking there flips state to Locked, `shouldRouteToUnlock` correctly refuses to route,
  *    and PinSetupScreen then lands on the wallet graph under Locked — reopening the
@@ -81,17 +84,19 @@ class AutoLockPolicyTest {
     }
 
     @Test
-    fun `missing wallet_config row falls back to the entity default, not to never-lock`() {
-        // Nothing seeds the row on create/restore; the Security screen shows the entity
-        // default, so the lock must enforce that same default.
+    fun `no stored timeout falls back to the default, not to never-lock`() {
+        // Nothing is stored until a timeout is chosen; the Security screen reads through the same
+        // function, so the lock enforces the default it shows. That default is the one the
+        // wallet database's row had before the timeout became app-wide: the move changed no one's lock.
         val default = WalletConfigEntity().autoLockTimeoutMs
         assertEquals(default, autoLockTimeoutOrDefault(null))
+        assertEquals(AutoLockPrefs.DEFAULT_TIMEOUT_MS, autoLockTimeoutOrDefault(null))
         assertTrue(shouldAutoLock(WalletState.Unlocked, hasPin = true, lastInteractionMs = 0L, unlockedAtMs = 0L, nowMs = default, timeoutMs = autoLockTimeoutOrDefault(null)))
         assertFalse(shouldAutoLock(WalletState.Unlocked, hasPin = true, lastInteractionMs = 0L, unlockedAtMs = 0L, nowMs = default - 1, timeoutMs = autoLockTimeoutOrDefault(null)))
     }
 
     @Test
-    fun `present wallet_config row wins over the default`() {
+    fun `a stored timeout wins over the default`() {
         assertEquals(300_000L, autoLockTimeoutOrDefault(300_000L))
         assertEquals(0L, autoLockTimeoutOrDefault(0L))
     }

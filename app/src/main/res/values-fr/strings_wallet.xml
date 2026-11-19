@@ -494,12 +494,6 @@
     <string name="did_insecure">Connexion non sécurisée</string>
     <string name="did_insecure_body">Ce site utilise HTTP, et non HTTPS. Votre authentification pourrait être interceptée.</string>
     <string name="did_callback_url">URL de rappel</string>
-    <string name="did_identity_title">Quelle connexion ce site connaît-il ?</string>
-    <string name="did_identity_hint">Portefeuille restauré ? Choisissez l\'identité utilisée auparavant sur ce site. Une fois une connexion réussie, le portefeuille s\'en souvient.</string>
-    <string name="did_identity_per_site">Clé propre à ce site (application DigiByte d\'origine)</string>
-    <string name="did_identity_shared">Clé partagée pour tous les sites (DigiByte wallet 3.x–4.0.76)</string>
-    <string name="did_identity_shared_note">Identique sur tous les sites, qui peuvent donc relier vos connexions. Choisissez-la seulement si ce site vous connaissait ainsi.</string>
-    <string name="did_identity_address">Adresse : %1$s</string>
     <string name="did_approve">Approuver</string>
     <string name="did_deny">Refuser</string>
     <string name="did_success">Authentification réussie</string>

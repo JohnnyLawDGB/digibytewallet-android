@@ -335,7 +335,10 @@ a CF-only wallet** and **DigiDollar as a sovereign light client**.
   canonical callback URI, so sites can no longer correlate a user by address. DigiScope
   domains and domains with a successful pre-change login are grandfathered on the legacy
   key (their accounts are bound to that address; re-binding is future work). The entry
-  below records the pre-change state it fixed.
+  below records the pre-change state it fixed. **Superseded in part by Q4 A** (owner
+  decision 2026-11-10; Android change of 2026-11-17): only `digiscope.me` and `api.digiscope.me`
+  keep the legacy key, a fixed list the same on every device. History no longer
+  grandfathers a domain, and a restored wallet is no longer offered the choice (4.1.2 row 16).
 - **Digi-ID has no dedicated identity path** — corrected 2026-08-19,
   traced through the JNI rather than inferred. `DigiIdManager.kt:49`
   calls `signMessage(uri, addressFormat)` (the second argument is the
@@ -563,6 +566,28 @@ not — but the coupling ran through the duress PIN, which was cancelled
    degrade + never-dial-direct-while-starting guard) — this item was
    stale. The one missing piece, the banner's "Retry now" action, is on
    `feat/tor-loud-fallback` (mark ✅ only when merged).
+6. **Coinomi-compatible Digi-ID.** A phrase restored from Coinomi signs
+   in to Digi-ID sites, DigiScope included, as the account Coinomi
+   signed in to. Approved 2026-11-17, in four steps:
+   `docs/superpowers/specs/2026-11-17-coinomi-digiid-design.md`, as
+   PR #267 amends it with the owner's OK of the same day (among other
+   changes, decision 3 is reversed). Until #267 merges, the amended
+   text is only in that PR, and steps 2 to 4 read it there.
+   Step 1, the core, is **done**: each per-site call in `BRDigiId.h`
+   takes the wallet's master-key root, `DIGIBYTE` ("DigiByte seed",
+   every per-site identity so far) or `STANDARD` ("Bitcoin seed",
+   Coinomi's), and no app's output changes. Shown by `digiid_core_kat`:
+   its `STANDARD` rows give the addresses Coinomi showed, and arms
+   131072, 262144, 524288 and 1048576 each fail exactly their cases.
+   Steps 2 (the app), 3 (the UI) and 4 (watching Coinomi's fund paths:
+   core engine work, with multi-wallet step 2) are pending. Step 2 is
+   done only with a bridge test that holds the bridge's
+   `identityAddress` under `STANDARD` to the address its
+   `signIdentityMessage` signs with, as `digiid_core_kat`'s
+   `address_root_hasuri_swapped` holds `BRDigiIdAddress` to
+   `BRDigiIdSignSite`. Until then the bridge is held to the header under
+   `DIGIBYTE` only, so two natives wired to different roots would show
+   one address and sign with another.
 
 **Effort:** S–M, reduced by the duress cancellation. Item 1 is shipped;
 5 is days; 3 is the riskiest (device-matrix testing); 4 is

@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
 import app.aroundtheblock.wallet.core.digiscope.HubTokenStore
+import app.aroundtheblock.wallet.core.settings.AutoLockPrefs
 import app.aroundtheblock.wallet.core.sync.CfAbandonmentStore
 import app.aroundtheblock.wallet.core.sync.CfScanLedgerStore
 import app.aroundtheblock.wallet.core.sync.FilterHeaderStore
@@ -72,6 +73,8 @@ interface WalletDataEraser {
      * and the compact-filter scan floor (`cf_birth_height` in `dgb_settings`). The scan floor
      * belongs to the wallet that set it: the next wallet starts from its own birthday. Nothing
      * else in `dgb_settings` is wallet state — the language and the network selection stay.
+     * Also the auto-lock timeout ([AutoLockPrefs], `dgb_auto_lock`): app-wide lock policy that goes
+     * with the one PIN, as it went with the wallet database before it was app-wide.
      */
     fun eraseLeftoverState(): Boolean
     /** Remove the persisted Hub session token, from the encrypted store and the legacy one. */
@@ -315,6 +318,9 @@ class AndroidWalletDataEraser internal constructor(
         val logTag = clearPrefs(LogTag.PREFS)
         // The quick-start choice and what it showed: this wallet's.
         val quickstart = clearPrefs(WalletStores.prefsName("dgb_quickstart", WalletScope.legacy(false)))
+        // The auto-lock timeout is app-wide lock policy: it goes with the PIN store the wipe releases.
+        // It went with the wallet database while it lived there, so a wipe resets it as it always did.
+        val autoLock = clearPrefs(AutoLockPrefs.PREFS)
         // NOT Settings → Display → Show prices (PricePrefs, "dgb_price"): a device setting, like the
         // own node (dgb_settings) and the balance mask (dgb_privacy), it survives a wipe or a restore
         // (owner decision, 2026-11-09). The cached price itself is in the database erased above.
@@ -331,7 +337,7 @@ class AndroidWalletDataEraser internal constructor(
             if (!landed) readWhatTheFileHolds(TAG, "dgb_settings", settings, held)
             landed
         }
-        return filterPeers && dandelionPeers && reconcile && assetBackfill && assetHeal && diag && logTag && quickstart && scanFloor
+        return filterPeers && dandelionPeers && reconcile && assetBackfill && assetHeal && diag && logTag && quickstart && autoLock && scanFloor
     }
 
     override fun eraseHubSession(): Boolean = step("hub session") { hubTokenStore().clearConfirmed() }

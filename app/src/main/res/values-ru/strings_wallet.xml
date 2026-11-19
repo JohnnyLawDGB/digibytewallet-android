@@ -510,12 +510,6 @@
     <string name="did_insecure">Небезопасное соединение</string>
     <string name="did_insecure_body">Этот сайт использует HTTP, а не HTTPS. Вашу аутентификацию могут перехватить.</string>
     <string name="did_callback_url">URL обратного вызова</string>
-    <string name="did_identity_title">Какой вход знает этот сайт?</string>
-    <string name="did_identity_hint">Восстановили кошелёк? Выберите личность, которую вы раньше использовали на этом сайте. После успешного входа кошелёк запомнит выбор.</string>
-    <string name="did_identity_per_site">Отдельный ключ для этого сайта (оригинальное приложение DigiByte)</string>
-    <string name="did_identity_shared">Общий ключ для всех сайтов (DigiByte wallet 3.x–4.0.76)</string>
-    <string name="did_identity_shared_note">Он одинаков на всех сайтах, поэтому сайты могут связать ваши входы. Выбирайте его, только если этот сайт знал вас по нему.</string>
-    <string name="did_identity_address">Адрес: %1$s</string>
     <string name="did_approve">Одобрить</string>
     <string name="did_deny">Отклонить</string>
     <string name="did_success">Аутентификация выполнена</string>

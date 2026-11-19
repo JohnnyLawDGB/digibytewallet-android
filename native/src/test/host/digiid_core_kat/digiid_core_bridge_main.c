@@ -14,6 +14,10 @@
  * own three bytes). The header is handed BRDigiIdUriBytesFromUtf16's bytes for the URI, and
  * BRDigiIdUtf8FromUtf16's for the message, so the sweep holds both encoders to what the bridge hashes.
  *
+ * Every per-site call here passes BR_DIGIID_ROOT_DIGIBYTE: the bridge takes no root, and its per-site master
+ * key is always "DigiByte seed". BR_DIGIID_ROOT_STANDARD ("Bitcoin seed") has no bridge counterpart until
+ * step 2 of the Coinomi design gives the bridge the root; its vectors are held in digiid_core_kat_main.c.
+ *
  *   digiid_core_bridge sweep    four phrases, a fixed pseudo-random stream of messages, URIs, indexes
  *                               and address formats, and long messages around 0xffff bytes.
  *   digiid_core_bridge print    the bridge's answers for the hand cases' fixed inputs (how the
@@ -249,8 +253,8 @@ static const char *header_site(const jchar *units, size_t n, const jchar *uri, s
     ulen = header_uri(uri, un, ub);
     if (BRDigiIdUtf8FromUtf16(bytes, 3 * n + 1, &len, units, n) == BR_DIGIID_OK) {
         need_work(BRDigiIdSignSiteWorkSize(ulen, len));
-        if (BRDigiIdSignSite(out, BR_DIGIID_ANSWER_CAPACITY, g_seed, sizeof(g_seed), bytes, len, (const char *)ub, ulen, index,
-                             g_work, g_workCap) == BR_DIGIID_OK) r = out;
+        if (BRDigiIdSignSite(out, BR_DIGIID_ANSWER_CAPACITY, g_seed, sizeof(g_seed), BR_DIGIID_ROOT_DIGIBYTE, bytes, len, (const char *)ub,
+                             ulen, index, g_work, g_workCap) == BR_DIGIID_OK) r = out;
     }
     free(bytes);
     free(ub);
@@ -263,8 +267,8 @@ static const char *header_address(const jchar *uri, size_t un, int hasUri, int32
     size_t ulen = header_uri(uri, hasUri ? un : 0, ub);
     const char *r = NULL;
     need_work(BRDigiIdIndexesWorkSize(ulen));
-    if (BRDigiIdAddress(out, BR_DIGIID_ADDRESS_CAPACITY, g_seed, sizeof(g_seed), hasUri, (const char *)ub, ulen, index, g_work,
-                        g_workCap) == BR_DIGIID_OK) r = out;
+    if (BRDigiIdAddress(out, BR_DIGIID_ADDRESS_CAPACITY, g_seed, sizeof(g_seed), BR_DIGIID_ROOT_DIGIBYTE, hasUri, (const char *)ub, ulen,
+                        index, g_work, g_workCap) == BR_DIGIID_OK) r = out;
     free(ub);
     return r;
 }
@@ -447,8 +451,12 @@ static void print(void)
         "https://api.digiscope.me/api/digiid/callback", "https://example.com/cb", "https://example.com/",
         "https://example.com", "https://sub.domain-with-dash.co.uk/digiid/login.php", "http://192.168.1.10:3000/digiid",
         "https://Example.COM/cb", "https://site.example/login",
+        /* The three callback URLs Coinomi was measured signing in to (site_key_digibyte_coinomi_uris). */
+        "https://api.digiscope.me/api/digiid-probe/callback", "https://api.digiscope.me/api/auth/digiid/callback",
+        "https://digiscope.me/api/digiid-probe/callback",
     };
     static const char *login = "digiid://api.digiscope.me/api/auth/digiid/callback?x=00112233445566778899aabbccddeeff";
+    static const char *loginCallback = "https://api.digiscope.me/api/auth/digiid/callback";   /* the login's own callback URL */
     static const char *request = "digiid://example.com/callback?x=abc123";
     static const jchar emoji[] = { 'g', 'm', ' ', 0xD83D, 0xDE00, ' ', '!' };
 
@@ -477,6 +485,7 @@ static void print(void)
     printf("SIGN shared login format 2 %s\n", answerText(NativeBridge_signMessage(env, NULL, jascii(login), 2)));
     printf("SIGN shared empty format 0 %s\n", answerText(NativeBridge_signMessage(env, NULL, jascii(""), 0)));
     printf("SIGN site request %s\n", answerText(NativeBridge_signIdentityMessage(env, NULL, jascii(request), jascii(golden[0]), 0)));
+    printf("SIGN site login %s\n", answerText(NativeBridge_signIdentityMessage(env, NULL, jascii(login), jascii(loginCallback), 0)));
     printf("SIGN shared request %s\n", answerText(NativeBridge_signMessage(env, NULL, jascii(request), 0)));
     printf("SIGN site emoji %s\n", answerText(NativeBridge_signIdentityMessage(env, NULL, hostString(emoji, 7),
                                                                                 jascii("https://site.example/login"), 0)));

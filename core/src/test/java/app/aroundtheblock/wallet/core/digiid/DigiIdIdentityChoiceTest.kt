@@ -2,41 +2,56 @@ package app.aroundtheblock.wallet.core.digiid
 
 import android.util.Log
 import app.aroundtheblock.wallet.core.db.dao.DigiIdHistoryDao
+import app.aroundtheblock.wallet.core.db.entity.DigiIdHistoryEntity
 import app.aroundtheblock.wallet.core.model.DigiIdRequest
+import app.aroundtheblock.wallet.core.model.DigiIdResult
 import io.mockk.coEvery
+import io.mockk.coVerify
+import io.mockk.confirmVerified
 import io.mockk.every
+import io.mockk.just
 import io.mockk.mockk
 import io.mockk.mockkStatic
+import io.mockk.runs
 import io.mockk.unmockkStatic
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
+import okhttp3.Protocol
+import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
-import java.io.IOException
 
 /**
- * 4.1.2 row 16: a restored wallet has no Digi-ID history, so for a site with no successful login
- * on record the user picks the identity — per-site (the original DigiByte app) or the shared
- * m/0'/0/0 key (io.digibyte 3.x–4.0.76) — and the login signs with exactly that one. Where the
- * history already decides, the pick changes nothing.
+ * Which identity a login signs with, through DigiIdManager: Q4 A (Mark, 2026-11-10). The shared
+ * m/0'/0/0 key exactly for the hosts on IdentityKeyPolicy's list, the per-site key for every other
+ * host, whatever this phone's Digi-ID history holds. The history is written, never read.
+ *
+ * Through 4.1.4 there was a choice here: a restored wallet picked the identity for a site with no
+ * successful login on record (4.1.2 row 16), and a site with a shared-key login on record kept the
+ * shared key. Both are gone, so the same seed signs a site the same way on every device.
  */
 class DigiIdIdentityChoiceTest {
 
+    // The request digiid_core_kat holds the two identities of (sign_site_request).
     private val request = DigiIdRequest.parse("digiid://example.com/callback?x=abc123")!!
     private val dao = mockk<DigiIdHistoryDao>(relaxed = true)
     private val signedWith = mutableListOf<IdentityKeyKind>()
+    private val recorded = mutableListOf<DigiIdHistoryEntity>()
 
-    // Every request fails before it leaves: the tests only look at which key was used.
-    private val offline = OkHttpClient.Builder().addInterceptor { throw IOException("offline") }.build()
+    // Every request is answered here, without a network: the tests look at which key signed and what was written.
+    private val answering = OkHttpClient.Builder().addInterceptor { chain ->
+        Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK")
+            .body("".toResponseBody(null)).build()
+    }.build()
 
-    private fun manager(restored: Boolean = true) = DigiIdManager(
-        offline, dao, mockk(relaxed = true),
+    private fun manager() = DigiIdManager(
+        answering, dao, mockk(relaxed = true),
         sign = { _, kind -> signedWith += kind; "Daddr|c2ln" },
-        address = { _, kind -> if (kind == IdentityKeyKind.PER_SITE) "DperSite" else "Dshared" },
-        walletMayHaveHistoryElsewhere = { restored },
     )
 
     @Before fun setUp() {
@@ -46,49 +61,64 @@ class DigiIdIdentityChoiceTest {
         every { Log.w(any(), any<String>()) } returns 0
         every { Log.e(any(), any<String>()) } returns 0
         every { Log.e(any(), any<String>(), any()) } returns 0
+        coEvery { dao.insert(capture(recorded)) } just runs
     }
 
     @After fun tearDown() = unmockkStatic(Log::class)
 
-    private fun history(any: Int, legacy: Int) {
-        coEvery { dao.countSuccessful(any()) } returns any
-        coEvery { dao.countSuccessfulLegacy(any()) } returns legacy
+    @Test fun `a site that is not on the list signs with the per-site identity`() = runBlocking {
+        assertTrue(manager().authenticate(request) is DigiIdResult.Success)
+        assertEquals(listOf(IdentityKeyKind.PER_SITE), signedWith)
     }
 
-    @Test fun `no history offers both identities by address`() = runBlocking {
-        history(any = 0, legacy = 0)
-        assertEquals(DigiIdManager.IdentityChoice("DperSite", "Dshared"), manager().identityChoice(request))
-    }
+    /**
+     * The user impact Q4 A intends: a site that io.digibyte <= 4.0.76 signed in with the shared key
+     * (every site, then) gets its per-site identity from this release on, so the site sees a new user.
+     * The history saying so changes nothing, because nothing reads it: the login only writes its row.
+     */
+    @Test fun `a site with a shared-key login on record signs with its per-site identity`() = runBlocking {
+        every { dao.getHistory() } returns flowOf(
+            listOf(DigiIdHistoryEntity(domain = "example.com", callbackUrl = "https://example.com/callback",
+                address = "Dshared", timestamp = 1L, success = true, derivation = "legacy")),
+        )
 
-    @Test fun `the shared identity picked is the one signed with`() = runBlocking {
-        history(any = 0, legacy = 0)
-        manager().authenticate(request, IdentityKeyKind.LEGACY)
-        assertEquals(listOf(IdentityKeyKind.LEGACY), signedWith)
-    }
-
-    @Test fun `no pick signs with the per-site identity`() = runBlocking {
-        history(any = 0, legacy = 0)
         manager().authenticate(request)
+
         assertEquals(listOf(IdentityKeyKind.PER_SITE), signedWith)
+        coVerify(exactly = 1) { dao.insert(any()) }
+        confirmVerified(dao)
     }
 
-    @Test fun `a site with a per-site login on record offers no choice and ignores a pick`() = runBlocking {
-        history(any = 1, legacy = 0)
-        assertNull(manager().identityChoice(request))
-        manager().authenticate(request, IdentityKeyKind.LEGACY)
-        assertEquals(listOf(IdentityKeyKind.PER_SITE), signedWith)
+    @Test fun `the listed hosts sign with the shared identity`() = runBlocking {
+        for (uri in listOf(
+            "digiid://digiscope.me/api/digiid/callback?x=n",
+            "digiid://api.digiscope.me/api/auth/digiid/callback?x=n",
+            // The parse lower-cases the host, as iOS's does; the list is read against that.
+            "digiid://API.DigiScope.me/api/digiid/callback?x=n",
+        )) {
+            manager().authenticate(DigiIdRequest.parse(uri)!!)
+        }
+        assertEquals(List(3) { IdentityKeyKind.LEGACY }, signedWith)
     }
 
-    @Test fun `a locked wallet offers no choice`() = runBlocking {
-        history(any = 0, legacy = 0)
-        val locked = DigiIdManager(offline, dao, mockk(relaxed = true), sign = { _, _ -> null }, address = { _, _ -> null })
-        assertNull(locked.identityChoice(request))
+    @Test fun `a name under a listed host signs with its per-site identity`() = runBlocking {
+        for (uri in listOf("digiid://hub.digiscope.me/callback?x=n", "digiid://x.api.digiscope.me/callback?x=n")) {
+            manager().authenticate(DigiIdRequest.parse(uri)!!)
+        }
+        assertEquals(List(2) { IdentityKeyKind.PER_SITE }, signedWith)
     }
 
-    @Test fun `a wallet created here is offered no choice and a pick of the shared key is ignored`() = runBlocking {
-        history(any = 0, legacy = 0)
-        assertNull(manager(restored = false).identityChoice(request))
-        manager(restored = false).authenticate(request, IdentityKeyKind.LEGACY)
-        assertEquals(listOf(IdentityKeyKind.PER_SITE), signedWith)
+    /** The history's words for the two identities, which iOS records too (`DigiIdIdentity` raw values). */
+    @Test fun `each login records which identity signed it`() = runBlocking {
+        manager().authenticate(request)
+        manager().authenticate(DigiIdRequest.parse("digiid://digiscope.me/api/digiid/callback?x=n")!!)
+        assertEquals(listOf("site", "legacy"), recorded.map { it.derivation })
+        assertEquals(listOf("example.com", "digiscope.me"), recorded.map { it.domain })
+    }
+
+    @Test fun `a locked wallet signs nothing and records nothing`() = runBlocking {
+        val locked = DigiIdManager(answering, dao, mockk(relaxed = true), sign = { _, _ -> null })
+        assertTrue(locked.authenticate(request) is DigiIdResult.Error)
+        coVerify(exactly = 0) { dao.insert(any()) }
     }
 }

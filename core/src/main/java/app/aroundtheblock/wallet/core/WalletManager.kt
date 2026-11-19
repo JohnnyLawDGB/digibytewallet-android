@@ -240,13 +240,6 @@ class WalletManager @Suppress("LongParameterList") constructor(
     }
 
     /** Check if an encrypted seed exists on disk. */
-    /**
-     * False only for a wallet made on this device by "create": its seed has never signed a Digi-ID
-     * login anywhere, so it has no shared-key (m/0'/0/0) identity to recover and is never offered
-     * one (4.1.2 row 16). A restored wallet, or one whose record predates the origin field, may.
-     */
-    fun mayHaveDigiIdHistoryElsewhere(): Boolean = prefs.getString(KEY_ORIGIN, null) != ORIGIN_CREATED
-
     fun hasSavedWallet(): Boolean = holdsSeed(prefs)
 
     private fun holdsSeed(record: SharedPreferences): Boolean =

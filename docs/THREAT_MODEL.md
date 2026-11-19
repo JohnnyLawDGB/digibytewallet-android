@@ -218,14 +218,20 @@ Named explicitly so they don't go unfixed by being unspoken.
    reconnects. Residual: the fallback is still clearnet by design —
    a "Tor or nothing" mode does not exist.
 6. **Digi-ID identity: per-site since the key-isolation change**
-   (docs/specs/digiid-key-isolation.md). New domains get an unlinkable
+   (docs/specs/digiid-key-isolation.md). Every site gets an unlinkable
    SLIP-0013 identity (`m/13'/A'/B'/C'/D'` from the site's canonical
-   callback URI). The legacy shared `m/0'/0/0` key remains in use for
-   DigiScope domains (the Hub account is bound to it) and for domains
-   with a successful pre-change login (switching keys would lock the
-   user out of the site account bound to the old address). Residuals:
-   those grandfathered domains stay mutually linkable, and signatures
-   already published cannot be unpublished. Not key exposure: the
+   callback URI) except the two DigiScope hosts, `digiscope.me` and
+   `api.digiscope.me`, which keep the legacy shared `m/0'/0/0` key (the
+   Hub account is bound to it). That list is fixed and the same on every
+   device (owner decision Q4 A, 2026-11-10). A site's earlier shared-key
+   login in this phone's history no longer keeps it on that key, and a
+   restored wallet, or one set up before 4.1.2, is no longer offered
+   that key for a site it has not logged in to here (4.1.2 to 4.1.4
+   offered it). Either way, a site that knows the user by the shared
+   address sees a new user. Residuals: the two DigiScope hosts share one
+   identity, and shared-key signatures already published (io.digibyte
+   <= 4.0.76 used that key everywhere) stay linkable and cannot be
+   unpublished. Not key exposure: the
    `\x19DigiByte Signed Message:\n` prefix blocks sighash confusion,
    and an app-created wallet never funds `m/0'` or `m/13'`.
 7. **Block-request correlation.** In compact-filter mode (the only
