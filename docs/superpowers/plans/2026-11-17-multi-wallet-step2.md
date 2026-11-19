@@ -8,6 +8,9 @@
 > 94 rulings, **G1-G94**, over 122 conflicts; 8 conflicts dropped as not real; 1 duplicate
 > folded; 3 owner questions (O14-O16, in "Open for Mark"). The rulings, the dropped list and the
 > evidence are in `docs/superpowers/specs/2026-11-17-multi-wallet-step2-rulings.md`.
+> An independent review of the rulings on conflicts 58-133 (2026-11-19) returned 29 findings, all
+> upheld: 26 rulings were amended in place, three contradictions between rulings were resolved,
+> and one owner question was added (O17). The rulings file's "Reviewed" entry lists them.
 > **Where this plan's text and a ruling differ, the ruling wins.**
 > - Each affected task and section carries a "**Rulings:**" line. Read those rulings before the
 >   task's text.
@@ -56,7 +59,7 @@
 | `kt-core:` / `kt-core-test:` | `core/src/{main,test}/java/app/aroundtheblock/wallet/core/` |
 | `kt-core-at:` | `core/src/androidTest/java/app/aroundtheblock/wallet/core/` (compiled in CI, not run) |
 | `kt-app:` / `kt-app-test:` | `app/src/{main,test}/java/app/aroundtheblock/wallet/` |
-| `native-at:` | `native/src/androidTest/java/app/aroundtheblock/wallet/` (compiled in CI, not run) |
+| `native-at:` | `native/src/androidTest/java/app/aroundtheblock/wallet/` (not compiled in CI until A3 merges, and never run there: G19) |
 
 ## Rulings this plan builds on
 
@@ -86,7 +89,7 @@ This plan's own decisions are PD1-PD28, listed below. A1 records them, one line 
 
 ## Global Constraints
 
-**Rulings:** G1, G2, G3, G4, G5, G11, G26, G61
+**Rulings:** G1, G2, G3, G4, G5, G11, G26, G61, G76
 
 - **The core change is additive and one-wallet neutral.**
   - No public signature, struct, field order, enum value, constant or blob format that iOS builds against changes. G6 freezes them.
@@ -165,7 +168,7 @@ These are the failure modes most likely to reach a user that ordinary tests woul
 
 ## Lanes and hand-offs (R1)
 
-**Rulings:** G5, G6
+**Rulings:** G5, G6, G17
 
 **What this session builds** (R1, recorded with its date in the rulings file and the hand-off):
 - the core PRs C1-C15 in the core repo;
@@ -203,7 +206,7 @@ A1 records both readings in the rulings file beside R1, and the hand-off asks th
 
 ## Order against the work in flight
 
-**Rulings:** G7, G8, G9, G10, G11
+**Rulings:** G7, G8, G9, G10, G11, G22, G26, G76
 
 External gates (in flight elsewhere, not tasks here):
 
@@ -218,8 +221,9 @@ External gates (in flight elsewhere, not tasks here):
 
 Amended by the pre-flight rulings:
 - **X3 splits** (G10): X3a (Coinomi step 2 merged) blocks B1, B3, K3, K8 and the head of the registry queue; X3b (step 3 merged) blocks U3 and the strings cluster.
-- **T is the commit 4.1.5 is built from, with the outcome of Mark's #264 review on it**, not the train's landing (G11). Until T is fixed no step-2 core PR merges and no step-2 production slice or pin reaches `develop`; test-only Stage 1 gates are unaffected. K1-K3 wait for X6 with the [R8] tasks.
+- **T is the first commit on public `develop` that holds both the landed 4.1.5 train with the freeze lifted (X5 as written) and the outcome of Mark's #264 review** (G11, as amended by the review of 2026-11-19: the build commit can predate the landing and sit on no public branch, so it cannot be T). Until T is fixed no step-2 core PR merges and no step-2 production slice or pin reaches `develop`; test-only Stage 1 gates are unaffected. K1-K3 wait for X6 with the [R8] tasks.
 - **CKPT**, the checkpoint refresh, may interleave with any C track (G26).
+- **X5's sentence** "none of them runs alongside the train's changes" covers production slices and core merges only; a Stage 1 gate may merge before the cut after its private pre-cut check (G22).
 
 Already settled:
 - **#268 (Q4 A)** merged into `develop` on 2026-11-17 (`27cc9bf0e`), with `docs/handoffs/2026-11-17-android-q4a.md`. K3 and K8 build on it.
@@ -233,8 +237,8 @@ Same-file clusters (never two at once):
 - **`bridge:jni_wallet.c`, `jni_peer.c`, `jni_transaction.c`, `jni_wallet_sign.c`, `jni_bridge.h`** (G7): Coinomi step 2, X150, B1, B2, B3, B4, B5, B6, B7, E6, B8, B9. Never two open at once; among PRs that do not build on each other the order is readiness (G12), and an [R8] PR never holds the cluster: B5, B6, B7 and E6 may overtake B4; B8 may not.
 - **`kt-app:service/SyncService.kt`:** K1, K2, K5, K6, E2, B7's caller, E3, E4, E5, E6, E2b, E7, U2, U4.
 - **The 13 `strings_wallet.xml`:** whatever 4.1.5 changes there (X5), then Coinomi step 3, then L1, E3, E4, S3, U1, U2, U3, U4, U5, one at a time.
-- **Added by G9** (never two members open at once): `WalletManager.kt`: K0, then K2, B6, S1, S2, E2b, E4, U3. `HistoryRebuildOnUpgrade.kt` and `StaleDataWiper.kt`: K0, then K1. `TransactionBuilder.kt` and `SpendPreflightOrderTest`: B3, K4, B5. `AssetManager.kt`: B2, B3, K4, K5, K6. `host:scan_floor_kat`: K0, C12's companion, E4. `host:prepared_send_core_kat`: X150, then C13's companion. `AppNavigation.kt`: K2, K3, E2b. `UnlockScreen.kt`: K2, S2, E5. The `SyncService.kt` cluster gains K0 and K3.
-- **Added by G8:** `AppModule.kt`, `DigiScopeClient.kt`, `DigiIdManager.kt`, `HubIdentity.kt`, `ChatViewModel.kt`, `DigiIdViewModel.kt`: Coinomi steps 2-3, K3, K7, K8.
+- **Added by G9** (never two members open at once): `WalletManager.kt`: K0, then K2, B6, S1, S2, E2b, E4, U3. `HistoryRebuildOnUpgrade.kt` and `StaleDataWiper.kt`: K0, then K1. `TransactionBuilder.kt` and `SpendPreflightOrderTest`: B3, K4, B5. `AssetManager.kt`: B2, B3, K4, K5, K6. `host:scan_floor_kat`: K0, C12's companion, E4. `host:prepared_send_core_kat`: X150, then C13's companion. `AppNavigation.kt`: K2, K3, E2b. `UnlockScreen.kt`: K2, S2, E5. The `SyncService.kt` cluster gains K0 and K3. Added by the review of 2026-11-19, from the tasks' own Files lists: the `SyncService.kt` cluster also gains B2, B3, B6 and S2; `HistoryRebuildOnUpgrade.kt` is K0, then K1, E4; `StaleDataWiper.kt` is K0, then K1, E5.
+- **Added by G8:** `AppModule.kt`, `DigiScopeClient.kt`, `DigiIdManager.kt`, `HubIdentity.kt`, `ChatViewModel.kt`, `DigiIdViewModel.kt`: Coinomi step 2, K3, K7, K8. Coinomi step 3 joins this cluster only if its PR edits one of the six files (G8 and G10, as amended by the review).
 
 ## Registry PRs (rule 6)
 
@@ -274,11 +278,11 @@ Also his:
 - **X-HUB**, his ruling first;
 - **E2b**, only if he overrides D1.
 
-The open questions O1-O16 are listed at the end. O15 goes in the M2 packet and O16 in the M3 packet. One test decides whether a PR that touches the wipe is [R8] (G1). M2 does not gate stage 4's start (G7).
+The open questions O1-O17 are listed at the end. O15 goes in the M2 packet and O16 in the M3 packet; O17 (whether an allow-list edit to a seed or wipe gate is [R8]) goes in A1's digest, because B6 waits on it. One test decides whether a PR that touches the wipe is [R8] (G1). M2 does not gate stage 4's start (G7).
 
 ## Stages, target dates and exit checks
 
-**Rulings:** G7, G11, G14, G15, G93
+**Rulings:** G7, G11, G14, G15, G22, G93
 
 T is the 4.1.5 cut (X5), which is not known today. A1 writes these into `ROADMAP.md` with dates relative to T, and its follow-up writes absolute dates the day T is known. Mark sets or changes them: scope and target are his. A stage that passes its date by more than half its planned length goes back to him with what slipped, why, and a new date or a cut (`docs/development-process.md`, "An overrun stops for a re-plan").
 
@@ -381,6 +385,8 @@ The design leaves these to the builder, or the code required a choice. Each is a
 
 ## File Structure
 
+**Rulings:** G76 (the String keys table)
+
 **Created in the core repo** (header-only or inside existing files):
 
 | File | Responsibility | Task |
@@ -455,6 +461,8 @@ The existing `send_max`, the `KeystoreKeyInvalidated` message and the step-1 swi
 **Landing:** a docs PR from `feat/multi-wallet-step2` into `develop`. It carries the design amendment `e227b4e60` and this plan. It may land before the 4.1.5 cut, outside the landing-sync freeze. Not R8; not a registry PR; no pin.
 **Depends on:** none. Land it first: the names it reserves must be fixed before the 4.1.5 cut for X-ROLLBACK (c).
 
+**Status (review of 2026-11-19, G18).** PR #273 is this task's first PR together with A2's: it carries the design amendment, this plan and the rulings file, and nothing else. Still owed, in a second A1 PR (the records PR) that merges before any code task starts: the `CLAUDE.md` correction (G16: lines 76, 82 and 84), the hand-off file (G17), the `ROADMAP.md` item (G15), the rulings file's index of R1-R8, D1-D4 and the PDs, and when and where Mark gave each of R1-R8 (G18). #273 was opened ready for review, not as a draft; before it merges its body says what it carries and names the records PR.
+
 **Files:**
 - Create `docs/superpowers/specs/2026-11-17-multi-wallet-step2-rulings.md`:
   - R1-R8 and D1-D4 cited by ID, one line each, pointing at the design amendment;
@@ -494,7 +502,7 @@ The existing `send_max`, the `KeystoreKeyInvalidated` message and the step-1 swi
 
 Step 1's scan found 32 defects in its plan (F1-F32). This one does the same for step 2.
 
-**Status: done by the pre-flight scan of 2026-11-19.** 134 conflicts, 94 rulings (G1-G94, not "S2-F"), 8 dropped, 2 duplicates, 3 owner questions (O14-O16); see the banner at the top and the rulings file. Steps 1 and 2 are done by that scan, with five area scanners in place of one reviewer and skeptics on conflicts 0-57. Step 3 is still owed: the rulings ride A1's PR (G18), whose independent reviewer also checks each ruling against its cited lines, first of all the rulings on conflicts 58-133, which no skeptic judged.
+**Status: done by the pre-flight scan of 2026-11-19.** 134 conflicts, 94 rulings (G1-G94, not "S2-F"), 8 dropped, 1 duplicate, 3 owner questions (O14-O16); see the banner at the top and the rulings file. Steps 1 and 2 are done by that scan, with five area scanners in place of one reviewer and skeptics on conflicts 0-57. Step 3: the rulings ride PR #273 with A1's first part (G18). Its independent review of the rulings on conflicts 58-133, which no skeptic had judged, ran on 2026-11-19 against the merged head (c72ad23fa, core d636eb5) and returned 29 findings (13 medium, 16 low; two repeat another). Each was re-checked against its cited source and all 29 were upheld: 26 rulings are amended in place, each marked "Amended by the review" where its rule changed (G1, G2, G3, G8, G9, G10, G11, G16, G17, G18, G19, G22, G26, G27, G29, G52, G56, G63, G64, G69, G76, G79, G81, G86, G93, G94); three contradictions between rulings are resolved (G27 against G3, G29 against G27, G8 against G10); the stale code-line cites are covered by a note in the Evidence header; and one finding needs Mark and is O17. No ruling was withdrawn and none of R1-R8 or D1-D4 was touched. Still owed in step 3: the merge of #273, after its body names what it carries (see A1's status), and A1's records PR.
 
 - [x] **Step 1: Brief a reviewer agent** with no part in writing this plan. Give it:
   - the goal;
@@ -772,10 +780,10 @@ Not covered by R6. Removing a wallet that is not active revokes its session. Rem
 
 **Rulings:** G26
 
-**Landing:** a core PR that regenerates both checkpoint tables, whenever `checkpoint_staleness_kat`'s 14-day warning shows (the current table turns red on 2026-12-02). Its pin move rides the open companion, or its own pin PR when none is open (rule 8). Not R8.
+**Landing:** a core PR that regenerates both checkpoint tables. Amended by the review of 2026-11-19 (G26): it is due when a new grid row becomes addable (the chain tip at least 100,000 above the newest row: 24,600,000 for today's table) and never later than 7 days before the red date (2026-11-25; the current table turns red on 2026-12-02), not when `checkpoint_staleness_kat`'s 14-day warning shows, which can show right after a refresh. The generator's default target is the VPS, which this session cannot reach: Mark runs the one command the lead hands him, or it runs against a local node. Its pin move rides the open companion, or its own pin PR when none is open (rule 8). Not R8.
 **Depends on:** none. It may interleave with any C track: Core landing step 5 excepts it.
 
-- [ ] The same day, sync `develop` into the integration branch and merge that into every open PR branch. The 4.1.5 train's refresh counts as the first.
+- [ ] The day its pin PR merges, sync `develop` into the integration branch and merge that into every open PR branch. The 4.1.5 train's refresh counts as the first.
 
 ## Stage 2: the core (R1: this session; core repo; one pin+KAT PR per core PR)
 
@@ -785,7 +793,7 @@ All C tasks merge after X1 and X5 (O4: Mark may relax X5 for neutral PRs). Their
 
 ### Task C1: The versioned wallet key record, and key equality [R8 · M1]
 
-**Rulings:** G44
+**Rulings:** G17, G44
 
 **Landing:** core landing. **[R8]:** waits for Mark at merge, because it fixes the format of key material at rest (R4); batch M1 with S1; after X6. A pure header, built alongside the `BRPeerManager.c` track.
 **Depends on:** X1, G6.
@@ -1267,7 +1275,7 @@ Scope of each reason:
 
 ### Task C12: "Rescan this wallet" and "Repair the chain" as new rebuild sequences
 
-**Rulings:** G3, G9, G38, G43
+**Rulings:** G3, G9, G27, G38, G43
 
 **Landing:** core landing; `BRPeerManager.c` track (for the comment and the white-box case). E4 adopts it. Not R8.
 **Depends on:** C10, C11.
@@ -2116,7 +2124,7 @@ Today a worker catch-up after the service has died persists only the active wall
 **Landing:** its own registry PR, after the C1 pin and B3. [R8 · M1].
 **Depends on:** the C1 pin, B3.
 
-- [ ] `deriveWalletKeys(phrase, passphrase, accounts)` alone, stateless, in `jni_derive.c`; accounts are refused until B9. It also returns SHA-256 of the 64-byte seed it derived from, computed in the same call (G79). The "derived record equals C1's" case and the `seed_buffer_ownership_kat` pattern move here from B8. S1 depends on this task; B8 keeps `openWatchOnly`, `activateWallet` and `deactivateWallet`.
+- [ ] `deriveWalletKeys(phrase, passphrase, accounts)` alone, stateless, in `jni_derive.c`; accounts are refused until B9. It also returns SHA-256 of the 64-byte seed it derived from, computed in the same call (G79); its case 'the returned fingerprint is the derived seed's' lives in the suite this PR creates, `host:derive_wallet_keys_kat/`, not in B8's `seed_activate_kat`. The "derived record equals C1's" case and the `seed_buffer_ownership_kat` pattern move here from B8. S1 depends on this task; B8 keeps `openWatchOnly`, `activateWallet` and `deactivateWallet`.
 
 ### Task S1: The wallet key record at rest (R4) [R8 · M1]
 
@@ -2268,6 +2276,10 @@ The switch, in order:
 7. Swap the session: the generation and `registry.setActive` together. Revoke the seed-view pass, update the notification, and start the dwell before deferred server work (K5).
 
 If anything fails: no seed is resident, and B shows watch-only with "Unlock to send". The engine is never rebuilt.
+
+Amended by the rulings (review of 2026-11-19):
+- **O16, option (a), until Mark answers it:** while `pinManager.isWipePending()` the switch takes step 1's path, `setActive(B)` and AppRestart, with nothing decrypted in-process. It is a second restart reason beside D2's latch (G86 step 1). `SwitchSeedOrderTest` adds 'a pending wipe decrypts nothing in-process: the switch restarts'.
+- **A no-record B whose activation fails** (G86, G81): a wallet with no key record cannot be shown watch-only. When the decrypt or the activation fails for it, the session is not swapped: A stays active and shown, with no seed resident. `SwitchSeedOrderTest` adds 'a declined prompt on a no-record wallet leaves A active and shown, with no seed resident'.
 
 - [ ] **Step 1: Write the failing tests.**
   - **`SwitchSeedOrderTest`:**
@@ -2428,7 +2440,7 @@ Each row reads its own wallet's handle, and shows its balance and one of: synced
 **Landing:** the integration branch. Not R8.
 **Depends on:** S3.
 
-Edited by G93: this task no longer waits for Mark's answer to O6. `SpendAuth`'s prompt carries `spend_auth_from_wallet` ("From %1$s") at every spend-class call site (PD23), in all 13 locales. Whether the Send, asset send, DigiDollar send, Digi-ID, Recover funds and Hub sign-in screens name the wallet too is O6, and that part is U5b. An instant switch makes sending from the wrong wallet easier.
+Edited by G93: this task no longer waits for Mark's answer to O6. `SpendAuth`'s prompt carries `spend_auth_from_wallet` ("From %1$s") at every spend-class call site (PD23), in all 13 locales. Not every `SpendAuth` call site is one (G93, as amended by the review of 2026-11-19): the label is absent from the removal prompt in Manage wallets, from node pairing and from the switch prompt, and the test asserts that too. Whether the Send, asset send, DigiDollar send, Digi-ID, Recover funds and Hub sign-in screens name the wallet too is O6, and that part is U5b. An instant switch makes sending from the wrong wallet easier.
 
 - [ ] Build the prompt naming, with a test that every spend-class prompt names the active wallet, and the locale gates.
 
@@ -2684,6 +2696,12 @@ Added by the pre-flight scan (2026-11-19):
 - **O16** (conflict 87; S3, in the M3 packet) While a PIN-failure wipe is owed and could not complete (pin_wipe_pending set, the unlock screen stood down, the wallet opened with its PIN), what does a wallet switch do? In step 1 every switch restarted, so the launch backstop (MainActivity.kt:151-157) and the unlock screen's hold (UnlockScreen.kt:144, :207) retried the wipe before another wallet opened. The in-process switch (S3) passes neither.
   - Options: (a) While a wipe is owed the switch takes step 1's path: setActive(B) and AppRestart, nothing decrypted in-process. This is a second restart reason beside D2's latch. (b) Refuse the switch until the wipe is no longer owed: on a device whose wipe keeps failing, the other wallets cannot be opened. (c) Proceed in-process behind the switch PIN, as the plan is written: the wipe is retried only at launches and unlock-screen entries.
   - Recommended: (a). It keeps step 1's behaviour exactly on CRITICAL-1's path and never strands a wallet. S3 is written with (a) and cannot merge before his M3 answer; the question goes in the M3 packet, and SwitchSeedOrderTest adds 'a pending wipe decrypts nothing in-process: the switch restarts'.
+
+Added by the independent review of the rulings (2026-11-19):
+
+- **O17** (conflict 119; G1, B6, E3; in A1's digest) G1 decides [R8] for a PR that touches the wipe by one test: it changes what the wipe or a removal erases of seed, key or PIN material, or the wipe's native steps that `WipeNativeStepsGateTest` pins. Conflict 119 also proposed a third trigger, an edit to a seed or wipe gate's allow-list, and G1 left it out. B6 needs such an edit (the detach native) and makes the wipe's quiesce stop every sync context, and is "Not R8" on that reading of his rule (`docs/development-process.md:54-56`). Does G1's two-part test stand, or is an allow-list edit to a seed or wipe gate [R8] too?
+  - Options: (a) The third trigger applies: an allow-list edit to a seed or wipe gate is [R8]; B6's entry lands as its own small [R8] PR ahead of B6, so B6 itself does not wait. (b) G1's test stands as written: B6 and E3 are not [R8] while the pinned quiesce order is unedited. (c) B6 as a whole is [R8].
+  - Recommended: (a). It costs one small PR and keeps every loosening of a seed or wipe gate in front of him. Until he answers, (a) is what the plan does.
 
 Answered by a ruling: none. No ruling settles an existing question, because each is Mark's. Four are changed in scope:
 

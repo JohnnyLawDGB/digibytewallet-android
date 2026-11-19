@@ -166,8 +166,9 @@ disagrees, this section wins.
    (`WalletRemoval`).
 9. **Outside this file, `CLAUDE.md` says the rescan pins the priority peer through
    `BRPeerManagerSetFixedPeer`.** No production code calls it, and the bridge's own comment in
-   `bridge_syncStopped` says not to. A1's docs PR corrects `CLAUDE.md` on `develop` now (G16);
-   the first step-2 PR that changes the rebuild corrects only what step 2 changes.
+   `bridge_syncStopped` says not to. A1's records PR, its second docs PR, corrects `CLAUDE.md` on
+   `develop` before any code task starts (G16, G18); the first step-2 PR that changes the rebuild
+   corrects only what step 2 changes.
 
 ### Server work for a wallet that is not active (R6)
 
