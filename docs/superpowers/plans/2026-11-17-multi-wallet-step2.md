@@ -11,6 +11,11 @@
 > An independent review of the rulings on conflicts 58-133 (2026-11-19) returned 29 findings, all
 > upheld: 26 rulings were amended in place, three contradictions between rulings were resolved,
 > and one owner question was added (O17). The rulings file's "Reviewed" entry lists them.
+> Two owner answers of 2026-11-19 then added two rulings: **G95** (O2: removing the active wallet
+> revokes its Hub session; task X-HUB is built) and **G96** (O7: the shared chain lives under the
+> legacy wallet's 4.1.4 names, which reverses PD13's names and its migration). Each task G96
+> changes carries an "**Amended by O7**" note. Four points G96 leaves to be designed are listed in
+> the ruling and in task E1; none is decided in this plan. Of O1-O17 only O9 is open.
 > **Where this plan's text and a ruling differ, the ruling wins.**
 > - Each affected task and section carries a "**Rulings:**" line. Read those rulings before the
 >   task's text.
@@ -89,7 +94,7 @@ This plan's own decisions are PD1-PD28, listed below. A1 records them, one line 
 
 ## Global Constraints
 
-**Rulings:** G1, G2, G3, G4, G5, G11, G26, G61, G76
+**Rulings:** G1, G2, G3, G4, G5, G11, G26, G61, G76, G96
 
 - **The core change is additive and one-wallet neutral.**
   - No public signature, struct, field order, enum value, constant or blob format that iOS builds against changes. G6 freezes them.
@@ -110,6 +115,7 @@ This plan's own decisions are PD1-PD28, listed below. A1 records them, one line 
   - Lifetime as R5.
 - **The shared chain is never deleted for one wallet.** No removal deletes it (legacy's included), and neither does a rescan or a per-wallet recovery reason. Only the full wipe and a chain-scoped recovery reason do (C11).
 - **The legacy wallet keeps every 4.1.4 name.** Step 2 only adds names, from A1's reserved list. No Room schema change.
+  - **Amended by O7 (2026-11-19, G96):** the shared chain itself lives under legacy's 4.1.4 chain names (PD13). Step 2 adds no chain file and no chain prefs file, and a 4.1.4 upgrade moves no file. So a per-wallet clear, a rescan, a hand-off or the removal of legacy must leave those files and keys in place; only the full wipe and a chain-scoped recovery reason erase them.
 - **No address set leaves the device by default.** A native that reveals addresses answers for one wallet, never for the union. While a wallet is not active, nothing is sent to a server for it (K5).
 - **Every new or changed user-facing string ships in all 13 locales of `AppLocale.SUPPORTED` in the same commit**, under `values*/strings_wallet.xml`. Every screen that gains text is added to `OnboardingHardcodedStringTest.COVERED`.
 - **Process.**
@@ -135,7 +141,7 @@ This plan's own decisions are PD1-PD28, listed below. A1 records them, one line 
 
 ## Review Focus
 
-**Rulings:** G61, G72, G75
+**Rulings:** G61, G72, G75, G96
 
 These are the failure modes most likely to reach a user that ordinary tests would not exercise. Each has a named test in the task that owns it.
 
@@ -147,6 +153,7 @@ These are the failure modes most likely to reach a user that ordinary tests woul
    - C11's `CF_RECOVERY_WALLET_RESET_SHARED_UNFIXED`.
    - E1's `WalletRemovalTest`: `removing legacy keeps the shared chain`.
    - E4's `RebuildSplitTest`.
+   - Since G96 the shared chain is the legacy wallet's own 4.1.4 files, so the nearest way to this failure is a clear, rescan, hand-off or removal of legacy that still treats them as legacy's. Today `clearSyncData` clears the whole of `dgb_sync_data<net>` and deletes all three files (`kt-core:WalletManager.kt:1854-1855`, `:1866`, `:1874-1875`). K0's and E1's legacy cases.
 3. **The shared ledger is persisted ahead of an attached wallet's saved history.** After a crash, a receive is silently missed. E2's `SharedLedgerCheckpointGateTest`, red on `develop`'s single-wallet gate.
 4. **A wallet attaches at the shared frontier after the ledger moved on without it.** The heights in between are never evaluated for it. E2's `FrontierRecordTest`: `a wallet not attached this session rejoins at its own frontier and the receive in between is found`. Red arm: attach at the shared frontier (PD14).
 5. **A hand-off with no rewind, past a hole, or across a fork.** C9's arms and C10's `band_handoff_engine_kat`: `a payment at a height in (F, requestedThrough] is found only with the rewind`.
@@ -261,7 +268,7 @@ Amended by the pre-flight rulings: the slot goes by readiness, not by the list's
 
 ## What waits for Mark
 
-**Rulings:** G1, G7, G78
+**Rulings:** G1, G7, G78, G95, G96
 
 **[R8] batches**, each put to him as one packet with a summary. M1 goes first, because E2b waits on it:
 
@@ -274,15 +281,15 @@ Amended by the pre-flight rulings: the slot goes by readiness, not by the list's
 
 Also his:
 - **V3**, the merge of the integration branch into `develop`, which makes step 2 the next release's content;
-- **X-ROLLBACK (c)**, if adopted: a 4.1.5 wipe change;
-- **X-HUB**, his ruling first;
+- **X-ROLLBACK (c)**, adopted (O10) and narrowed by G96 to the key-record names: a 4.1.5 wipe change;
+- **X-HUB**: ruled (O2, G95) and not [R8]. Nothing of it waits for him, unless its PR has to edit a seed or wipe gate;
 - **E2b**, only if he overrides D1.
 
-The open questions O1-O17 are listed at the end. O15 goes in the M2 packet and O16 in the M3 packet; O17 (whether an allow-list edit to a seed or wipe gate is [R8]) goes in A1's digest, because B6 waits on it. One test decides whether a PR that touches the wipe is [R8] (G1). M2 does not gate stage 4's start (G7).
+The open questions O1-O17 are listed at the end; after 2026-11-19 only O9 is open. O15 goes in the M2 packet and O16 in the M3 packet; O17 (whether an allow-list edit to a seed or wipe gate is [R8]) goes in A1's digest, because B6 waits on it. One test decides whether a PR that touches the wipe is [R8] (G1). M2 does not gate stage 4's start (G7).
 
 ## Stages, target dates and exit checks
 
-**Rulings:** G7, G11, G14, G15, G22, G93
+**Rulings:** G7, G11, G14, G15, G22, G93, G95
 
 T is the 4.1.5 cut (X5), which is not known today. A1 writes these into `ROADMAP.md` with dates relative to T, and its follow-up writes absolute dates the day T is known. Mark sets or changes them: scope and target are his. A stage that passes its date by more than half its planned length goes back to him with what slipped, why, and a new date or a cut (`docs/development-process.md`, "An overrun stops for a re-plan").
 
@@ -292,7 +299,7 @@ T is the 4.1.5 cut (X5), which is not known today. A1 writes these into `ROADMAP
 | 1 Gates | G1-G6 | 2026-11-18 | 7 working days | 2026-11-27, or the day the landing-sync freeze starts if sooner | G1-G6 merged on `develop`, every red arm's run pasted in its PR, core `develop`'s next push run green with them |
 | 2 Core | C1-C15 | T (branches from 2026-11-18) | 20 working days | T+20 | every C PR merged on core `develop` and its pin+KAT PR on Android `develop`; G6 green; the white-box suites' assertions unedited; hand-off status lines complete; M1 put to Mark |
 | 3 Android, neutral | X150, B1-B5, K0-K8 | T | 20 working days | T+20 | merged on `develop`; full suites and every KAT shard green; with one session, behaviour unchanged (each reviewer checks); M2 put to Mark |
-| 4 Integration | B6-B9, E1-E7, E2b, S1-S3, U1-U5, X-ROLLBACK (a) | T+10 | 25 working days | T+35 | merged on the integration branch with green CI and passed reviews; M1-M4 approved |
+| 4 Integration | B6-B9, E1-E7, E2b, S1-S3, U1-U5, X-ROLLBACK (a), X-HUB (G95) | T+10 | 25 working days | T+35 | merged on the integration branch with green CI and passed reviews; M1-M4 approved |
 | 5 Verify and merge | V1-V3 | T+35 | 5 working days | T+40 | V1 recorded on the Note 8 and the Moto G 5G, and on the API 28/33/34/35 emulators; the pre-publish suite passes; V3 merged |
 
 Amended by the pre-flight rulings: T is defined by G11 (see "Order against the work in flight"). Stage 1 and Stage 2 branches start the day A2 merges, Stage 0's CI proof runs on a probe branch, and no target date is written into `ROADMAP.md` before Mark answers O11 (G14). Step-2 merges pause during each train's landing-sync freeze and the stage dates move by the freeze's length (O14). Acceptance rows 2, 7, 8 and 11 change as G75 and G27 say.
@@ -323,7 +330,7 @@ The design's test plan (`2026-11-16-multi-wallet-design.md`, "Left to the builde
 
 ## Decisions this plan takes (PD1-PD28)
 
-**Rulings:** G12, G20, G30, G31, G32, G36, G37, G38, G41, G42, G49, G65, G68, G69, G72, G80, G81, G84, G85, G86, G93
+**Rulings:** G12, G20, G30, G31, G32, G36, G37, G38, G41, G42, G49, G65, G68, G69, G72, G80, G81, G84, G85, G86, G93, G96
 
 The design leaves these to the builder, or the code required a choice. Each is a default the owner may override. A1 records them by number.
 
@@ -346,12 +353,13 @@ The design leaves these to the builder, or the code required a choice. Each is a
 - **PD10** The post-reorg height lag (`core:BRPeerManager.c:4693`; `wallet->blockHeight` stays at the join until the next block) stays as today. Changing it changes one-wallet results and would need both pins.
 - **PD11 The integration branch** is `integration/multi-wallet-step2`. It is created from `develop` at the 4.1.5 cut, made CI-enabled by A3, merged with `develop` at least weekly and before every registry PR, and merged into `develop` once (V3). The alternative, a stack of PRs into `develop` merged in one sitting, is O3. **Amended by G12:** each sync of `develop` into it is a merge-only PR (conflict resolution only, CI green, a review of the resolutions).
 - **PD12** When the device lock is removed, every `_v2` key is invalidated and spending needs each wallet's phrase. The unbound key records stay, so balances keep showing. Open for Mark (O5).
-- **PD13 Shared chain names and the migration.**
-  - The shared chain gets new NETWORK-scoped names (A1's list).
-  - The migration seeds it from the step-1 chain with the highest verified saved tip. It uses a hard link, which is safe because `DurableFile` writes through tmp+rename, so the names diverge at the first write. It falls back to a copy, and reads the result back.
-  - Each wallet's step-1 chain stores become its band files until its hand-off is durable, and are deleted then. Its abandonment record stays.
-  - The alternative layout, the shared chain under legacy's 4.1.4 names, is O7, with its costs.
-  - **Amended by G69 and G38:** "verified" means the candidate passes today's restore preflight (a tie goes to the active wallet); a hand-off also removes the wallet's own chain keys from its `dgb_sync_data`.
+- **PD13 Shared chain names and the migration. Reversed by O7 (Mark, 2026-11-19; G96).**
+  - The shared chain lives under the legacy wallet's 4.1.4 names, per network: the files `saved_blocks<net>.bin`, `saved_filter_headers<net>.bin` and `saved_cf_ledger<net>.bin`, and the chain keys in `dgb_sync_data<net>`. These are the names `WalletStores` resolves for the legacy scope (`kt-core:wallets/WalletStores.kt:16-17`, `:51-54`; `kt-core:wallets/WalletScope.kt:45-52`), and they are the shared chain's whether or not a legacy wallet exists on the device.
+  - The migration moves, links, copies and renames nothing. Legacy's chain is the shared chain as it stands, when it passes today's restore preflight (G69's test, applied to legacy's chain alone). No other wallet's chain is ranked against it, even one that is ahead.
+  - Every other wallet's step-1 chain stores become its band files until its hand-off is durable, and are deleted then, with its own chain keys (G38). Its abandonment record stays. A hand-off never deletes anything under legacy's names.
+  - **Withdrawn:** "new NETWORK-scoped names (A1's list)", the seed "from the step-1 chain with the highest verified saved tip", the hard link and its copy fallback, and G69's ranking of candidates.
+  - **Accepted costs (Mark, 2026-11-19):** the chain starts from legacy's even when another wallet is ahead; on a rollback build legacy reads a ledger that was evaluated while it was not attached, so it can miss receives until it is rescanned; removal, the eraser and every per-wallet clear treat legacy's chain names specially.
+  - **To be designed, not decided here** (G96; E1's note has the detail): the names of legacy's own band files; which keys of `dgb_sync_data<net>` are the chain's and which are legacy's; what the chain starts from when legacy's names hold none that passes; one store target per file.
 - **PD14 Frontier records.**
   - Every READY wallet has a durable frontier per network in the registry: the lowest height not yet proven evaluated for it, with the main-chain hash below it.
   - The record is raised only while the wallet is attached: at a hand-off, and after each durable shared-ledger persist.
@@ -385,7 +393,7 @@ The design leaves these to the builder, or the code required a choice. Each is a
 
 ## File Structure
 
-**Rulings:** G76 (the String keys table)
+**Rulings:** G76 (the String keys table), G96 (`ChainMigration.kt`)
 
 **Created in the core repo** (header-only or inside existing files):
 
@@ -407,7 +415,7 @@ Modified in the core: `BRPeerManager.h/.c` (C3-C8, C10, C12's comment), `BRWalle
 | `kt-app:session/WalletSessions.kt`, `WalletSession.kt` | One session per READY wallet; active session and generation | K3 |
 | `kt-core:sync/ServerWorkGate.kt` | R6: may this session send? | K5 |
 | `kt-app:WebViewProcessLatch.kt` | D2 latch | K8 |
-| `kt-core:wallets/ChainMigration.kt` | Step-1 to step-2 migration | E1 |
+| `kt-core:wallets/ChainMigration.kt` | Step-1 to step-2 migration: each wallet's frontier record. It moves no chain file (G96) | E1 |
 | `kt-app:service/BandScheduler.kt`, `BandHandoffExecutor.kt` | Band order, cap and preemption; the hand-off steps | E3 |
 | `kt-core:sync/EnginePersistence.kt` | Process-level save sink for `SyncService` and `SyncWorker` | E6 |
 | `kt-core:wallets/WalletKeyRecordStore.kt` | R4 record at rest | S1 |
@@ -456,7 +464,7 @@ The existing `send_max`, the `KeystoreKeyInvalidated` message and the step-1 swi
 
 ### Task A1: Land the plan, the rulings file, the core hand-off and the ROADMAP item
 
-**Rulings:** G3, G4, G5, G6, G13, G14, G15, G16, G17, G18, G30, G48
+**Rulings:** G3, G4, G5, G6, G13, G14, G15, G16, G17, G18, G30, G48, G96
 
 **Landing:** a docs PR from `feat/multi-wallet-step2` into `develop`. It carries the design amendment `e227b4e60` and this plan. It may land before the 4.1.5 cut, outside the landing-sync freeze. Not R8; not a registry PR; no pin.
 **Depends on:** none. Land it first: the names it reserves must be fixed before the 4.1.5 cut for X-ROLLBACK (c).
@@ -475,8 +483,8 @@ The existing `send_max`, the `KeystoreKeyInvalidated` message and the step-1 swi
 - This plan.
 
 **Names reserved here.** This is the one copy; E1, S1 and X-ROLLBACK use it.
-- Files: `chain_saved_blocks<net>.bin`, `chain_filter_headers<net>.bin`, `chain_cf_ledger<net>.bin`, each with its `.bin.tmp`. `<net>` is `storageSuffix(scope, NETWORK)`.
-- Prefs file `dgb_chain<net>`. It holds `saved_blocks_tip`, `last_chain_tip`, `sync_start_height`, `chain_synced`, `saved_peers` and `saved_peer_penalties`.
+- **Amended by O7 (2026-11-19, G96): no chain name is reserved.** The two lines that stood here are withdrawn: the files `chain_saved_blocks<net>.bin`, `chain_filter_headers<net>.bin` and `chain_cf_ledger<net>.bin`, and the prefs file `dgb_chain<net>`. No step-2 build writes them. The shared chain uses legacy's 4.1.4 names (PD13): `saved_blocks<net>.bin`, `saved_filter_headers<net>.bin`, `saved_cf_ledger<net>.bin`, and in `dgb_sync_data<net>` the keys `saved_blocks_tip`, `last_chain_tip`, `sync_start_height`, `saved_peers` and `saved_peer_penalties`. The one new chain key, `chain_synced`, is a key in that same file, not a new file.
+- **Not reserved yet, and time-sensitive.** If legacy's own band files need names that 4.1.4 never wrote (G96's first open point), they are added to this list before the 4.1.5 cut. Otherwise 4.1.5's wipe does not know them (O10).
 - Prefs base `dgb_wallet_keys` (WALLET class: legacy `dgb_wallet_keys`, others `dgb_wallet_keys_<id>`).
 - Alias `dgb_wallet_keys_wrap`.
 - Registry fields `frontier`, `holder`, `band` (per entry and network) and `chainMigration` (per network). `"v"` stays `1`.
@@ -491,7 +499,7 @@ The existing `send_max`, the `KeystoreKeyInvalidated` message and the step-1 swi
   - every cited line against the design amendment, `develop` and core `fc35768`;
   - that every PD has a task that implements it, and every task's dependencies exist;
   - that the ROADMAP item names the tests and device checks that will mark it done.
-- [ ] **Step 5: Merge** on green CI and a passed review. Put to Mark in the digest: O3, O4, O7, O8, O10 (time-sensitive: before the 4.1.5 cut) and O11.
+- [ ] **Step 5: Merge** on green CI and a passed review. Put to Mark in the digest: O3, O4, O7, O8, O10 (time-sensitive: before the 4.1.5 cut) and O11. (He answered all six on 2026-11-19; see "Open for Mark".)
 
 ### Task A2: Pre-flight conflict scan, before any code
 
@@ -746,35 +754,58 @@ Both KATs test hand-copied mirrors of `jni_peer.c`'s `startSync`, `loadSavedBloc
 
 ### Task X-ROLLBACK: A pulled step-2 release leaves no wrong balance and no orphaned key material
 
-**Rulings:** G1, G25, G38, G68
+**Rulings:** G1, G25, G38, G68, G96
 
 **Landing:** in three parts.
 - (a) Tests on the integration branch, with E1.
 - (b) The device check, in V1.
-- (c) Only on Mark's yes (O10): a 4.1.5 step-1 gap PR before the cut. It is a wipe change, so **[R8]**, and a 4.1.5 scope addition (R7).
+- (c) Only on Mark's yes (O10; given on 2026-11-19): a 4.1.5 step-1 gap PR before the cut. It is a wipe change, so **[R8]**, and a 4.1.5 scope addition (R7).
 
 **Depends on:** A1 (names), E1, S1.
 
 Play cannot downgrade, so a pulled release is replaced by a higher `versionCode` built from older code. That code then reads a step-2 layout.
 
+**Amended by O7 (2026-11-19, G96).** With the shared chain under legacy's names, this task's title no longer holds for the legacy wallet on a rollback build: it can show a balance that misses receives until it is rescanned. Mark was shown that cost and accepted it; in his words, a rollback that loses sync progress and needs a rescan "is fine". Steps 3 and 4 are rewritten for it. Nothing is built to detect a rollback, or to rescan legacy without the user.
+
 - [ ] **Step 1 (a): Registry.** Write `kt-core-test:wallets/RegistryForwardCompatTest.kt`. Every key and type that `git show v4.1.5:core/src/main/java/app/aroundtheblock/wallet/core/wallets/WalletRegistry.kt` reads keeps its name, type and meaning in a step-2 registry, and `"v"` stays `1`. The keys are copied as literals from that source, as `LegacyStoreNameParityTest` copies 4.1.4's.
 - [ ] **Step 2 (a): Layout fixture.** Commit `core/src/test/resources/step2-layout.txt`, listing every name a step-2 install holds (dummy values). V1 uses it.
 - [ ] **Step 3 (b): Document** what a rollback build (4.1.5 code, with a bumped `versionCode`) does with a step-2 layout. Write it in the rulings file and the hand-off:
-  - each wallet re-syncs from its birth, because its chain files are gone after its hand-off. Funds are not lost, and no wallet reads a ledger that was evaluated without it. That is why PD13 does not share legacy's names;
-  - the shared chain files, the key records and `dgb_wallet_keys_wrap` are orphaned;
-  - a 4.1.5 wipe leaves them behind.
-- [ ] **Step 4 (c), on Mark's yes:** 4.1.5's full wipe also erases the reserved step-2 names if they exist: `chain_*` files, `dgb_chain*`, `dgb_wallet_keys*` and the alias `dgb_wallet_keys_wrap`. `WalletWipeEveryWalletTest` reads them back. A step-1 gap PR, [R8].
+  - every wallet but legacy re-syncs from its birth, because its chain files and chain keys are gone after its hand-off (G38). Funds are not lost;
+  - legacy reads the shared chain as its own, because it is under legacy's names. Where the shared ledger advanced while legacy was not attached (no key record yet, a band of its own, a process the PIN had not unlocked), legacy misses the receives at those heights until the user runs 4.1.5's "Full rebuild from chain". This is O7's accepted cost; the record says that the release body of any rollback build must tell users to run it;
+  - with no legacy wallet on the device, nothing reads the files under legacy's names;
+  - the shared chain is not orphaned: every wipe since 4.1.4 erases legacy's names on both networks, legacy listed or not (`kt-core:WalletManager.kt:1149-1159`; `kt-core:WalletDataEraser.kt:239`, `:257`, `:262`, `:267`);
+  - the key records and `dgb_wallet_keys_wrap` are orphaned, and a 4.1.5 wipe leaves them behind unless (c) shipped.
+- [ ] **Step 4 (c), on Mark's yes (given, O10):** 4.1.5's full wipe also erases the reserved step-2 names if they exist. **Amended by O7 (G96):** those are now `dgb_wallet_keys*` and the alias `dgb_wallet_keys_wrap` only. `chain_*` files and `dgb_chain*` leave the list, because no step-2 build writes them. Any name reserved later for legacy's own band files (A1) joins it if it is fixed before the cut. `WalletWipeEveryWalletTest` reads them back. A step-1 gap PR, [R8].
 
-### Task X-HUB: Hub revokes on removal and on the wipe (waits for Mark's ruling, O2)
+### Task X-HUB: Removing the active wallet revokes its Hub session (ruled by Mark, O2; G95)
 
-**Rulings:** G1
+**Rulings:** G1, G95
 
-**Landing:** the integration branch, or `develop` if Mark wants it in a step-1 release. It is R8 if it changes the wipe.
-**Depends on:** Mark's ruling; E7.
+**Landing:** the integration branch. It uses no step-2 code, so it could ride a step-1 release instead, but only if Mark adds it to that release's scope (R7).
+**Not [R8],** by G1's test as O17 amended it. It changes nothing that the wipe or a removal erases of seed, key or PIN material, none of the wipe's native steps, and no seed or wipe gate's allow-list. It adds one server request before a restart, and the Hub token is erased exactly as today. It becomes [R8] only if its PR has to edit such a gate.
+**Depends on:** none. X-HUB and E7 both edit `WalletRemoval.kt`, so they are never open at the same time; the second one merges the first.
 
-Not covered by R6. Removing a wallet that is not active revokes its session. Removing the active wallet never revokes. The wipe revokes every wallet's session in one burst, which links them at the server.
+**Files:**
+- `kt-core:wallets/WalletRemoval.kt`; `kt-app:ui/wallets/WalletsViewModel.kt`.
+- `kt-core-test:wallets/WalletRemovalTest.kt`; `kt-app-test:ui/wallets/WalletsViewModelTest.kt`.
 
-- [ ] Build what he rules, with a test that is red on `develop`. For example: `removing the active wallet revokes its session before the erase`.
+Today (this branch's head):
+- Removing a wallet that is not active revokes its session before the erase (`WalletRemoval.kt:82-88`).
+- Removing the active wallet returns `RemovedRestartNeeded` one line earlier (`WalletRemoval.kt:81`), and the next launch's housekeeping erases its token with no revoke (`WalletHousekeeping.kt:28`). Its session stays live on the server until it expires.
+- The wipe revokes every wallet's session in one pass (`WalletManager.kt:1101-1110`), which links them at the server.
+
+What is built (Mark, 2026-11-19): only the active-wallet gap.
+- After the REMOVING mark has landed and before `RemovedRestartNeeded` is returned, the running wallet's stored session is revoked. It is best effort, as for a wallet that is not active: a failed or undelivered revoke changes nothing of the removal, and that session expires on its own.
+- The request must leave before the process ends. `revokeStoredSession` only queues it (`DigiScopeClient.kt:515`), and the restart follows at once (`WalletsViewModel.kt:191`). The removal gives the request a bounded time to be sent before the restart.
+- The running client's in-memory token and socket end with the restart (PD3). If removing the active wallet ever stops restarting, this task's revoke must also close them.
+- Removing a wallet that is not active is unchanged. The wipe is unchanged, its one-pass burst included: he was not asked to change it. None of this is covered by R6.
+
+- [ ] **Step 1: Write the failing tests.**
+  - `WalletRemovalTest`: `removing the running wallet revokes its Hub session before the restart is asked for`. Red on `develop`: `WalletRemoval.kt:81` returns first.
+  - `WalletRemovalTest`: `a failed revoke still returns RemovedRestartNeeded`, and `a wallet that could not be marked is not revoked`.
+  - `WalletsViewModelTest`: the restart is not called until the revoke request was sent or the bound has passed.
+  - Unchanged and green: `removing a wallet that is not running revokes its Hub session first, and a failed revoke does not stop it`, and the wipe's revoke tests.
+- [ ] **Step 2: Run.** Expected FAIL. **Step 3: Implement.** **Step 4: Run, full suites.** Expected PASS. **Step 5: Open the PR.**
 
 ### Task CKPT: The checkpoint refresh, a standing task (added by G26)
 
@@ -1275,10 +1306,12 @@ Scope of each reason:
 
 ### Task C12: "Rescan this wallet" and "Repair the chain" as new rebuild sequences
 
-**Rulings:** G3, G9, G27, G38, G43
+**Rulings:** G3, G9, G27, G38, G43, G96
 
 **Landing:** core landing; `BRPeerManager.c` track (for the comment and the white-box case). E4 adopts it. Not R8.
 **Depends on:** C10, C11.
+
+**Amended by O7 (2026-11-19, G96).** The core lists are unchanged: they name what a rescan or a repair never clears, not where it is stored. G38's "the never-list names only the shared `dgb_chain<net>` keys" now reads "the shared chain keys in legacy's `dgb_sync_data<net>`", and that file also holds legacy's own keys, which a rescan of legacy does clear (G96's second open point).
 
 **Files:**
 - `core:BRChainRebuild.h`: new enum types and arrays.
@@ -1599,6 +1632,8 @@ fun TransactionBuilder.prepareSendAll(address: String, feePerKb: Long, customTot
 **Landing:** a `develop` PR after X5. In the step-1 layout the chain scope is the wallet's own, so the same files are deleted as today. Not R8.
 **Depends on:** X5.
 
+**Amended by O7 (2026-11-19, G96).** After E1 the chain scope's names are the legacy wallet's own names, so the split must also hold when the wallet is legacy: a per-wallet clear of legacy leaves the three chain files and the chain keys of `dgb_sync_data<net>`. Today `clearSyncData` clears that whole prefs file and deletes all three files (`kt-core:WalletManager.kt:1854-1855`, `:1866`, `:1874-1875`). K0 stays behaviour-neutral on `develop`, where each wallet's chain is still its own. It shapes `clearWalletHistory` so that the keys and files it clears are given as lists, and E1 supplies legacy's. Which keys of that file are the chain's is G96's second open point; K0 does not decide it.
+
 **Files:**
 - `kt-core:sync/HistoryRebuildOnUpgrade.kt` (`clearTransactionCacheForRebuild`).
 - `kt-core:WalletManager.kt` (`clearSyncData`, the seed-change verdict, `rebuildFromChainRescan[From]`).
@@ -1614,10 +1649,12 @@ fun TransactionBuilder.prepareSendAll(address: String, feePerKb: Long, customTot
 
 ### Task K1: An explicit wallet scope at every store call; write epochs per scope
 
-**Rulings:** G9, G11, G53, G54
+**Rulings:** G9, G11, G53, G54, G96
 
 **Landing:** a `develop` PR after X5. Not R8.
 **Depends on:** X5.
+
+**Amended by O7 (2026-11-19, G96).** G53 keys each store's epoch and io lock by target. Since G96, `Wallet(legacy)` and E1's `Chain(testnet)` would name the same three files. K1 changes nothing for this on `develop`, where `Wallet(scope)` is the only target; the rule that one file has one target is G96's fourth open point and is E1's to build.
 
 **Files:**
 - `kt-core:sync/{SavedBlockStore,FilterHeaderStore,CfScanLedgerStore,SavedTransactionsStore,CfAbandonmentStore,ChainTipStore,SavedTransactionsCheckpoint,CfStateFlush,HistoryRebuildOnUpgrade}.kt`.
@@ -1874,10 +1911,23 @@ What changes:
 
 ### Task E1: Shared chain stores, frontier records, and the migration from step 1
 
-**Rulings:** G1, G32, G53, G65, G68, G69, G91
+**Rulings:** G1, G32, G53, G65, G68, G69, G91, G96
 
 **Landing:** the integration branch, in the same PR as E2 or immediately before it. Its migration is not invoked at launch until E2. Not R8.
-**Depends on:** K0, K1; `fix/wallets-ready-slot-and-gate-hygiene` (X5).
+**Depends on:** K0, K1; `fix/wallets-ready-slot-and-gate-hygiene` (X5); the four design points below.
+
+**Amended by O7 (2026-11-19, G96).** The shared chain gets no new names. It lives under the legacy wallet's 4.1.4 names (PD13, as reversed). What that changes in this task:
+- `ChainStores` resolves to legacy's names: the three files that `WalletStores.fileName` gives for the legacy scope, and `dgb_sync_data<net>` for the chain keys. It still hands no File to a writer (G53).
+- The migration links, copies, renames and ranks nothing. It writes each READY wallet's frontier from that wallet's own ledger (G68). `chainMigration` stays a reserved registry field, for E1 to record that the migration ran.
+- A removal of legacy, a hand-off of legacy and every per-wallet clear of legacy leave the three files and the chain keys. The full wipe and a chain-scoped reason erase them, as the wipe does today for legacy.
+- Withdrawn: the hard-link test and its timing record; the red arms "rename instead of link or copy" and "seed from the active wallet instead of the highest tip"; the three `ChainMigrationTest` cases G69 added about ranked candidates.
+- G1's "E1 erases chain files only, and says so" stands. E1 also changes what the removal of legacy erases, but only of chain files and chain keys, never of seed, key or PIN material, so it is still not [R8]; its PR says so.
+
+**To be designed before this task is written** (G96). None is decided in this plan, because each can change what a wallet shows or what a removal or the wipe erases:
+1. **Legacy's own band files.** The design forbids a band sharing a file with the shared engine (spec:708-710), so a band for legacy (Rescan this wallet, Coinomi's accounts, a lagging frontier, a rejoin below the window) cannot use legacy's names. It needs file names and chain keys that 4.1.4 never wrote. They must be in `WalletStores`' lists, so that removal, the eraser, the wipe and `WipeLeavesNoWalletNamesTest` reach them, and G38's retire step must never run on the shared keys. If they are new names, A1 reserves them before the 4.1.5 cut (O10). B7, E3, E4 and E5 wait on this for the legacy wallet only.
+2. **Whose key is whose in `dgb_sync_data<net>`.** That file now holds the chain's keys and legacy's own (`has_synced`, `last_balance`, the checkpoint keys). Needed: an exhaustive list, pinned by a test that fails on a key in neither part; how a per-wallet clear and the removal of legacy, with its read-back, work on a file that must remain; how a chain-scoped clear keeps legacy's own keys. The eraser already keeps one shared key in a legacy-named file (`custom_rpc_endpoint` in `dgb_reconcile<net>`: `kt-core:wallets/WalletStoreEraser.kt:96`, `:214`).
+3. **No usable chain under legacy's names.** Legacy was removed under step 1, never synced on this network, or its chain fails the preflight. G69's fallback is the floor: the chain is not seeded, the engine arms as G64 says for no stored chain, and each wallet joins from its own frontier or bands over its own files. Whether another wallet's chain may instead be copied under legacy's names is not decided.
+4. **One store target per file.** G53 keys each store's epoch and io lock by target. `Wallet(legacy)` and `Chain(testnet)` would name the same file under two locks. After E1 only the chain target may reach the three files.
 
 **Files:**
 - `kt-core:wallets/{WalletStores,WalletScope,WalletRegistry,WalletStoreEraser}.kt`; create `kt-core:wallets/ChainMigration.kt`.
@@ -1887,11 +1937,11 @@ What changes:
 
 **Interfaces:**
 ```kotlin
-object ChainStores {        // NETWORK scope, A1's names; legacy's 4.1.4 names are untouched
+object ChainStores {        // NETWORK scope; resolves to legacy's 4.1.4 names, which stay as they are (G96)
     fun savedBlocks(ctx: Context, testnet: Boolean): File
     fun filterHeaders(ctx: Context, testnet: Boolean): File
     fun cfLedger(ctx: Context, testnet: Boolean): File
-    fun prefs(ctx: Context, testnet: Boolean): SharedPreferences          // dgb_chain<net>
+    fun prefs(ctx: Context, testnet: Boolean): SharedPreferences          // legacy's dgb_sync_data<net> (G96)
 }
 data class Frontier(val height: Long, val hashBelow: String?, val holder: Holder)   // PD14
 enum class Holder { SHARED, BAND, NONE }
@@ -1902,22 +1952,23 @@ class ChainMigration(...) { fun run(testnet: Boolean): MigrationState }   // ide
 
 - [ ] **Step 1: Write the failing tests.**
   - **`UpgradeFrom414Test`, re-anchored:**
+    - the migration creates, moves, links, copies and deletes no file, and legacy's three chain files are byte-identical after it (G96);
     - every legacy store outside the chain is byte-identical;
-    - legacy's chain is linked or copied into the shared files and read back before anything of legacy's goes;
     - legacy's names are unchanged;
-    - the shared chain is seeded with no re-sync (legacy's frontier equals the shared one).
+    - the shared engine resumes from legacy's chain with no re-sync (legacy's frontier equals the shared one).
   - **`ChainMigrationTest`,** from the step-1 layout with four wallets: legacy at the tip, B days behind (inside the window), C weeks behind, D with no key record.
-    - The shared chain is seeded from the highest verified tip.
+    - The shared chain is legacy's chain, where it stands. No file moves, and B's and C's chains are not ranked against it (G96).
     - Each wallet's frontier is written from its own ledger.
     - B attaches or bands, C bands, D waits.
     - Nothing is deleted before its frontier is durable.
     - A kill after each step resumes to the same end state.
 
-    Red arms: delete before the frontier; rename instead of link or copy; seed from the active wallet instead of the highest tip.
-  - **Hard link:** a write to the shared name leaves the band name's bytes unchanged (`DurableFile` tmp+rename). The PR records the measured link and copy times on a 64 MiB filter-header chain, against a launch-time budget.
+    Red arms: delete before the frontier; a hand-off or a per-wallet clear of legacy that deletes a chain file or a chain key (G96).
+  - **`ChainMigrationTest`, a wallet ahead of legacy (G96):** the engine starts from legacy's tip, and the wallet that is ahead keeps its own files and waits or bands under C9's rule. Nothing of its chain is copied.
+  - **Hard link:** withdrawn by G96. Nothing is linked or copied.
   - **`FrontierRecordStoreTest`:** `recordFrontiers` only raises; a wallet not listed keeps its record.
-  - **`WalletRemovalTest`:** removing legacy keeps the shared chain and every byte of the other wallets.
-  - **`PeerStoresSharedTest`:** `saved_peers` and `saved_peer_penalties` live in `dgb_chain<net>`, and no per-wallet path writes them (PD17).
+  - **`WalletRemovalTest`:** removing legacy keeps the shared chain and every byte of the other wallets. Since G96 that means the three files under legacy's names and the chain keys stay, while legacy's own keys and files go and read back gone.
+  - **`PeerStoresSharedTest`:** `saved_peers` and `saved_peer_penalties` live with the shared chain keys, in legacy's `dgb_sync_data<net>` (G96), and no per-wallet path writes them (PD17).
   - **X-ROLLBACK (a):** `RegistryForwardCompatTest`.
 - [ ] **Step 2: Run.** Expected FAIL.
 - [ ] **Step 3: Implement.**
@@ -1928,10 +1979,12 @@ class ChainMigration(...) { fun run(testnet: Boolean): MigrationState }   // ide
 
 ### Task E2: `SyncService` runs the shared engine: the active wallet attached, frontier records kept
 
-**Rulings:** G2, G32, G41, G42, G53, G55, G64, G65, G67, G68, G70, G71, G72, G85
+**Rulings:** G2, G32, G41, G42, G53, G55, G64, G65, G67, G68, G70, G71, G72, G85, G96
 
 **Landing:** the integration branch. E2 and E3 land back to back. Not R8 (D1 is today's behaviour).
 **Depends on:** E1, B6, K4, K5, K6, the C9, C10 and C11 pins.
+
+**Amended by O7 (2026-11-19, G96).** The arming inputs G64 names (`chain_synced`, `sync_start_height`, `saved_blocks_tip`) are read from legacy's `dgb_sync_data<net>`, not from `dgb_chain<net>`. `StoreDurabilityCallerGateTest` refuses a direct write to the three legacy-named chain files, not to `chain_*` (G53).
 
 **Files:**
 - `kt-app:service/SyncService.kt`: the shared writers, and routing through K6.
@@ -1965,10 +2018,12 @@ What changes:
 
 ### Task B7: The band's sync context and the hand-off natives (registry PR, 7th)
 
-**Rulings:** G7, G19, G20, G23, G29, G31, G33, G34, G35, G36, G38, G46, G48, G50, G67, G71, G73, G74
+**Rulings:** G7, G19, G20, G23, G29, G31, G33, G34, G35, G36, G38, G46, G48, G50, G67, G71, G73, G74, G96
 
 **Landing:** a registry PR into the integration branch. Not R8.
 **Depends on:** B6, the C9 and C10 pins, A4; #109 first if revived.
+
+**Amended by O7 (2026-11-19, G96).** "The wallet's band files" are the wallet's step-1 names for every wallet but legacy. Legacy's names are the shared chain, so legacy's band cannot use them; what it uses is G96's first open point, and `startBand` for legacy waits on it. `band_context_kat`'s "band saves never touch the shared files" gains the legacy case.
 
 **Files:**
 - `bridge:jni_peer.c`, `jni_bridge.h`, `jni_registry_gen.h`.
@@ -2006,10 +2061,12 @@ The band context:
 
 ### Task E3: Bands: scheduling, preemption, the hand-off executor, durability, spending and the wipe
 
-**Rulings:** G1, G31, G34, G35, G36, G37, G38, G42, G48, G64, G67, G73, G74, G75, G77, G83, G91
+**Rulings:** G1, G31, G34, G35, G36, G37, G38, G42, G48, G64, G67, G73, G74, G75, G77, G83, G91, G96
 
 **Landing:** the integration branch, immediately after E2. Device testing starts after it. Not R8.
 **Depends on:** E2, B7.
+
+**Amended by O7 (2026-11-19, G96).** Step 6 of the executor ("Delete the band files") and G38's retire of the wallet's chain keys never touch anything under legacy's names: for legacy they would delete the shared chain. What legacy's hand-off deletes is G96's first open point. `BandHandoffExecutorTest` adds: a hand-off of legacy leaves the three chain files and every chain key.
 
 **Files:**
 - Create `kt-app:service/{BandScheduler,BandHandoffExecutor}.kt`.
@@ -2053,10 +2110,12 @@ What it does:
 
 ### Task E4: "Rescan this wallet" and "Repair the chain" replace the Full rebuild
 
-**Rulings:** G9, G43, G66, G76, G84
+**Rulings:** G9, G43, G66, G76, G84, G96
 
 **Landing:** the integration branch. Not R8.
 **Depends on:** the C12 pin, E3; X5.
+
+**Amended by O7 (2026-11-19, G96).** "Rescan this wallet" on legacy is a band for legacy, so it needs legacy's own band files (G96's first open point) and clears only legacy's own keys in `dgb_sync_data<net>` (the second). `RebuildSplitTest` adds: rescanning legacy leaves every shared chain file and chain key.
 
 **Files:**
 - `kt-core:WalletManager.kt`: `rebuildFromChainRescan[From]` becomes a band rescan, and a repair entry point is added.
@@ -2078,10 +2137,12 @@ What it does:
 
 ### Task E5: BootGuard and StaleDataWiper on the shared engine
 
-**Rulings:** G2, G9, G41, G77, G88
+**Rulings:** G2, G9, G41, G77, G88, G96
 
 **Landing:** the integration branch. Not R8.
 **Depends on:** E2, the C11 pin.
+
+**Amended by O7 (2026-11-19, G96).** For legacy the per-wallet tier never reaches the files and keys under legacy's chain names; it covers legacy's database, legacy's own keys in `dgb_sync_data<net>` and legacy's band files (G96's first two open points). The test below gains the case "a crash bracketed on legacy's attach leaves the shared chain".
 
 **Files:**
 - `kt-app:{BootGuard,StaleDataWiper}.kt`; `kt-app:ui/onboarding/UnlockScreen.kt` (the bracket); `kt-app:service/SyncService.kt`.
@@ -2296,10 +2357,12 @@ Amended by the rulings (review of 2026-11-19):
 
 ### Task E7: Live add, and live removal of a wallet that is not active
 
-**Rulings:** G2, G31, G55, G56, G64, G65, G83, G91, G92
+**Rulings:** G2, G31, G55, G56, G64, G65, G83, G91, G92, G95, G96
 
 **Landing:** the integration branch. Not R8: the eraser and what it erases are unchanged. Mark sees it in the digest.
-**Depends on:** E3, S1, S3, X-HUB's ruling (only for its revoke behaviour).
+**Depends on:** E3, S1, S3. X-HUB is ruled (G95) and E7 does not wait for it; both edit `WalletRemoval.kt`, so they are never open at the same time.
+
+**Amended by O7 (2026-11-19, G96).** "The eraser and what it erases are unchanged" holds for this task: the change for legacy (its removal keeps the shared chain's files and keys, which are under legacy's names) is E1's. E7's removal of legacy runs that eraser.
 
 **Files:**
 - `kt-core:wallets/{WalletRemoval,WalletProvisioner,WalletHousekeeping}.kt`.
@@ -2319,7 +2382,7 @@ Amended by the rulings (review of 2026-11-19):
 4. close its database;
 5. erase and verify.
 
-The shared chain is never touched. Removing the active wallet keeps F8 (PD3). The Hub revokes stay as in step 1 until X-HUB.
+The shared chain is never touched. Removing the active wallet keeps F8 (PD3), and since X-HUB it revokes that wallet's Hub session before the restart (G95). Removing a wallet that is not active revokes as in step 1.
 
 - [ ] **Step 1: Write the failing tests.**
   - Removing an attached wallet that is not active detaches it with no restart, and nothing writes its files after a verified erase. Red on `develop`: the erase races the live writers.
@@ -2457,7 +2520,7 @@ Edited by G93: this task no longer waits for Mark's answer to O6. `SpendAuth`'s 
 
 ### Task V1: Device and emulator verification
 
-**Rulings:** G25, G93, G94
+**Rulings:** G25, G93, G94, G96
 
 **Landing:** the results and a pre-publish PR into the integration branch.
 **Depends on:** every Stage 4 task.
@@ -2492,7 +2555,7 @@ Rules for this task:
   - Coinomi's accounts on the public test phrase.
 - [ ] **Step 6: Peers.** With Tor on and an own node pinned, a band dials no other peer.
 - [ ] **Step 7: Capacity.** With 8 wallets: memory (`dumpsys meminfo`), `[CF-SLOW]` lock holds, and the union's filter false-positive rate (union matches per 1,000 blocks; the estimate is 1-1.5%).
-- [ ] **Step 8: Rollback (X-ROLLBACK b).** On an emulator, install a rollback build (4.1.5 code with a bumped `versionCode`) over step 2. Record the outcome against the fixture.
+- [ ] **Step 8: Rollback (X-ROLLBACK b).** On an emulator, install a rollback build (4.1.5 code with a bumped `versionCode`) over step 2. Record the outcome against the fixture. Since G96 the record covers legacy by name: whether it shows every receive, and that 4.1.5's "Full rebuild from chain" restores any it missed.
 - [ ] **Step 9: Pre-publish suite.** `./scripts/pre-publish-test.sh` on API 28, 33, 34 and 35. Each must pass.
 - [ ] **Step 10: Write the results file** and commit it with the explicit path, after the full suites pass.
 
@@ -2609,13 +2672,13 @@ Rules for this task:
 - MULTI_PROFILE from a throwaway build (A5);
 - the #264 review gate (X6);
 - R8 registry PRs taking the slot only after Mark's OK;
-- the registry forward-compat test and the hard link (E1, X-ROLLBACK);
+- the registry forward-compat test and the hard link (E1, X-ROLLBACK); the hard link was withdrawn by G96;
 - the R6 dwell and the comment corrections (K5);
 - the C9 and C10 edge cases;
 - the "opens once" state (U4) and O8;
 - the D1-override note (E2b);
 - the `PUBLIC_HEADERS` rule (hand-off);
-- the BD1 alternative (O7);
+- the BD1 alternative (O7), which Mark chose on 2026-11-19 (G96);
 - the 4.1.5 branch names (X5);
 - R3 clauses in the source gate (C3);
 - `AssetSweepHandleTest` (K6);
@@ -2647,14 +2710,14 @@ Rules for this task:
 
 ## Ambiguities between the spec and the code (decided here)
 
-**Rulings:** G16, G70
+**Rulings:** G16, G70, G96
 
 1. **"Attached only once the band manager is gone (Free returned 1, or its deferred free has run)."** The reason is that a parked manager's threads can still reach its wallet. PD15 removes that reason for holding managers, which detach every wallet under the lock inside `Free`, and keeps the old behaviour for every other manager. That is equivalent and does not stall a recreate.
 2. **"Pre-generate its address window" inside the one critical section** would breach the lock budget (about 645 addresses per wallet against the 2000 ms `[CF-SLOW]` threshold). PD16 generates outside and re-runs inside, as a no-op unless the set grew.
 3. **"Write the wallet's attach height F to the registry"** covers only the band. A wallet that was attached and is not attachable this session (unreadable record, KeyInvalidated, a failed attach, a process the PIN has not unlocked) needs the same record, or it rejoins at the shared frontier and misses receives. PD14 generalises the attach height to a frontier record, raised only while the wallet is attached.
 4. **"On a cold start, rewind to any recorded F whose band files still exist"** becomes: rewind to the lowest frontier of the wallets being attached, when it is at or above H_min (C9), and finish any hand-off whose band files remain.
-5. **"Upgrading never touches the existing wallet's data" against "then delete the wallet's chain files".** The amendment states the deletion explicitly. This plan reads the anti-goal as: names are never renamed, chain data is linked or copied and read back before anything is deleted, and deletion waits until the hand-off is durable (PD13). The alternative layout is O7.
-6. **The shared chain's file names** were left to the builder: A1's list.
+5. **"Upgrading never touches the existing wallet's data" against "then delete the wallet's chain files".** The amendment states the deletion explicitly. This plan reads the anti-goal as: names are never renamed, chain data is linked or copied and read back before anything is deleted, and deletion waits until the hand-off is durable (PD13). The alternative layout is O7. **Amended by O7 (2026-11-19, G96):** Mark chose that layout. Legacy's chain files are never linked, copied or deleted: they are the shared chain. The deletion the amendment states applies to every other wallet's chain files, after its hand-off is durable.
+6. **The shared chain's file names** were left to the builder: A1's list. **Amended by O7 (2026-11-19, G96):** legacy's 4.1.4 names. The design's rule that a band never shares a file with the shared engine (spec:708-710) then means legacy's own band needs other names, which G96 leaves to be designed.
 7. **"SyncWorker catches up the wallets attached in its process."** In a fresh process none are attached (D1), so it does nothing, as today (E6).
 8. **`BRPeerManagerApplyServerHeight` reads the wallet before the lock.** C3 lists every such read, and C8 fixes each one or proves it unreachable.
 9. **The design's test plan omits element-cache invalidation.** G1 and C7 add it.
@@ -2671,6 +2734,7 @@ Rules for this task:
 - **O1** Key mismatch at activation: refuse (PD2) or replace the record.
   - **Answered (Mark, 2026-11-19):** refuse (PD2 stands). A record that differs from the seed is refused, unused and unreplaced.
 - **O2** The Hub revokes on removal and on the wipe (X-HUB).
+  - **Answered (Mark, 2026-11-19):** close the active-wallet gap only. Removing the active wallet revokes its Hub session on the server, so a removed wallet's session does not stay live. Removing a wallet that is not active revokes as today, and the wipe is unchanged: it still revokes every wallet's session in one pass (G95; X-HUB is built, and is not [R8]).
 - **O3** The integration branch (PD11), or a stack of PRs into `develop` merged in one sitting.
   - **Answered (Mark, 2026-11-19):** the integration branch (PD11).
 - **O4** Whether step-2 core PRs may merge before the 4.1.5 cut. Default: no.
@@ -2683,11 +2747,13 @@ Rules for this task:
   - seeding from legacy even when another wallet is ahead;
   - a rollback in which legacy reads a ledger evaluated while it was not attached, so missed receives (X-ROLLBACK);
   - removal and the eraser special-casing legacy's names.
+  - **Answered (Mark, 2026-11-19):** yes, legacy's 4.1.4 names. The shared chain gets no new name and a 4.1.4 upgrade moves no file. He was shown the three costs above and accepted them; of the second, in his words, a rollback that loses sync progress and needs a rescan "is fine". This reverses PD13 and withdraws A1's chain names (G96). Four points are left to be designed and are not decided in this plan (G96; task E1): legacy's own band files, the split of `dgb_sync_data<net>`, what the chain starts from when legacy's names hold none that passes, and one store target per file.
 - **O8** Whether S1's inert record writer may ship in a release before step 2, so more wallets hold a record when the engine ships.
   - **Answered (Mark, 2026-11-19):** yes. S1's inert record writer may ship in a release before step 2. It is still [R8]: its PR waits for him.
 - **O9** The lost-PIN path. iOS's D-3 asks for the phrase first; Android does not. This predates step 2 and is not built here (PD22).
 - **O10** (before the 4.1.5 cut) Should 4.1.5's wipe erase the reserved step-2 names (X-ROLLBACK c)?
   - **Answered (Mark, 2026-11-19):** yes. A wipe clears every file, so 4.1.5's wipe erases the reserved step-2 names (X-ROLLBACK c). It rides the 4.1.5 train as a row of the private scope file.
+  - **Narrowed by O7 (2026-11-19, G96):** his yes stands, over a shorter list. Still reserved, and still to be erased by 4.1.5's wipe: the key-record prefs `dgb_wallet_keys` and `dgb_wallet_keys_<id>`, and the Keystore alias `dgb_wallet_keys_wrap`. No longer reserved: the `chain_*` files and `dgb_chain<net>`, which no step-2 build writes. The shared chain needs nothing from 4.1.5: its wipe already erases legacy's names on both networks. The private 4.1.5 scope row is to be narrowed to match. One thing can lengthen the list again: names for legacy's own band files, if that design (G96) needs new ones and fixes them before the cut.
 - **O11** The stage target dates.
   - **Answered (Mark, 2026-11-19):** as soon as possible. No calendar date is set; each stage starts when its gate opens, and `ROADMAP.md` carries no step-2 date (G14).
 - **O12** If D1 is overridden, attaching before the PIN unlock becomes [R8] (E2b).
@@ -2717,9 +2783,11 @@ Added by the independent review of the rulings (2026-11-19):
   - Recommended: (a). It costs one small PR and keeps every loosening of a seed or wipe gate in front of him. Until he answers, (a) is what the plan does.
   - **Answered (Mark, 2026-11-19): option (a).** An edit to a seed or wipe gate's allow-list is itself [R8]; B6's `WipeNativeStepsGateTest` entry lands as its own small [R8] PR ahead of B6.
 
+Open after 2026-11-19: **O9 only.** O2 and O7 were answered by Mark that day and are recorded as G95 and G96.
+
 Answered by a ruling: none. No ruling settles an existing question, because each is Mark's. Four are changed in scope:
 
 - **O1** gains the unlock case (a record that differs from the seed at a cold-start unlock is marked refused, unused and unreplaced, until he rules) and the note that a replace resets the wallet's frontier to its birth (G85; the switch's messages, G90).
 - **O4** is widened: may neutral slices start at the train's landing while #264's review is still open? Default: no (G11).
 - **O6** now covers only the per-screen naming (U5b). The prompt naming (U5) is built by default (G93).
-- **O10**: part (c) depends only on A1's names and his yes; if the landing-sync freeze has begun when he answers, it can only ride the train as a row of its private scope file, which is his call (G25).
+- **O10**: part (c) depends only on A1's names and his yes; if the landing-sync freeze has begun when he answers, it can only ride the train as a row of its private scope file, which is his call (G25). G96 shortens A1's names to the key-record ones.

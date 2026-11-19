@@ -207,6 +207,8 @@ after a switch runs what waited.
 
 Not covered by R6, and open for Mark: the Hub revokes. Removing a wallet that is not active
 revokes its session, and the wipe revokes every wallet's session in one pass (step 1).
+Answered by Mark on 2026-11-19 (ruling G95): removing the active wallet also revokes its session,
+before the restart. The other two stay as they are.
 
 ### Rebuild and rescan (D4)
 
@@ -285,6 +287,15 @@ only. These change a point this design had decided, and the text is corrected in
 - **G92:** a restore bands whenever its network's shared chain exists; it never resets that chain.
 - **G28:** a transaction no attached wallet contains is offered to each wallet, as today.
 - **G16:** `CLAUDE.md`'s `SetFixedPeer` claim is corrected by A1 on `develop`, not by the first rebuild PR (correction 9).
+
+Two owner answers of 2026-11-19 added rulings after the scan:
+
+- **G95:** removing the active wallet revokes its Hub session (see "Server work", above).
+- **G96:** the shared chain lives under the legacy wallet's 4.1.4 names. This design left the
+  names to the builder ("Left to the builder"), so no rule here changes. Two of its rules now
+  bear on legacy in particular: a band never shares a file with the shared engine, so legacy's own
+  band needs other names (to be designed); and removing legacy never deletes the shared chain,
+  although the chain is under legacy's names.
 
 ## Intent
 
