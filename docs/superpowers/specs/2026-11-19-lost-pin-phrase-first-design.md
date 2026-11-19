@@ -119,9 +119,16 @@ Not read or verified: anything on a device; the tests' bodies; the new-PIN view 
      device-credential prompt if its key asks, the key-lost message). It takes no typed identity, so
      the unlock path's v2 rewrite (`WalletManager.kt:480-484`) is untouched. When the matched record
      *is* the active one (always under §4 option B), 4a and 4b read the same record. When it is not,
-     that is a second Keystore read and possibly a second prompt. When the selected network holds no
-     wallet, 4b loads nothing and, once the PIN is set, the app goes on to that network's onboarding;
-     `PinSetupScreen` must then create nothing.
+     that is a second Keystore read and possibly a second prompt.
+   - **4c. The selected network holds no wallet** (the match is a wallet of the other network). 4b
+     loads nothing. `pin_setup` is entered in a **PIN-only mode** (a route argument, not inferred):
+     it stores the PIN and neither creates a wallet nor requires `isWalletReady()`. Today
+     `PinSetupScreen.kt:183-196` reads "no active record" as "create one" and then requires a ready
+     wallet, so without this mode the scenario would try a creation with no onboarding seed state or
+     end on `pin_err_wallet`. After the PIN is stored the app is Unlocked with no wallet on this
+     network and goes to that network's onboarding, which sets no PIN (a PIN now exists; the
+     INT-2026-11-19-B rule) and proceeds as add-a-wallet does. `PinSetupScreen.kt` is in this
+     change's file list.
 5. **`pin_setup`**, only on the outcome "opened" below → Unlocked → biometric offer → wallet. The
    phrase entry is replaced by `pin_setup` (`popUpTo` inclusive), and `PinSetupScreen`'s exit pops
    `pin_setup` itself: today it pops the start destination (`PinSetupScreen.kt:145-147`), which would
@@ -136,7 +143,8 @@ is ignored and the PIN is stored over a wallet that did not open (`AppNavigation
 | 4a confirms, 4b opened (or had nothing to load) | — | yes |
 | Device prompt declined or cancelled (4a or 4b) | stay on the phrase screen, words kept, retry | no |
 | Key lost with the device lock (`KeystoreKeyInvalidatedException`) | `unlock_device_lock_removed`, as today | no |
-| Record incomplete, the AND-005 contradiction, or the seed does not read (`WalletManager.kt:421`, `:429-433`, `:441-446`) | a new message: the wallet on this phone could not be read, the funds are safe with the words, erase the app's storage and restore (iOS: `PinViews.swift:427-428`) | no |
+| The active wallet's record is incomplete, has the AND-005 contradiction, or its seed does not read (`WalletManager.kt:421`, `:429-433`, `:441-446`), **and it is the record that matched or the only record on the phone** | a new message: the wallet on this phone could not be read, the funds are safe with the words, erase the app's storage and restore (iOS: `PinViews.swift:427-428`) | no |
+| The same, **but the record that matched (4a) is another wallet** | no advice to clear storage: that would erase every wallet on the phone on the proof of one phrase. The matched wallet becomes the active one (`setActive`), 4b runs for it, and the PIN is set over a wallet that opened. The unreadable wallet stays listed and fails as it does at any unlock today; nothing of it is erased | yes, if the matched wallet opened |
 | 4a: the sealed seed is another identity (an edited fingerprint) | the mismatch line; nothing changed | no |
 
 **The check.** The record holds the wallet's identity in plain prefs: `seed_fingerprint_v2` =
@@ -256,6 +264,12 @@ Red first, each failing on today's code:
   and no PIN except after a match or under the process mark. It covers `PinSetupScreen` and
   `SettingsViewModel.changePin` (`SettingsViewModel.kt:399-402`); iOS's is
   `ios:DigiByteWalletTests/PinFirstTests.swift:287`.
+- `LostPinNoActiveWalletTest` (app): the match is a wallet of the other network and the selected
+  network holds none: `pin_setup` in PIN-only mode stores the PIN, creates nothing, never shows
+  `pin_err_wallet`, and the next destination is that network's onboarding, which sets no PIN (4c).
+- `LostPinOtherWalletUnreadableTest` (app/core): the active record does not read and another wallet's
+  phrase matched: no clear-storage message, the matched wallet becomes active and opens, the PIN is
+  set, and no record or store of the unreadable wallet is erased.
 - Extend `LostPinKeyLostGateTest` (the key-lost message still wins after a match),
   `NavigationRouteIntegrityTest`, `LocaleResourceParityTest`, `OnboardingHardcodedStringTest.COVERED`,
   `NetworkLeakTest`/`LogRedactionSourceGateTest` (no log line on the new path names the phrase).
