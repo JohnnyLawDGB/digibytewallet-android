@@ -184,20 +184,50 @@ its `android:` line must end `(feat/digiid-site-key-root)`. If `develop` has mov
 line names the commit the run tested, and that commit, which contains the merge, is the one the pin
 takes once the run is green.
 
-## 7. The DigiScope list in the core, reshaped (iOS hand-off 2026-11-13 §3)
+## 7. The DigiScope list and the identity choice, in the core (iOS hand-off 2026-11-13 §3)
 
-The iOS session's hand-off of 2026-11-13 (§3) asks the core lane for
-`BRDigiIdUsesSharedIdentity(host, hostLen)`. Mark gave that header to the Android session too
-(2026-11-17), as its own small core PR after this step. The Coinomi design (merged in #267, "App:
-the policy") reshapes it, because a Coinomi-mode wallet signs DigiScope per-site, so "the host is on
-the list" no longer means "sign with the shared key":
-- **"Is a DigiScope host":** list membership, exactly `digiscope.me` and `api.digiscope.me`, byte
-  for byte, on the parsed (lower-cased) domain.
-- **The whole choice:** one header-only call that takes the host, the wallet's `digiScopeIdentity`
-  and its `siteKeyRoot`, and answers either `SHARED` or the per-site key with the URI and root to
-  derive it from. The DigiScope login URI is a core literal.
-- Its host KAT carries §3's host cases, crossed with both `digiScopeIdentity` values and both roots.
+The iOS session's hand-off of 2026-11-13 (§3) asked the core lane for
+`BRDigiIdUsesSharedIdentity(host, hostLen)`. Mark gave that header to the Android session
+(2026-11-17), and the Coinomi design ("App: the policy") reshaped it: a Coinomi-mode wallet signs
+DigiScope per-site, so "on the list" no longer means "the shared key". It is built in `BRDigiId.h`
+(core `3ab900a`), under these names and not that one:
 
-Until it lands, Android keeps its two-host Kotlin list (Q4 A, #268), and iOS keeps its Swift list. When
-it lands, both call it in place of their lists. `BRDigiIdUsesSharedIdentity` is not built under that
-name.
+- **`BRDigiIdIsDigiScopeHost(host, hostLen)`**: 1 exactly for `digiscope.me` and `api.digiscope.me`,
+  byte for byte, on the request's parsed (lower-cased) domain.
+- **`BRDigiIdChooseIdentity(&choice, host, hostLen, callbackUri, callbackLen, scope, siteKeyRoot)`**:
+  the whole choice. `scope` is the wallet's `digiScopeIdentity`, a `BRDigiIdScopeIdentity`
+  (`BR_DIGIID_SCOPE_SHARED` 1, `BR_DIGIID_SCOPE_SITE` 2), and `siteKeyRoot` its `BRDigiIdRoot`. The
+  answer is a `BRDigiIdChoice { kind, uri, uriLen, root }`, whose `kind` is a `BRDigiIdIdentityKind`:
+
+  | Host | `scope` | `kind` | `uri` and `root` |
+  |---|---|---|---|
+  | on the list | `SHARED` | `BR_DIGIID_IDENTITY_SHARED` | none: `NULL`, `BR_DIGIID_ROOT_NONE` |
+  | on the list | `SITE` | `BR_DIGIID_IDENTITY_SITE` | `BR_DIGIID_DIGISCOPE_LOGIN_URI`, `siteKeyRoot` |
+  | any other | either | `BR_DIGIID_IDENTITY_SITE` | the caller's `callbackUri`, `siteKeyRoot` |
+
+  `BR_DIGIID_DIGISCOPE_LOGIN_URI` is a literal,
+  `https://api.digiscope.me/api/auth/digiid/callback`. A `SITE` wallet signs every DigiScope request
+  with that one identity, never with the request's own callback. `SHARED` signs with
+  `BRDigiIdSignShared`, and `SITE` with `BRDigiIdSignSite` under `choice.root` over `choice.uri`.
+- **Refused**, the choice left all zero: no host; a `scope` or a root that is 0 or unknown, also
+  where the answer would not use it; no callback for a host off the list. A list host needs no
+  callback.
+- The `SHARED` answer's root is `BR_DIGIID_ROOT_NONE`, which `BRDigiIdAddress` refuses. Ask it for the
+  shared address under the wallet's own root, with `hasUri` 0.
+
+**iOS** replaces `DigiIdIdentityPolicy.sharedIdentityHosts` with that one call, passing
+`BR_DIGIID_SCOPE_SHARED` and `BR_DIGIID_ROOT_DIGIBYTE` until it stores the per-wallet properties.
+That gives exactly today's answers: the shared identity on the two hosts, and on every other host
+the per-site identity of the request's callback under `DIGIBYTE`. One input answers differently, and
+no request has it: an empty host is refused, where `choose("")` answered per-site.
+
+**Android** keeps `IdentityKeyPolicy.DIGISCOPE_HOSTS` until Coinomi step 2 moves it onto the call.
+Until then `digiid_core_kat`'s source gate fails when that list and the header's differ.
+
+Held by `digiid_core_kat`: iOS's `DigiIdIdentityTests` list cases, value for value
+(`digiscope_list_*`), each host crossed with both `scope` values and both roots; every refusal; and
+`choice_end_to_end`, where `api.digiscope.me` with `SITE` and `STANDARD` derives
+`DSsC7WWi7mgr4t7xEw9kmcZqgQq6YJjdri`, the address Coinomi signed DigiScope's login with. Arms
+2097152, 4194304, 8388608, 16777216 and 33554432 each fail exactly their cases. The Swift leg of
+`run.sh` now imports these names (the literal as a `String`). Like §4's legs, it has not run on a
+Mac.

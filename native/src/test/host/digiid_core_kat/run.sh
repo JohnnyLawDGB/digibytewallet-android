@@ -12,6 +12,14 @@
 # compared with over fixed pseudo-random inputs. See digiid_core_kat_main.c. Then the REAL bridge, booted over a
 # host JNI, is held to the header answer for answer under the DigiByte root (digiid_core_bridge_main.c).
 #
+# WHICH IDENTITY SIGNS is the header's too (THE DIGISCOPE LIST and THE CHOICE: BRDigiIdIsDigiScopeHost,
+# BRDigiIdChooseIdentity), and has no bridge to be held to. Its cases are by hand: iOS's DigiIdIdentityTests list
+# cases, value for value (digiscope_list_*), each host crossed with both digiScopeIdentity values and both roots;
+# the choice on a DigiScope host and off the list (choice_digiscope_shared, choice_digiscope_site, choice_other_host);
+# every refusal (choice_refused, choice_unknown_scope_refused, choice_unknown_root_refused); and END TO END
+# (choice_end_to_end), the choice fed to BRDigiIdAddress and the signing calls, where a wallet restored as from
+# Coinomi signs DigiScope with DSsC7WWi7mgr4t7xEw9kmcZqgQq6YJjdri, the address Coinomi signed DigiScope's login with.
+#
 #   comparison  one arm per rule, -DDIGIID_UNFIXED=<bit> (BRDigiId.h): 1 the account index is hashed
 #               big-endian; 2 A..D are read big-endian; 4 A..D are not hardened; 8 a negative index is
 #               taken as its uint32 bits; 16 the shared identity's address is given for any index; 32 a
@@ -25,9 +33,15 @@
 #               with "DigiByte seed" (the per-site master key before the root was an argument); 262144 every
 #               known root derives with "Bitcoin seed" (the constant swapped in place, which moves every
 #               existing identity); 524288 a root that is neither DIGIBYTE nor STANDARD is not refused (it
-#               derives with "DigiByte seed"); 1048576 BRDigiIdAddress takes any nonzero hasUri as 1, so a root
-#               swapped with hasUri is not refused. Each arm fails exactly the cases CASES lists for its bit and
-#               passes every other.
+#               derives with "DigiByte seed", and BRDigiIdChooseIdentity chooses with it); 1048576 BRDigiIdAddress
+#               takes any nonzero hasUri as 1, so a root swapped with hasUri is not refused; 2097152 a name ending
+#               in ".digiscope.me" counts as a DigiScope host (a suffix match in place of the exact one); 4194304
+#               the list is compared without regard to letter case, so a spelling no parse gives is on it; 8388608
+#               a wallet whose digiScopeIdentity is SITE still gets the shared identity on a DigiScope host (the
+#               rule before the property: it signs in as another account without a word); 16777216 SITE on a
+#               DigiScope host answers the request's own callback, not DigiScope's login URL; 33554432 a
+#               digiScopeIdentity that is neither SHARED nor SITE is not refused. Each arm fails exactly the
+#               cases CASES lists for its bit and passes every other; a case listed with - fails under no arm.
 #   shipped     -DDIGIID_UNFIXED=0: every case passes, exit 0.
 #   bridge      the shipped header under BR_DIGIID_ROOT_DIGIBYTE against the bridge's own jni_wallet_sign.c /
 #               jni_wallet.c / slip13.c, over identity_sign_bytes_kat's host_jni stand-ins: every answer and
@@ -49,6 +63,15 @@
 #                     the second); for iphoneos/iphonesimulator, and through Swift's C importer (swiftc
 #                     -import-objc-header) on macOS, where an Xcode SDK / swiftc is present (skipped, and
 #                     said so, elsewhere).
+#   SOURCE GATE       one DigiScope list. Until Android reads the list from the core (Coinomi step 2) it is written
+#                     twice in shipped code: in BRDigiId.h (BRDigiIdIsDigiScopeHost) and in Android's
+#                     IdentityKeyPolicy.kt (DIGISCOPE_HOSTS). Both must be exactly the hosts digiid_core_kat_main.c
+#                     holds the header to (`hosts`), so neither copy can drift from the other meanwhile.
+#                     digiscope_hosts.py reads the Kotlin set literal with a scanner that tells a string from a
+#                     comment, and the header's list out of the compiler's own preprocessing. Its comparison arm
+#                     plants a third host in a temp copy of each file, and the gate must refuse both by name; a
+#                     host planted only in comments, and a literal written over several lines, must still read as
+#                     the two.
 #
 # CORE_DIR may be set to run against a core checkout other than the android submodule.
 # MACRO CONVENTION: VALUE of -DDIGIID_UNFIXED, a set of bits (one bit per comparison arm, =0 shipped).
@@ -100,6 +123,18 @@ CASES=(
     long_messages:2,4,32,64,4096,8192,262144
     edges:1,2,4,8,16,64,256,4096,8192,262144
     buffer_edges:512
+    digiscope_list_hosts:-
+    digiscope_list_subdomains:2097152
+    digiscope_list_lookalikes:-
+    digiscope_list_letter_case:4194304
+    digiscope_list_edges:-
+    choice_digiscope_shared:-
+    choice_digiscope_site:8388608,16777216
+    choice_other_host:-
+    choice_refused:-
+    choice_unknown_scope_refused:33554432
+    choice_unknown_root_refused:524288
+    choice_end_to_end:2,4,64,4096,8192,131072,262144,524288,8388608,16777216
     sweep_indexes:1,2
     sweep_keys:1,2,4,8,4096,262144
     sweep_keys_standard:1,2,4,8,64,8192,131072
@@ -110,7 +145,8 @@ CASES=(
 ARMS=(1:index-big-endian 2:words-big-endian 4:soft-path 8:negative-index 16:shared-any-index 32:compact-size
       64:single-sha 128:uncompressed 256:segwit-ignored 512:key-kept 1024:lone-surrogate-kept 2048:modified-utf8
       4096:shared-path 8192:base64-unpadded 16384:uri-spec-pairs 32768:uri-as-message 65536:address-key-kept
-      131072:root-ignored 262144:root-always-standard 524288:any-root 1048576:any-hasuri)
+      131072:root-ignored 262144:root-always-standard 524288:any-root 1048576:any-hasuri 2097152:list-suffix
+      4194304:list-casefold 8388608:site-signs-shared 16777216:site-uses-callback 33554432:any-scope)
 
 # ---- the seam is real ----------------------------------------------------------------------
 if [ ! -f "$HEADER" ]; then
@@ -118,7 +154,8 @@ if [ ! -f "$HEADER" ]; then
 fi
 HDR="$(cat "$HEADER")"
 for fn in BRDigiIdSlip13Indexes BRDigiIdSiteKey BRDigiIdSharedKey BRDigiIdMessagePrefix BRDigiIdMessageDigest BRDigiIdUtf8FromUtf16 \
-          BRDigiIdUriBytesFromUtf16 BRDigiIdAddressWithKey BRDigiIdSignWithKey BRDigiIdSignShared BRDigiIdSignSite BRDigiIdAddress; do
+          BRDigiIdUriBytesFromUtf16 BRDigiIdAddressWithKey BRDigiIdSignWithKey BRDigiIdSignShared BRDigiIdSignSite BRDigiIdAddress \
+          BRDigiIdIsDigiScopeHost BRDigiIdChooseIdentity; do
     if ! grep -Eq "static inline [a-zA-Z0-9_ ]+ \*?$fn\(" <<<"$HDR"; then
         echo "GATE FAILURE: $HEADER does not define $fn."; exit 1
     fi
@@ -199,13 +236,19 @@ int main(void)
     static const uint16_t units[] = { 'h', 0xD83D, 0xDE00 };
     uint8_t bytes[16];
     size_t len = 0;
+    BRDigiIdChoice choice;
     int ok;
     BRBIP39DeriveKey(seed, "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about", NULL);
     ok = BRDigiIdAddress(addr, sizeof(addr), seed, sizeof(seed), BR_DIGIID_ROOT_DIGIBYTE, 0, NULL, 0, 0, work, sizeof(work)) == BR_DIGIID_OK &&
          strcmp(addr, "DGAf4MmtdP6D6QY1KREaznT3DZwxeAkWyn") == 0 &&
          BRDigiIdSignSite(out, sizeof(out), seed, sizeof(seed), BR_DIGIID_ROOT_DIGIBYTE, (const uint8_t *)"m", 1, "https://example.com/callback",
                           28, 0, work, sizeof(work)) == BR_DIGIID_OK && strncmp(out, "DPeEMYki92jeUSDgjkrfrTMVpvGWCHYd68|", 35) == 0 &&
-         BRDigiIdUtf8FromUtf16(bytes, sizeof(bytes), &len, units, 3) == BR_DIGIID_OK && len == 5;
+         BRDigiIdUtf8FromUtf16(bytes, sizeof(bytes), &len, units, 3) == BR_DIGIID_OK && len == 5 &&
+         BRDigiIdIsDigiScopeHost("digiscope.me", 12) == 1 && BRDigiIdIsDigiScopeHost("hub.digiscope.me", 16) == 0 &&
+         BRDigiIdChooseIdentity(&choice, "api.digiscope.me", 16, NULL, 0, BR_DIGIID_SCOPE_SITE, BR_DIGIID_ROOT_STANDARD) == BR_DIGIID_OK &&
+         choice.kind == BR_DIGIID_IDENTITY_SITE && choice.uriLen == sizeof(BR_DIGIID_DIGISCOPE_LOGIN_URI) - 1 &&
+         BRDigiIdAddress(addr, sizeof(addr), seed, sizeof(seed), choice.root, 1, choice.uri, choice.uriLen, 0, work, sizeof(work)) == BR_DIGIID_OK &&
+         strcmp(addr, "DSsC7WWi7mgr4t7xEw9kmcZqgQq6YJjdri") == 0;
     mem_clean(seed, sizeof(seed));
     return (ok && strict_tu1()) ? 0 : 1;
 }
@@ -259,8 +302,22 @@ let indexes: BRDigiIdStatus = BRDigiIdSlip13Indexes(&idx, uriBytes, uriLength, 0
 var key = BRKey()
 let siteKey: BRDigiIdStatus = BRDigiIdSiteKey(&key, seed, seed.count, BR_DIGIID_ROOT_DIGIBYTE, uriBytes, uriLength, 0, &work, workCount)
 let keyAddress: BRDigiIdStatus = BRDigiIdAddressWithKey(&addr, addr.count, &key)
+// Which identity signs (THE CHOICE in BRDigiId.h): the request's host and callback as bytes, the wallet's two
+// properties as the enums' constants, and DigiScope's login URL, a plain literal that Swift imports as a String.
+let host: [CChar] = "api.digiscope.me".utf8.map { CChar(bitPattern: $0) }
+let listed: Int32 = BRDigiIdIsDigiScopeHost(host, host.count)
+var choice = BRDigiIdChoice()
+let chosen: BRDigiIdStatus = BRDigiIdChooseIdentity(&choice, host, host.count, uriBytes, uriLength, BR_DIGIID_SCOPE_SITE, BR_DIGIID_ROOT_STANDARD)
+let chosenKind: BRDigiIdIdentityKind = choice.kind
+let chosenRoot: BRDigiIdRoot = choice.root
+let chosenUri: UnsafePointer<CChar>? = choice.uri
+let chosenLength: Int = choice.uriLen
+let loginUri: String = BR_DIGIID_DIGISCOPE_LOGIN_URI
+let unsetScope: BRDigiIdScopeIdentity = BR_DIGIID_SCOPE_NONE
 print(uriStatus == BR_DIGIID_OK, signed == BR_DIGIID_OK, shared == BR_DIGIID_OK, address == BR_DIGIID_OK, indexes == BR_DIGIID_OK,
-      utf8 == BR_DIGIID_OK, siteKey == BR_DIGIID_OK, keyAddress == BR_DIGIID_OK, DIGIID_UNFIXED, BR_DIGIID_MESSAGE_HEADER_LENGTH)
+      utf8 == BR_DIGIID_OK, siteKey == BR_DIGIID_OK, keyAddress == BR_DIGIID_OK, DIGIID_UNFIXED, BR_DIGIID_MESSAGE_HEADER_LENGTH,
+      listed == 1, chosen == BR_DIGIID_OK, chosenKind == BR_DIGIID_IDENTITY_SITE, chosenRoot == BR_DIGIID_ROOT_STANDARD, chosenUri != nil,
+      chosenLength == loginUri.utf8.count, unsetScope.rawValue == 0, BR_DIGIID_SCOPE_SHARED.rawValue == 1)
 EOF
     # The headers alone, without the core's module.modulemap (Swift would read it as the BRCore module, and it
     # names headers this core no longer has): the way an app's bridging header sees them.
@@ -287,8 +344,11 @@ int digiid_core_kat_tu2(void)
 {
     uint32_t idx[4];
     uint8_t work[64];
+    BRDigiIdChoice choice;
     return BRDigiIdSlip13Indexes(idx, "http://bitid.bitcoin.blue/callback", 34, 0, work, sizeof(work)) == BR_DIGIID_OK && idx[0] == 0xbe553112u &&
-           BRDigiIdDigestWorkSize(2) == 29;
+           BRDigiIdDigestWorkSize(2) == 29 && BRDigiIdIsDigiScopeHost("api.digiscope.me", 16) == 1 &&
+           BRDigiIdChooseIdentity(&choice, "digiscope.me", 12, NULL, 0, BR_DIGIID_SCOPE_SHARED, BR_DIGIID_ROOT_DIGIBYTE) == BR_DIGIID_OK &&
+           choice.kind == BR_DIGIID_IDENTITY_SHARED;
 }
 EOF
 
@@ -307,6 +367,80 @@ known="$("$BUILD_DIR/green" list | sort | tr '\n' ' ')"
 listed="$(printf '%s\n' "${CASES[@]%%:*}" | sort | tr '\n' ' ')"
 if [ "$known" != "$listed" ]; then
     echo "GATE FAILURE: case lists disagree"; echo "  binary: $known"; echo "  run.sh: $listed"; exit 1
+fi
+
+# ---- SOURCE GATE: one DigiScope list -------------------------------------------------------
+# Remove this gate, and digiscope_hosts.py's kotlin reader, in the change that makes Android read the list from the
+# core (Coinomi step 2): IdentityKeyPolicy.kt's DIGISCOPE_HOSTS goes then, and the reader says so when it is gone.
+KOTLIN_POLICY="$REPO_ROOT/core/src/main/java/app/aroundtheblock/wallet/core/digiid/IdentityKeyPolicy.kt"
+HOSTS_PY="$SCRIPT_DIR/digiscope_hosts.py"
+LIST_ARM="$BUILD_DIR/list_arm"
+mkdir -p "$LIST_ARM/hdr"
+printf '#include "BRDigiId.h"\n' > "$LIST_ARM/tu.c"
+"$BUILD_DIR/green" hosts > "$LIST_ARM/kat.txt"
+# one_list <IdentityKeyPolicy.kt> <the directory of the BRDigiId.h to read>: prints its verdict, and returns 0 when
+# that header's list, that file's DIGISCOPE_HOSTS and the hosts digiid_core_kat_main.c names are the same hosts.
+one_list() {
+    local kotlin="$1" hdrdir="$2" k c t
+    t="$(LC_ALL=C sort "$LIST_ARM/kat.txt" | tr '\n' ' ')"
+    [ -n "$t" ] || { echo "digiid_core_kat_main.c names no host"; return 1; }
+    if ! "$CC" -E -P -DDIGIID_UNFIXED=0 -I "$hdrdir" -I "$CORE_DIR" "$LIST_ARM/tu.c" > "$LIST_ARM/pre.c" 2> "$LIST_ARM/err.txt"; then
+        echo "BRDigiId.h did not preprocess: $(head -1 "$LIST_ARM/err.txt")"; return 1
+    fi
+    if ! python3 -I "$HOSTS_PY" header "$LIST_ARM/pre.c" > "$LIST_ARM/c.txt" 2> "$LIST_ARM/err.txt"; then
+        echo "BRDigiId.h: $(cat "$LIST_ARM/err.txt")"; return 1
+    fi
+    [ -f "$kotlin" ] || { echo "IdentityKeyPolicy.kt is not at $kotlin"; return 1; }
+    if ! python3 -I "$HOSTS_PY" kotlin "$kotlin" > "$LIST_ARM/k.txt" 2> "$LIST_ARM/err.txt"; then
+        echo "IdentityKeyPolicy.kt: $(cat "$LIST_ARM/err.txt")"; return 1
+    fi
+    c="$(LC_ALL=C sort "$LIST_ARM/c.txt" | tr '\n' ' ')"; k="$(LC_ALL=C sort "$LIST_ARM/k.txt" | tr '\n' ' ')"
+    if [ "$c" != "$t" ]; then echo "BRDigiId.h lists [ $c] where digiid_core_kat_main.c holds it to [ $t]"; return 1; fi
+    if [ "$k" != "$t" ]; then echo "IdentityKeyPolicy.kt's DIGISCOPE_HOSTS is [ $k] where BRDigiId.h lists [ $c]"; return 1; fi
+    echo "BRDigiId.h, IdentityKeyPolicy.kt and digiid_core_kat_main.c name the same hosts: $t"
+}
+# expect_list <label> refused|same <what a refusal must name> <IdentityKeyPolicy.kt> <header directory>
+expect_list() {
+    local label="$1" want="$2" name="$3" out rc
+    out="$(one_list "$4" "$5")"; rc=$?
+    if [ "$want" = refused ]; then
+        if [ $rc -ne 0 ] && grep -qF -- "$name" <<<"$out"; then echo "  [list $label] refused, as it must be: ${out:0:160}"
+        else echo "  [list $label] GATE FAILURE: the gate did not refuse it, or not by name (rc=$rc): $out"; FAIL=1; fi
+    elif [ $rc -eq 0 ]; then echo "  [list $label] read as the same hosts, as it must be"
+    else echo "  [list $label] GATE FAILURE: $out"; FAIL=1; fi
+}
+echo "--- SOURCE GATE: one DigiScope list (BRDigiId.h, IdentityKeyPolicy.kt, digiid_core_kat_main.c) ---"
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "  GATE FAILURE: no python3 to read the lists with (digiscope_hosts.py)"; FAIL=1
+elif [ ! -f "$KOTLIN_POLICY" ]; then
+    echo "  GATE FAILURE: $KOTLIN_POLICY is gone. If Android reads the list from the core now, remove this gate with it."; FAIL=1
+elif ! out="$(one_list "$KOTLIN_POLICY" "$CORE_DIR")"; then
+    # The comparison arm below plants in copies of these two files, so it has nothing to say while they disagree.
+    echo "  [list] GATE FAILURE: $out"; FAIL=1
+else
+    echo "  [list] $out"
+    # COMPARISON ARM, in temp copies: a third host planted in either file is refused by name; so are a host missing
+    # from the Kotlin list and a list this gate cannot read; comments and layout change nothing.
+    sed -E 's/(DIGISCOPE_HOSTS[^=]*=[[:space:]]*setOf\()/\1"planted.example", /' "$KOTLIN_POLICY" > "$LIST_ARM/third.kt"
+    sed -E 's/(DIGISCOPE_HOSTS[^=]*=[[:space:]]*setOf\([^)]*\))/\1 + "planted.example"/' "$KOTLIN_POLICY" > "$LIST_ARM/plus.kt"
+    { printf '// val DIGISCOPE_HOSTS: Set<String> = setOf("planted.example")\n/* "planted.example", /* "nested.example" */ */\n'
+      sed -E 's/(DIGISCOPE_HOSTS[^=]*=[[:space:]]*setOf\()/\1\/* "planted.example", *\/ /' "$KOTLIN_POLICY"; } > "$LIST_ARM/comments.kt"
+    { printf 'object IdentityKeyPolicy {\n    val DIGISCOPE_HOSTS : Set < String > =\n        setOf (\n'
+      while IFS= read -r h; do printf '            "%s"   // "planted.example",\n            ,\n' "$h"; done < "$LIST_ARM/kat.txt"
+      printf '        )\n}\n'; } > "$LIST_ARM/layout.kt"
+    printf 'object IdentityKeyPolicy {\n    val DIGISCOPE_HOSTS: Set<String> = setOf("%s")\n}\n' "$(head -1 "$LIST_ARM/kat.txt")" > "$LIST_ARM/one.kt"
+    sed -E 's/(\{ "digiscope\.me", "api\.digiscope\.me")( \};)/\1, "planted.example"\2/' "$HEADER" > "$LIST_ARM/hdr/BRDigiId.h"
+    if [ "$(grep -c 'planted\.example' "$LIST_ARM/third.kt")" -ne 1 ] || [ "$(grep -c 'planted\.example' "$LIST_ARM/plus.kt")" -ne 1 ] ||
+       [ "$(grep -c 'planted\.example' "$LIST_ARM/comments.kt")" -ne 3 ] || [ "$(grep -c 'planted\.example' "$LIST_ARM/hdr/BRDigiId.h")" -ne 1 ]; then
+        echo "  [list] GATE FAILURE: a plant found no anchor in IdentityKeyPolicy.kt or BRDigiId.h -- the comparison arm is blind"; FAIL=1
+    else
+        expect_list "a third host in IdentityKeyPolicy.kt" refused planted.example "$LIST_ARM/third.kt" "$CORE_DIR"
+        expect_list "a third host in BRDigiId.h" refused planted.example "$KOTLIN_POLICY" "$LIST_ARM/hdr"
+        expect_list "a host missing from IdentityKeyPolicy.kt" refused "IdentityKeyPolicy.kt's DIGISCOPE_HOSTS is" "$LIST_ARM/one.kt" "$CORE_DIR"
+        expect_list "a list that is not plain literals" refused "cannot read it" "$LIST_ARM/plus.kt" "$CORE_DIR"
+        expect_list "a third host only in comments" same "" "$LIST_ARM/comments.kt" "$CORE_DIR"
+        expect_list "the list written over several lines" same "" "$LIST_ARM/layout.kt" "$CORE_DIR"
+    fi
 fi
 
 for arm in "${ARMS[@]}"; do
@@ -428,6 +562,6 @@ if ! grep -q "detect_leaks is not supported" <<<"$leak_probe"; then
 fi
 echo "leak check: $leak_note"
 
-[ $FAIL -eq 0 ] && echo "PASS: digiid_core_kat (${#CASES[@]} cases: ${#ARMS[@]} comparison arms each failing exactly its cases, shipped arm clean under ASan + UBSan and unsanitized; the bridge's own answers matched; 32-bit $bits_note; leak check $leak_note; portability)"
+[ $FAIL -eq 0 ] && echo "PASS: digiid_core_kat (${#CASES[@]} cases: ${#ARMS[@]} comparison arms each failing exactly its cases, shipped arm clean under ASan + UBSan and unsanitized; the bridge's own answers matched; 32-bit $bits_note; leak check $leak_note; one DigiScope list in BRDigiId.h and IdentityKeyPolicy.kt; portability)"
 [ $FAIL -ne 0 ] && echo "FAIL: digiid_core_kat"
 exit $FAIL

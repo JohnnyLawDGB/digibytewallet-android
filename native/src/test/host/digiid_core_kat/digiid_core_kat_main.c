@@ -38,8 +38,17 @@
 //       art8_utf below is ART's own encoder (Android 8.0 to 12) line for line, and
 //       digiid_core_bridge_main.c's host env writes them with the newer ART's.
 //
-//  IdentityKeyPolicyTest's assertions are not here: IdentityKeyPolicy (which identity a site gets) stays
-//  in Kotlin; only the C moved.
+//  WHICH IDENTITY SIGNS (THE DIGISCOPE LIST and THE CHOICE in BRDigiId.h: BRDigiIdIsDigiScopeHost and
+//  BRDigiIdChooseIdentity) has no bridge to be held to: it was never C, each app deciding in its own code
+//  (Android's IdentityKeyPolicy.kt, a Swift list on iOS). It is held BY HAND. The list cases are iOS's
+//  DigiIdIdentityTests, value for value (Android's IdentityKeyPolicyTest holds the same ones), every host
+//  crossed with both digiScopeIdentity values and both roots; then every refusal; then END TO END, the choice
+//  fed to BRDigiIdAddress and the signing calls, where a wallet restored as from Coinomi signs DigiScope with
+//  DSsC7WWi7mgr4t7xEw9kmcZqgQq6YJjdri, the address Coinomi signed DigiScope's login with (measured: the
+//  design's table). The two hosts and the login URL are written in this file, never read from the header.
+//  `hosts` prints the two, and run.sh's SOURCE GATE holds the header's own list and Android's
+//  IdentityKeyPolicy.kt to them, for as long as Android keeps a list of its own. Not carried from iOS's file:
+//  testTheRecordedDerivationNamesAreAndroids, the words a login's history row records, which is each app's.
 //
 //  One case per process: `digiid_core_kat <case>` prints PASS:/FAIL: lines and `RESULT <case> pass|fail`;
 //  `list` prints the case names. run.sh builds one binary per DIGIID_UNFIXED arm and holds each
@@ -49,6 +58,7 @@
 #include "BRDigiId.h"
 #include "BRBIP39Mnemonic.h"
 #include "BRBase58.h"   // BRBase58CheckDecode: the published BitID address's hash160
+#include "BRDigiScopePins.h"   // BR_DIGISCOPE_HOST: the server both apps pin, which the login URL names
 #include "slip13.h"   // the bridge's own
 #include <limits.h>
 #include <stdarg.h>
@@ -113,6 +123,11 @@ static const char *EMOJI_URI_REQUEST_ANSWER =
 static const char *EMOJI_URI_SPEC_ADDRESS = "DJEY3MhnjYjB7RxKHfxfZeZiyDu6ziGV6F";
 static const char *EMOJI_SITE_ANSWER =
     "DFfdC1dpu7GjqwbHBGwMbuHzwtfBE2r5Wx|IEjMM6/dfsv1K8w5HKPNCFHV/bjkzpPkLyi9KRdyyqm5a70pMTDcL5Bc+HjtmX+FblU+9Up/NIXxIVDNNLfAbDE=";
+// LOGIN signed with the per-site identity of DigiScope's login callback (https://api.digiscope.me/api/auth/digiid/callback)
+// at index 0 under BR_DIGIID_ROOT_STANDARD: an independent Python model's answer, the bridge having none for that root
+// (site_key_standard_login_and_indexes). Its address is the one Coinomi showed for that callback.
+static const char *LOGIN_ANSWER_STANDARD_SITE =
+    "DSsC7WWi7mgr4t7xEw9kmcZqgQq6YJjdri|IMx5g483pmrhXxBN7sywXP4364mTuX1jM7F2QAMJZ5CzKifnD1bbptCQGvlXMB78Xo6URQkWkPV1IIbSh/o+lfI=";
 
 // ---- a BIP32 of this file's own (hardened and normal private steps), to hold keys outside the core --
 
@@ -845,9 +860,8 @@ static void site_key_standard_login_and_indexes(void)
         { 2, "DT1N5cjfpXxrTQztFQSQGCEiNdfhYTbJSc" },
         { INT32_MAX, "D7D31HYwVkgv2wGjx3vxczkx6kXpa6zg6r" },
     };
-    static const char *loginAnswer =
-        "DSsC7WWi7mgr4t7xEw9kmcZqgQq6YJjdri|IMx5g483pmrhXxBN7sywXP4364mTuX1jM7F2QAMJZ5CzKifnD1bbptCQGvlXMB78Xo6URQkWkPV1IIbSh/o+lfI=";
     static const int32_t negative[] = { -1, INT32_MIN };
+    const char *loginAnswer = LOGIN_ANSWER_STANDARD_SITE;
     uint8_t seed[64];
     char addr[BR_DIGIID_ADDRESS_CAPACITY], answer[BR_DIGIID_ANSWER_CAPACITY], keyAddr[75];
     size_t i, n = strlen(uri);
@@ -1596,6 +1610,558 @@ static void buffer_edges(void)
     }
 }
 
+// ---- which identity signs ------------------------------------------------------------------------
+
+// THE DIGISCOPE LIST as this file holds it: the two hosts iOS's DigiIdIdentityTests and Android's
+// IdentityKeyPolicyTest name, written here and never read from the header. `digiid_core_kat hosts` prints them for
+// run.sh's SOURCE GATE.
+static const char *const LISTED_HOSTS[] = { "digiscope.me", "api.digiscope.me" };
+
+// DigiScope's login callback URL, written here: the second of the three URLs Coinomi was measured signing in to (the
+// design's table). Its per-site identity for ABANDON is the address Coinomi showed for it under "Bitcoin seed"
+// (site_key_standard_coinomi_uris) and the bridge's under "DigiByte seed" (site_key_digibyte_coinomi_uris).
+static const char *DIGISCOPE_LOGIN_URI = "https://api.digiscope.me/api/auth/digiid/callback";
+static const char *DIGISCOPE_LOGIN_STANDARD_ADDRESS = "DSsC7WWi7mgr4t7xEw9kmcZqgQq6YJjdri";
+static const char *DIGISCOPE_LOGIN_DIGIBYTE_ADDRESS = "DKBDZRPxPz6qGseZKNNzSwW3zfaRr1FQNA";
+
+// The two values each of a wallet's two properties takes (THE CHOICE).
+static const BRDigiIdScopeIdentity SCOPES[] = { BR_DIGIID_SCOPE_SHARED, BR_DIGIID_SCOPE_SITE };
+static const BRDigiIdRoot ROOTS[] = { BR_DIGIID_ROOT_DIGIBYTE, BR_DIGIID_ROOT_STANDARD };
+
+static const char *scopeName(BRDigiIdScopeIdentity s)
+{
+    return s == BR_DIGIID_SCOPE_SHARED ? "SHARED" : (s == BR_DIGIID_SCOPE_SITE ? "SITE" : "?");
+}
+
+static const char *rootName(BRDigiIdRoot r)
+{
+    return r == BR_DIGIID_ROOT_DIGIBYTE ? "DIGIBYTE" : (r == BR_DIGIID_ROOT_STANDARD ? "STANDARD" : "?");
+}
+
+// BRDigiIdChooseIdentity into *c, which is filled with 0xa5 first: what a refusal must zero is then not zero already.
+static BRDigiIdStatus hChoose(BRDigiIdChoice *c, const char *host, size_t hostLen, const char *callback, size_t callbackLen,
+                              BRDigiIdScopeIdentity scope, BRDigiIdRoot root)
+{
+    memset(c, 0xa5, sizeof(*c));
+    return BRDigiIdChooseIdentity(c, host, hostLen, callback, callbackLen, scope, root);
+}
+
+// hChoose for a host and a callback that are C strings (callback NULL: the request has none).
+static BRDigiIdStatus hChooseStr(BRDigiIdChoice *c, const char *host, const char *callback, BRDigiIdScopeIdentity scope, BRDigiIdRoot root)
+{
+    return hChoose(c, host, strlen(host), callback, callback ? strlen(callback) : 0, scope, root);
+}
+
+// What a refusal leaves: every byte zero, so no identity, no URI and no root.
+static int isNoChoice(const BRDigiIdChoice *c)
+{
+    return allZero(c, sizeof(*c)) && c->kind == BR_DIGIID_IDENTITY_NONE && c->uri == NULL && c->uriLen == 0 && c->root == BR_DIGIID_ROOT_NONE;
+}
+
+// The SHARED answer: the shared identity, which names no URI and no root.
+static int isSharedChoice(const BRDigiIdChoice *c)
+{
+    return c->kind == BR_DIGIID_IDENTITY_SHARED && c->uri == NULL && c->uriLen == 0 && c->root == BR_DIGIID_ROOT_NONE;
+}
+
+// The SITE answer that passes the request's callback through: the caller's own pointer and length, under `root`.
+static int isCallbackChoice(const BRDigiIdChoice *c, const char *callback, size_t callbackLen, BRDigiIdRoot root)
+{
+    return c->kind == BR_DIGIID_IDENTITY_SITE && c->uri == callback && c->uriLen == callbackLen && c->root == root;
+}
+
+// The SITE answer for DigiScope's login URL under `root`: that URL's bytes (this file's copy of them), in storage that
+// is not the request's callback, whatever the callback's bytes are.
+static int isLoginChoice(const BRDigiIdChoice *c, const char *callback, BRDigiIdRoot root)
+{
+    const size_t n = strlen(DIGISCOPE_LOGIN_URI);
+
+    return c->kind == BR_DIGIID_IDENTITY_SITE && c->root == root && c->uri != NULL && c->uri != callback && c->uriLen == n &&
+           memcmp(c->uri, DIGISCOPE_LOGIN_URI, n) == 0;
+}
+
+// Every answer THE CHOICE gives a host that is NOT on the list, for a request with this callback: both digiScopeIdentity
+// values crossed with both roots give the per-site identity of that callback, the caller's pointer and length, under
+// the wallet's root. Nonzero when all four do.
+static int offListAnswers(const char *host, size_t hostLen, const char *callback, size_t callbackLen)
+{
+    BRDigiIdChoice c;
+    size_t s, r;
+    int ok = 1;
+
+    for (s = 0; s < N(SCOPES); s++)
+        for (r = 0; r < N(ROOTS); r++)
+            ok = hChoose(&c, host, hostLen, callback, callbackLen, SCOPES[s], ROOTS[r]) == BR_DIGIID_OK &&
+                 isCallbackChoice(&c, callback, callbackLen, ROOTS[r]) && ok;
+    return ok;
+}
+
+// offListAnswers for a host and a callback that are C strings.
+static int offListStr(const char *host, const char *callback)
+{
+    return offListAnswers(host, strlen(host), callback, strlen(callback));
+}
+
+// One host that is not on the list, as a request names it (callback https://<host>/api/digiid/callback, the path of
+// both apps' list tests): BRDigiIdIsDigiScopeHost answers 0, and THE CHOICE its own per-site identity (offListAnswers).
+static void ckOffList(const char *host)
+{
+    char callback[128];
+    size_t n = strlen(host);
+
+    snprintf(callback, sizeof(callback), "https://%s/api/digiid/callback", host);
+    ck(BRDigiIdIsDigiScopeHost(host, n) == 0, "\"%s\" is not a DigiScope host", host);
+    ck(offListStr(host, callback), "\"%s\": its own per-site identity, under both digiScopeIdentity values and both roots", host);
+}
+
+// THE DIGISCOPE LIST holds the two hosts: iOS's testTheListedDigiScopeHostsAlwaysUseTheSharedIdentity and
+// testTheListHoldsExactlyTheTwoDigiScopeHosts (Android's IdentityKeyPolicyTest: the same two). iOS's choose(domain:)
+// is THE CHOICE as iOS asks it until it has per-wallet properties: digiScopeIdentity SHARED, root DIGIBYTE. Then what
+// the header states about them: the two enums' values, the login URL's text, and that its host is on the list and is
+// the server both apps pin.
+static void digiscope_list_hosts(void)
+{
+    static const char among[] = { 'x', 'd', 'i', 'g', 'i', 's', 'c', 'o', 'p', 'e', '.', 'm', 'e', 'x' };   // no NUL anywhere
+    BRDigiIdChoice c;
+    size_t i;
+
+    ck(N(LISTED_HOSTS) == 2 && strcmp(LISTED_HOSTS[0], "digiscope.me") == 0 && strcmp(LISTED_HOSTS[1], "api.digiscope.me") == 0,
+       "the list this file holds is the two hosts: digiscope.me, api.digiscope.me");
+    for (i = 0; i < N(LISTED_HOSTS); i++) {
+        const char *h = LISTED_HOSTS[i];
+        char callback[128];
+
+        snprintf(callback, sizeof(callback), "https://%s/api/digiid/callback", h);
+        ck(BRDigiIdIsDigiScopeHost(h, strlen(h)) == 1, "\"%s\" is a DigiScope host", h);
+        ck(hChooseStr(&c, h, callback, BR_DIGIID_SCOPE_SHARED, BR_DIGIID_ROOT_DIGIBYTE) == BR_DIGIID_OK && isSharedChoice(&c),
+           "\"%s\", SHARED and DIGIBYTE (as iOS asks today): the shared identity", h);
+    }
+    ck(BRDigiIdIsDigiScopeHost(among + 1, 12) == 1,
+       "the 12 bytes of digiscope.me between other bytes, with no NUL after them: the length is what ends the host");
+
+    ck(BR_DIGIID_SCOPE_NONE == 0 && BR_DIGIID_SCOPE_SHARED == 1 && BR_DIGIID_SCOPE_SITE == 2,
+       "digiScopeIdentity's values are the ones every platform passes: none 0, SHARED 1, SITE 2");
+    ck(BR_DIGIID_IDENTITY_NONE == 0 && BR_DIGIID_IDENTITY_SHARED == 1 && BR_DIGIID_IDENTITY_SITE == 2,
+       "and the chosen identity's: none 0, SHARED 1, SITE 2");
+    ck(strcmp(BR_DIGIID_DIGISCOPE_LOGIN_URI, DIGISCOPE_LOGIN_URI) == 0 && strlen(BR_DIGIID_DIGISCOPE_LOGIN_URI) == 49,
+       "BR_DIGIID_DIGISCOPE_LOGIN_URI is DigiScope's login callback, 49 bytes (%s)", BR_DIGIID_DIGISCOPE_LOGIN_URI);
+    ck(strncmp(DIGISCOPE_LOGIN_URI, "https://", 8) == 0 && strncmp(DIGISCOPE_LOGIN_URI + 8, LISTED_HOSTS[1], 16) == 0 &&
+       DIGISCOPE_LOGIN_URI[24] == '/' && BRDigiIdIsDigiScopeHost(DIGISCOPE_LOGIN_URI + 8, 16) == 1,
+       "its host is api.digiscope.me, a DigiScope host");
+    ck(strcmp(LISTED_HOSTS[1], BR_DIGISCOPE_HOST) == 0, "and that host is the server both apps pin (BRDigiScopePins.h's BR_DIGISCOPE_HOST, %s)",
+       BR_DIGISCOPE_HOST);
+}
+
+// iOS's testADigiScopeSubdomainThatIsNotOnTheListGetsAPerSiteIdentity, value for value: a name under a listed host is
+// not on the list. Beyond iOS's five: an empty label under the host, and a name under it that is not a word.
+static void digiscope_list_subdomains(void)
+{
+    static const char *IOS[] = { "hub.digiscope.me", "a.digiscope.me", "www.digiscope.me", "x.api.digiscope.me", "api.api.digiscope.me" };
+    static const char *MORE[] = { ".digiscope.me", ".api.digiscope.me", "pi.digiscope.me", "evil.example.digiscope.me" };
+    size_t i;
+
+    for (i = 0; i < N(IOS); i++) ckOffList(IOS[i]);
+    for (i = 0; i < N(MORE); i++) ckOffList(MORE[i]);
+}
+
+// iOS's testALookalikeDomainIsNotTreatedAsDigiScope and testANewDomainGetsAPerSiteIdentity, value for value: a name
+// that only holds a listed host's letters, or ends in them with no dot before, or carries a trailing dot, is another
+// site. Beyond iOS's: what no parse gives as a domain (a port, a slash, a blank), one letter more, and other sites.
+static void digiscope_list_lookalikes(void)
+{
+    static const char *IOS[] = { "notdigiscope.me", "digiscope.me.other.example", "adigiscope.me", "api-digiscope.me", "digiscope.me.",
+                                 "api.digiscope.me.", "example.com" };
+    static const char *MORE[] = { "digiscope.me:443", "api.digiscope.me:8443", "digiscope.me/", " digiscope.me", "digiscope.me ",
+                                  "digiscope.mee", "digiscope_me", "apidigiscope.me", "digiscope.com", "me", "localhost" };
+    size_t i;
+
+    for (i = 0; i < N(IOS); i++) ckOffList(IOS[i]);
+    for (i = 0; i < N(MORE); i++) ckOffList(MORE[i]);
+}
+
+// iOS's testTheDomainComesFromTheParse: the list is matched byte for byte and the parse lower-cases the domain, so the
+// parse's spelling is the one that counts. The parse is each app's own: the domain it gives digiid://API.DigiScope.me/...
+// is "api.digiscope.me", which digiscope_list_hosts holds. The spellings no parse gives are off the list, iOS's first.
+static void digiscope_list_letter_case(void)
+{
+    static const char *HOSTS[] = { "API.DigiScope.me", "DigiScope.ME", "DIGISCOPE.ME", "Digiscope.me", "digiscope.mE", "API.DIGISCOPE.ME",
+                                   "api.Digiscope.me" };
+    size_t i;
+
+    for (i = 0; i < N(HOSTS); i++) ckOffList(HOSTS[i]);
+}
+
+// Beyond iOS's cases: no host, an empty one, and a length that is not the host's own. A listed host's bytes with one
+// fewer, or with the NUL that ends its C string counted in, are another host, as is any host with a NUL among its
+// bytes: all hostLen bytes are compared, and nothing after them is read. THE CHOICE reads the same bytes; with no host
+// it refuses, where both apps' choose("") answered per-site: no request has an empty host (each parse refuses it).
+static void digiscope_list_edges(void)
+{
+    static const char host[] = "digiscope.me", api[] = "api.digiscope.me";   // 13 and 17 bytes with their NULs
+    static const char nulInside[] = { 'd', 'i', 'g', 'i', 0, 'c', 'o', 'p', 'e', '.', 'm', 'e' };
+    static const char nulThenRest[] = { 'd', 'i', 'g', 'i', 's', 'c', 'o', 'p', 'e', '.', 'm', 'e', 0, 'x' };
+    static const char noNulAfter[] = { 'd', 'i', 'g', 'i', 's', 'c', 'o', 'p', 'e', '.', 'm', 'e', 'e' };
+    const size_t n = strlen(REQUEST_CALLBACK);
+    BRDigiIdChoice c;
+    size_t s, r;
+
+    ck(BRDigiIdIsDigiScopeHost("", 0) == 0 && BRDigiIdIsDigiScopeHost(host, 0) == 0, "an empty host is not a DigiScope host (digiscope.me with length 0 is empty)");
+    ck(BRDigiIdIsDigiScopeHost(NULL, 0) == 0 && BRDigiIdIsDigiScopeHost(NULL, 12) == 0 && BRDigiIdIsDigiScopeHost(NULL, 16) == 0,
+       "no host (NULL) is not one, whatever length comes with it");
+    ck(BRDigiIdIsDigiScopeHost(host, 12) == 1 && BRDigiIdIsDigiScopeHost(host, 11) == 0, "digiscope.me one byte short (digiscope.m) is not");
+    ck(BRDigiIdIsDigiScopeHost(host, 13) == 0, "digiscope.me one byte long, its NUL counted in, is not: an embedded NUL never matches");
+    ck(BRDigiIdIsDigiScopeHost(api, 16) == 1 && BRDigiIdIsDigiScopeHost(api, 15) == 0 && BRDigiIdIsDigiScopeHost(api, 17) == 0,
+       "api.digiscope.me one byte short and one byte long are not");
+    ck(BRDigiIdIsDigiScopeHost(api, 12) == 0 && BRDigiIdIsDigiScopeHost(host, 1) == 0 && BRDigiIdIsDigiScopeHost(api, 3) == 0,
+       "a listed host's first bytes are not (api.digiscop, d, api)");
+    ck(BRDigiIdIsDigiScopeHost(nulInside, sizeof(nulInside)) == 0, "12 bytes with a NUL where digiscope.me has its s are not");
+    ck(BRDigiIdIsDigiScopeHost(nulThenRest, sizeof(nulThenRest)) == 0 && BRDigiIdIsDigiScopeHost(nulThenRest, 13) == 0,
+       "digiscope.me, a NUL and more bytes are not: the host does not end at the NUL");
+    ck(BRDigiIdIsDigiScopeHost(noNulAfter, 12) == 1 && BRDigiIdIsDigiScopeHost(noNulAfter, 13) == 0,
+       "digiscope.mee: its first 12 bytes are the host, all 13 are not, and no NUL is looked for");
+
+    ck(offListAnswers(host, 11, REQUEST_CALLBACK, n) && offListAnswers(host, 13, REQUEST_CALLBACK, n) && offListAnswers(api, 15, REQUEST_CALLBACK, n) &&
+       offListAnswers(api, 17, REQUEST_CALLBACK, n) && offListAnswers(nulInside, sizeof(nulInside), REQUEST_CALLBACK, n),
+       "THE CHOICE reads the same bytes: each of these is another site, with its own per-site identity");
+    for (s = 0; s < N(SCOPES); s++) {
+        for (r = 0; r < N(ROOTS); r++) {
+            ck(hChoose(&c, "", 0, REQUEST_CALLBACK, n, SCOPES[s], ROOTS[r]) == BR_DIGIID_REFUSED && isNoChoice(&c) &&
+               hChoose(&c, NULL, 0, REQUEST_CALLBACK, n, SCOPES[s], ROOTS[r]) == BR_DIGIID_REFUSED && isNoChoice(&c),
+               "%s, %s: an empty host and no host are refused, the answer all zero", scopeName(SCOPES[s]), rootName(ROOTS[r]));
+        }
+    }
+}
+
+// The callbacks a request to a DigiScope host is tried with: none at all (the Hub's own login has no request), an
+// empty one, DigiScope's login URL in the request's own storage, the probe callback Coinomi was measured at for that
+// host, and another site's.
+typedef struct { const char *uri; size_t len; const char *name; } Callback;
+
+static size_t digiScopeCallbacks(Callback out[5], char ownLogin[64], const char *probe)
+{
+    strcpy(ownLogin, DIGISCOPE_LOGIN_URI);
+    out[0].uri = NULL; out[0].len = 0; out[0].name = "no callback";
+    out[1].uri = ""; out[1].len = 0; out[1].name = "an empty callback";
+    out[2].uri = ownLogin; out[2].len = strlen(ownLogin); out[2].name = "the login URL, in the request's own storage";
+    out[3].uri = probe; out[3].len = strlen(probe); out[3].name = probe;
+    out[4].uri = REQUEST_CALLBACK; out[4].len = strlen(REQUEST_CALLBACK); out[4].name = REQUEST_CALLBACK;
+    return 5;
+}
+
+static const struct { const char *host, *probe; } DIGISCOPE[] = {
+    { "digiscope.me", "https://digiscope.me/api/digiid-probe/callback" },
+    { "api.digiscope.me", "https://api.digiscope.me/api/digiid-probe/callback" },
+};
+
+// THE CHOICE, a DigiScope host and digiScopeIdentity SHARED (every wallet but one restored as from Coinomi): the shared
+// identity, m/0'/0/0, on both hosts, under either root and whatever callback the request has, or none. The answer
+// names no URI and no root.
+static void choice_digiscope_shared(void)
+{
+    Callback cb[5];
+    char own[64];
+    BRDigiIdChoice c;
+    size_t h, r, k, count;
+
+    for (h = 0; h < N(DIGISCOPE); h++) {
+        count = digiScopeCallbacks(cb, own, DIGISCOPE[h].probe);
+        for (r = 0; r < N(ROOTS); r++) {
+            for (k = 0; k < count; k++) {
+                BRDigiIdStatus s = hChoose(&c, DIGISCOPE[h].host, strlen(DIGISCOPE[h].host), cb[k].uri, cb[k].len, BR_DIGIID_SCOPE_SHARED, ROOTS[r]);
+
+                ck(s == BR_DIGIID_OK && isSharedChoice(&c), "%s, SHARED, %s, %s: the shared identity, no URI and no root (%s)", DIGISCOPE[h].host,
+                   rootName(ROOTS[r]), cb[k].name, st(s));
+            }
+        }
+    }
+}
+
+// THE CHOICE, a DigiScope host and digiScopeIdentity SITE (a wallet restored as from Coinomi): the per-site identity
+// of DigiScope's one login URL under the wallet's root, on both hosts and whatever callback the request has, or none.
+// Never the request's own callback: not its bytes when they differ (the probe's, another site's), and not its pointer
+// when they are the login URL's own. One DigiScope account, one key.
+static void choice_digiscope_site(void)
+{
+    Callback cb[5];
+    char own[64];
+    BRDigiIdChoice c;
+    size_t h, r, k, count;
+
+    for (h = 0; h < N(DIGISCOPE); h++) {
+        count = digiScopeCallbacks(cb, own, DIGISCOPE[h].probe);
+        for (r = 0; r < N(ROOTS); r++) {
+            for (k = 0; k < count; k++) {
+                BRDigiIdStatus s = hChoose(&c, DIGISCOPE[h].host, strlen(DIGISCOPE[h].host), cb[k].uri, cb[k].len, BR_DIGIID_SCOPE_SITE, ROOTS[r]);
+
+                ck(s == BR_DIGIID_OK && isLoginChoice(&c, cb[k].uri, ROOTS[r]),
+                   "%s, SITE, %s, %s: the per-site identity of the login URL under that root, not of the callback (%s)", DIGISCOPE[h].host,
+                   rootName(ROOTS[r]), cb[k].name, st(s));
+            }
+        }
+    }
+}
+
+// THE CHOICE, a host off the list: the per-site identity of the request's own callback URL under the wallet's root,
+// whatever its digiScopeIdentity. The answer is the caller's pointer and length: the bytes are not copied, changed or
+// read (THE URI: hashed as given), so a callback with no NUL after it, or with a NUL or bytes above 0x7f in it, comes
+// back as it went in. The host and the callback are the caller's pair and are not compared: DigiScope's login URL
+// given with a host off the list is still that request's callback.
+static void choice_other_host(void)
+{
+    static const char odd[] = { 'h', 0x00, 't', (char)0x80, (char)0xff, (char)0xc0, (char)0x80, '/' };
+    static const char idn[] = { 'b', (char)0xc3, (char)0xbc, 'c', 'h', 'e', 'r', '.', 'e', 'x', 'a', 'm', 'p', 'l', 'e' };   // b<U+00FC>cher.example, in UTF-8
+    static const char *off = "example.com";
+    const size_t n = strlen(REQUEST_CALLBACK);
+    char unterminated[40], ownLogin[64];
+    BRDigiIdChoice c;
+    size_t s, r;
+
+    memset(unterminated, 'x', sizeof(unterminated));
+    memcpy(unterminated + 3, REQUEST_CALLBACK, n);   // 28 bytes, 'x' before and after, no NUL in the buffer
+    strcpy(ownLogin, DIGISCOPE_LOGIN_URI);
+
+    for (s = 0; s < N(SCOPES); s++) {
+        for (r = 0; r < N(ROOTS); r++) {
+            BRDigiIdStatus status = hChooseStr(&c, off, REQUEST_CALLBACK, SCOPES[s], ROOTS[r]);
+
+            ck(status == BR_DIGIID_OK && c.kind == BR_DIGIID_IDENTITY_SITE && c.uri == REQUEST_CALLBACK && c.uriLen == 28 && c.root == ROOTS[r],
+               "example.com, %s, %s: SITE, the request's callback (its pointer, 28 bytes), root %s (%s)", scopeName(SCOPES[s]), rootName(ROOTS[r]),
+               rootName(ROOTS[r]), st(status));
+        }
+    }
+    ck(offListAnswers(off, strlen(off), unterminated + 3, n), "a callback with no NUL after it: its pointer and length");
+    ck(offListAnswers(off, strlen(off), odd, sizeof(odd)), "a callback with a NUL and bytes above 0x7f in it: its pointer and length");
+    ck(offListStr(off, "/"), "a callback of one byte: its pointer and length");
+    ck(offListStr(off, ownLogin), "DigiScope's login URL given with a host off the list: that request's callback (the pair is the caller's)");
+    ck(offListAnswers(idn, sizeof(idn), REQUEST_CALLBACK, n) && BRDigiIdIsDigiScopeHost(idn, sizeof(idn)) == 0,
+       "a host with bytes above 0x7f: another site");
+    ck(offListStr("shop.example.com", "https://shop.example.com/digiid/callback/v1"), "shop.example.com: its own callback");
+}
+
+// What THE CHOICE refuses that is not a wallet property: no out, no host, and a host off the list with no callback URL.
+// Each leaves the answer all zero, and the same call with nothing missing answers. (A DigiScope host needs no callback:
+// choice_digiscope_shared, choice_digiscope_site.) Both properties unknown at once are refused as well.
+static void choice_refused(void)
+{
+    static const char *off = "example.com", *listed = "digiscope.me";
+    const size_t n = strlen(REQUEST_CALLBACK), on = strlen(off), ln = strlen(listed);
+    BRDigiIdChoice c;
+    size_t s, r;
+
+    ck(BRDigiIdChooseIdentity(NULL, off, on, REQUEST_CALLBACK, n, BR_DIGIID_SCOPE_SHARED, BR_DIGIID_ROOT_DIGIBYTE) == BR_DIGIID_REFUSED &&
+       BRDigiIdChooseIdentity(NULL, listed, ln, NULL, 0, BR_DIGIID_SCOPE_SITE, BR_DIGIID_ROOT_STANDARD) == BR_DIGIID_REFUSED,
+       "no out: refused, for a host off the list and for a DigiScope host");
+    for (s = 0; s < N(SCOPES); s++) {
+        for (r = 0; r < N(ROOTS); r++) {
+            const BRDigiIdScopeIdentity scope = SCOPES[s];
+            const BRDigiIdRoot root = ROOTS[r];
+            const char *sn = scopeName(scope), *rn = rootName(root);
+
+            ck(hChoose(&c, NULL, on, REQUEST_CALLBACK, n, scope, root) == BR_DIGIID_REFUSED && isNoChoice(&c) &&
+               hChoose(&c, NULL, 0, REQUEST_CALLBACK, n, scope, root) == BR_DIGIID_REFUSED && isNoChoice(&c),
+               "%s, %s: no host (NULL), with a length or without: refused, the answer all zero", sn, rn);
+            ck(hChoose(&c, off, 0, REQUEST_CALLBACK, n, scope, root) == BR_DIGIID_REFUSED && isNoChoice(&c) &&
+               hChoose(&c, listed, 0, REQUEST_CALLBACK, n, scope, root) == BR_DIGIID_REFUSED && isNoChoice(&c),
+               "%s, %s: an empty host (length 0, whatever it points at): refused, the answer all zero", sn, rn);
+            ck(hChoose(&c, off, on, NULL, n, scope, root) == BR_DIGIID_REFUSED && isNoChoice(&c) &&
+               hChoose(&c, off, on, NULL, 0, scope, root) == BR_DIGIID_REFUSED && isNoChoice(&c),
+               "%s, %s: a host off the list with no callback (NULL): refused, the answer all zero", sn, rn);
+            ck(hChoose(&c, off, on, REQUEST_CALLBACK, 0, scope, root) == BR_DIGIID_REFUSED && isNoChoice(&c) &&
+               hChoose(&c, off, on, "", 0, scope, root) == BR_DIGIID_REFUSED && isNoChoice(&c),
+               "%s, %s: a host off the list with an empty callback: refused, the answer all zero", sn, rn);
+            ck(hChoose(&c, off, on, REQUEST_CALLBACK, n, scope, root) == BR_DIGIID_OK && isCallbackChoice(&c, REQUEST_CALLBACK, n, root),
+               "%s, %s: the same call with its host and its callback answers", sn, rn);
+        }
+    }
+    ck(hChoose(&c, off, on, REQUEST_CALLBACK, n, BR_DIGIID_SCOPE_NONE, BR_DIGIID_ROOT_NONE) == BR_DIGIID_REFUSED && isNoChoice(&c) &&
+       hChoose(&c, listed, ln, REQUEST_CALLBACK, n, BR_DIGIID_SCOPE_NONE, BR_DIGIID_ROOT_NONE) == BR_DIGIID_REFUSED && isNoChoice(&c),
+       "neither property set (both 0): refused on and off the list, the answer all zero");
+}
+
+// The hosts and callbacks the two property refusals are tried on: both DigiScope hosts, with a callback and with none,
+// and a host off the list. Each case then makes the same calls with a known value, for the rows that have a callback
+// (a DigiScope host with none answers too: choice_digiscope_shared, choice_digiscope_site).
+static const struct { const char *host, *callback; } PROPERTY_ROWS[] = {
+    { "digiscope.me", NULL }, { "digiscope.me", "https://digiscope.me/api/digiid-probe/callback" },
+    { "api.digiscope.me", NULL }, { "api.digiscope.me", "https://api.digiscope.me/api/auth/digiid/callback" },
+    { "example.com", "https://example.com/callback" },
+};
+
+// THE CHOICE refuses a digiScopeIdentity that is neither SHARED (1) nor SITE (2): 0, which a zeroed or unset property
+// holds, and every other value. On a DigiScope host, and off the list, where the answer would not use it; under either
+// root; the answer left all zero. The same calls with a known value answer, so each refusal is the property's alone.
+static void choice_unknown_scope_refused(void)
+{
+    static const struct { BRDigiIdScopeIdentity scope; const char *name; } BAD[] = {
+        { BR_DIGIID_SCOPE_NONE, "0 (BR_DIGIID_SCOPE_NONE)" }, { (BRDigiIdScopeIdentity)3, "3" },
+        { (BRDigiIdScopeIdentity)-1, "(BRDigiIdScopeIdentity)-1" },
+    };
+    BRDigiIdChoice c;
+    size_t i, r, k;
+
+    for (k = 0; k < N(PROPERTY_ROWS); k++) {
+        const char *host = PROPERTY_ROWS[k].host, *callback = PROPERTY_ROWS[k].callback;
+
+        for (r = 0; r < N(ROOTS); r++) {
+            for (i = 0; i < N(BAD); i++) {
+                BRDigiIdStatus s = hChooseStr(&c, host, callback, BAD[i].scope, ROOTS[r]);
+
+                ck(s == BR_DIGIID_REFUSED && isNoChoice(&c), "%s, callback %s, %s, digiScopeIdentity %s: refused, the answer all zero (%s)", host,
+                   callback ? callback : "none", rootName(ROOTS[r]), BAD[i].name, st(s));
+            }
+            for (i = 0; callback && i < N(SCOPES); i++)
+                ck(hChooseStr(&c, host, callback, SCOPES[i], ROOTS[r]) == BR_DIGIID_OK && c.kind != BR_DIGIID_IDENTITY_NONE,
+                   "%s, callback %s, %s, digiScopeIdentity %s: the same call answers", host, callback ? callback : "none", rootName(ROOTS[r]),
+                   scopeName(SCOPES[i]));
+        }
+    }
+}
+
+// THE CHOICE refuses a root that is neither DIGIBYTE (1) nor STANDARD (2), as every call that takes a root does (THE
+// ROOT, unknown_root_refused): 0 and every other value, also where the answer would not name a root (a DigiScope host
+// with digiScopeIdentity SHARED), the answer left all zero. The same calls with a known root answer.
+static void choice_unknown_root_refused(void)
+{
+    static const struct { BRDigiIdRoot root; const char *name; } BAD[] = {
+        { BR_DIGIID_ROOT_NONE, "0 (BR_DIGIID_ROOT_NONE)" }, { (BRDigiIdRoot)3, "3" }, { (BRDigiIdRoot)-1, "(BRDigiIdRoot)-1" },
+    };
+    BRDigiIdChoice c;
+    size_t i, s, k;
+
+    for (k = 0; k < N(PROPERTY_ROWS); k++) {
+        const char *host = PROPERTY_ROWS[k].host, *callback = PROPERTY_ROWS[k].callback;
+
+        for (s = 0; s < N(SCOPES); s++) {
+            for (i = 0; i < N(BAD); i++) {
+                BRDigiIdStatus status = hChooseStr(&c, host, callback, SCOPES[s], BAD[i].root);
+
+                ck(status == BR_DIGIID_REFUSED && isNoChoice(&c), "%s, callback %s, %s, root %s: refused, the answer all zero (%s)", host,
+                   callback ? callback : "none", scopeName(SCOPES[s]), BAD[i].name, st(status));
+            }
+            for (i = 0; callback && i < N(ROOTS); i++)
+                ck(hChooseStr(&c, host, callback, SCOPES[s], ROOTS[i]) == BR_DIGIID_OK && c.kind != BR_DIGIID_IDENTITY_NONE,
+                   "%s, callback %s, %s, root %s: the same call answers", host, callback ? callback : "none", scopeName(SCOPES[s]),
+                   rootName(ROOTS[i]));
+        }
+    }
+}
+
+// The address THE CHOICE's answer gives ABANDON at index 0, as a caller derives it: for SITE, BRDigiIdAddress under
+// the answer's root with the answer's URI; for SHARED, BRDigiIdAddress with no URI under the wallet's own root, the
+// answer naming none. Empty when the choice or the address is refused.
+static void chosenAddress(char addr[BR_DIGIID_ADDRESS_CAPACITY], const uint8_t *seed, const char *host, const char *callback,
+                          BRDigiIdScopeIdentity scope, BRDigiIdRoot root)
+{
+    BRDigiIdChoice c;
+
+    addr[0] = '\0';
+    if (hChooseStr(&c, host, callback, scope, root) != BR_DIGIID_OK) return;
+    if (c.kind == BR_DIGIID_IDENTITY_SITE)
+        BRDigiIdAddress(addr, BR_DIGIID_ADDRESS_CAPACITY, seed, 64, c.root, 1, c.uri, c.uriLen, 0, WORK, sizeof(WORK));
+    else if (c.kind == BR_DIGIID_IDENTITY_SHARED)
+        BRDigiIdAddress(addr, BR_DIGIID_ADDRESS_CAPACITY, seed, 64, root, 0, NULL, 0, 0, WORK, sizeof(WORK));
+}
+
+// The answer a login signs msg with after THE CHOICE, as a caller signs it: BRDigiIdSignSite under the answer's root
+// over the answer's URI, or BRDigiIdSignShared (P2PKH). Empty when the choice or the signing is refused.
+static void chosenLogin(char answer[BR_DIGIID_ANSWER_CAPACITY], const uint8_t *seed, const char *host, const char *callback,
+                        BRDigiIdScopeIdentity scope, BRDigiIdRoot root, const char *msg)
+{
+    BRDigiIdChoice c;
+
+    answer[0] = '\0';
+    if (hChooseStr(&c, host, callback, scope, root) != BR_DIGIID_OK) return;
+    if (c.kind == BR_DIGIID_IDENTITY_SITE)
+        BRDigiIdSignSite(answer, BR_DIGIID_ANSWER_CAPACITY, seed, 64, c.root, (const uint8_t *)msg, strlen(msg), c.uri, c.uriLen, 0, WORK,
+                         sizeof(WORK));
+    else if (c.kind == BR_DIGIID_IDENTITY_SHARED)
+        BRDigiIdSignShared(answer, BR_DIGIID_ANSWER_CAPACITY, seed, 64, (const uint8_t *)msg, strlen(msg), 0, WORK, sizeof(WORK));
+}
+
+// END TO END: THE CHOICE's answer, fed to the calls that derive and sign, for ABANDON at index 0.
+//   A wallet restored as from Coinomi (digiScopeIdentity SITE, root STANDARD) signs DigiScope with
+//   DSsC7WWi7mgr4t7xEw9kmcZqgQq6YJjdri, the address Coinomi signed DigiScope's login with (measured: the design's
+//   table), and its login is the independent model's answer byte for byte. It is that one address on both hosts and
+//   for every callback: the two probe callbacks Coinomi was also measured at have identities of their own
+//   (DSSfzAos..., DA3TaNPP...), which no DigiScope host is signed with.
+//   SITE under the DigiByte root is the bridge's address for the login URL.
+//   digiScopeIdentity SHARED is the shared address under either root, the one BRDigiIdSignShared signs with, and the
+//   login is the bridge's answer byte for byte: what every wallet signs DigiScope with today.
+//   A host off the list signs as it does today under the DigiByte root (the bridge's answers), and under the standard
+//   root with this file's own BIP32 key from "Bitcoin seed".
+static void choice_end_to_end(void)
+{
+    static const struct { const char *host, *callback, *itsOwn; } OTHER[] = {
+        { "api.digiscope.me", "https://api.digiscope.me/api/digiid-probe/callback", "DSSfzAosbs1mBJE4rZPtZHGuwjHorJDNau" },
+        { "digiscope.me", "https://digiscope.me/api/digiid-probe/callback", "DA3TaNPPTHwStZp3K98sGzk7aaQ8sh7sBo" },
+        { "digiscope.me", NULL, NULL }, { "api.digiscope.me", NULL, NULL },   // no request: the Hub's own login
+        { "digiscope.me", "https://example.com/callback", NULL },
+    };
+    const size_t n = strlen(REQUEST_CALLBACK);
+    uint8_t seed[64];
+    char login[64], addr[BR_DIGIID_ADDRESS_CAPACITY], own[BR_DIGIID_ADDRESS_CAPACITY], answer[BR_DIGIID_ANSWER_CAPACITY];
+    BRDigiIdChoice c;
+    BRKey key;
+    size_t i, r, s;
+
+    seedOf(seed, ABANDON);
+    strcpy(login, DIGISCOPE_LOGIN_URI);   // LOGIN's callback URL, in the request's own storage
+
+    chosenAddress(addr, seed, "api.digiscope.me", login, BR_DIGIID_SCOPE_SITE, BR_DIGIID_ROOT_STANDARD);
+    ck(strcmp(addr, DIGISCOPE_LOGIN_STANDARD_ADDRESS) == 0,
+       "api.digiscope.me, SITE, STANDARD, the login request: the address Coinomi signed DigiScope's login with (%s)", addr);
+    chosenLogin(answer, seed, "api.digiscope.me", login, BR_DIGIID_SCOPE_SITE, BR_DIGIID_ROOT_STANDARD, LOGIN);
+    ck(strcmp(answer, LOGIN_ANSWER_STANDARD_SITE) == 0, "and LOGIN signed after that choice is the model's answer, byte for byte");
+    for (i = 0; i < N(OTHER); i++) {
+        chosenAddress(addr, seed, OTHER[i].host, OTHER[i].callback, BR_DIGIID_SCOPE_SITE, BR_DIGIID_ROOT_STANDARD);
+        ck(strcmp(addr, DIGISCOPE_LOGIN_STANDARD_ADDRESS) == 0, "%s, SITE, STANDARD, callback %s: that same address (%s)", OTHER[i].host,
+           OTHER[i].callback ? OTHER[i].callback : "none", addr);
+        if (! OTHER[i].itsOwn) continue;
+        ck(BRDigiIdAddress(own, sizeof(own), seed, 64, BR_DIGIID_ROOT_STANDARD, 1, OTHER[i].callback, strlen(OTHER[i].callback), 0, WORK,
+                           sizeof(WORK)) == BR_DIGIID_OK && strcmp(own, OTHER[i].itsOwn) == 0 && strcmp(own, addr) != 0,
+           "and not %s, which Coinomi showed for that callback itself", own);
+    }
+
+    chosenAddress(addr, seed, "api.digiscope.me", login, BR_DIGIID_SCOPE_SITE, BR_DIGIID_ROOT_DIGIBYTE);
+    ck(strcmp(addr, DIGISCOPE_LOGIN_DIGIBYTE_ADDRESS) == 0, "api.digiscope.me, SITE, DIGIBYTE: the bridge's address for the login URL (%s)", addr);
+
+    for (r = 0; r < N(ROOTS); r++) {
+        for (i = 0; i < N(LISTED_HOSTS); i++) {
+            chosenAddress(addr, seed, LISTED_HOSTS[i], login, BR_DIGIID_SCOPE_SHARED, ROOTS[r]);
+            ck(strcmp(addr, SHARED_ADDRESS) == 0, "%s, SHARED, %s: the shared address, the bridge's (%s)", LISTED_HOSTS[i], rootName(ROOTS[r]), addr);
+            chosenLogin(answer, seed, LISTED_HOSTS[i], login, BR_DIGIID_SCOPE_SHARED, ROOTS[r], LOGIN);
+            ck(strcmp(answer, LOGIN_ANSWER_P2PKH) == 0 && strncmp(answer, addr, strlen(addr)) == 0 && answer[strlen(addr)] == '|',
+               "and LOGIN signed after that choice is the bridge's answer, byte for byte, signed with that address");
+        }
+    }
+    ck(hChooseStr(&c, "api.digiscope.me", login, BR_DIGIID_SCOPE_SHARED, BR_DIGIID_ROOT_STANDARD) == BR_DIGIID_OK && c.root == BR_DIGIID_ROOT_NONE,
+       "the SHARED answer names no root");
+    memset(addr, 'X', sizeof(addr));
+    ck(BRDigiIdAddress(addr, sizeof(addr), seed, 64, c.root, 0, NULL, 0, 0, WORK, sizeof(WORK)) == BR_DIGIID_REFUSED && addr[0] == '\0',
+       "so BRDigiIdAddress given the answer's root refuses: the shared address is asked under the wallet's own root");
+
+    for (s = 0; s < N(SCOPES); s++) {
+        uint32_t idx[4], path[5];
+
+        chosenAddress(addr, seed, "example.com", REQUEST_CALLBACK, SCOPES[s], BR_DIGIID_ROOT_DIGIBYTE);
+        chosenLogin(answer, seed, "example.com", REQUEST_CALLBACK, SCOPES[s], BR_DIGIID_ROOT_DIGIBYTE, REQUEST);
+        ck(strcmp(addr, "DPeEMYki92jeUSDgjkrfrTMVpvGWCHYd68") == 0 && strcmp(answer, REQUEST_SITE_ANSWER) == 0,
+           "example.com, %s, DIGIBYTE: the bridge's per-site address and its answer for the request, byte for byte (%s)", scopeName(SCOPES[s]), addr);
+
+        memset(&key, 0, sizeof(key));
+        ck(hChooseStr(&c, "example.com", REQUEST_CALLBACK, SCOPES[s], BR_DIGIID_ROOT_STANDARD) == BR_DIGIID_OK && c.kind == BR_DIGIID_IDENTITY_SITE &&
+           BRDigiIdSiteKey(&key, seed, 64, c.root, c.uri, c.uriLen, 0, WORK, sizeof(WORK)) == BR_DIGIID_OK,
+           "example.com, %s, STANDARD: the answer derives a key", scopeName(SCOPES[s]));
+        slip13_indexes(idx, REQUEST_CALLBACK, n, 0);
+        path[0] = 13 | HARD; path[1] = idx[0] | HARD; path[2] = idx[1] | HARD; path[3] = idx[2] | HARD; path[4] = idx[3] | HARD;
+        ck(sameSecret(&key, ownSecret(seed, 64, "Bitcoin seed", path, 5)),
+           "which is m/13'/A'/B'/C'/D' of the request's callback from \"Bitcoin seed\" (this file's BIP32)");
+        BRKeyClean(&key);
+        chosenAddress(addr, seed, "example.com", REQUEST_CALLBACK, SCOPES[s], BR_DIGIID_ROOT_STANDARD);
+        ck(addr[0] != '\0' && strcmp(addr, "DPeEMYki92jeUSDgjkrfrTMVpvGWCHYd68") != 0, "another identity than the DigiByte root gives that site (%s)", addr);
+    }
+}
+
 // ---- a fixed pseudo-random stream ----------------------------------------------------------------
 
 static uint64_t RNG = 0x9e3779b97f4a7c15ULL;
@@ -1863,6 +2429,13 @@ static const Case CASES[] = {
     { "sign_shared_login", sign_shared_login }, { "sign_site_request", sign_site_request },
     { "request_golden_inputs", request_golden_inputs }, { "address_rules", address_rules },
     { "sign_with_key_wipes", sign_with_key_wipes }, { "address_with_key_wipes", address_with_key_wipes }, { "long_messages", long_messages }, { "edges", edges }, { "buffer_edges", buffer_edges },
+    { "digiscope_list_hosts", digiscope_list_hosts }, { "digiscope_list_subdomains", digiscope_list_subdomains },
+    { "digiscope_list_lookalikes", digiscope_list_lookalikes }, { "digiscope_list_letter_case", digiscope_list_letter_case },
+    { "digiscope_list_edges", digiscope_list_edges },
+    { "choice_digiscope_shared", choice_digiscope_shared }, { "choice_digiscope_site", choice_digiscope_site },
+    { "choice_other_host", choice_other_host }, { "choice_refused", choice_refused },
+    { "choice_unknown_scope_refused", choice_unknown_scope_refused }, { "choice_unknown_root_refused", choice_unknown_root_refused },
+    { "choice_end_to_end", choice_end_to_end },
     { "sweep_indexes", sweep_indexes }, { "sweep_keys", sweep_keys }, { "sweep_keys_standard", sweep_keys_standard },
     { "sweep_sign", sweep_sign }, { "sweep_utf8", sweep_utf8 },
     { "sweep_uri_bytes", sweep_uri_bytes },
@@ -1873,9 +2446,13 @@ int main(int argc, char **argv)
     size_t i;
 
     setvbuf(stdout, NULL, _IONBF, 0);
-    if (argc != 2) { fprintf(stderr, "usage: %s <case>|list\n", argv[0]); return 2; }
+    if (argc != 2) { fprintf(stderr, "usage: %s <case>|list|hosts\n", argv[0]); return 2; }
     if (strcmp(argv[1], "list") == 0) {
         for (i = 0; i < N(CASES); i++) printf("%s\n", CASES[i].name);
+        return 0;
+    }
+    if (strcmp(argv[1], "hosts") == 0) {   // THE DIGISCOPE LIST as this file holds it, for run.sh's SOURCE GATE
+        for (i = 0; i < N(LISTED_HOSTS); i++) printf("%s\n", LISTED_HOSTS[i]);
         return 0;
     }
     for (i = 0; i < N(CASES); i++) {
