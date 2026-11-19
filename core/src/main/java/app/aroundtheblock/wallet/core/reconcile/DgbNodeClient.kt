@@ -378,6 +378,12 @@ class DgbNodeClient internal constructor(
                 ?: return@withContext null
             if (root.optString("type") != "dd_address") return@withContext null
             val r = root.optJSONObject("result") ?: return@withContext null
+            // A balance the server says it could not derive, or did not give as a number, is a
+            // lookup that was not made: null, never the zero a missing field would default to. The
+            // quick start shows and stores this figure, so a defaulted zero would read as "checked,
+            // holds none". An answer without the flag (an older backend) is taken at its balance.
+            if (r.has("balance_derivable") && r.opt("balance_derivable") != true) return@withContext null
+            val cents = (r.opt("dd_balance_cents") as? Number)?.toLong() ?: return@withContext null
 
             val txids = mutableListOf<String>()
             r.optJSONArray("transactions")?.let { arr ->
@@ -387,7 +393,7 @@ class DgbNodeClient internal constructor(
                 }
             }
             DigiDollarHoldingResult(
-                cents = r.optLong("dd_balance_cents", 0L),
+                cents = cents,
                 unspentCount = r.optInt("unspent_count", 0),
                 txids = txids,
             )

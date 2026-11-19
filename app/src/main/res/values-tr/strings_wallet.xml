@@ -835,6 +835,7 @@
     <string name="quickstart_continue">Devam</string>
     <string name="quickstart_unverified">%2$s tarafından bildirilen %1$s DGB, henüz doğrulanmadı</string>
     <string name="quickstart_unverified_dd">%1$s DigiDollar bildirildi, henüz doğrulanmadı</string>
+    <string name="quickstart_dd_unchecked">DigiDollar sorgulanamadı.</string>
     <string name="quickstart_unverified_sub">Eşitleme kanıtlayana kadar harcanamaz ve bakiyenize dahil edilmez.</string>
     <string name="quickstart_running_skip">Beklemeden devam et</string>
     <string name="quickstart_incomplete">Sorgu tamamlanamadı, bu yüzden tutar gösterilmiyor. Cüzdan eşitlenirken bakiyesini yine de bulacaktır.</string>

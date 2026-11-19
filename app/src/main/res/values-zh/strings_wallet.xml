@@ -828,6 +828,7 @@
     <string name="quickstart_continue">继续</string>
     <string name="quickstart_unverified">%2$s 报告 %1$s DGB，尚未验证</string>
     <string name="quickstart_unverified_dd">报告 %1$s DigiDollar，尚未验证</string>
+    <string name="quickstart_dd_unchecked">无法查询 DigiDollar。</string>
     <string name="quickstart_unverified_sub">在同步证实之前不可花费，也不计入您的余额。</string>
     <string name="quickstart_running_skip">不等待，继续</string>
     <string name="quickstart_incomplete">查询未能完成，因此不显示数字。钱包同步时仍会找到其余额。</string>

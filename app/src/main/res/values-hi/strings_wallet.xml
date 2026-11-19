@@ -835,6 +835,7 @@
     <string name="quickstart_continue">जारी रखें</string>
     <string name="quickstart_unverified">%2$s के अनुसार %1$s DGB, अभी सत्यापित नहीं</string>
     <string name="quickstart_unverified_dd">%1$s DigiDollar बताया गया, अभी सत्यापित नहीं</string>
+    <string name="quickstart_dd_unchecked">DigiDollar की जाँच नहीं हो सकी।</string>
     <string name="quickstart_unverified_sub">सिंक द्वारा प्रमाणित होने तक खर्च योग्य नहीं और आपके बैलेंस में शामिल नहीं।</string>
     <string name="quickstart_running_skip">प्रतीक्षा किए बिना जारी रखें</string>
     <string name="quickstart_incomplete">खोज पूरी नहीं हो सकी, इसलिए कोई राशि नहीं दिखाई जा रही। सिंक होते समय वॉलेट फिर भी अपना बैलेंस खोज लेगा।</string>
