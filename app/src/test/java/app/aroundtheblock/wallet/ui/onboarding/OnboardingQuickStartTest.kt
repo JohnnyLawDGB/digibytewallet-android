@@ -92,12 +92,12 @@ class OnboardingQuickStartTest {
         val v = vm()
         v.runQuickStart(QuickStartSource.OWN_NODE)
         assertEquals(QuickStartUi.Failed, v.quickStart.value)
-        coVerify(exactly = 0) { service.scan(any(), any()) }
+        coVerify(exactly = 0) { service.scan(any(), any(), any()) }
     }
 
     @Test fun `the quick start counts both native paths and is stored only for the added wallet, before the switch`() {
         every { scans.serviceFor(QuickStartSource.DIGISCOPE, any()) } returns (service to "digiscope.me")
-        coEvery { service.scan(phrase, null) } returns done(100_000_000L, 50_000_000L)
+        coEvery { service.scan(phrase, null, true) } returns done(100_000_000L, 50_000_000L)
         every { provisioner.prepareSeedKey(false, WalletOrigin.RESTORED) } returns (entry to SeedKeyReadiness.READY)
         every { provisioner.add(any(), any(), any(), any()) } returns AddResult.Added(entry)
         val v = vm()
@@ -127,7 +127,7 @@ class OnboardingQuickStartTest {
         val partial = done(100_000_000L).let { d ->
             d.copy(results = d.results.mapIndexed { i, r -> if (i == 1) r.copy(reachableBackend = false) else r })
         }
-        coEvery { service.scan(phrase, null) } returns partial
+        coEvery { service.scan(phrase, null, true) } returns partial
         every { provisioner.prepareSeedKey(false, WalletOrigin.RESTORED) } returns (entry to SeedKeyReadiness.READY)
         every { provisioner.add(any(), any(), any(), any()) } returns AddResult.Added(entry)
         val v = vm()
@@ -146,7 +146,7 @@ class OnboardingQuickStartTest {
     /** Runs the quick start over [result] and commits the add; returns what was shown and what was stored. */
     private fun foundAndStored(result: RecoveryScanService.State.Done): Pair<QuickStart, QuickStart> {
         every { scans.serviceFor(QuickStartSource.DIGISCOPE, any()) } returns (service to "digiscope.me")
-        coEvery { service.scan(phrase, null) } returns result
+        coEvery { service.scan(phrase, null, true) } returns result
         every { provisioner.prepareSeedKey(false, WalletOrigin.RESTORED) } returns (entry to SeedKeyReadiness.READY)
         every { provisioner.add(any(), any(), any(), any()) } returns AddResult.Added(entry)
         val written = slot<QuickStart>()
@@ -155,6 +155,9 @@ class OnboardingQuickStartTest {
         v.runQuickStart(QuickStartSource.DIGISCOPE)
         val state = awaitState(v) { it != QuickStartUi.Running && it != QuickStartUi.Idle }
         assertTrue("the DGB figure was withheld: $state", state is QuickStartUi.Found)
+        // The quick start is the scan that asks for DigiDollar (the stub above answers only that call).
+        coVerify(exactly = 1) { service.scan(phrase, null, true) }
+        coVerify(exactly = 0) { service.scan(any(), any(), false) }
         val answered = CountDownLatch(1)
         v.commitAdd(null) { answered.countDown() }
         assertTrue(answered.await(5, TimeUnit.SECONDS))
@@ -196,7 +199,7 @@ class OnboardingQuickStartTest {
     @Test fun `a capped scan shows no figure and stores nothing`() {
         every { scans.serviceFor(QuickStartSource.DIGISCOPE, any()) } returns (service to "digiscope.me")
         val capped = done(100_000_000L).let { d -> d.copy(results = d.results.mapIndexed { i, r -> if (i == 0) r.copy(capped = true) else r }) }
-        coEvery { service.scan(phrase, null) } returns capped
+        coEvery { service.scan(phrase, null, true) } returns capped
         every { provisioner.prepareSeedKey(false, WalletOrigin.RESTORED) } returns (entry to SeedKeyReadiness.READY)
         every { provisioner.add(any(), any(), any(), any()) } returns AddResult.Added(entry)
         val v = vm()
@@ -212,7 +215,7 @@ class OnboardingQuickStartTest {
     @Test fun `an own-node lookup goes to the node shown in the offer`() {
         every { scans.customEndpoint() } returns "https://node.example"
         every { scans.serviceFor(QuickStartSource.OWN_NODE, "https://node.example") } returns (service to "node.example")
-        coEvery { service.scan(phrase, null) } returns done(1L)
+        coEvery { service.scan(phrase, null, true) } returns done(1L)
         val v = vm()
         val offer = kotlinx.coroutines.runBlocking { v.quickStartOffer() }
         assertEquals(listOf(QuickStartSource.OWN_NODE, QuickStartSource.DIGISCOPE), offer.choices)
@@ -223,7 +226,7 @@ class OnboardingQuickStartTest {
 
     @Test fun `a quick start cancelled by another scan is not left running`() {
         every { scans.serviceFor(QuickStartSource.DIGISCOPE, any()) } returns (service to "digiscope.me")
-        coEvery { service.scan(phrase, null) } coAnswers { kotlinx.coroutines.awaitCancellation() }
+        coEvery { service.scan(phrase, null, true) } coAnswers { kotlinx.coroutines.awaitCancellation() }
         val v = vm()
         v.runQuickStart(QuickStartSource.DIGISCOPE)
         assertEquals(QuickStartUi.Running, v.quickStart.value)
@@ -233,7 +236,7 @@ class OnboardingQuickStartTest {
 
     @Test fun `leaving a running quick start stops it and keeps nothing`() {
         every { scans.serviceFor(QuickStartSource.DIGISCOPE, any()) } returns (service to "digiscope.me")
-        coEvery { service.scan(phrase, null) } coAnswers { kotlinx.coroutines.awaitCancellation() }
+        coEvery { service.scan(phrase, null, true) } coAnswers { kotlinx.coroutines.awaitCancellation() }
         val v = vm()
         v.runQuickStart(QuickStartSource.DIGISCOPE)
         v.cancelQuickStart()
@@ -242,7 +245,7 @@ class OnboardingQuickStartTest {
 
     @Test fun `a new phrase drops the quick start`() {
         every { scans.serviceFor(QuickStartSource.DIGISCOPE, any()) } returns (service to "digiscope.me")
-        coEvery { service.scan(phrase, null) } returns done(100_000_000L)
+        coEvery { service.scan(phrase, null, true) } returns done(100_000_000L)
         val v = vm()
         v.runQuickStart(QuickStartSource.DIGISCOPE)
         awaitState(v) { it is QuickStartUi.Found }

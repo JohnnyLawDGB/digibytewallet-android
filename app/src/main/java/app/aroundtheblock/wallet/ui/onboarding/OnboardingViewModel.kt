@@ -174,7 +174,9 @@ class OnboardingViewModel @Inject constructor(
     fun runRecoveryScan() {
         val hadPassphrase = _passphrase != null
         _scanResults.value = RecoveryScanService.State.Scanning("Deriving addresses…")
-        runScan(recoveryScanService) { result ->
+        // No DigiDollar lookup: this scan's screen and its passphrase verdict report DGB only, so the
+        // wallet's DigiDollar addresses are not sent for an answer nobody would see.
+        runScan(recoveryScanService, digiDollar = false) { result ->
             // NO second, passphrase-less scan here. Re-scanning without the passphrase would answer
             // "is it a typo?", but it sends a SECOND wallet's addresses to the backend from the same
             // IP — and the people who use a passphrase include those who keep a decoy wallet on the
@@ -198,8 +200,9 @@ class OnboardingViewModel @Inject constructor(
      * straight after (the held passphrase lives until the wallet is written). [onDone] is called
      * on the main thread with the answer, only while [scanGeneration] still names the phrase it
      * was started for. A blank phrase answers [RecoveryScanService.State.Failed] at once.
+     * [digiDollar]: whether the scan also looks up DigiDollar ([RecoveryScanService.scan]).
      */
-    private fun runScan(service: RecoveryScanService, onDone: (RecoveryScanService.State) -> Unit): kotlinx.coroutines.Job? {
+    private fun runScan(service: RecoveryScanService, digiDollar: Boolean, onDone: (RecoveryScanService.State) -> Unit): kotlinx.coroutines.Job? {
         val phrase = _mnemonic.joinToString(" ")
         if (phrase.isBlank()) {
             onDone(RecoveryScanService.State.Failed("No mnemonic entered"))
@@ -210,7 +213,7 @@ class OnboardingViewModel @Inject constructor(
         scanJob = viewModelScope.launch {
             val passBytes = _passphrase?.copyOf()
             val result = try {
-                service.scan(phrase, passBytes)
+                service.scan(phrase, passBytes, digiDollar)
             } finally {
                 passBytes?.fill(0)
             }
@@ -269,7 +272,7 @@ class OnboardingViewModel @Inject constructor(
         }
         val (service, label) = built
         _quickStart.value = QuickStartUi.Running
-        val job = runScan(service) { result ->
+        val job = runScan(service, digiDollar = true) { result ->
             if (result !is RecoveryScanService.State.Done || result.allBackendUnreachable) {
                 _quickStart.value = QuickStartUi.Failed
                 return@runScan
@@ -286,7 +289,8 @@ class OnboardingViewModel @Inject constructor(
                 unverifiedSat = result.totalBalanceSat,
                 // DigiDollar is its own lookup (one request per address, an endpoint an own node may
                 // not have), so it failing does not withhold the DGB figure above, which is complete
-                // on its own. But only a FINISHED lookup gives a figure: one not made (null) or with
+                // on its own; the scan bounds it in time, so it does not hold that figure back
+                // either. But only a FINISHED lookup gives a figure: one not made (null) or with
                 // an address unasked (!reachable) is stored as null, "could not be checked", never
                 // as zero and never as the part that happened to answer.
                 unverifiedDdCents = result.digiDollar?.takeIf { it.reachable }?.cents,

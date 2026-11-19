@@ -31,6 +31,8 @@ class QuickStartDigiDollarLineTest {
         }
     }
 
+    /** A pin of behaviour that predates QUICKSTART-DD (it passed before the change): kept so the
+     *  figure line this change now always reaches stays on the one formatter. */
     @Test fun `the figure is formatted as dollars by the wallet's one formatter`() {
         for ((path, _) in screens) {
             val src = File(path).readText()
@@ -41,6 +43,8 @@ class QuickStartDigiDollarLineTest {
         assertEquals("$0.00", app.aroundtheblock.wallet.ui.wallet.WalletViewModel.formatDigiDollar(0L))
     }
 
+    /** A pin of behaviour that predates QUICKSTART-DD (it passed before the change): the rewritten
+     *  line must keep the mask. */
     @Test fun `the wallet screen masks the DigiDollar figure with the balance`() {
         val src = File("src/main/java/app/aroundtheblock/wallet/ui/wallet/WalletScreen.kt").readText()
         assertTrue(Regex("""R\.string\.quickstart_unverified_dd,\s*mask\(WalletViewModel\.formatDigiDollar\(""").containsMatchIn(src))
