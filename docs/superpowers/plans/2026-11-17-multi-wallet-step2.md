@@ -5,7 +5,7 @@
 > this plan against the amended design, R1-R8, D1-D4, the code (`develop` 52aa40000, core fc35768)
 > and the project's invariants, and found 134 conflicts. Conflicts 0-57 were each judged by
 > skeptics; 58-133 were verified by the area consolidators against the cited lines. The result is
-> 94 rulings, **G1-G94**, over 121 conflicts; 8 conflicts dropped as not real; 2 duplicates
+> 94 rulings, **G1-G94**, over 122 conflicts; 8 conflicts dropped as not real; 1 duplicate
 > folded; 3 owner questions (O14-O16, in "Open for Mark"). The rulings, the dropped list and the
 > evidence are in `docs/superpowers/specs/2026-11-17-multi-wallet-step2-rulings.md`.
 > **Where this plan's text and a ruling differ, the ruling wins.**
@@ -86,7 +86,7 @@ This plan's own decisions are PD1-PD28, listed below. A1 records them, one line 
 
 ## Global Constraints
 
-**Rulings:** G1, G2, G3, G4, G5, G26
+**Rulings:** G1, G2, G3, G4, G5, G11, G26, G61
 
 - **The core change is additive and one-wallet neutral.**
   - No public signature, struct, field order, enum value, constant or blob format that iOS builds against changes. G6 freezes them.
@@ -131,6 +131,8 @@ This plan's own decisions are PD1-PD28, listed below. A1 records them, one line 
 - **Registry:** merge the PR's base into the PR branch: `develop` for a `develop` PR; for an integration-branch PR, first merge `develop` into the integration branch, then the integration branch into the PR branch. Run `python3 scripts/gen-jni-registry.py`, push, and wait for CI. `--check` passes, and the `native-at:` NativeBridge copy carries identical signatures. One registry PR at a time across both sessions; the session that merges second regenerates.
 
 ## Review Focus
+
+**Rulings:** G61, G72, G75
 
 These are the failure modes most likely to reach a user that ordinary tests would not exercise. Each has a named test in the task that owns it.
 
@@ -276,7 +278,7 @@ The open questions O1-O16 are listed at the end. O15 goes in the M2 packet and O
 
 ## Stages, target dates and exit checks
 
-**Rulings:** G11, G14, G15
+**Rulings:** G7, G11, G14, G15, G93
 
 T is the 4.1.5 cut (X5), which is not known today. A1 writes these into `ROADMAP.md` with dates relative to T, and its follow-up writes absolute dates the day T is known. Mark sets or changes them: scope and target are his. A stage that passes its date by more than half its planned length goes back to him with what slipped, why, and a new date or a cut (`docs/development-process.md`, "An overrun stops for a re-plan").
 
@@ -292,6 +294,8 @@ T is the 4.1.5 cut (X5), which is not known today. A1 writes these into `ROADMAP
 Amended by the pre-flight rulings: T is defined by G11 (see "Order against the work in flight"). Stage 1 and Stage 2 branches start the day A2 merges, Stage 0's CI proof runs on a probe branch, and no target date is written into `ROADMAP.md` before Mark answers O11 (G14). Step-2 merges pause during each train's landing-sync freeze and the stage dates move by the freeze's length (O14). Acceptance rows 2, 7, 8 and 11 change as G75 and G27 say.
 
 ## Acceptance index
+
+**Rulings:** G27, G75
 
 The design's test plan (`2026-11-16-multi-wallet-design.md`, "Left to the builder", Test plan) and this plan's own proofs, each owned by one task. Each is red before it is green, on `develop` or under a named `*_UNFIXED` arm.
 
@@ -315,7 +319,7 @@ The design's test plan (`2026-11-16-multi-wallet-design.md`, "Left to the builde
 
 ## Decisions this plan takes (PD1-PD28)
 
-**Rulings:** G12, G20, G30, G31, G32, G36, G37, G38, G41, G42, G49, G65, G68, G69, G72, G80, G81, G85, G86, G93
+**Rulings:** G12, G20, G30, G31, G32, G36, G37, G38, G41, G42, G49, G65, G68, G69, G72, G80, G81, G84, G85, G86, G93
 
 The design leaves these to the builder, or the code required a choice. Each is a default the owner may override. A1 records them by number.
 
@@ -355,7 +359,7 @@ The design leaves these to the builder, or the code required a choice. Each is a
 - **PD16 Address pregeneration at attach.** The address window is pre-generated before the shared lock, and the same bounded pregeneration runs again inside the critical section. The second run is a no-op unless the set grew, so the design's "pre-generate inside the critical section" still holds. Nothing can grow the set in between: during a hand-off no manager holds the wallet and the bridge has stopped routing its calls.
 - **PD17 Band peers.** The band starts from a read-only snapshot of the shared engine's saved peers and penalties, and never writes either. It dials a peer set disjoint from the shared engine's. A4 confirms this or changes it. **Amended by G20:** the plan claims no disjoint peer set until A4 has chosen between no rule and a core exclusion rule.
 - **PD18 Chain-level reset.** A reset that drops the shared ledger resets every READY wallet's frontier record to its birth. It restarts as one climb from the lowest attached birth, with every attachable wallet attached. A running band is not folded in: it pauses at cap 0 and hands off under the same rule (verdict WAIT until then) once the climb's chain holds its F-1. **Amended by G42 and G41:** the birth reset applies to a cold-start reset that loses the window and to a wallet whose history was dropped; an in-session recovery that drops the shared ledger lowers attached frontiers only to the re-armed start and starts no band.
-- **PD19 `HistoryRebuildOnUpgrade`'s floor.** When every attached wallet needs it, one chain-scoped climb. Otherwise one band for each wallet that needs it, queued in PD5 order and persisted in the registry.
+- **PD19 `HistoryRebuildOnUpgrade`'s floor.** When every attached wallet needs it, one chain-scoped climb. Otherwise one band for each wallet that needs it, queued in PD5 order and persisted in the registry. **Amended by G84:** the choice is made at attach time; at process start only the per-wallet clear runs, never a chain clear.
 - **PD20 Spending during a hand-off.**
   - A new send, asset send, DigiDollar send or sweep for a wallet in its hand-off window is refused with a typed BUSY and "try again in a few seconds".
   - The hand-off waits, within a bound, for publishes already in flight. One still in flight is published again through the shared engine after the attach.
@@ -774,6 +778,8 @@ Not covered by R6. Removing a wallet that is not active revokes its session. Rem
 - [ ] The same day, sync `develop` into the integration branch and merge that into every open PR branch. The 4.1.5 train's refresh counts as the first.
 
 ## Stage 2: the core (R1: this session; core repo; one pin+KAT PR per core PR)
+
+**Rulings:** G11, G14
 
 All C tasks merge after X1 and X5 (O4: Mark may relax X5 for neutral PRs). Their branches start now.
 
@@ -1413,6 +1419,8 @@ BRWallet *BRWalletOpenWithAccounts(BRTransaction *txs[], size_t txCount, BRWalle
 
 ## Stage 3: Android, behaviour-neutral, on `develop` after the 4.1.5 cut
 
+**Rulings:** G11
+
 ### Task B1: Bridge, a per-wallet context table and per-manager sync contexts (one live slot; no JNI change)
 
 **Rulings:** G10, G45, G46, G47, G48, G49, G50
@@ -1805,6 +1813,8 @@ Each ViewModel observes the active session (`flatMapLatest` plus the generation)
 - [ ] Extract the screen's remaining hardcoded literals in all 13 locales and add it to `OnboardingHardcodedStringTest.COVERED`. E4 depends on this task. Any screen that joins `COVERED` in step 2 gets the same prior PR.
 
 ## Stage 4: behaviour changes on `integration/multi-wallet-step2`
+
+**Rulings:** G15
 
 Every PR here goes into the integration branch with CI (A3), an independent review and, where marked, Mark. The branch merges `develop` at least weekly. Device testing starts after E3; neither intermediate state reaches `develop`:
 - between E2 and E3, a wallet that lags the shared window cannot sync;
@@ -2411,16 +2421,16 @@ Each row reads its own wallet's handle, and shows its balance and one of: synced
   - The locale gates.
 - [ ] **Steps 2-4:** run (FAIL), implement, run (PASS), full suites. **Step 5: Open the PR.**
 
-### Task U5: Name the spending wallet (runs only on Mark's answer, O6)
+### Task U5: Name the spending wallet in every spend-auth prompt (unconditional, G93)
 
 **Rulings:** G93
 
 **Landing:** the integration branch. Not R8.
-**Depends on:** S3; Mark's answer.
+**Depends on:** S3.
 
-The proposed default (PD23) is that `SpendAuth`'s prompt carries `spend_auth_from_wallet` ("From %1$s") at every spend-class call site. If Mark wants it, the Send, asset send, DigiDollar send, Digi-ID, Recover funds and Hub sign-in screens name the wallet too. An instant switch makes sending from the wrong wallet easier.
+Edited by G93: this task no longer waits for Mark's answer to O6. `SpendAuth`'s prompt carries `spend_auth_from_wallet` ("From %1$s") at every spend-class call site (PD23), in all 13 locales. Whether the Send, asset send, DigiDollar send, Digi-ID, Recover funds and Hub sign-in screens name the wallet too is O6, and that part is U5b. An instant switch makes sending from the wrong wallet easier.
 
-- [ ] Build what he answers, with a test that every spend-class prompt names the active wallet, and the locale gates.
+- [ ] Build the prompt naming, with a test that every spend-class prompt names the active wallet, and the locale gates.
 
 ### Task U5b: Name the spending wallet on every spend screen (runs only on Mark's answer, O6; added by G93)
 
@@ -2429,13 +2439,13 @@ The proposed default (PD23) is that `SpendAuth`'s prompt carries `spend_auth_fro
 **Landing:** an integration-branch PR, only if Mark answers O6 with yes. Not R8.
 **Depends on:** U5.
 
-- [ ] The per-screen naming that U5's heading still describes. U5 itself is now unconditional: the prompt naming on every `SpendAuth` call site, in 13 locales. V1 and the stage 4 exit check depend on U5, and on U5b only if Mark answered yes before V1 starts.
+- [ ] The per-screen naming: the Send, asset send, DigiDollar send, Digi-ID, Recover funds and Hub sign-in screens name the wallet, with the locale gates. U5 itself is unconditional: the prompt naming on every `SpendAuth` call site, in 13 locales. V1 and the stage 4 exit check depend on U5, and on U5b only if Mark answered yes before V1 starts.
 
 ## Stage 5: verification and merge
 
 ### Task V1: Device and emulator verification
 
-**Rulings:** G93, G94
+**Rulings:** G25, G93, G94
 
 **Landing:** the results and a pre-publish PR into the integration branch.
 **Depends on:** every Stage 4 task.
@@ -2624,6 +2634,8 @@ Rules for this task:
 - the upgrade-floor queue (PD19, C11).
 
 ## Ambiguities between the spec and the code (decided here)
+
+**Rulings:** G16, G70
 
 1. **"Attached only once the band manager is gone (Free returned 1, or its deferred free has run)."** The reason is that a parked manager's threads can still reach its wallet. PD15 removes that reason for holding managers, which detach every wallet under the lock inside `Free`, and keeps the old behaviour for every other manager. That is equivalent and does not stall a recreate.
 2. **"Pre-generate its address window" inside the one critical section** would breach the lock budget (about 645 addresses per wallet against the 2000 ms `[CF-SLOW]` threshold). PD16 generates outside and re-runs inside, as a no-op unless the set grew.
