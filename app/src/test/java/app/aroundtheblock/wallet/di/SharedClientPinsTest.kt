@@ -74,7 +74,14 @@ class SharedClientPinsTest {
     }
 
     @Test fun `the IPFS gateway fetch is made on a pinned client`() {
-        assertPinsDigiScope("the IPFS client", clientOf(AppModule.provideIpfsClient(shared), "httpClient"))
+        val ipfs = AppModule.provideIpfsClient(shared)
+        assertPinsDigiScope("the IPFS client", clientOf(ipfs, "httpClient"))
+        // IPFS-NO-REDIRECT: the trusted gateway is asked on a client derived from that one. It keeps
+        // the pins and follows no redirect, so what it reads is the pinned host's own answer.
+        val trusted = (ipfs.javaClass.getDeclaredField("trustedGatewayClient\$delegate").apply { isAccessible = true }
+            .get(ipfs) as Lazy<*>).value as OkHttpClient
+        assertPinsDigiScope("the IPFS client's trusted-gateway client", trusted)
+        assertTrue("the trusted-gateway client follows redirects", !trusted.followRedirects && !trusted.followSslRedirects)
     }
 
     @Test fun `the Digi-ID callback is posted on a pinned client`() {
