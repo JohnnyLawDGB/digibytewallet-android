@@ -2705,6 +2705,7 @@ Added by the independent review of the rulings (2026-11-19):
 - **O17** (conflict 119; G1, B6, E3; in A1's digest) G1 decides [R8] for a PR that touches the wipe by one test: it changes what the wipe or a removal erases of seed, key or PIN material, or the wipe's native steps that `WipeNativeStepsGateTest` pins. Conflict 119 also proposed a third trigger, an edit to a seed or wipe gate's allow-list, and G1 left it out. B6 needs such an edit (the detach native) and makes the wipe's quiesce stop every sync context, and is "Not R8" on that reading of his rule (`docs/development-process.md:54-56`). Does G1's two-part test stand, or is an allow-list edit to a seed or wipe gate [R8] too?
   - Options: (a) The third trigger applies: an allow-list edit to a seed or wipe gate is [R8]; B6's entry lands as its own small [R8] PR ahead of B6, so B6 itself does not wait. (b) G1's test stands as written: B6 and E3 are not [R8] while the pinned quiesce order is unedited. (c) B6 as a whole is [R8].
   - Recommended: (a). It costs one small PR and keeps every loosening of a seed or wipe gate in front of him. Until he answers, (a) is what the plan does.
+  - **Answered (Mark, 2026-11-19): option (a).** An edit to a seed or wipe gate's allow-list is itself [R8]; B6's `WipeNativeStepsGateTest` entry lands as its own small [R8] PR ahead of B6.
 
 Answered by a ruling: none. No ruling settles an existing question, because each is Mark's. Four are changed in scope:
 
