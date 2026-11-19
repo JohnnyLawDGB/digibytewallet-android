@@ -361,7 +361,7 @@ The design leaves these to the builder, or the code required a choice. Each is a
   - Every other wallet's step-1 chain stores become its band files until its hand-off is durable, and are deleted then, with its own chain keys (G38). Its abandonment record stays. A hand-off never deletes anything under legacy's names.
   - **Withdrawn:** "new NETWORK-scoped names (A1's list)", the seed "from the step-1 chain with the highest verified saved tip", the hard link and its copy fallback, and G69's ranking of candidates.
   - **Accepted costs (Mark, 2026-11-19):** the chain starts from legacy's even when another wallet is ahead; on a rollback build legacy reads a ledger that was evaluated while it was not attached, so it can miss receives until it is rescanned; removal, the eraser and every per-wallet clear treat legacy's chain names specially.
-  - **To be designed, not decided here** (G96; E1's note has the detail): the names of legacy's own band files; which keys of `dgb_sync_data<net>` are the chain's and which are legacy's; what the chain starts from when legacy's names hold none that passes; one store target per file.
+  - **To be designed, not decided here** (G96; E1's note has the detail; the first is decided by G97): the names of legacy's own band files (G97: the `_legacy` spelling); which keys of `dgb_sync_data<net>` are the chain's and which are legacy's; what the chain starts from when legacy's names hold none that passes; one store target per file.
 - **PD14 Frontier records.**
   - Every READY wallet has a durable frontier per network in the registry: the lowest height not yet proven evaluated for it, with the main-chain hash below it.
   - The record is raised only while the wallet is attached: at a hand-off, and after each durable shared-ledger persist.
@@ -486,7 +486,12 @@ The existing `send_max`, the `KeystoreKeyInvalidated` message and the step-1 swi
 
 **Names reserved here.** This is the one copy; E1, S1 and X-ROLLBACK use it.
 - **Amended by O7 (2026-11-19, G96): no chain name is reserved.** The two lines that stood here are withdrawn: the files `chain_saved_blocks<net>.bin`, `chain_filter_headers<net>.bin` and `chain_cf_ledger<net>.bin`, and the prefs file `dgb_chain<net>`. No step-2 build writes them. The shared chain uses legacy's 4.1.4 names (PD13): `saved_blocks<net>.bin`, `saved_filter_headers<net>.bin`, `saved_cf_ledger<net>.bin`, and in `dgb_sync_data<net>` the keys `saved_blocks_tip`, `last_chain_tip`, `sync_start_height`, `saved_peers` and `saved_peer_penalties`. The one new chain key, `chain_synced`, is a key in that same file, not a new file.
-- **Not reserved yet, and time-sensitive.** If legacy's own band files need names that 4.1.4 never wrote (G96's first open point), they are added to this list before the 4.1.5 cut. Otherwise 4.1.5's wipe does not know them (O10).
+- **Legacy's own band stores (G97, 2026-11-19; G96's first open point, decided by the lead).** A band for legacy uses the per-wallet name rule with the id spelled out: every WALLET_AND_NETWORK store of `WalletStores` with `_legacy` where another wallet has `_<id>`, before the network part. Reserved here:
+  - files `saved_filter_headers_legacy<net>.bin`, `saved_cf_ledger_legacy<net>.bin`, `saved_blocks_legacy<net>.bin` (each with its `.bin.tmp`);
+  - prefs `dgb_sync_data_legacy<net>` (the band's chain keys only) and `dgb_cf_abandonment_legacy<net>`.
+  - Not reserved: `saved_transactions_legacy`, `dgb_history_rebuild_legacy`, `dgb_reconcile_legacy` and `wallet_legacy.db`. Those stores are the wallet's own, not a chain's, and legacy keeps its 4.1.4 names for them.
+  - 4.1.4 never wrote any of these names, `legacy` is not sixteen hex characters, so no wallet id can spell them, and `storageSuffix` stays the one place a suffix is built (the band asks it for legacy's band spelling; no second builder).
+  - 4.1.5's wipe erases them on both networks (O10; private row WIPE-RESERVED-NAMES), beside `dgb_wallet_keys*` and the alias below.
 - Prefs base `dgb_wallet_keys` (WALLET class: legacy `dgb_wallet_keys`, others `dgb_wallet_keys_<id>`).
 - Alias `dgb_wallet_keys_wrap`.
 - Registry fields `frontier`, `holder`, `band` (per entry and network) and `chainMigration` (per network). `"v"` stays `1`.
@@ -2025,7 +2030,7 @@ What changes:
 **Landing:** a registry PR into the integration branch. Not R8.
 **Depends on:** B6, the C9 and C10 pins, A4; #109 first if revived.
 
-**Amended by O7 (2026-11-19, G96).** "The wallet's band files" are the wallet's step-1 names for every wallet but legacy. Legacy's names are the shared chain, so legacy's band cannot use them; what it uses is G96's first open point, and `startBand` for legacy waits on it. `band_context_kat`'s "band saves never touch the shared files" gains the legacy case.
+**Amended by O7 (2026-11-19, G96).** "The wallet's band files" are the wallet's step-1 names for every wallet but legacy. Legacy's names are the shared chain, so legacy's band cannot use them; what it uses is G96's first open point, decided by G97 (the `_legacy` band names in A1), and `startBand` for legacy waits on it. `band_context_kat`'s "band saves never touch the shared files" gains the legacy case.
 
 **Files:**
 - `bridge:jni_peer.c`, `jni_bridge.h`, `jni_registry_gen.h`.
@@ -2068,7 +2073,7 @@ The band context:
 **Landing:** the integration branch, immediately after E2. Device testing starts after it. Not R8.
 **Depends on:** E2, B7.
 
-**Amended by O7 (2026-11-19, G96).** Step 6 of the executor ("Delete the band files") and G38's retire of the wallet's chain keys never touch anything under legacy's names: for legacy they would delete the shared chain. What legacy's hand-off deletes is G96's first open point. `BandHandoffExecutorTest` adds: a hand-off of legacy leaves the three chain files and every chain key.
+**Amended by O7 (2026-11-19, G96).** Step 6 of the executor ("Delete the band files") and G38's retire of the wallet's chain keys never touch anything under legacy's names: for legacy they would delete the shared chain. What legacy's hand-off deletes is G96's first open point, decided by G97 (the `_legacy` band names in A1). `BandHandoffExecutorTest` adds: a hand-off of legacy leaves the three chain files and every chain key.
 
 **Files:**
 - Create `kt-app:service/{BandScheduler,BandHandoffExecutor}.kt`.
@@ -2117,7 +2122,7 @@ What it does:
 **Landing:** the integration branch. Not R8.
 **Depends on:** the C12 pin, E3; X5.
 
-**Amended by O7 (2026-11-19, G96).** "Rescan this wallet" on legacy is a band for legacy, so it needs legacy's own band files (G96's first open point) and clears only legacy's own keys in `dgb_sync_data<net>` (the second). `RebuildSplitTest` adds: rescanning legacy leaves every shared chain file and chain key.
+**Amended by O7 (2026-11-19, G96).** "Rescan this wallet" on legacy is a band for legacy, so it needs legacy's own band files (G96's first open point, decided by G97 (the `_legacy` band names in A1)) and clears only legacy's own keys in `dgb_sync_data<net>` (the second). `RebuildSplitTest` adds: rescanning legacy leaves every shared chain file and chain key.
 
 **Files:**
 - `kt-core:WalletManager.kt`: `rebuildFromChainRescan[From]` becomes a band rescan, and a repair entry point is added.
