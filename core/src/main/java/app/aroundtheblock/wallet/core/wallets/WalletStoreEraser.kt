@@ -54,7 +54,12 @@ data class EraseReport(
  * record `dgb_db_key`, the PIN store `dgb_pin_store` and the registry `dgb_wallets`.
  *
  * The legacy wallet is one wallet on both networks (one seed), so for it every per-network store
- * is erased on both.
+ * is erased on both. Any other wallet writes its stores under one network, the one its registry
+ * entry records, and [erase] erases it there. A READY wallet with no record, and a wallet being
+ * removed, are erased under the other network too before their entry is dropped
+ * ([eraseStoresOnBothNetworks], [eraseOnBothNetworks]), as the wipe erases every wallet: the entry,
+ * the seed record and the key aliases are all a wipe finds a wallet by, so once they are gone a
+ * store left under the other network is never found.
  */
 class WalletStoreEraser internal constructor(
     private val context: Context,
@@ -102,15 +107,32 @@ class WalletStoreEraser internal constructor(
         return cleared && !otherStoresLeft(scope)
     }
 
+    /**
+     * Phase 3 on BOTH networks: [eraseStores] for [scope] and for the same wallet on the other
+     * network, each attempted whatever the other reported. True when neither reads anything back.
+     * For legacy this is [eraseStores], which spans both already.
+     *
+     * Only a wallet's registry entry says which network its stores were written under, and
+     * `WalletManager.wipeWallet` does not rely on it: it erases every wallet under both. This is the
+     * same erase, for a caller about to drop an entry: no wipe can find the wallet afterwards.
+     */
+    fun eraseStoresOnBothNetworks(scope: WalletScope): Boolean = bothNetworksOf(scope).map(::eraseStores).all { it }
+
     /** [eraseRecord], then [eraseAliases], then [eraseStores]. Every phase runs, whatever the one before reported. */
-    fun erase(scope: WalletScope): EraseReport {
+    fun erase(scope: WalletScope): EraseReport = erasePhases(scope, ::eraseStores)
+
+    /** [erase] with its last phase on both networks ([eraseStoresOnBothNetworks]): what removing a wallet runs. */
+    fun eraseOnBothNetworks(scope: WalletScope): EraseReport = erasePhases(scope, ::eraseStoresOnBothNetworks)
+
+    /** The three phases in order; [stores] is phase 3, for one network or for both. */
+    private inline fun erasePhases(scope: WalletScope, stores: (WalletScope) -> Boolean): EraseReport {
         val record = eraseRecord(scope)
         val aliases = eraseAliases(scope)
-        val stores = eraseStores(scope)
+        val storesGone = stores(scope)
         return EraseReport(
             recordGone = record,
             aliasesGone = aliases == AliasOutcome.GONE,
-            storesGone = stores,
+            storesGone = storesGone,
             dbKeyHeldLegacyKey = aliases == AliasOutcome.KEPT_FOR_DB_KEY,
         )
     }
@@ -127,7 +149,11 @@ class WalletStoreEraser internal constructor(
 
     fun anythingLeft(scope: WalletScope): Boolean = storesLeft(scope) || aliasesLeft(scope)
 
-    private fun recordLeft(scope: WalletScope): Boolean = try {
+    /**
+     * READ-BACK, deletes nothing: [scope]'s seed record is still present (production: its file or
+     * its backup is on disk, readable or not), or cannot be read back.
+     */
+    fun recordLeft(scope: WalletScope): Boolean = try {
         prefsLeft(WalletStores.seedRecordPrefs(scope))
     } catch (t: Throwable) {
         Log.w(TAG, "record read-back: ${t.javaClass.simpleName}")
@@ -152,6 +178,10 @@ class WalletStoreEraser internal constructor(
     /** The scopes a wallet's stores span: legacy is one wallet on both networks. */
     private fun scopesOf(scope: WalletScope): List<WalletScope> =
         if (scope.isLegacy) listOf(WalletScope.legacy(false), WalletScope.legacy(true)) else listOf(scope)
+
+    /** [scope], then the same wallet on the other network. Legacy alone: [scopesOf] spans both for it. */
+    private fun bothNetworksOf(scope: WalletScope): List<WalletScope> =
+        if (scope.isLegacy) listOf(scope) else listOf(scope, scope.copy(testnet = !scope.testnet))
 
     /** Every per-wallet prefs file except the seed record ([eraseRecord]) and legacy's reconcile file (shared key). */
     private fun otherPrefsOf(scope: WalletScope): List<String> {

@@ -8,6 +8,7 @@ import app.aroundtheblock.wallet.core.WipeReport
 import app.aroundtheblock.wallet.core.asKeystoreAliases
 import app.aroundtheblock.wallet.core.digiscope.HubSessionRevoke
 import app.aroundtheblock.wallet.core.digiscope.HubTokenStore
+import app.aroundtheblock.wallet.core.leftNamedFor
 import app.aroundtheblock.wallet.core.sync.ChainTipStore
 import app.aroundtheblock.wallet.core.wipeTestContext
 import io.mockk.every
@@ -130,6 +131,9 @@ class WalletRemovalTest {
             aliasesOf(scope).forEach { out["alias:$it"] = it in vault.keys.keys }
             return out
         }
+
+        /** Whatever is still on the device under wallet [id]'s name, on either network. */
+        fun namedFor(id: String): List<String> = leftNamedFor(id, prefs, root, vault)
 
         fun everything(): Any = listOf(
             prefs.names().associateWith { prefs.prefsFor(it).all.toMap() },
@@ -345,5 +349,46 @@ class WalletRemovalTest {
 
         assertEquals(RemoveResult.Incomplete, d.removal(active = legacyMain, registry = refusing).remove(b, "Wallet 2", "Wallet 2"))
         assertEquals(EntryState.REMOVING, d.registry.find(b)!!.state)
+    }
+
+    @Test fun `removing a wallet erases it on both networks, and no other wallet on either`() = runBlocking {
+        val d = Device()
+        d.installLegacy()
+        val b = d.addWallet(false)
+        val c = d.addWallet(false)
+        // Both also hold stores under the network their entry does not name.
+        d.populate(WalletScope(b, true))
+        d.populate(WalletScope(c, true))
+        val legacyBefore = d.snapshot(legacyMain)
+        val cBefore = listOf(false, true).map { d.snapshot(WalletScope(c, it)) }
+
+        assertEquals(RemoveResult.Removed, d.removal(active = legacyMain).remove(b, "Wallet 2", "Wallet 2"))
+
+        assertNull(d.registry.find(b))
+        // Its entry, its record and its key are gone, so nothing could find a store left behind now.
+        assertEquals("left with nothing naming the wallet", emptyList<String>(), d.namedFor(b))
+        assertEquals(legacyBefore, d.snapshot(legacyMain))
+        assertEquals(cBefore, listOf(false, true).map { d.snapshot(WalletScope(c, it)) })
+        assertEquals(listOf("legacy", c), d.registry.list(false).map { it.id })
+    }
+
+    @Test fun `a removal whose other network cannot be verified is Incomplete and finishes at the next launch`() = runBlocking {
+        val d = Device()
+        d.installLegacy()
+        val b = d.addWallet(false)
+        val other = WalletScope(b, true)
+        d.populate(other)
+        val otherSync = WalletStores.prefsName("dgb_sync_data", other)
+        d.prefs.refuseWritesTo(otherSync)
+
+        assertEquals(RemoveResult.Incomplete, d.removal(active = legacyMain).remove(b, "Wallet 2", "Wallet 2"))
+        assertEquals(EntryState.REMOVING, d.registry.find(b)!!.state)
+        assertTrue(d.eraser().storesLeft(other))
+
+        // The next launch, whose write lands.
+        d.prefs.prefsFor(otherSync).refuseWrites = false
+        assertEquals(1, d.housekeeping().run())
+        assertNull(d.registry.find(b))
+        assertEquals(emptyList<String>(), d.namedFor(b))
     }
 }

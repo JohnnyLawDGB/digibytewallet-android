@@ -101,6 +101,41 @@ class WalletRegistryTest {
     }
 
     @Test
+    fun `a READY wallet whose record is gone holds its slot and its number until it is dropped`() {
+        val r = registry()
+        // Legacy and seven more: the cap.
+        val wallets = List(WalletRegistry.MAX_PER_NETWORK - 1) { reserved(r) }
+        val gone = wallets[2]
+        missingRecords += gone.id
+        assertFalse(r.list(false).any { it.id == gone.id })
+        assertFalse("a hidden wallet gave up its slot before it was dropped", r.canReserve(false))
+        assertEquals(listOf(gone.id), r.readyWithoutRecord().map { it.id })
+
+        assertTrue(r.drop(gone.id))
+
+        assertEquals(emptyList<WalletEntry>(), r.readyWithoutRecord())
+        assertTrue(r.canReserve(false))
+        assertEquals(gone.number, r.reserve(false, WalletOrigin.CREATED, 2L)!!.number)
+    }
+
+    @Test
+    fun `readyWithoutRecord names neither legacy, nor a wallet that has its record, nor an incomplete entry`() {
+        legacyRecord = false
+        val r = registry()
+        reserved(r)
+        val pending = r.reserve(false, WalletOrigin.CREATED, 1L)!!
+        val removing = reserved(r)
+        assertTrue(r.markRemoving(removing.id))
+        missingRecords += listOf(pending.id, removing.id)
+        assertEquals(emptyList<WalletEntry>(), r.readyWithoutRecord())
+
+        // Either network.
+        val onTestnet = reserved(r, testnet = true)
+        missingRecords += onTestnet.id
+        assertEquals(listOf(onTestnet.id), r.readyWithoutRecord().map { it.id })
+    }
+
+    @Test
     fun `an unreadable registry is rebuilt from the seed records on disk`() {
         prefs.seed("registry", "{not json")
         recordsOnDisk = listOf("0123456789abcdef" to false, "fedcba9876543210" to null)
