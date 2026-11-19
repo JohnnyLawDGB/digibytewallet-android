@@ -973,6 +973,7 @@
     <string name="quickstart_continue">Continue</string>
     <string name="quickstart_unverified">%1$s DGB reported by %2$s, not yet verified</string>
     <string name="quickstart_unverified_dd">%1$s DigiDollar reported, not yet verified</string>
+    <string name="quickstart_dd_unchecked">DigiDollar could not be checked.</string>
     <string name="quickstart_unverified_sub">Not spendable and not in your balance until the sync proves it.</string>
     <string name="quickstart_running_skip">Continue without waiting</string>
     <string name="quickstart_incomplete">The lookup could not finish, so no figure is shown. The wallet will still find its balance as it syncs.</string>

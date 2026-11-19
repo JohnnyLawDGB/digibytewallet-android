@@ -842,6 +842,7 @@
     <string name="quickstart_continue">Continuar</string>
     <string name="quickstart_unverified">%1$s DGB informado por %2$s, ainda não verificado</string>
     <string name="quickstart_unverified_dd">%1$s DigiDollar informado, ainda não verificado</string>
+    <string name="quickstart_dd_unchecked">Não foi possível consultar o DigiDollar.</string>
     <string name="quickstart_unverified_sub">Não pode ser gasto e não entra no seu saldo até a sincronização comprovar.</string>
     <string name="quickstart_running_skip">Continuar sem esperar</string>
     <string name="quickstart_incomplete">A consulta não pôde ser concluída, então nenhum valor é mostrado. A carteira ainda encontrará seu saldo durante a sincronização.</string>

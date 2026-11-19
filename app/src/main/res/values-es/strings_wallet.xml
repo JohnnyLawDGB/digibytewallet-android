@@ -844,6 +844,7 @@
     <string name="quickstart_continue">Continuar</string>
     <string name="quickstart_unverified">%1$s DGB informados por %2$s, aún sin verificar</string>
     <string name="quickstart_unverified_dd">%1$s DigiDollar informados, aún sin verificar</string>
+    <string name="quickstart_dd_unchecked">No se pudo consultar DigiDollar.</string>
     <string name="quickstart_unverified_sub">No se puede gastar ni cuenta en tu saldo hasta que la sincronización lo compruebe.</string>
     <string name="quickstart_running_skip">Continuar sin esperar</string>
     <string name="quickstart_incomplete">La consulta no pudo completarse, así que no se muestra ninguna cifra. La billetera igualmente encontrará su saldo al sincronizarse.</string>

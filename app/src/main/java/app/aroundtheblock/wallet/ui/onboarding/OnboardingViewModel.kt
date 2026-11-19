@@ -284,8 +284,12 @@ class OnboardingViewModel @Inject constructor(
             // nativeResult alone would be BIP84 only and drop the taproot coins.
             val found = QuickStart(
                 unverifiedSat = result.totalBalanceSat,
-                // Null today: scan() does not look up DigiDollar (only scanFromSeed does). Kept for when it does.
-                unverifiedDdCents = result.digiDollar?.cents,
+                // DigiDollar is its own lookup (one request per address, an endpoint an own node may
+                // not have), so it failing does not withhold the DGB figure above, which is complete
+                // on its own. But only a FINISHED lookup gives a figure: one not made (null) or with
+                // an address unasked (!reachable) is stored as null, "could not be checked", never
+                // as zero and never as the part that happened to answer.
+                unverifiedDdCents = result.digiDollar?.takeIf { it.reachable }?.cents,
                 sourceLabel = label,
                 atSecs = System.currentTimeMillis() / 1000,
             )

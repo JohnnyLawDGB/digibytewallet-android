@@ -828,6 +828,7 @@
     <string name="quickstart_continue">Tiếp tục</string>
     <string name="quickstart_unverified">%2$s báo %1$s DGB, chưa được xác minh</string>
     <string name="quickstart_unverified_dd">Báo %1$s DigiDollar, chưa được xác minh</string>
+    <string name="quickstart_dd_unchecked">Không thể kiểm tra DigiDollar.</string>
     <string name="quickstart_unverified_sub">Không thể chi tiêu và không tính vào số dư cho đến khi đồng bộ chứng minh.</string>
     <string name="quickstart_running_skip">Tiếp tục mà không chờ</string>
     <string name="quickstart_incomplete">Không thể hoàn tất tra cứu nên không hiển thị con số nào. Ví vẫn sẽ tìm thấy số dư khi đồng bộ.</string>

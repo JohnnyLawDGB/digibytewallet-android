@@ -34,8 +34,8 @@ class RecoveryScanService(
         data class Done(
             val results: List<ProfileResult>,
             /**
-             * What the wallet holds in DigiDollar, or null when the scan predates this and never
-             * looked. Carried at wallet level rather than per profile: DigiDollar always lives at
+             * What the wallet holds in DigiDollar, or null when the lookup could not be made (never
+             * a zero). Carried at wallet level rather than per profile: DigiDollar always lives at
              * m/86'/20'/0' regardless of which derivation the plain DGB sits on.
              */
             val digiDollar: DigiDollarScan.Result? = null,
@@ -335,8 +335,47 @@ class RecoveryScanService(
     }
 
     /**
-     * Derives each profile's addresses from [seedBytes] via JNI, then calls
-     * [classifyDerived]. The seed bytes are owned by the caller — this
+     * The one "classify, then DigiDollar" path, shared by [scanFromSeed] and [scan]: every profile's
+     * plain DGB ([classifyWidening]), then what the seed holds in DigiDollar.
+     *
+     * DigiDollar is looked up separately because it is invisible to the UTXO path: a token output
+     * carries zero satoshis and reconcile filters those out of the set entirely. Without this the
+     * wallet is emptied of DGB and assets while its dollars sit untouched and unmentioned, and a
+     * restore's quick scan reports a wallet holding dollars as holding none.
+     *
+     * A DigiDollar lookup that throws is a lookup that was not made: `digiDollar` is then null,
+     * never zero, and the DGB answer stands. Only a cancellation passes through.
+     *
+     * [seedBytes] is the caller's and is NOT zeroed here. The parameters after it are what the scan
+     * asks the native side, replaced in host-JVM tests, where NativeBridge cannot load.
+     */
+    internal suspend fun classifyThenDigiDollar(
+        seedBytes: ByteArray,
+        derive: (ByteArray, List<DerivationProfile>) -> Map<DerivationProfile, List<DerivedAddress>> = ::deriveAllProfiles,
+        outputScripts: (ProfileResult) -> Set<String> = ::outputScriptsOf,
+        scriptOf: (String) -> String? = ::scriptHexOf,
+        digiDollar: suspend (ByteArray) -> DigiDollarScan.Result? = ::scanDigiDollar,
+    ): State.Done {
+        val done = classifyWidening(
+            derive = { ps -> derive(seedBytes, ps) },
+            outputScripts = outputScripts,
+            scriptOf = scriptOf,
+        )
+        val dd = try {
+            digiDollar(seedBytes)
+        } catch (c: kotlinx.coroutines.CancellationException) {
+            throw c
+        } catch (t: Throwable) {
+            null
+        }
+        val withDollars = done.copy(digiDollar = dd)
+        _state.value = withDollars
+        return withDollars
+    }
+
+    /**
+     * Derives each profile's addresses from [seedBytes] via JNI, classifies them and looks up
+     * DigiDollar ([classifyThenDigiDollar]). The seed bytes are owned by the caller — this
      * function does NOT zero [seedBytes].
      */
     suspend fun scanFromSeed(
@@ -346,20 +385,7 @@ class RecoveryScanService(
             _state.value = State.Scanning(
                 "Deriving addresses across ${profiles.size} paths…", 0.1f
             )
-            val done = classifyWidening(
-                derive = { ps -> deriveAllProfiles(seedBytes, ps) },
-                outputScripts = ::outputScriptsOf,
-            )
-
-            // DigiDollar is looked up separately because it is invisible to the UTXO path: a
-            // token output carries zero satoshis and reconcile filters those out of the set
-            // entirely. Without this the wallet is emptied of DGB and assets while its dollars
-            // sit untouched and unmentioned.
-            val dd = runCatching { scanDigiDollar(seedBytes) }.getOrNull()
-            val withDollars = done.copy(digiDollar = dd)
-
-            _state.value = withDollars
-            withDollars
+            classifyThenDigiDollar(seedBytes)
         } catch (t: Throwable) {
             val failed = State.Failed(t.message ?: t.javaClass.simpleName)
             _state.value = failed
@@ -367,16 +393,32 @@ class RecoveryScanService(
         }
     }
 
+    /**
+     * The phrase path: the onboarding recovery scan and a restore's quick start. Derives the seed,
+     * runs [classifyThenDigiDollar] with it, and zeroes it: straight after its last use (the
+     * DigiDollar lookup) and again in `finally`, however the scan ends.
+     */
     suspend fun scan(
         mnemonic: String,
         /** NFKD UTF-8 bytes, or null. Caller owns and zeroes them. */
         passphrase: ByteArray? = null,
+    ): State = scanPhrase(mnemonic, passphrase)
+
+    /** [scan], with what it asks the native side as parameters (see [classifyThenDigiDollar]). */
+    internal suspend fun scanPhrase(
+        mnemonic: String,
+        passphrase: ByteArray?,
+        seedOf: (ByteArray, ByteArray?) -> ByteArray? = { phrase, pass -> NativeBridge.mnemonicToSeed(phrase, pass) },
+        derive: (ByteArray, List<DerivationProfile>) -> Map<DerivationProfile, List<DerivedAddress>> = ::deriveAllProfiles,
+        outputScripts: (ProfileResult) -> Set<String> = ::outputScriptsOf,
+        scriptOf: (String) -> String? = ::scriptHexOf,
+        digiDollar: suspend (ByteArray) -> DigiDollarScan.Result? = ::scanDigiDollar,
     ): State = withContext(Dispatchers.IO) {
         val phraseBytes = mnemonic.trim().lowercase().toByteArray(Charsets.UTF_8)
         var seed: ByteArray? = null
         try {
             _state.value = State.Scanning("Deriving seed…", 0f)
-            seed = NativeBridge.mnemonicToSeed(phraseBytes, passphrase)
+            seed = seedOf(phraseBytes, passphrase)
             if (seed == null || seed.isEmpty()) {
                 val failed = State.Failed("Could not derive seed from mnemonic")
                 _state.value = failed
@@ -390,11 +432,9 @@ class RecoveryScanService(
 
             _state.value = State.Scanning("Querying node for UTXOs…", 0.4f)
 
-            // The seed is needed while the windows widen; it is zeroed below and again in finally.
-            val done = classifyWidening(
-                derive = { ps -> deriveAllProfiles(capturedSeed, ps) },
-                outputScripts = ::outputScriptsOf,
-            )
+            // The seed is needed while the windows widen and for the DigiDollar addresses after
+            // them; it is zeroed below and again in finally.
+            val done = classifyThenDigiDollar(capturedSeed, derive, outputScripts, scriptOf, digiDollar)
             capturedSeed.fill(0)
             seed = null
             _state.value = done

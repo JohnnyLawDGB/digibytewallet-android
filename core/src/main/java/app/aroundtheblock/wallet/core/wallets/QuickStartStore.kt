@@ -9,9 +9,9 @@ import android.content.Context
  * when the native wallet holds that exact output, which only the compact-filter scan proves.
  *
  * @param unverifiedSat the DGB the lookup reported on this wallet's own address formats.
- * @param unverifiedDdCents the DigiDollar it reported, or null when it did not look. Always null
- *   today: `RecoveryScanService.scan()` (the phrase path the quick start uses) does not look up
- *   DigiDollar. Kept, with its display paths, for when it does.
+ * @param unverifiedDdCents the DigiDollar the lookup reported on this wallet's own DigiDollar
+ *   addresses (zero when it reported none), or null when DigiDollar could not be checked: the
+ *   lookup was not made, or did not finish. Null is shown as "could not be checked", never as zero.
  * @param sourceLabel the server that answered (a host name, never a URL with credentials).
  * @param atSecs when it answered, Unix seconds.
  */

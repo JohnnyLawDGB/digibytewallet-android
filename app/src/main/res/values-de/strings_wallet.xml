@@ -843,6 +843,7 @@
     <string name="quickstart_continue">Weiter</string>
     <string name="quickstart_unverified">%1$s DGB laut %2$s, noch nicht bestätigt</string>
     <string name="quickstart_unverified_dd">%1$s DigiDollar gemeldet, noch nicht bestätigt</string>
+    <string name="quickstart_dd_unchecked">DigiDollar konnte nicht abgefragt werden.</string>
     <string name="quickstart_unverified_sub">Nicht ausgebbar und nicht in deinem Guthaben, bis die Synchronisierung es belegt.</string>
     <string name="quickstart_running_skip">Weiter, ohne zu warten</string>
     <string name="quickstart_incomplete">Die Abfrage konnte nicht abgeschlossen werden, daher wird kein Betrag angezeigt. Die Wallet findet ihr Guthaben trotzdem beim Synchronisieren.</string>
