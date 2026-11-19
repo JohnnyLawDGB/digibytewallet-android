@@ -294,11 +294,11 @@ class WalletStoreEraser internal constructor(
         const val RECONCILE = "dgb_reconcile"
         const val SETTINGS = "dgb_settings"
         const val TMP = ".tmp"
-
-        /** The platform's file for prefs [name], or its backup, is on disk. */
-        fun prefsFileOnDisk(context: Context, name: String): Boolean {
-            val dir = File(context.dataDir, "shared_prefs")
-            return File(dir, "$name.xml").exists() || File(dir, "$name.xml.bak").exists()
-        }
     }
+}
+
+/** The platform's file for prefs [name], or its backup, is on disk. The one on-disk check a read-back uses. */
+internal fun prefsFileOnDisk(context: Context, name: String): Boolean {
+    val dir = File(context.dataDir, "shared_prefs")
+    return File(dir, "$name.xml").exists() || File(dir, "$name.xml.bak").exists()
 }

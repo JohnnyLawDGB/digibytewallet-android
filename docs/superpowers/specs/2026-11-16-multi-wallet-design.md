@@ -22,8 +22,10 @@ Status: for owner approval (2026-11-16); builder-checked. Step 2 amended 2026-11
 >   the device, across both networks. Before a wallet's stores go, the wipe puts every other
 >   wallet's id on record (`dgb_wipe_owed`, `WipeOwedStores`) and takes it off only when that
 >   wallet's stores read back empty on both networks: the next launch's wipe lists those ids, and
->   no wipe verifies while one is on record (INT-2026-11-19-A; waits for the owner, it changes the
->   wipe). The both-networks erase is the eraser's (`eraseStoresOnBothNetworks`), one copy.
+>   no wipe verifies while one is on record, while the record cannot be read or while its file is
+>   on the device. The registry is cleared only once every wallet whose stores are left reads back
+>   on that record (INT-2026-11-19-A; waits for the owner, it changes the wipe). The both-networks
+>   erase is the eraser's (`eraseStoresOnBothNetworks`), one copy.
 > - Removal: `RemoveResult.NotRemoved` (nothing written) vs `Incomplete` (REMOVING; housekeeping
 >   finishes). Removing legacy first releases the DB password's legacy wrap. No concurrent add/remove.
 > - Add: a cancelled add abandons its reserved slot; a duplicate cleans up its entry and alias.

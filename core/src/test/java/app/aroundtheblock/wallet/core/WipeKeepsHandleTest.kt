@@ -95,6 +95,12 @@ class WipeKeepsHandleTest {
 
         init { launch() }
 
+        /** Prefs files that take their writes but whose file cannot be deleted. */
+        val undeletable = mutableSetOf<String>()
+
+        /** Prefs files that cannot be opened at all. */
+        val unreadable = mutableSetOf<String>()
+
         /** A new process over the same device: nothing held from the one before. */
         fun launch() {
             ActiveWallet.resetForTest()
@@ -102,7 +108,8 @@ class WipeKeepsHandleTest {
             every { ctx.getSharedPreferences(match { it in refusing }, any()) } answers {
                 RefusingPrefs(prefs.prefsFor(firstArg()))
             }
-            every { ctx.deleteSharedPreferences(match { it in refusing }) } returns false
+            every { ctx.deleteSharedPreferences(match { it in refusing || it in undeletable }) } returns false
+            every { ctx.getSharedPreferences(match { it in unreadable }, any()) } throws IllegalStateException("not opened")
         }
 
         /** Legacy and wallet B (mainnet), each with its record and key; B with two stores. */
@@ -144,6 +151,8 @@ class WipeKeepsHandleTest {
         )
 
         fun pin() = PinManager(RecordingPinStore().apply { map["pin_hash"] = "00"; map["pin_salt"] = "00"; map["pin_method"] = "pbkdf2" })
+
+        fun owedFile() = File(root, "shared_prefs/${WipeOwedStores.PREFS}.xml")
 
         fun stuckStoreOnDisk() = File(root, "shared_prefs/$stuck.xml").exists()
 
@@ -251,6 +260,83 @@ class WipeKeepsHandleTest {
         assertEquals(emptyList<String>(), d.namingB())
     }
 
+    @Test fun `a wipe whose record of ids did not land keeps the registry, so the next wipe still lists the wallet`() = runTest {
+        val d = Device().apply { populate() }
+        // One run in which neither B's store nor the record of ids takes its write.
+        d.refusing += d.stuck
+        d.refusing += WipeOwedStores.PREFS
+
+        val first = d.walletManager().wipeThenReleasePin(d.pin())
+
+        assertTrue("precondition: every seed record and key went", first.seedGone)
+        assertFalse(first.verified)
+        assertEquals("precondition: the id is not on record", emptyList<String>(), WipeOwedStores.ids(d.ctx))
+
+        // The next launch: the record takes writes again, the store still refuses.
+        d.refusing -= WipeOwedStores.PREFS
+        d.launch()
+        val pin = d.pin()
+        val second = d.walletManager().wipeThenReleasePin(pin)
+
+        assertTrue("precondition: the store is still on the device", d.stuckStoreOnDisk())
+        assertFalse("a wallet's store is on the device, yet the wipe verified", second.verified)
+        assertTrue("the PIN store was cleared by a wipe that left a wallet's store", pin.hasPin())
+
+        d.refusing.clear()
+        d.launch()
+        val third = d.walletManager().wipeThenReleasePin(d.pin())
+
+        assertTrue("$third", third.verified)
+        assertEquals("a verified wipe left the wallet's id on the device", emptyList<String>(), d.namingB())
+        assertFalse("a verified wipe left the registry", File(d.root, "shared_prefs/${WalletRegistry.PREFS}.xml").exists())
+    }
+
+    @Test fun `a wipe does not verify while the record of ids cannot be read`() = runTest {
+        val d = Device().apply { populate() }
+        d.refusing += d.stuck
+        d.walletManager().wipeThenReleasePin(d.pin())
+        assertEquals("precondition: the id is on record", listOf(d.b.walletId), WipeOwedStores.ids(d.ctx))
+
+        // The next launch: the record cannot be opened, and the store still refuses.
+        d.unreadable += WipeOwedStores.PREFS
+        d.launch()
+        val pin = d.pin()
+        val second = d.walletManager().wipeThenReleasePin(pin)
+
+        assertTrue("precondition: the store is still on the device", d.stuckStoreOnDisk())
+        assertFalse("the record of ids could not be read, yet the wipe verified", second.verified)
+        assertTrue("the PIN store was cleared by a wipe that could not read the record of ids", pin.hasPin())
+
+        d.unreadable.clear()
+        d.refusing.clear()
+        d.launch()
+        val third = d.walletManager().wipeThenReleasePin(d.pin())
+
+        assertTrue("$third", third.verified)
+        assertEquals(emptyList<String>(), d.namingB())
+    }
+
+    @Test fun `a wipe does not verify while the emptied record's file is on the device`() = runTest {
+        val d = Device().apply { populate() }
+        d.undeletable += WipeOwedStores.PREFS
+        d.launch()
+        val pin = d.pin()
+
+        val first = d.walletManager().wipeThenReleasePin(pin)
+
+        assertTrue("precondition: the record's file is still on the device", d.owedFile().exists())
+        assertFalse("a file only a device with more than one wallet has is left, yet the wipe verified", first.verified)
+        assertTrue(pin.hasPin())
+
+        // The next launch finds the emptied file and removes it.
+        d.undeletable.clear()
+        d.launch()
+        val second = d.walletManager().wipeThenReleasePin(d.pin())
+
+        assertTrue("$second", second.verified)
+        assertFalse("a verified wipe left the record's file", d.owedFile().exists())
+    }
+
     @Test fun `a wipe does not verify while an id is still on record`() = runTest {
         val d = Device().apply { populate() }
         // An earlier wipe left B's id on record; its stores go now, but the record will not take the write.
@@ -307,7 +393,13 @@ class WipeKeepsHandleTest {
         assertTrue(WipeOwedStores.record(d.ctx, owed = emptyList()))
         assertEquals("a record of nothing created a file", emptyList<String>(), d.prefs.files())
 
+        assertTrue(WipeOwedStores.record(d.ctx, owed = listOf("legacy", "not-an-id")))
+        assertEquals("an id that is never listed was written", emptyList<String>(), d.prefs.files())
+
         assertTrue(WipeOwedStores.record(d.ctx, owed = listOf(idB, "legacy", "not-an-id", idB)))
+        assertEquals("what the file holds is not the one valid id", listOf(idB), d.owedFile().readText().let { text ->
+            listOf(idB, "legacy", "not-an-id").filter { it in text }
+        })
         assertTrue(WipeOwedStores.record(d.ctx, owed = listOf(idC)))
         assertEquals(listOf(idB, idC), WipeOwedStores.ids(d.ctx))
 
@@ -329,6 +421,28 @@ class WipeKeepsHandleTest {
 
         assertTrue("nothing to write is not a write that failed", WipeOwedStores.record(d.ctx, cleared = listOf("0123456789abcdef")))
         assertFalse(WipeOwedStores.record(d.ctx, owed = listOf("0123456789abcdef")))
+    }
+
+    @Test fun `a record that cannot be read is neither written over nor settled`() {
+        val d = Device()
+        val id = "0123456789abcdef"
+        assertTrue(WipeOwedStores.record(d.ctx, owed = listOf(id)))
+        d.unreadable += WipeOwedStores.PREFS
+        d.launch()
+
+        assertEquals("what cannot be read was read", null, WipeOwedStores.read(d.ctx))
+        assertEquals("listing wallets must not fail on it", emptyList<String>(), WipeOwedStores.ids(d.ctx))
+        assertFalse("nothing to take off a record that cannot be read is not a record that holds nothing",
+            WipeOwedStores.record(d.ctx, cleared = listOf("fedcba9876543210")))
+        assertFalse("a record that cannot be read counted as empty", WipeOwedStores.settled(d.ctx))
+        assertTrue("the record's file was removed unread", d.owedFile().exists())
+
+        d.unreadable.clear()
+        d.launch()
+        assertEquals(listOf(id), WipeOwedStores.ids(d.ctx))
+        assertFalse("a record that names a wallet is settled", WipeOwedStores.settled(d.ctx))
+        assertTrue(WipeOwedStores.record(d.ctx, cleared = listOf(id)))
+        assertTrue(WipeOwedStores.settled(d.ctx))
     }
 
     @Test fun `the production id set includes the ids on record`() {
