@@ -40,8 +40,15 @@
 #               a wallet whose digiScopeIdentity is SITE still gets the shared identity on a DigiScope host (the
 #               rule before the property: it signs in as another account without a word); 16777216 SITE on a
 #               DigiScope host answers the request's own callback, not DigiScope's login URL; 33554432 a
-#               digiScopeIdentity that is neither SHARED nor SITE is not refused. Each arm fails exactly the
-#               cases CASES lists for its bit and passes every other; a case listed with - fails under no arm.
+#               digiScopeIdentity that is neither SHARED nor SITE is not refused; 67108864 only api.digiscope.me
+#               is on the list (digiscope.me is not); 134217728 a name that begins with a listed host counts as one
+#               (the length is not compared: a trailing dot, a port, the host's NUL counted in); 268435456 the
+#               SHARED answer names the wallet's root, not none; 536870912 a request whose callback is DigiScope's
+#               login URL gets DigiScope's answer on any host (the callback read where the host decides);
+#               1073741824 a refusal leaves the answer as the caller had it, not all zero; 2147483648 a host off the
+#               list with no callback URL is not refused. Each arm fails exactly the cases CASES lists for its bit
+#               and passes every other, and every case has at least one arm: a case no arm fails proves nothing
+#               about the rule it holds, and the gate refuses it.
 #   shipped     -DDIGIID_UNFIXED=0: every case passes, exit 0.
 #   bridge      the shipped header under BR_DIGIID_ROOT_DIGIBYTE against the bridge's own jni_wallet_sign.c /
 #               jni_wallet.c / slip13.c, over identity_sign_bytes_kat's host_jni stand-ins: every answer and
@@ -94,7 +101,7 @@ ASAN_LEAK="halt_on_error=1 abort_on_error=1 detect_leaks=1 symbolize=0"
 export UBSAN_OPTIONS="halt_on_error=1 print_stacktrace=1"
 SAN_RE='ERROR: AddressSanitizer|ERROR: LeakSanitizer|runtime error:'
 
-# <case>:<the comparison arms (bits of DIGIID_UNFIXED) that must fail it, comma-separated; - for none>
+# <case>:<the comparison arms (bits of DIGIID_UNFIXED) that must fail it, comma-separated; at least one>
 CASES=(
     slip13_published_vectors:2
     slip13_identity_carried:2,4,262144
@@ -121,20 +128,20 @@ CASES=(
     sign_with_key_wipes:128,512
     address_with_key_wipes:128,65536
     long_messages:2,4,32,64,4096,8192,262144
-    edges:1,2,4,8,16,64,256,4096,8192,262144
+    edges:1,2,4,8,16,64,256,4096,8192,262144,67108864
     buffer_edges:512
-    digiscope_list_hosts:-
+    digiscope_list_hosts:67108864,268435456
     digiscope_list_subdomains:2097152
-    digiscope_list_lookalikes:-
+    digiscope_list_lookalikes:134217728
     digiscope_list_letter_case:4194304
-    digiscope_list_edges:-
-    choice_digiscope_shared:-
-    choice_digiscope_site:8388608,16777216
-    choice_other_host:-
-    choice_refused:-
-    choice_unknown_scope_refused:33554432
-    choice_unknown_root_refused:524288
-    choice_end_to_end:2,4,64,4096,8192,131072,262144,524288,8388608,16777216
+    digiscope_list_edges:67108864,134217728,1073741824
+    choice_digiscope_shared:67108864,268435456
+    choice_digiscope_site:8388608,16777216,67108864
+    choice_other_host:536870912
+    choice_refused:1073741824,2147483648
+    choice_unknown_scope_refused:33554432,1073741824
+    choice_unknown_root_refused:524288,1073741824
+    choice_end_to_end:2,4,64,4096,8192,131072,262144,524288,8388608,16777216,67108864,268435456
     sweep_indexes:1,2
     sweep_keys:1,2,4,8,4096,262144
     sweep_keys_standard:1,2,4,8,64,8192,131072
@@ -146,7 +153,17 @@ ARMS=(1:index-big-endian 2:words-big-endian 4:soft-path 8:negative-index 16:shar
       64:single-sha 128:uncompressed 256:segwit-ignored 512:key-kept 1024:lone-surrogate-kept 2048:modified-utf8
       4096:shared-path 8192:base64-unpadded 16384:uri-spec-pairs 32768:uri-as-message 65536:address-key-kept
       131072:root-ignored 262144:root-always-standard 524288:any-root 1048576:any-hasuri 2097152:list-suffix
-      4194304:list-casefold 8388608:site-signs-shared 16777216:site-uses-callback 33554432:any-scope)
+      4194304:list-casefold 8388608:site-signs-shared 16777216:site-uses-callback 33554432:any-scope
+      67108864:list-api-only 134217728:list-prefix 268435456:shared-names-root 536870912:callback-decides
+      1073741824:refusal-keeps-out 2147483648:no-callback-answers)
+for entry in "${CASES[@]}"; do   # every case is failed by an arm this script runs
+    arms_of="${entry##*:}"
+    [ -n "$arms_of" ] && [ "$arms_of" != "$entry" ] && [ "$arms_of" != - ] || {
+        echo "GATE FAILURE: case ${entry%%:*} lists no comparison arm; nothing shows it can fail."; exit 1; }
+    for bit in ${arms_of//,/ }; do
+        case " ${ARMS[*]%%:*} " in *" $bit "*) ;; *) echo "GATE FAILURE: case ${entry%%:*} lists arm $bit, which is not in ARMS."; exit 1 ;; esac
+    done
+done
 
 # ---- the seam is real ----------------------------------------------------------------------
 if [ ! -f "$HEADER" ]; then
@@ -311,13 +328,28 @@ let chosen: BRDigiIdStatus = BRDigiIdChooseIdentity(&choice, host, host.count, u
 let chosenKind: BRDigiIdIdentityKind = choice.kind
 let chosenRoot: BRDigiIdRoot = choice.root
 let chosenUri: UnsafePointer<CChar>? = choice.uri
-let chosenLength: Int = choice.uriLen
+let chosenLength: Int = choice.uriLen   // read after the call: on a DigiScope host the URI is the header's literal
+// A host off the list: the answer's URI is the pointer passed in (THE ANSWER'S URI in BRDigiId.h), which Swift keeps
+// only for one call when an array is passed. So the choice and the signing are made inside one
+// withUnsafeBufferPointer over the callback's bytes, and nothing of the answer is read outside it.
+let otherHost: [CChar] = "example.com".utf8.map { CChar(bitPattern: $0) }
+var otherOut = [CChar](repeating: 0, count: Int(BR_DIGIID_ANSWER_CAPACITY))
+let otherOutCount = otherOut.count
+let otherSigned: Bool = uriBytes.withUnsafeBufferPointer { (callback: UnsafeBufferPointer<CChar>) -> Bool in
+    var other = BRDigiIdChoice()
+    let status: BRDigiIdStatus = BRDigiIdChooseIdentity(&other, otherHost, otherHost.count, callback.baseAddress, callback.count,
+                                                        BR_DIGIID_SCOPE_SHARED, BR_DIGIID_ROOT_DIGIBYTE)
+    if status != BR_DIGIID_OK || other.kind != BR_DIGIID_IDENTITY_SITE || other.uri != callback.baseAddress { return false }
+    let signedOther: BRDigiIdStatus = BRDigiIdSignSite(&otherOut, otherOutCount, seed, seed.count, other.root, message, length, other.uri,
+                                                       other.uriLen, 0, &work, workCount)
+    return signedOther == BR_DIGIID_OK
+}
 let loginUri: String = BR_DIGIID_DIGISCOPE_LOGIN_URI
 let unsetScope: BRDigiIdScopeIdentity = BR_DIGIID_SCOPE_NONE
 print(uriStatus == BR_DIGIID_OK, signed == BR_DIGIID_OK, shared == BR_DIGIID_OK, address == BR_DIGIID_OK, indexes == BR_DIGIID_OK,
       utf8 == BR_DIGIID_OK, siteKey == BR_DIGIID_OK, keyAddress == BR_DIGIID_OK, DIGIID_UNFIXED, BR_DIGIID_MESSAGE_HEADER_LENGTH,
       listed == 1, chosen == BR_DIGIID_OK, chosenKind == BR_DIGIID_IDENTITY_SITE, chosenRoot == BR_DIGIID_ROOT_STANDARD, chosenUri != nil,
-      chosenLength == loginUri.utf8.count, unsetScope.rawValue == 0, BR_DIGIID_SCOPE_SHARED.rawValue == 1)
+      chosenLength == loginUri.utf8.count, unsetScope.rawValue == 0, BR_DIGIID_SCOPE_SHARED.rawValue == 1, otherSigned)
 EOF
     # The headers alone, without the core's module.modulemap (Swift would read it as the BRCore module, and it
     # names headers this core no longer has): the way an app's bridging header sees them.

@@ -190,7 +190,8 @@ The iOS session's hand-off of 2026-11-13 (§3) asked the core lane for
 `BRDigiIdUsesSharedIdentity(host, hostLen)`. Mark gave that header to the Android session
 (2026-11-17), and the Coinomi design ("App: the policy") reshaped it: a Coinomi-mode wallet signs
 DigiScope per-site, so "on the list" no longer means "the shared key". It is built in `BRDigiId.h`
-(core `3ab900a`), under these names and not that one:
+(core `3ab900a`; the six further comparison arms and the pointer rule below, core `042e88b`), under
+these names and not that one:
 
 - **`BRDigiIdIsDigiScopeHost(host, hostLen)`**: 1 exactly for `digiscope.me` and `api.digiscope.me`,
   byte for byte, on the request's parsed (lower-cased) domain.
@@ -214,6 +215,13 @@ DigiScope per-site, so "on the list" no longer means "the shared key". It is bui
   callback.
 - The `SHARED` answer's root is `BR_DIGIID_ROOT_NONE`, which `BRDigiIdAddress` refuses. Ask it for the
   shared address under the wallet's own root, with `hasUri` 0.
+- **`choice.uri` off the list is the pointer you passed in**; nothing is copied. Swift keeps an array
+  or `String` passed as a pointer alive for that one call only, so `choice.uri` is dead as soon as
+  `BRDigiIdChooseIdentity` returns from such a call. Either make the choice **and** sign inside one
+  `withUnsafeBufferPointer` (or `withCString`) over the callback's bytes, or take only `kind` and
+  `root` from the answer and give `BRDigiIdSignSite` your own callback bytes again when `kind` is
+  `SITE` off the list. Only on a list host is `choice.uri` safe to keep: it is the header's literal.
+  `run.sh`'s Swift leg shows the first shape for `example.com`.
 
 **iOS** replaces `DigiIdIdentityPolicy.sharedIdentityHosts` with that one call, passing
 `BR_DIGIID_SCOPE_SHARED` and `BR_DIGIID_ROOT_DIGIBYTE` until it stores the per-wallet properties.
@@ -222,12 +230,14 @@ the per-site identity of the request's callback under `DIGIBYTE`. One input answ
 no request has it: an empty host is refused, where `choose("")` answered per-site.
 
 **Android** keeps `IdentityKeyPolicy.DIGISCOPE_HOSTS` until Coinomi step 2 moves it onto the call.
-Until then `digiid_core_kat`'s source gate fails when that list and the header's differ.
+Until then `digiid_core_kat`'s source gate fails when that list and the header's differ. Neither app
+calls `BRDigiIdChooseIdentity` yet, and the header's rules now say so.
 
 Held by `digiid_core_kat`: iOS's `DigiIdIdentityTests` list cases, value for value
 (`digiscope_list_*`), each host crossed with both `scope` values and both roots; every refusal; and
 `choice_end_to_end`, where `api.digiscope.me` with `SITE` and `STANDARD` derives
 `DSsC7WWi7mgr4t7xEw9kmcZqgQq6YJjdri`, the address Coinomi signed DigiScope's login with. Arms
-2097152, 4194304, 8388608, 16777216 and 33554432 each fail exactly their cases. The Swift leg of
+2097152 to 2147483648 (eleven, one bit each) fail exactly their cases, and every case has an arm:
+`run.sh` refuses a case that lists none. The Swift leg of
 `run.sh` now imports these names (the literal as a `String`). Like §4's legs, it has not run on a
 Mac.
