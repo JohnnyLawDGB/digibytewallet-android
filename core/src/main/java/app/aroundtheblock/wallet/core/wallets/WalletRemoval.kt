@@ -44,7 +44,9 @@ sealed class RemoveResult {
  * and native session stay until the restart, and the next launch's housekeeping erases it. Removing
  * the last wallet on the device is the existing full wipe ([wipeAll]).
  *
- * The legacy wallet is one seed on both networks, so its stores go on both (the eraser does that).
+ * A wallet's stores go on both networks ([WalletStoreEraser.eraseOnBothNetworks]). Legacy is one seed
+ * on both. Any other wallet lives on the network its entry records, and what is under the other one
+ * goes with it: once the entry is dropped nothing names the wallet, and no later wipe would find it.
  */
 class WalletRemoval(
     private val registry: WalletRegistry,
@@ -87,7 +89,7 @@ class WalletRemoval(
             Log.w(TAG, "Hub session not revoked (${e.javaClass.simpleName})")
         }
         return try {
-            val report = eraser.erase(scope)
+            val report = eraser.eraseOnBothNetworks(scope)
             when {
                 report.verified && registry.drop(id) -> RemoveResult.Removed
                 report.dbKeyHeldLegacyKey -> RemoveResult.DatabaseKeyStillOnLegacy
