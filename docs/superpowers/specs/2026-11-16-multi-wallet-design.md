@@ -56,6 +56,13 @@ Status: for owner approval (2026-11-16); builder-checked. Follow-on, separate de
 > under the other network would never be looked for again. It therefore erases the wallet's stores
 > under both networks first, and deletes the key aliases and drops the entry only once both read back
 > empty. Either network unverified keeps the entry and the key for the next launch.
+>
+> **Also for him (2026-11-19): a removal erases both networks too.** A confirmed removal drops its
+> entry in the same way, so it erases the wallet's stores under both networks as well
+> (`WalletRemoval`, and the launch step that finishes a removal), its seed record and its key first
+> as before. Every name it erases carries the removed wallet's own id. Legacy, whose stores already
+> span both networks, is unchanged. An add that never completed is erased as before: it was never
+> loaded, and its record and key are all it wrote.
 
 
 ## Intent

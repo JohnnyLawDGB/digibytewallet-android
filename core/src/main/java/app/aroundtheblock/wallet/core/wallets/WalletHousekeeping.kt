@@ -24,6 +24,11 @@ import android.util.Log
  * and its entry go. With no record left, those two are all a wipe finds the wallet by, and this runs
  * before the wipe a launch may still owe: an erase of the one network the entry records would leave
  * whatever is under the other where nothing looks again.
+ *
+ * A removal is erased on both networks for the same reason, its seed record and its key first as in
+ * any removal. An add that never completed (PENDING) was never loaded: its record and its key are
+ * all it wrote, neither name carries a network, and it is erased as [WalletProvisioner] erases an
+ * abandoned add.
  */
 class WalletHousekeeping internal constructor(
     private val registry: WalletRegistry,
@@ -40,7 +45,8 @@ class WalletHousekeeping internal constructor(
         for (entry in registry.incomplete()) {
             if (entry.state == EntryState.READY) continue
             val scope = WalletScope(entry.id, entry.testnet == true)
-            val report = eraser.erase(scope)
+            // An add that never completed was never loaded: only a removal can hold anything under the other network.
+            val report = if (entry.state == EntryState.PENDING) eraser.erase(scope) else eraser.eraseOnBothNetworks(scope)
             if (report.verified && registry.drop(entry.id)) {
                 dropped++
             } else {

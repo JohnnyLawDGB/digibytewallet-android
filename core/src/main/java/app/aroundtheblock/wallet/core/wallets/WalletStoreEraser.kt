@@ -55,10 +55,11 @@ data class EraseReport(
  *
  * The legacy wallet is one wallet on both networks (one seed), so for it every per-network store
  * is erased on both. Any other wallet writes its stores under one network, the one its registry
- * entry records, and [erase] erases it there. A READY wallet with no record is erased under the
- * other network too before its entry is dropped ([eraseStoresOnBothNetworks]), as the wipe erases
- * every wallet: the entry, the seed record and the key aliases are all a wipe finds a wallet by, so
- * once they are gone a store left under the other network is never found.
+ * entry records, and [erase] erases it there. A READY wallet with no record, and a wallet being
+ * removed, are erased under the other network too before their entry is dropped
+ * ([eraseStoresOnBothNetworks], [eraseOnBothNetworks]), as the wipe erases every wallet: the entry,
+ * the seed record and the key aliases are all a wipe finds a wallet by, so once they are gone a
+ * store left under the other network is never found.
  */
 class WalletStoreEraser internal constructor(
     private val context: Context,
@@ -118,14 +119,20 @@ class WalletStoreEraser internal constructor(
     fun eraseStoresOnBothNetworks(scope: WalletScope): Boolean = bothNetworksOf(scope).map(::eraseStores).all { it }
 
     /** [eraseRecord], then [eraseAliases], then [eraseStores]. Every phase runs, whatever the one before reported. */
-    fun erase(scope: WalletScope): EraseReport {
+    fun erase(scope: WalletScope): EraseReport = erasePhases(scope, ::eraseStores)
+
+    /** [erase] with its last phase on both networks ([eraseStoresOnBothNetworks]): what removing a wallet runs. */
+    fun eraseOnBothNetworks(scope: WalletScope): EraseReport = erasePhases(scope, ::eraseStoresOnBothNetworks)
+
+    /** The three phases in order; [stores] is phase 3, for one network or for both. */
+    private inline fun erasePhases(scope: WalletScope, stores: (WalletScope) -> Boolean): EraseReport {
         val record = eraseRecord(scope)
         val aliases = eraseAliases(scope)
-        val stores = eraseStores(scope)
+        val storesGone = stores(scope)
         return EraseReport(
             recordGone = record,
             aliasesGone = aliases == AliasOutcome.GONE,
-            storesGone = stores,
+            storesGone = storesGone,
             dbKeyHeldLegacyKey = aliases == AliasOutcome.KEPT_FOR_DB_KEY,
         )
     }

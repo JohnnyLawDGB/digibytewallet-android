@@ -104,8 +104,8 @@ internal fun wipeTestContext(prefs: InMemoryPrefsFactory, root: File): Context {
 /**
  * Whatever a test device still holds under wallet [id]'s name: prefs files with something in them,
  * files under [root], seed key aliases and its key in `dgb_settings`. Read from the device itself and
- * not through an eraser's read-back, so it also shows what an erase never looked for. For an id
- * other than `legacy`, whose names carry none.
+ * not through an eraser's read-back, so it also shows what an erase never looked for. Not for
+ * `legacy`: its names carry no id.
  */
 internal fun leftNamedFor(id: String, prefs: InMemoryPrefsFactory, root: File, vault: FakeVault): List<String> =
     prefs.names().toList().filter { id in it && prefs.prefsFor(it).all.isNotEmpty() }.map { "prefs:$it" } +

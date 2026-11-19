@@ -343,4 +343,47 @@ class WalletStoreEraserTest {
         assertEquals(one.fileSnapshot(), both.fileSnapshot())
         assertTrue("B was touched", both.eraser.storesLeft(scopeB) && both.eraser.storesLeft(scopeBTest))
     }
+
+    @Test fun `erasing B on both networks is erase(B) and B's stores under the other network`() {
+        val d = everyWalletOnBothNetworks()
+        val expected = everyWalletOnBothNetworks().apply {
+            assertTrue(eraser.erase(scopeB).verified)
+            assertTrue(eraser.eraseStores(scopeBTest))
+        }
+
+        val report = d.eraser.eraseOnBothNetworks(scopeB)
+
+        assertTrue("not verified: $report", report.verified)
+        assertEquals(expected.prefsSnapshot(), d.prefsSnapshot())
+        assertEquals(expected.fileSnapshot(), d.fileSnapshot())
+        assertEquals(expected.vault.keys.keys, d.vault.keys.keys)
+        assertFalse(d.eraser.anythingLeft(scopeB))
+        assertFalse(d.eraser.anythingLeft(scopeBTest))
+        assertTrue("C was touched under the other network", d.eraser.storesLeft(scopeCTest))
+    }
+
+    @Test fun `erasing B on both networks is not verified while a store is left under the other one`() {
+        val d = everyWalletOnBothNetworks()
+        d.prefs.refuseWritesTo(WalletStores.prefsName("dgb_sync_data", scopeBTest))
+
+        val report = d.eraser.eraseOnBothNetworks(scopeB)
+
+        assertFalse(report.storesGone)
+        assertFalse(report.verified)
+        // The seed record and the key go first, whatever a store reports afterwards.
+        assertTrue(report.recordGone)
+        assertTrue(report.aliasesGone)
+    }
+
+    @Test fun `for legacy, erasing on both networks is the erase it already was`() {
+        val one = everyWalletOnBothNetworks()
+        val both = everyWalletOnBothNetworks()
+
+        assertEquals(one.eraser.erase(legacyMain), both.eraser.eraseOnBothNetworks(legacyMain))
+
+        assertEquals(one.deleted, both.deleted)
+        assertEquals(one.prefsSnapshot(), both.prefsSnapshot())
+        assertEquals(one.fileSnapshot(), both.fileSnapshot())
+        assertEquals(one.vault.keys.keys, both.vault.keys.keys)
+    }
 }

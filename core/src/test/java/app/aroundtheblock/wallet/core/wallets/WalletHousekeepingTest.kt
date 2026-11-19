@@ -38,7 +38,7 @@ import org.junit.rules.TemporaryFolder
  *
  * A READY wallet with no record is erased on BOTH networks, as the wipe erases a wallet, its key and
  * its entry last: once they are gone nothing names the wallet, and the wipe a launch still owes runs
- * after this.
+ * after this. A removal is erased on both networks too, its seed record and its key first.
  */
 class WalletHousekeepingTest {
 
@@ -500,5 +500,52 @@ class WalletHousekeepingTest {
         assertEquals(keysBefore.filterNot { cut.id in it }.toSet(), d.vault.keys.keys.toSet())
         assertEquals(listOf(keepMain.id), d.registry.list(false).map { it.id })
         assertEquals(listOf(keepTest.id), d.registry.list(true).map { it.id })
+    }
+
+    @Test fun `a removal finished at launch erases the wallet on both networks`() {
+        for (testnet in listOf(false, true)) {
+            val d = Device()
+            d.installLegacy()
+            val gone = d.addReady(testnet)
+            d.leaveStores(WalletScope(gone.id, testnet))
+            d.leaveStores(WalletScope(gone.id, !testnet))
+            assertTrue(d.registry.markRemoving(gone.id))
+
+            assertEquals(1, d.housekeeping().run())
+
+            assertNull(d.registry.find(gone.id))
+            assertEquals(
+                "left with nothing naming the wallet (registered on testnet=$testnet)",
+                emptyList<String>(),
+                d.namedFor(gone.id),
+            )
+        }
+    }
+
+    @Test fun `a removal whose other network cannot be verified stays REMOVING, its seed gone all the same`() {
+        val d = Device()
+        d.installLegacy()
+        val gone = d.addReady()
+        val own = WalletScope(gone.id, false)
+        val other = WalletScope(gone.id, true)
+        d.leaveStores(own)
+        d.leaveStores(other)
+        assertTrue(d.registry.markRemoving(gone.id))
+        val otherSync = WalletStores.prefsName("dgb_sync_data", other)
+        d.prefs.refuseWritesTo(otherSync)
+
+        assertEquals(0, d.housekeeping().run())
+
+        assertEquals(EntryState.REMOVING, d.registry.find(gone.id)?.state)
+        assertTrue(d.eraser().storesLeft(other))
+        // A removal takes the seed first, whatever a store reports afterwards.
+        assertTrue(d.prefs.prefsFor(WalletStores.seedRecordPrefs(own)).all.isEmpty())
+        assertFalse(d.eraser().aliasesLeft(own))
+
+        // The next launch, whose write lands.
+        d.prefs.prefsFor(otherSync).refuseWrites = false
+        assertEquals(1, d.housekeeping().run())
+        assertNull(d.registry.find(gone.id))
+        assertEquals(emptyList<String>(), d.namedFor(gone.id))
     }
 }
