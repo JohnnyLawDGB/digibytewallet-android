@@ -55,13 +55,9 @@ Activity, reopened, stays on `pin_setup`: the start is computed once and nothing
 
 **The state is per active wallet today, and that leaves a hole.** `walletState` is the active scope's
 (`WalletManager.kt:235-243`; `ActiveWallet.kt:14-23`; `WalletRegistry.kt:227-231` falls back to
-`legacy` when the selected network has no READY wallet). With wallets on the *other* network and none
-on the selected one, the start is first-run onboarding whatever the PIN store holds
-(`LockGatePolicy.kt:145`). A create there stores a PIN first (`PinSetupScreen.kt:124`), a restore
-after its record (`RecoveryDateScreen.kt:203`), and that PIN opens every wallet
-(`2026-11-16-multi-wallet-design.md:343`). With no PIN stored, that is this document's state reached
-without the phrase (§3 step 1 closes it). With a PIN stored, it replaces that PIN without asking for
-it: Q6.
+`legacy` when the selected network has no READY wallet). So the state must be read over every wallet on both networks, not the active one (§3 step 1).
+A related gap on `develop`, with a PIN stored, is recorded privately as INT-2026-11-19-B (invariant:
+no onboarding path sets or replaces the app PIN while any wallet record exists): Q6.
 
 **Not this state:** a **PIN store that cannot be read** (4.1.2 row 23) goes to
 `PIN_STORE_UNAVAILABLE_ROUTE`, never "no PIN" (`LockGatePolicy.kt:146-148`; `PinManager.kt:300-304`);
@@ -291,11 +287,10 @@ Landing: one PR into `develop` after the 4.1.5 cut, independent review + green C
   background for a set time (say 5 minutes) the phrase is asked again; (c) do Q2 first, and build
   this with no exception at all. **Recommended: (a) if Q2 is yes, otherwise (b).** The window
   exists today with no bound and no phrase; (b) costs a re-check on resume that today's code has not.
-- **Q6. On `develop` today, a first run on a network with no wallet, while the other network's
-  wallets keep their PIN, sets a new PIN without asking for the old one** (create:
-  `PinSetupScreen.kt:124`; restore: `RecoveryDateScreen.kt:203`). Read, not reproduced. It is a
-  PIN-replace path, so it is yours. (a) that onboarding asks for the current PIN first and keeps
-  it, setting none; (b) it asks for a wallet's phrase, as this screen does; (c) leave it.
+- **Q6. INT-2026-11-19-B** (private record; unreleased, `develop` only; read, not reproduced).
+  Invariant: no onboarding path sets or replaces the app PIN while any wallet record exists. It is a
+  PIN path, so it is yours. (a) such an onboarding asks for the current PIN first and keeps it,
+  setting none; (b) it asks for a wallet's phrase, as this screen does; (c) leave it.
   **Recommended: (a)**, in this PR or its own, before a release ships multi-wallet.
 
 ## 8. Not verified
