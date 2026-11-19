@@ -37,4 +37,12 @@ object DigiDollarGapRule {
 
     /** The scan's round bound: more rounds than its windows can take to reach the cap. */
     fun roundBound(): Int = NativeBridge.recoveryDigiDollarGapRoundBound()
+
+    /**
+     * The furthest the rule ever grows [chain]'s window: what [next] answers for a window of nothing
+     * with a use far past any cap (the core's BR_RECOVERY_DIGIDOLLAR_MAX, 1000 today, read through
+     * the rule and not copied here). The phrase scan derives this many addresses per chain in one
+     * step so its seed can be zeroed before the first request ([RecoveryScanService.scan]).
+     */
+    fun cap(chain: Int): Int = NativeBridge.recoveryDigiDollarWholeGapNext(chain, 0, Int.MAX_VALUE / 2)
 }

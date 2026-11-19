@@ -1304,14 +1304,14 @@ private fun UnverifiedQuickStart(q: app.aroundtheblock.wallet.core.wallets.Quick
             color = Color(0xFFFFC107),
             textAlign = TextAlign.Center,
         )
-        q.unverifiedDdCents?.let { cents ->
-            Text(
-                text = stringResource(R.string.quickstart_unverified_dd, mask(WalletViewModel.formatDigiDollar(cents))),
-                style = MaterialTheme.typography.bodySmall,
-                color = Color(0xFFFFC107),
-                textAlign = TextAlign.Center,
-            )
-        }
+        Text(
+            // Null is a DigiDollar lookup that was not made or not finished: said, never shown as zero.
+            text = q.unverifiedDdCents?.let { stringResource(R.string.quickstart_unverified_dd, mask(WalletViewModel.formatDigiDollar(it))) }
+                ?: stringResource(R.string.quickstart_dd_unchecked),
+            style = MaterialTheme.typography.bodySmall,
+            color = Color(0xFFFFC107),
+            textAlign = TextAlign.Center,
+        )
         Text(
             text = stringResource(R.string.quickstart_unverified_sub),
             style = MaterialTheme.typography.labelSmall,

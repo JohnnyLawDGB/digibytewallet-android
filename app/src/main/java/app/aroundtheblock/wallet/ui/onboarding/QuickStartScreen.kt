@@ -140,10 +140,12 @@ fun QuickStartScreen(
                 is QuickStartUi.Found -> {
                     val q = state.quickStart
                     Body(stringResource(R.string.quickstart_found, WalletViewModel.formatSatoshisBare(q.unverifiedSat), q.sourceLabel))
-                    q.unverifiedDdCents?.let { cents ->
-                        Spacer(Modifier.height(8.dp))
-                        Body(stringResource(R.string.quickstart_found_dd, WalletViewModel.formatDigiDollar(cents)))
-                    }
+                    Spacer(Modifier.height(8.dp))
+                    // Null is a DigiDollar lookup that was not made or not finished: said, never shown as zero.
+                    Body(
+                        q.unverifiedDdCents?.let { stringResource(R.string.quickstart_found_dd, WalletViewModel.formatDigiDollar(it)) }
+                            ?: stringResource(R.string.quickstart_dd_unchecked),
+                    )
                     Spacer(Modifier.height(8.dp))
                     Note(stringResource(R.string.quickstart_unverified_sub))
                     Spacer(Modifier.height(24.dp))

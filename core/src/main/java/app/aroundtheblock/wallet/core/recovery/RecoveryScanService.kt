@@ -2,11 +2,14 @@ package app.aroundtheblock.wallet.core.recovery
 
 import app.aroundtheblock.wallet.core.bridge.NativeBridge
 import app.aroundtheblock.wallet.core.reconcile.UtxoEntry
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Runs a multi-profile derivation scan during seed restore.
@@ -34,8 +37,8 @@ class RecoveryScanService(
         data class Done(
             val results: List<ProfileResult>,
             /**
-             * What the wallet holds in DigiDollar, or null when the scan predates this and never
-             * looked. Carried at wallet level rather than per profile: DigiDollar always lives at
+             * What the wallet holds in DigiDollar, or null when the lookup could not be made (never
+             * a zero). Carried at wallet level rather than per profile: DigiDollar always lives at
              * m/86'/20'/0' regardless of which derivation the plain DGB sits on.
              */
             val digiDollar: DigiDollarScan.Result? = null,
@@ -114,37 +117,47 @@ class RecoveryScanService(
     }
 
     /**
-     * What this seed holds in DigiDollar, at m/86'/20'/0'.
+     * What a wallet holds in DigiDollar, at m/86'/20'/0'.
      *
      * A shorter gap than the DGB profiles use (the core's, through [DigiDollarGapRule]): DigiDollar
      * receive addresses are handed out one at a time by a wallet that has only ever had one DD
-     * address per index, so the long tail the plain-DGB scan needs is wasted round-trips here —
+     * address per index, so the long tail the plain-DGB scan needs is wasted round-trips here:
      * each address is its own request rather than part of a batch.
+     *
+     * [addressesFor] gives a round's addresses: the first `external` of chain 0, then the first
+     * `internal` of chain 1. It is a parameter because the two callers hold different things:
+     * Recover funds holds its caller's seed and derives each round ([digiDollarOfSeed]); the phrase
+     * scan derived every address the rule can ask for and zeroed its seed before the first request
+     * ([digiDollarOfAddresses]).
+     *
+     * With [stopAtFirstUnanswered] the scan ends at the first address the endpoint did not answer
+     * for, with `reachable = false`: for a caller that shows a figure only when every address
+     * answered, nothing asked after that can change what it shows, and each further request can
+     * take the client's whole timeout.
      */
-    private suspend fun scanDigiDollar(seedBytes: ByteArray): DigiDollarScan.Result? {
+    private suspend fun scanDigiDollar(
+        stopAtFirstUnanswered: Boolean,
+        addressesFor: (external: Int, internal: Int) -> List<DigiDollarAddress>?,
+    ): DigiDollarScan.Result? {
         // Each chain's window widens while its far end is in use ([DigiDollarGapRule], the core's
         // rule): DigiDollar change walks the internal chain one index per send, past any fixed
         // window (4.1.2 row 19). Lookups are asked once per address, however many times the window
         // grows; the round bound stops a lookup that keeps the far end in use.
-        val asked = HashMap<String, app.aroundtheblock.wallet.core.reconcile.DigiDollarHoldingResult?>()
+        val lookup = DigiDollarHoldingLookup(stopAtFirstUnanswered) { utxoSource.fetchDigiDollar(it) }
         var external = DigiDollarGapRule.start(0)
         var internal = DigiDollarGapRule.start(1)
         val bound = DigiDollarGapRule.roundBound()
         var round = 0
         while (true) {
             round++
-            val lines = app.aroundtheblock.wallet.core.bridge.NativeBridge.deriveDigiDollarAddresses(
-                seedBytes, external, internal,
-            ) ?: return null
-            val addresses = DigiDollarAddress.parseAll(lines)
-            if (addresses.isEmpty()) return null
+            val addresses = addressesFor(external, internal)
+            if (addresses.isNullOrEmpty()) return null
 
             val used = HashSet<DigiDollarAddress>()
             val result = DigiDollarScan.assemble(
                 addresses = addresses,
                 holdingFor = { a ->
-                    val h = if (a.ddAddress in asked) asked[a.ddAddress]
-                        else utxoSource.fetchDigiDollar(a.ddAddress).also { asked[a.ddAddress] = it }
+                    val h = lookup.holdingFor(a.ddAddress)
                     if (h != null && h.txids.isNotEmpty()) used += a
                     h
                 },
@@ -152,6 +165,9 @@ class RecoveryScanService(
                 inputsFor = { utxoSource.fetchInputs(it) },
                 versionFor = { utxoSource.fetchVersion(it) },
             )
+            // An address went unanswered and the caller asked to stop there: `result.reachable` is
+            // already false, and no wider window is asked for.
+            if (lookup.stopped) return result
             val usedExternal = used.filter { it.chain == 0 }.maxOfOrNull { it.index }
             val usedInternal = used.filter { it.chain == 1 }.maxOfOrNull { it.index }
             val nextExternal = DigiDollarGapRule.next(0, external, usedExternal)
@@ -168,6 +184,28 @@ class RecoveryScanService(
             }
         }
     }
+
+    /** Recover funds: the caller's seed, each round's window derived from it, every address asked
+     *  (a partial answer still tells the user what was found). */
+    private suspend fun digiDollarOfSeed(seedBytes: ByteArray): DigiDollarScan.Result? =
+        scanDigiDollar(stopAtFirstUnanswered = false) { external, internal ->
+            DigiDollarAddress.parseAll(NativeBridge.deriveDigiDollarAddresses(seedBytes, external, internal))
+        }
+
+    /**
+     * Every DigiDollar address the rule can ever ask for ([DigiDollarGapRule.cap] per chain), derived
+     * in one local step so the phrase scan can zero its seed before the first DigiDollar request.
+     * Only the addresses a round's window covers are sent anywhere. Null when none could be derived.
+     */
+    private fun digiDollarAddressesToCap(seedBytes: ByteArray): List<DigiDollarAddress>? =
+        DigiDollarAddress.parseAll(
+            NativeBridge.deriveDigiDollarAddresses(seedBytes, DigiDollarGapRule.cap(0), DigiDollarGapRule.cap(1)),
+        ).takeIf { it.isNotEmpty() }
+
+    /** The phrase scan: no seed, the windows taken from [all] ([digiDollarAddressesToCap]), ended at
+     *  the first unanswered address. */
+    private suspend fun digiDollarOfAddresses(all: List<DigiDollarAddress>): DigiDollarScan.Result? =
+        scanDigiDollar(stopAtFirstUnanswered = true) { external, internal -> digiDollarWindow(all, external, internal) }
 
     /**
      * [classifyDerived] with each path's window widened while its far end is in use (4.1.3 G1). A
@@ -335,8 +373,50 @@ class RecoveryScanService(
     }
 
     /**
-     * Derives each profile's addresses from [seedBytes] via JNI, then calls
-     * [classifyDerived]. The seed bytes are owned by the caller — this
+     * The one "classify, then DigiDollar" path, shared by [scanFromSeed] and [scan]: every profile's
+     * plain DGB ([classifyWidening]), then what the seed holds in DigiDollar.
+     *
+     * DigiDollar is looked up separately because it is invisible to the UTXO path: a token output
+     * carries zero satoshis and reconcile filters those out of the set entirely. Without this the
+     * wallet is emptied of DGB and assets while its dollars sit untouched and unmentioned, and a
+     * restore's quick scan reports a wallet holding dollars as holding none.
+     *
+     * A DigiDollar lookup that throws is a lookup that was not made: `digiDollar` is then null,
+     * never zero, and the DGB answer stands. Only a cancellation passes through.
+     *
+     * [digiDollar] defaults to Recover funds' lookup ([digiDollarOfSeed]); the phrase scan passes its
+     * own, which zeroes the seed it owns before asking anything ([scanPhrase]).
+     *
+     * [seedBytes] is the caller's and is NOT zeroed here. The parameters after it are what the scan
+     * asks the native side, replaced in host-JVM tests, where NativeBridge cannot load.
+     */
+    internal suspend fun classifyThenDigiDollar(
+        seedBytes: ByteArray,
+        derive: (ByteArray, List<DerivationProfile>) -> Map<DerivationProfile, List<DerivedAddress>> = ::deriveAllProfiles,
+        outputScripts: (ProfileResult) -> Set<String> = ::outputScriptsOf,
+        scriptOf: (String) -> String? = ::scriptHexOf,
+        digiDollar: suspend (ByteArray) -> DigiDollarScan.Result? = ::digiDollarOfSeed,
+    ): State.Done {
+        val done = classifyWidening(
+            derive = { ps -> derive(seedBytes, ps) },
+            outputScripts = outputScripts,
+            scriptOf = scriptOf,
+        )
+        val dd = try {
+            digiDollar(seedBytes)
+        } catch (c: kotlinx.coroutines.CancellationException) {
+            throw c
+        } catch (t: Throwable) {
+            null
+        }
+        val withDollars = done.copy(digiDollar = dd)
+        _state.value = withDollars
+        return withDollars
+    }
+
+    /**
+     * Derives each profile's addresses from [seedBytes] via JNI, classifies them and looks up
+     * DigiDollar ([classifyThenDigiDollar]). The seed bytes are owned by the caller — this
      * function does NOT zero [seedBytes].
      */
     suspend fun scanFromSeed(
@@ -346,20 +426,7 @@ class RecoveryScanService(
             _state.value = State.Scanning(
                 "Deriving addresses across ${profiles.size} paths…", 0.1f
             )
-            val done = classifyWidening(
-                derive = { ps -> deriveAllProfiles(seedBytes, ps) },
-                outputScripts = ::outputScriptsOf,
-            )
-
-            // DigiDollar is looked up separately because it is invisible to the UTXO path: a
-            // token output carries zero satoshis and reconcile filters those out of the set
-            // entirely. Without this the wallet is emptied of DGB and assets while its dollars
-            // sit untouched and unmentioned.
-            val dd = runCatching { scanDigiDollar(seedBytes) }.getOrNull()
-            val withDollars = done.copy(digiDollar = dd)
-
-            _state.value = withDollars
-            withDollars
+            classifyThenDigiDollar(seedBytes)
         } catch (t: Throwable) {
             val failed = State.Failed(t.message ?: t.javaClass.simpleName)
             _state.value = failed
@@ -367,16 +434,50 @@ class RecoveryScanService(
         }
     }
 
+    /**
+     * The phrase path: the onboarding recovery scan and a restore's quick start. Derives the seed,
+     * runs [classifyThenDigiDollar] with it, and zeroes it, however the scan ends.
+     *
+     * [digiDollar] is whether DigiDollar is looked up as well. Only the quick start asks: it shows
+     * the figure. The onboarding recovery scan's screen reports DGB only, so it does not send the
+     * wallet's DigiDollar addresses anywhere for an answer nobody would see. Without it,
+     * `State.Done.digiDollar` is null: not looked up, never a zero.
+     *
+     * The DigiDollar lookup here is bounded, unlike Recover funds' ([scanFromSeed]):
+     *  - the seed's last use is deriving the DigiDollar addresses, all of them in one local step
+     *    ([digiDollarAddressesToCap]). It is zeroed before the first DigiDollar request, so its
+     *    lifetime does not depend on how the endpoint behaves;
+     *  - the lookup ends at the first address that could not be asked ([digiDollarOfAddresses]);
+     *  - the whole lookup has [QUICK_DIGI_DOLLAR_BUDGET_MS]. Past it the scan returns its DGB answer
+     *    with `digiDollar` null ("could not be checked"), and the request still in flight is left
+     *    to end on its own: it holds addresses, not the seed.
+     */
     suspend fun scan(
         mnemonic: String,
         /** NFKD UTF-8 bytes, or null. Caller owns and zeroes them. */
         passphrase: ByteArray? = null,
+        digiDollar: Boolean = false,
+    ): State = scanPhrase(mnemonic, passphrase, digiDollar)
+
+    /** [scan], with what it asks the native side as parameters (see [classifyThenDigiDollar]), the
+     *  two halves of its DigiDollar lookup and that lookup's time budget. */
+    internal suspend fun scanPhrase(
+        mnemonic: String,
+        passphrase: ByteArray?,
+        digiDollar: Boolean,
+        seedOf: (ByteArray, ByteArray?) -> ByteArray? = { phrase, pass -> NativeBridge.mnemonicToSeed(phrase, pass) },
+        derive: (ByteArray, List<DerivationProfile>) -> Map<DerivationProfile, List<DerivedAddress>> = ::deriveAllProfiles,
+        outputScripts: (ProfileResult) -> Set<String> = ::outputScriptsOf,
+        scriptOf: (String) -> String? = ::scriptHexOf,
+        digiDollarAddresses: (ByteArray) -> List<DigiDollarAddress>? = ::digiDollarAddressesToCap,
+        digiDollarLookup: suspend (List<DigiDollarAddress>) -> DigiDollarScan.Result? = ::digiDollarOfAddresses,
+        digiDollarBudgetMs: Long = QUICK_DIGI_DOLLAR_BUDGET_MS,
     ): State = withContext(Dispatchers.IO) {
         val phraseBytes = mnemonic.trim().lowercase().toByteArray(Charsets.UTF_8)
         var seed: ByteArray? = null
         try {
             _state.value = State.Scanning("Deriving seed…", 0f)
-            seed = NativeBridge.mnemonicToSeed(phraseBytes, passphrase)
+            seed = seedOf(phraseBytes, passphrase)
             if (seed == null || seed.isEmpty()) {
                 val failed = State.Failed("Could not derive seed from mnemonic")
                 _state.value = failed
@@ -390,11 +491,16 @@ class RecoveryScanService(
 
             _state.value = State.Scanning("Querying node for UTXOs…", 0.4f)
 
-            // The seed is needed while the windows widen; it is zeroed below and again in finally.
-            val done = classifyWidening(
-                derive = { ps -> deriveAllProfiles(capturedSeed, ps) },
-                outputScripts = ::outputScriptsOf,
-            )
+            // The seed is needed while the DGB windows widen and, last, for the DigiDollar addresses.
+            // It is zeroed there, before any DigiDollar request, and again in finally.
+            val done = classifyThenDigiDollar(capturedSeed, derive, outputScripts, scriptOf) { s ->
+                val addresses = try {
+                    if (digiDollar) digiDollarAddresses(s) else null
+                } finally {
+                    s.fill(0)
+                }
+                addresses?.let { withinBudget(digiDollarBudgetMs) { digiDollarLookup(it) } }
+            }
             capturedSeed.fill(0)
             seed = null
             _state.value = done
@@ -407,6 +513,33 @@ class RecoveryScanService(
             seed?.fill(0)
             phraseBytes.fill(0)
         }
+    }
+
+    /**
+     * [block]'s answer, or null once [ms] have passed. [block] runs on a worker of its own, because a
+     * timeout cannot interrupt a blocking network call: the wait ends on time and the worker is
+     * cancelled, its request in flight ending on the client's own timeout with its answer dropped.
+     * So [block] must hold nothing that has to be cleaned up when the scan ends: never the seed.
+     * What [block] throws is thrown here; this coroutine's cancellation cancels the worker.
+     */
+    private suspend fun <T> withinBudget(ms: Long, block: suspend () -> T?): T? {
+        val work = CoroutineScope(Dispatchers.IO).async { block() }
+        try {
+            return withTimeoutOrNull(ms) { work.await() }
+        } finally {
+            work.cancel()
+        }
+    }
+
+    companion object {
+        /**
+         * The phrase scan's whole DigiDollar lookup, in milliseconds. A judgement, not a measurement
+         * of every link: the lookup is one request per address, 30 for a wallet with nothing near
+         * the end of its windows, each well under a second against api.digiscope.me on a direct
+         * connection, so a minute leaves room for a slow link or Tor and still ends a stalled
+         * endpoint (15 s to connect, 120 s a call, per request) while the user is on the screen.
+         */
+        const val QUICK_DIGI_DOLLAR_BUDGET_MS = 60_000L
     }
 
     /**
@@ -461,3 +594,8 @@ internal fun mapDerived(raw: Array<String>, gapExternal: Int): List<DerivedAddre
             else -> DerivedAddress(addr, chain = 1, index = pos - gapExternal)
         }
     }
+
+/** The first [external] addresses of chain 0, then the first [internal] of chain 1, of [all]: one
+ *  round's window out of addresses derived once, in the order a derivation of that window gives. */
+internal fun digiDollarWindow(all: List<DigiDollarAddress>, external: Int, internal: Int): List<DigiDollarAddress> =
+    all.filter { it.chain == 0 && it.index < external } + all.filter { it.chain == 1 && it.index < internal }

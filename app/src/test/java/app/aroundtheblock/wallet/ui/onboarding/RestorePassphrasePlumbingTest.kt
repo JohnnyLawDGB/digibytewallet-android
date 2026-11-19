@@ -90,7 +90,7 @@ class RestorePassphrasePlumbingTest {
 
         restore(vm)
 
-        io.mockk.coVerify(exactly = 0) { scanService.scan(any(), any()) }
+        io.mockk.coVerify(exactly = 0) { scanService.scan(any(), any(), any()) }
     }
 
     /**
@@ -110,8 +110,10 @@ class RestorePassphrasePlumbingTest {
         vm.setPassphrase("correct horse")
         vm.runRecoveryScan()
 
-        io.mockk.coVerify(exactly = 1) { scanService.scan(any(), any()) }
-        io.mockk.coVerify(exactly = 0) { scanService.scan(any(), null) }
+        io.mockk.coVerify(exactly = 1) { scanService.scan(any(), any(), any()) }
+        io.mockk.coVerify(exactly = 0) { scanService.scan(any(), null, any()) }
+        // This scan's screen reports DGB only: it does not send the DigiDollar addresses as well.
+        io.mockk.coVerify(exactly = 0) { scanService.scan(any(), any(), true) }
     }
 }
 

@@ -53,6 +53,20 @@ class QuickStartStoreTest {
         assertEquals(noDd, QuickStartStore.read(ctx, b))
     }
 
+    /** A stored zero is "checked, holds none"; an absent key is "could not be checked". The two
+     *  must not meet on the way through the store. A pin: it passes on the store as it was. */
+    @Test fun `a checked zero of DigiDollar is stored as zero, not as none`() {
+        val zero = q.copy(unverifiedDdCents = 0L)
+        assertTrue(QuickStartStore.write(ctx, b, zero))
+        assertEquals(0L, QuickStartStore.read(ctx, b)?.unverifiedDdCents)
+        assertTrue("the zero was not written", prefs.prefsFor(WalletStores.prefsName("dgb_quickstart", b)).contains("unverified_dd_cents"))
+
+        // And a later quick start with none drops the earlier figure rather than keeping it.
+        assertTrue(QuickStartStore.write(ctx, b, q.copy(unverifiedDdCents = null)))
+        assertNull(QuickStartStore.read(ctx, b)?.unverifiedDdCents)
+        assertFalse(prefs.prefsFor(WalletStores.prefsName("dgb_quickstart", b)).contains("unverified_dd_cents"))
+    }
+
     @Test fun `a write that does not land says so`() {
         prefs.refuseWritesTo(WalletStores.prefsName("dgb_quickstart", b))
         assertFalse(QuickStartStore.write(ctx, b, q))

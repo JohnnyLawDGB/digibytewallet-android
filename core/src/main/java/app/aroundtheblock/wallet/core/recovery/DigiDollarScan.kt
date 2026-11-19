@@ -164,3 +164,33 @@ object DigiDollarScan {
         )
     }
 }
+
+/**
+ * The DigiDollar endpoint over one scan: each address is asked once however many rounds name it,
+ * and a null (the lookup could not be made) is remembered as that, not asked again and never a zero.
+ *
+ * With [stopAtFirstUnanswered], nothing is asked after the first null: every later address reads as
+ * unanswered too, and [stopped] tells the scan to end. For a caller that shows a figure only when
+ * every address answered, the answer is already "could not be checked", and each further request
+ * could take the client's whole timeout.
+ */
+internal class DigiDollarHoldingLookup(
+    private val stopAtFirstUnanswered: Boolean,
+    private val ask: suspend (String) -> DigiDollarHoldingResult?,
+) {
+    private val answers = HashMap<String, DigiDollarHoldingResult?>()
+    private var unanswered = false
+
+    /** True once an address went unanswered and the scan was to stop there. */
+    val stopped: Boolean get() = stopAtFirstUnanswered && unanswered
+
+    suspend fun holdingFor(ddAddress: String): DigiDollarHoldingResult? {
+        if (ddAddress in answers) return answers[ddAddress]
+        if (stopped) return null
+        return ask(ddAddress).also {
+            answers[ddAddress] = it
+            if (it == null) unanswered = true
+        }
+    }
+}
+
