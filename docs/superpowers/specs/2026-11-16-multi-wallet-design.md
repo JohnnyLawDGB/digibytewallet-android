@@ -1,6 +1,6 @@
 # Multiple wallets in HoldFast Wallet — design
 
-Status: for owner approval (2026-11-16); builder-checked. Step 2 amended 2026-11-17 with the owner's rulings (below). Follow-on, separate design: Coinomi-compatible Digi-ID.
+Status: for owner approval (2026-11-16); builder-checked. Step 2 amended 2026-11-17 with the owner's rulings (below); its plan's pre-flight rulings G1-G94 (2026-11-19) are in `2026-11-17-multi-wallet-step2-rulings.md`. Follow-on, separate design: Coinomi-compatible Digi-ID.
 
 > **Step 1 disposition (2026-11-16).** Plan: `docs/superpowers/plans/2026-11-16-multi-wallet-step1.md`.
 > The pre-flight conflict scan found 32 defects in the plan against this spec; rulings **F1-F32**
@@ -166,8 +166,8 @@ disagrees, this section wins.
    (`WalletRemoval`).
 9. **Outside this file, `CLAUDE.md` says the rescan pins the priority peer through
    `BRPeerManagerSetFixedPeer`.** No production code calls it, and the bridge's own comment in
-   `bridge_syncStopped` says not to. The first step-2 PR that changes the rebuild corrects
-   `CLAUDE.md` in the same PR.
+   `bridge_syncStopped` says not to. A1's docs PR corrects `CLAUDE.md` on `develop` now (G16);
+   the first step-2 PR that changes the rebuild corrects only what step 2 changes.
 
 ### Server work for a wallet that is not active (R6)
 
@@ -269,6 +269,21 @@ In step 2:
 - **The hand-off file (R1)** states the core API step 2 adds, its KATs, and whether the key record
   becomes a core format (versioned, with a KAT) or stays platform storage.
 
+
+### Pre-flight rulings that change this design (2026-11-19)
+
+The plan's pre-flight scan produced rulings G1-G94
+(`docs/superpowers/specs/2026-11-17-multi-wallet-step2-rulings.md`). Almost all change the plan
+only. These change a point this design had decided, and the text is corrected in place:
+
+- **G33:** F is the frontier of the band's stored-form ledger, which also stops at the lowest held confirmation.
+- **G36:** the quiesce stops routing and waits for publishes before it flushes and frees the band.
+- **G39:** the attach un-confirms the wallet's transactions above F - 1.
+- **G38:** a hand-off also removes the wallet's own chain keys from its `dgb_sync_data`.
+- **G71:** a shared abandonment reaches a wallet only for heights at or above its attach frontier.
+- **G92:** a restore bands whenever its network's shared chain exists; it never resets that chain.
+- **G28:** a transaction no attached wallet contains is offered to each wallet, as today.
+- **G16:** `CLAUDE.md`'s `SetFixedPeer` claim is corrected by A1 on `develop`, not by the first rebuild PR (correction 9).
 
 ## Intent
 
@@ -494,7 +509,7 @@ and the instant switch together (R2).
 - `BRPeerManager` holds a set of wallets, attached and detached at runtime.
 - Each wallet-facing call becomes "for each wallet":
   - relevance and ownership: a transaction is registered with every wallet that owns an input or
-    output;
+    output; one that no attached wallet contains is offered to each wallet, as today (G28);
   - block height updates go to all wallets;
   - filter elements are the union of every wallet's elements;
   - each wallet's gap-limit extension runs on its own.
@@ -533,36 +548,41 @@ and the instant switch together (R2).
   - a wallet that has fallen behind the shared window (inactive for more than about 5.7 days);
   - a synced wallet whose Coinomi accounts are added;
   - "Rescan this wallet".
-- A wallet created on this device starts at the tip and attaches directly. A restore with no other
-  wallet on its network needs no band: the shared engine starts at its birth, as a restore does
-  today. A wallet with no key record yet (R4) can be opened only from its seed, so it waits,
+- A wallet created on this device starts at the tip and attaches directly. A restore on a network with no
+  shared chain files (a first wallet, or after the full wipe) needs no band: the shared engine
+  starts at its birth, as a restore does today. Where the network's shared chain exists, a restore
+  bands and the chain is left alone (G92). A wallet with no key record yet (R4) can be opened only from its seed, so it waits,
   unsynced, for its next turn as active.
 - Each wallet is in exactly one place: attached to the shared engine, held by the band, or not
   attached yet (waiting for the band, or for its key record).
 - **The hand-off rule** is a core function with a host KAT, because it decides what the wallet
   holds.
-  - **Trigger.** F is the band's lowest needed height, `max(scannedThrough + 1, abandonedBelow)`,
-    so it never passes a hole. Hand off when F is at least H_min and at least S - 1000. H_min is
+  - **Trigger.** F is the frontier of the band's stored-form ledger,
+    `max(min(scannedThrough + 1, lowestHeld), abandonedBelow)`, so it never passes a hole or a
+    held confirmation (G33). Hand off when F is at least H_min and at least S - 1000. H_min is
     the highest of the shared engine's block floor, filter-chain start, ledger start and
     `abandonedBelow`. S is the shared ledger's lowest needed height. 1000 is one getcfilters
     batch (`MAX_CFILTERS_RESULTS`), so a rewind holds back the other wallets' tip matching by one
     batch at most.
-  - **Quiesce.** Flush the band's blocks, filter headers and ledger to the wallet's files. Stop
-    routing the wallet's calls to the band. Disconnect and free it. The wallet is attached only
+  - **Quiesce** (order as G36). Stop routing the wallet's calls to the band. Wait, within a
+    bound, for its publishes in flight. Flush the band's blocks, filter headers and ledger, then
+    the wallet's transaction checkpoint, to the wallet's files. Disconnect and free it. The wallet is attached only
     once the band manager is gone (`BRPeerManagerFree` returned 1, or its deferred free has run),
-    because a parked manager's threads can still reach its wallet. No publish may be in flight in
-    the band, since freeing it fails them: wait, or publish again through the shared engine.
+    because a parked manager's threads can still reach its wallet. Freeing the band fails
+    any publish still in flight, so the wait comes first, and one left unanswered is published
+    again through the shared engine after the attach.
   - **Attach, in one critical section under the shared manager's lock.** Re-check H_min. Require
     the shared chain's block at F - 1 to be the band's; otherwise refuse, and the band resumes.
     Add the wallet to the set and re-key the union element cache. Pre-generate its address
-    window. Set its height to the shared tip. If F is at or below the shared ledger's requested
+    window. Un-confirm its transactions above F - 1, as a reorg does at its join (G39). Set
+    its height to the shared tip. If F is at or below the shared ledger's requested
     height, rewind the shared ledger to F and its fetch cursor to F - 1. That is the shape the gap
     rescan already uses (`_BRPeerManagerCFRescanAfterGrowthLocked`, gated by `cf_gap_rescan_kat`).
   - **Durability.** Persist the shared ledger at once; its writer otherwise coalesces for 20 s.
     Write the wallet's attach height F to the registry, per wallet and network (legacy serves
     both), before its band files are deleted. On a cold start, rewind the restored shared ledger
-    to any recorded F whose band files still exist. Then delete the wallet's chain files. Its
-    abandonment record stays.
+    to any recorded F whose band files still exist. Then delete the wallet's chain files and the
+    chain keys in its `dgb_sync_data` (G38). Its abandonment record stays.
   - **Exclusive hold.** A wallet is never in two managers. Growth in a wallet's address set is
     noticed only by the manager that delivered the block, so a wallet held by two would miss its
     own receives. Moving an attached wallet into a band (Coinomi accounts, "Rescan this wallet")
@@ -579,8 +599,8 @@ and the instant switch together (R2).
     gets no other peer through a band. Like a restore today, it sends peers heights and block
     hashes, never addresses.
 - **Abandonment stays per wallet** (`dgb_cf_abandonment` already is). An abandonment on the shared
-  ledger is written to the record of every wallet attached at that moment, and a band's to its own
-  wallet's record.
+  ledger is written to the record of every wallet attached at that moment, for the heights at or
+  above the frontier that wallet attached at (G71), and a band's to its own wallet's record.
 - **Recovery.** The shared engine runs recreate-near-tip, re-anchor and reorg rewind on its one
   ledger, as today. A band runs them as a one-wallet manager does today, over its own files.
 - **Costs.** A banded wallet is not matched at the tip until its hand-off, as in a restore today;

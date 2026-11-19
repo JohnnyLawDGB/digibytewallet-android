@@ -1,5 +1,23 @@
 # Multi-wallet Step 2 Implementation Plan
 
+> **Pre-flight disposition (2026-11-19).** Task A2's conflict scan is done. Five area scanners
+> (core engine and band; bridge; app; security and owner gates; tests, landing and process) checked
+> this plan against the amended design, R1-R8, D1-D4, the code (`develop` 52aa40000, core fc35768)
+> and the project's invariants, and found 134 conflicts. Conflicts 0-57 were each judged by
+> skeptics; 58-133 were verified by the area consolidators against the cited lines. The result is
+> 94 rulings, **G1-G94**, over 121 conflicts; 8 conflicts dropped as not real; 2 duplicates
+> folded; 3 owner questions (O14-O16, in "Open for Mark"). The rulings, the dropped list and the
+> evidence are in `docs/superpowers/specs/2026-11-17-multi-wallet-step2-rulings.md`.
+> **Where this plan's text and a ruling differ, the ruling wins.**
+> - Each affected task and section carries a "**Rulings:**" line. Read those rulings before the
+>   task's text.
+> - Task text is edited only where a ruling reverses a PD or the task order; each such edit names
+>   its ruling. Every other change a ruling makes to a task is in the rulings file only.
+> - The rulings add five tasks: CKPT, K8a, L1, B8a and U5b (stubs below, in place), and PD28.
+> - The rulings are numbered G, not "S2-F" as the Pre-flight paragraph below says. On a
+>   "**Rulings:**" line and in every "Amended by" note a G number is a ruling, never one of the
+>   Stage 1 tasks G1-G6.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Each task is one pull request unless it says otherwise.
 
 **Goal:** One compact-filter engine for every wallet of a network, and an in-process instant switch, shipped together in one release (R2). A wallet that lags the shared engine catches up in a temporary one-wallet band and is handed over under a core rule (R3). A wallet that is not active syncs watch-only from its stored public master keys (R4) and does no server work until it is active (R6). Step 2 also brings MAX for DGB, "catching up" wording instead of first-sync wording, and Coinomi step 4.
@@ -64,9 +82,11 @@
 - **D3.** WebView `MULTI_PROFILE` is checked on the Note 8 and the Moto G 5G.
 - **D4.** "Rescan this wallet" becomes a band for one wallet, and "Repair the chain" a near-tip recreate plus a full-locator getheaders. `BRPeerManagerRescan` gets no Android caller.
 
-This plan's own decisions are PD1-PD27, listed below. A1 records them, one line each, in the rulings file.
+This plan's own decisions are PD1-PD28, listed below. A1 records them, one line each, in the rulings file.
 
 ## Global Constraints
+
+**Rulings:** G1, G2, G3, G4, G5, G26
 
 - **The core change is additive and one-wallet neutral.**
   - No public signature, struct, field order, enum value, constant or blob format that iOS builds against changes. G6 freezes them.
@@ -143,6 +163,8 @@ These are the failure modes most likely to reach a user that ordinary tests woul
 
 ## Lanes and hand-offs (R1)
 
+**Rulings:** G5, G6
+
 **What this session builds** (R1, recorded with its date in the rulings file and the hand-off):
 - the core PRs C1-C15 in the core repo;
 - every new host KAT in this plan (G1-G6 and each C and B task's suites);
@@ -179,6 +201,8 @@ A1 records both readings in the rulings file beside R1, and the hand-off asks th
 
 ## Order against the work in flight
 
+**Rulings:** G7, G8, G9, G10, G11
+
 External gates (in flight elsewhere, not tasks here):
 
 | Gate | What must be true | Blocks |
@@ -190,6 +214,11 @@ External gates (in flight elsewhere, not tasks here):
 | **X5** | **The 4.1.5 cut.** The train has landed on public `develop` and the landing-sync freeze is lifted on both repos (`RELEASING.md` §3). On `develop`: the train's rows and the step-1 gap fixes `fix/wallets-ready-slot-and-gate-hygiene` and `fix/wallets-device-wide-settings`. The rows are named only in the private scope file, never in this plan: the 4.1.5 scope stays private until it ships (`ROADMAP.md`). Because every Android production slice and every core merge waits for X5, none of them runs alongside the train's changes, whatever files those touch. | every core merge (O4); every Android production slice |
 | **X6** | Mark has reviewed #264's seed and key changes (R7). Step 2 builds on #264's per-wallet aliases and seed records. | the merge of every [R8] task |
 
+Amended by the pre-flight rulings:
+- **X3 splits** (G10): X3a (Coinomi step 2 merged) blocks B1, B3, K3, K8 and the head of the registry queue; X3b (step 3 merged) blocks U3 and the strings cluster.
+- **T is the commit 4.1.5 is built from, with the outcome of Mark's #264 review on it**, not the train's landing (G11). Until T is fixed no step-2 core PR merges and no step-2 production slice or pin reaches `develop`; test-only Stage 1 gates are unaffected. K1-K3 wait for X6 with the [R8] tasks.
+- **CKPT**, the checkpoint refresh, may interleave with any C track (G26).
+
 Already settled:
 - **#268 (Q4 A)** merged into `develop` on 2026-11-17 (`27cc9bf0e`), with `docs/handoffs/2026-11-17-android-q4a.md`. K3 and K8 build on it.
 - **Draft #150** (prepared-send adoption) is redone by X150 before MAX.
@@ -199,11 +228,15 @@ Already settled:
 Same-file clusters (never two at once):
 - **`core:BRPeerManager.c`:** C3 → C4 → C5 → C6 → C7 → C8 → C10 → C12; C15's pregen edit after C8.
 - **`core:BRWallet.c`:** C8's hold field → C13 → C15.
-- **`bridge:jni_wallet.c`, `jni_transaction.c`, `jni_wallet_sign.c`:** Coinomi step 2 → X150 → B1 → B2 → B3 → B4 → B5 → B6 → B8 → B9.
+- **`bridge:jni_wallet.c`, `jni_peer.c`, `jni_transaction.c`, `jni_wallet_sign.c`, `jni_bridge.h`** (G7): Coinomi step 2, X150, B1, B2, B3, B4, B5, B6, B7, E6, B8, B9. Never two open at once; among PRs that do not build on each other the order is readiness (G12), and an [R8] PR never holds the cluster: B5, B6, B7 and E6 may overtake B4; B8 may not.
 - **`kt-app:service/SyncService.kt`:** K1, K2, K5, K6, E2, B7's caller, E3, E4, E5, E6, E2b, E7, U2, U4.
-- **The 13 `strings_wallet.xml`:** whatever 4.1.5 changes there (X5), then Coinomi step 3, then E3, E4, S3, U1, U2, U3, U4, U5, one at a time.
+- **The 13 `strings_wallet.xml`:** whatever 4.1.5 changes there (X5), then Coinomi step 3, then L1, E3, E4, S3, U1, U2, U3, U4, U5, one at a time.
+- **Added by G9** (never two members open at once): `WalletManager.kt`: K0, then K2, B6, S1, S2, E2b, E4, U3. `HistoryRebuildOnUpgrade.kt` and `StaleDataWiper.kt`: K0, then K1. `TransactionBuilder.kt` and `SpendPreflightOrderTest`: B3, K4, B5. `AssetManager.kt`: B2, B3, K4, K5, K6. `host:scan_floor_kat`: K0, C12's companion, E4. `host:prepared_send_core_kat`: X150, then C13's companion. `AppNavigation.kt`: K2, K3, E2b. `UnlockScreen.kt`: K2, S2, E5. The `SyncService.kt` cluster gains K0 and K3.
+- **Added by G8:** `AppModule.kt`, `DigiScopeClient.kt`, `DigiIdManager.kt`, `HubIdentity.kt`, `ChatViewModel.kt`, `DigiIdViewModel.kt`: Coinomi steps 2-3, K3, K7, K8.
 
 ## Registry PRs (rule 6)
+
+**Rulings:** G12, G78
 
 The step-2 queue, after whatever is open in either session:
 1. [Coinomi step 2]
@@ -218,13 +251,17 @@ The step-2 queue, after whatever is open in either session:
 
 An [R8] registry PR takes the merge-`develop`-and-regenerate slot only after Mark's OK, so waiting for him never holds the queue for either session. A later registry PR may overtake an [R8] one only if it does not build on it; B9 builds on B8.
 
+Amended by the pre-flight rulings: the slot goes by readiness, not by the list's numbers. Any ready registry PR may go ahead of an earlier-listed one it does not build on, [R8] or not; B6 does not wait for B5 (G12). **B8a** (`deriveWalletKeys` alone, [R8 · M1]) joins the queue after B3 (G78). A sync of `develop` into the integration branch is a merge-only PR and serves as the Registry step's first merge (G12).
+
 ## What waits for Mark
+
+**Rulings:** G1, G7, G78
 
 **[R8] batches**, each put to him as one packet with a summary. M1 goes first, because E2b waits on it:
 
 | Batch | Tasks | What he decides |
 |---|---|---|
-| **M1** | C1, S1 | Key material at rest: the record format, its unbound Keystore key, the wipe's reach and read-back (R4) |
+| **M1** | C1, B8a (G78), S1 | Key material at rest: the record format, its unbound Keystore key, the wipe's reach and read-back (R4) |
 | **M2** | B4 (B3 shown for context) | The bridge's seed-owner rule: only the active wallet's context signs or derives |
 | **M3** | B8, S2, S3 | The seed-only load and the in-process switch (R5) |
 | **M4** | B9, U3 | Coinomi's account keys: derived from the resident seed and stored (R4) |
@@ -235,9 +272,11 @@ Also his:
 - **X-HUB**, his ruling first;
 - **E2b**, only if he overrides D1.
 
-The open questions O1-O13 are listed at the end.
+The open questions O1-O16 are listed at the end. O15 goes in the M2 packet and O16 in the M3 packet. One test decides whether a PR that touches the wipe is [R8] (G1). M2 does not gate stage 4's start (G7).
 
 ## Stages, target dates and exit checks
+
+**Rulings:** G11, G14, G15
 
 T is the 4.1.5 cut (X5), which is not known today. A1 writes these into `ROADMAP.md` with dates relative to T, and its follow-up writes absolute dates the day T is known. Mark sets or changes them: scope and target are his. A stage that passes its date by more than half its planned length goes back to him with what slipped, why, and a new date or a cut (`docs/development-process.md`, "An overrun stops for a re-plan").
 
@@ -249,6 +288,8 @@ T is the 4.1.5 cut (X5), which is not known today. A1 writes these into `ROADMAP
 | 3 Android, neutral | X150, B1-B5, K0-K8 | T | 20 working days | T+20 | merged on `develop`; full suites and every KAT shard green; with one session, behaviour unchanged (each reviewer checks); M2 put to Mark |
 | 4 Integration | B6-B9, E1-E7, E2b, S1-S3, U1-U5, X-ROLLBACK (a) | T+10 | 25 working days | T+35 | merged on the integration branch with green CI and passed reviews; M1-M4 approved |
 | 5 Verify and merge | V1-V3 | T+35 | 5 working days | T+40 | V1 recorded on the Note 8 and the Moto G 5G, and on the API 28/33/34/35 emulators; the pre-publish suite passes; V3 merged |
+
+Amended by the pre-flight rulings: T is defined by G11 (see "Order against the work in flight"). Stage 1 and Stage 2 branches start the day A2 merges, Stage 0's CI proof runs on a probe branch, and no target date is written into `ROADMAP.md` before Mark answers O11 (G14). Step-2 merges pause during each train's landing-sync freeze and the stage dates move by the freeze's length (O14). Acceptance rows 2, 7, 8 and 11 change as G75 and G27 say.
 
 ## Acceptance index
 
@@ -272,15 +313,17 @@ The design's test plan (`2026-11-16-multi-wallet-design.md`, "Left to the builde
 | 14 | Server work waits until the wallet is active | K5 |
 | 15 | No other wallet's list, balance, phrase, Hub or web session after an in-process switch | K7, K8, S3 |
 
-## Decisions this plan takes (PD1-PD27)
+## Decisions this plan takes (PD1-PD28)
+
+**Rulings:** G12, G20, G30, G31, G32, G36, G37, G38, G41, G42, G49, G65, G68, G69, G72, G80, G81, G85, G86, G93
 
 The design leaves these to the builder, or the code required a choice. Each is a default the owner may override. A1 records them by number.
 
-- **PD1 Switch order.** Zero A's seed, then decrypt B's seed record (its mnemonic, under B's `_v2` key), then activate B. If anything fails, no seed is resident and B shows watch-only with "Unlock to send". That reads R5 and "one resident seed" literally.
-- **PD2 Key mismatch at activation.** If the keys derived from B's seed differ from B's key record, activation is refused, the seed is zeroed, and B stays watch-only. iOS does the same (`SeedStore.swift:327-335`). Mark rules refuse or replace (O1).
+- **PD1 Switch order.** Zero A's seed, then decrypt B's seed record (its mnemonic, under B's `_v2` key), then activate B. If anything fails, no seed is resident and B shows watch-only with "Unlock to send". That reads R5 and "one resident seed" literally. **Amended by G86:** the app PIN comes first and a declined or failed PIN changes nothing of either wallet; "no seed resident, B watch-only" applies only to failures after the zeroing.
+- **PD2 Key mismatch at activation.** If the keys derived from B's seed differ from B's key record, activation is refused, the seed is zeroed, and B stays watch-only. iOS does the same (`SeedStore.swift:327-335`). Mark rules refuse or replace (O1). **Amended by G85:** the refusal applies only to `activateWallet` on a context built from the record (the switch); at a cold-start unlock a record that differs from the seed is marked refused and never stops the unlock.
 - **PD3** Removing the active wallet keeps F8's mark-and-restart.
 - **PD4** Stranded-send rebroadcast runs for the active wallet only.
-- **PD5 Band order.** The active wallet first, then the one fewest blocks behind, then registry order. A running band is preempted (quiesced, never discarded) only when the active wallet changes to one that needs a band. No band runs during a `SyncWorker` catch-up.
+- **PD5 Band order.** The active wallet first, then the one fewest blocks behind, then registry order. A running band is preempted (quiesced, never discarded) only when the active wallet changes to one that needs a band. No band runs during a `SyncWorker` catch-up. **Amended by G37:** any band need of the active wallet preempts a non-active wallet's band whenever it arises (a rescan, Coinomi accounts, a lagging frontier), not only at a switch.
 - **PD6 Catching-up wording.** It covers every band, a restore's included. Only a first climb on a device where no wallet has ever synced keeps the first-sync wording.
 - **PD7 MAX.**
   - It spends the effective-value set to one output, with no change.
@@ -290,42 +333,47 @@ The design leaves these to the builder, or the code required a choice. Each is a
   - Not `dgb_db_passphrase`: `WalletDatabaseOpener` can re-provision that alias in place, which would silently invalidate every record.
   - Not per-wallet aliases: they carry wallet ids, and the wipe's read-back would have to learn them.
   - Removal deletes the wallet's record. The wipe deletes every record and the alias, and reads both back.
+  - **Amended by G80:** the records and the alias count toward a verified wipe (`everythingCleared`), never toward `seedGone` or the owed-wipe release.
 - **PD9** The key record is a versioned core format with a KAT (C1). Encryption at rest stays on the platform.
 - **PD10** The post-reorg height lag (`core:BRPeerManager.c:4693`; `wallet->blockHeight` stays at the join until the next block) stays as today. Changing it changes one-wallet results and would need both pins.
-- **PD11 The integration branch** is `integration/multi-wallet-step2`. It is created from `develop` at the 4.1.5 cut, made CI-enabled by A3, merged with `develop` at least weekly and before every registry PR, and merged into `develop` once (V3). The alternative, a stack of PRs into `develop` merged in one sitting, is O3.
+- **PD11 The integration branch** is `integration/multi-wallet-step2`. It is created from `develop` at the 4.1.5 cut, made CI-enabled by A3, merged with `develop` at least weekly and before every registry PR, and merged into `develop` once (V3). The alternative, a stack of PRs into `develop` merged in one sitting, is O3. **Amended by G12:** each sync of `develop` into it is a merge-only PR (conflict resolution only, CI green, a review of the resolutions).
 - **PD12** When the device lock is removed, every `_v2` key is invalidated and spending needs each wallet's phrase. The unbound key records stay, so balances keep showing. Open for Mark (O5).
 - **PD13 Shared chain names and the migration.**
   - The shared chain gets new NETWORK-scoped names (A1's list).
   - The migration seeds it from the step-1 chain with the highest verified saved tip. It uses a hard link, which is safe because `DurableFile` writes through tmp+rename, so the names diverge at the first write. It falls back to a copy, and reads the result back.
   - Each wallet's step-1 chain stores become its band files until its hand-off is durable, and are deleted then. Its abandonment record stays.
   - The alternative layout, the shared chain under legacy's 4.1.4 names, is O7, with its costs.
+  - **Amended by G69 and G38:** "verified" means the candidate passes today's restore preflight (a tie goes to the active wallet); a hand-off also removes the wallet's own chain keys from its `dgb_sync_data`.
 - **PD14 Frontier records.**
   - Every READY wallet has a durable frontier per network in the registry: the lowest height not yet proven evaluated for it, with the main-chain hash below it.
   - The record is raised only while the wallet is attached: at a hand-off, and after each durable shared-ledger persist.
   - Every attach goes through the hand-off rule from that frontier.
   - The shared engine may run and persist with no wallet attached.
-- **PD15 Holding managers.** The shared engine and the band are built through the new holding constructor. Such a manager detaches every wallet under its lock inside `Free`, before it can park, so a parked manager reaches no wallet and a recreate can re-attach the whole set at once. The existing constructors keep today's `Free` behaviour exactly.
+  - **Amended by G68, G32, G72 and G65:** a record is a (height, hashBelow) pair, or the mark "unscanned"; it is written from the ledger snapshot's own wallet set and may be lowered (a rewind, a refused fork), so "raised only" goes; it rises for a wallet only after that wallet's own checkpoint landed; missing or unreadable means the birth floor.
+- **PD15 Holding managers.** The shared engine and the band are built through the new holding constructor. Such a manager detaches every wallet under its lock inside `Free`, before it can park, so a parked manager reaches no wallet and a recreate can re-attach the whole set at once. The existing constructors keep today's `Free` behaviour exactly. **Amended by G31:** `Free` on a holding manager also swaps every callback except `threadCleanup` for a no-op before it can park, and the bridge drops a callback from a manager that is no longer its context's current one.
   - This replaces the design's "attached only once the band manager is gone", with the same guarantee.
 - **PD16 Address pregeneration at attach.** The address window is pre-generated before the shared lock, and the same bounded pregeneration runs again inside the critical section. The second run is a no-op unless the set grew, so the design's "pre-generate inside the critical section" still holds. Nothing can grow the set in between: during a hand-off no manager holds the wallet and the bridge has stopped routing its calls.
-- **PD17 Band peers.** The band starts from a read-only snapshot of the shared engine's saved peers and penalties, and never writes either. It dials a peer set disjoint from the shared engine's. A4 confirms this or changes it.
-- **PD18 Chain-level reset.** A reset that drops the shared ledger resets every READY wallet's frontier record to its birth. It restarts as one climb from the lowest attached birth, with every attachable wallet attached. A running band is not folded in: it pauses at cap 0 and hands off under the same rule (verdict WAIT until then) once the climb's chain holds its F-1.
+- **PD17 Band peers.** The band starts from a read-only snapshot of the shared engine's saved peers and penalties, and never writes either. It dials a peer set disjoint from the shared engine's. A4 confirms this or changes it. **Amended by G20:** the plan claims no disjoint peer set until A4 has chosen between no rule and a core exclusion rule.
+- **PD18 Chain-level reset.** A reset that drops the shared ledger resets every READY wallet's frontier record to its birth. It restarts as one climb from the lowest attached birth, with every attachable wallet attached. A running band is not folded in: it pauses at cap 0 and hands off under the same rule (verdict WAIT until then) once the climb's chain holds its F-1. **Amended by G42 and G41:** the birth reset applies to a cold-start reset that loses the window and to a wallet whose history was dropped; an in-session recovery that drops the shared ledger lowers attached frontiers only to the re-armed start and starts no band.
 - **PD19 `HistoryRebuildOnUpgrade`'s floor.** When every attached wallet needs it, one chain-scoped climb. Otherwise one band for each wallet that needs it, queued in PD5 order and persisted in the registry.
 - **PD20 Spending during a hand-off.**
   - A new send, asset send, DigiDollar send or sweep for a wallet in its hand-off window is refused with a typed BUSY and "try again in a few seconds".
   - The hand-off waits, within a bound, for publishes already in flight. One still in flight is published again through the shared engine after the attach.
   - Signing-only actions (Digi-ID, Hub) are unaffected.
+  - **Amended by G37 and G36:** the typed BUSY, with its own string, also answers a spend from a wallet that no manager holds or whose band is paused; the wait for publishes comes before the band is freed.
 - **PD21** The `CF_ELEMS_CACHE_NOINVALIDATE` and `CF_ELEMS_CACHE_COUNT_ONLY` arm names stay through step 2. Renaming them would turn core `develop`'s runs red against Android `develop`.
 - **PD22 The lost-PIN path** (`kt-app:ui/navigation/AppNavigation.kt:178-195`, `:345-387`). No watch-only wallet attaches until the new PIN is set and the app reaches Unlocked. The restore deferred there opens only the active wallet from its seed, as today. iOS's D-3 (ask for the phrase first) is noted for Mark (O9).
-- **PD23** The spend-auth prompt names the wallet that spends. Whether every spend screen names it too is O6. U5 runs only on his answer.
-- **PD24 The wallet handle** is a `jlong`: `(slot << 32) | generation`. A stale or unknown handle is refused, never resolved to the active context.
+- **PD23** The spend-auth prompt names the wallet that spends. Whether every spend screen names it too is O6. U5 runs only on his answer. **Amended by G93:** U5 (the prompt) is built unconditionally; only the per-screen naming (U5b) waits for O6.
+- **PD24 The wallet handle** is a `jlong`: `(slot << 32) | generation`. A stale or unknown handle is refused, never resolved to the active context. **Amended by G49:** handle 0 is reserved; generations start at 1 and skip 0 when they wrap.
 - **PD25** No publish-time copies. An A-to-B send shows in B when it confirms (about 15 s), as today.
 - **PD26** A detached `BRWallet` is freed only after the core detach has returned. PD15 guarantees that no holding manager still reaches it.
 - **PD27 Switching to a wallet with no key record.**
-  1. Load its seed and build it from the seed's keys.
+  1. Open a keyless context from its saved transactions, creation time and watched-address pins; load its seed and build the wallet from the seed's keys with that history (G81).
   2. Write its record (S1).
-  3. Attach it at the tip, or band it under the rule.
+  3. Attach it under the hand-off rule from its frontier record, or band it; never at the tip (G65, G81).
 
   The engine is never rebuilt.
+- **PD28 Relay checks on a holding manager** (G30). The unrelayed-transaction request and the at-tip sweep run only for the wallet the bridge names, the active one (R6); a holding manager with none named runs neither.
 
 ## File Structure
 
@@ -398,6 +446,8 @@ The existing `send_max`, the `KeystoreKeyInvalidated` message and the step-1 swi
 
 ### Task A1: Land the plan, the rulings file, the core hand-off and the ROADMAP item
 
+**Rulings:** G3, G4, G5, G6, G13, G14, G15, G16, G17, G18, G30, G48
+
 **Landing:** a docs PR from `feat/multi-wallet-step2` into `develop`. It carries the design amendment `e227b4e60` and this plan. It may land before the 4.1.5 cut, outside the landing-sync freeze. Not R8; not a registry PR; no pin.
 **Depends on:** none. Land it first: the names it reserves must be fixed before the 4.1.5 cut for X-ROLLBACK (c).
 
@@ -433,22 +483,28 @@ The existing `send_max`, the `KeystoreKeyInvalidated` message and the step-1 swi
 
 ### Task A2: Pre-flight conflict scan, before any code
 
+**Rulings:** G14
+
 **Landing:** a docs PR into `develop` (the rulings file and the task edits). No code task starts before it merges.
 **Depends on:** A1.
 
 Step 1's scan found 32 defects in its plan (F1-F32). This one does the same for step 2.
 
-- [ ] **Step 1: Brief a reviewer agent** with no part in writing this plan. Give it:
+**Status: done by the pre-flight scan of 2026-11-19.** 134 conflicts, 94 rulings (G1-G94, not "S2-F"), 8 dropped, 2 duplicates, 3 owner questions (O14-O16); see the banner at the top and the rulings file. Steps 1 and 2 are done by that scan, with five area scanners in place of one reviewer and skeptics on conflicts 0-57. Step 3 is still owed: the rulings ride A1's PR (G18), whose independent reviewer also checks each ruling against its cited lines, first of all the rulings on conflicts 58-133, which no skeptic judged.
+
+- [x] **Step 1: Brief a reviewer agent** with no part in writing this plan. Give it:
   - the goal;
   - this plan, the amended design and the Coinomi design;
   - `develop`'s head and core `develop`'s head;
   - what is ruled out: R1-R8 are not re-opened, and D1-D4 change only by Mark's word.
 
   It returns defects, each with a concrete failure scenario: a task that contradicts the code, a missing dependency, a test that could not fail, a file two tracks touch at once.
-- [ ] **Step 2: Decide** each defect with one numbered ruling (S2-F1 onwards) in the rulings file, and edit the tasks it changes.
+- [x] **Step 2: Decide** each defect with one numbered ruling (S2-F1 onwards) in the rulings file, and edit the tasks it changes.
 - [ ] **Step 3: Open the PR**, get an independent review (a different agent from step 1), and merge.
 
 ### Task A3: CI runs on the integration branch
+
+**Rulings:** G14, G19, G24
 
 **Landing:** a `develop` PR, any time outside the landing-sync freeze. Not R8.
 **Depends on:** none.
@@ -466,6 +522,8 @@ Today all three run only for `main`/`develop`, so PRs into an integration branch
 
 ### Task A4: Measure two connections from one device
 
+**Rulings:** G20
+
 **Landing:** no code PR. Results go into the rulings file through a docs PR; figures go to the private repo (F32). Not R8.
 **Depends on:** none. It must be answered before B7's peer rules are final.
 
@@ -482,6 +540,8 @@ The design marks this "not measured yet". The answer decides PD17's disjoint-pee
 
 ### Task A5: D3, WebView `MULTI_PROFILE` on the Note 8 and the Moto G 5G
 
+**Rulings:** G21
+
 **Landing:** no code PR. Results go into the rulings file. Never run on the Ultra.
 **Depends on:** none.
 
@@ -492,6 +552,8 @@ The design marks this "not measured yet". The answer decides PD17's disjoint-pee
 ## Stage 1: gates on `develop` (test-only; may land before the 4.1.5 cut)
 
 ### Task G1: Port the element-cache invalidation gate, building its red arms for the first time
+
+**Rulings:** G5, G6, G22
 
 **Landing:** a test-only `develop` PR. Not R8; not a registry PR. After its first green run, add its timing line to both kat-shards copies (R1).
 **Depends on:** none.
@@ -521,6 +583,8 @@ The cache has shipped since v4.0.31-beta, and no KAT, script or CI job on `devel
 - [ ] **Step 5: KAT sweep, then open the PR** with both arms' runs pasted.
 
 ### Task G2: Name-keyed gates fail loudly on a rename; mutants ignore the wallet argument's spelling
+
+**Rulings:** G3, G6, G13, G22, G48
 
 **Landing:** a test-only `develop` PR. It must be on Android `develop` before C3 merges in core, or core `develop`'s merge run deadlocks. Not R8: it hardens seed gates and changes no seed code.
 **Depends on:** A1 (the planned spellings).
@@ -555,6 +619,8 @@ The cache has shipped since v4.0.31-beta, and no KAT, script or CI job on `devel
 
 ### Task G3: JNI callback names and descriptors checked at build time
 
+**Rulings:** G46
+
 **Landing:** a test-only `develop` PR. Not R8.
 **Depends on:** none.
 
@@ -570,6 +636,8 @@ A `GetMethodID` miss only logs today (`jni_peer.c:1613-1620`), so a changed `onS
 
 ### Task G4: Fail when `jni_peer.c` drifts from the mirrors the recreate KATs test
 
+**Rulings:** G22, G23
+
 **Landing:** a test-only `develop` PR. Not R8.
 **Depends on:** none.
 
@@ -584,6 +652,8 @@ Both KATs test hand-copied mirrors of `jni_peer.c`'s `startSync`, `loadSavedBloc
 - [ ] **Step 3: KAT sweep, then open the PR.** From now on, every bridge PR that edits those bodies carries its mirror changes.
 
 ### Task G5: Characterise today's one-wallet engine per class, the DigiDollar receive key, and the engine rescan
+
+**Rulings:** G22, G24
 
 **Landing:** a test-only `develop` PR. Not R8.
 **Depends on:** none.
@@ -614,6 +684,8 @@ Both KATs test hand-copied mirrors of `jni_peer.c`'s `startSync`, `loadSavedBloc
 
 ### Task G6: Freeze the core API iOS builds against
 
+**Rulings:** G22
+
 **Landing:** a test-only `develop` PR. Each later core PR's companion grows the snapshot. Not R8.
 **Depends on:** none.
 
@@ -643,6 +715,8 @@ Both KATs test hand-copied mirrors of `jni_peer.c`'s `startSync`, `loadSavedBloc
 
 ### Task X150: Redo draft #150 from `develop`, before MAX
 
+**Rulings:** G9
+
 **Landing:** a `develop` adoption PR after the 4.1.5 cut. Behaviour-neutral, and not a registry PR. A pin conflict resolves to core `develop` (rule 8). Close #150. Skip this task if the session that owns #150 has already redone it. Not R8.
 **Depends on:** X5. The M9 adoptions do not run alongside it.
 
@@ -659,6 +733,8 @@ Both KATs test hand-copied mirrors of `jni_peer.c`'s `startSync`, `loadSavedBloc
 - [ ] **Step 4: Full suites and KAT sweep;** `FeeShownIsFeeSignedGateTest` stays green. Open the PR.
 
 ### Task X-ROLLBACK: A pulled step-2 release leaves no wrong balance and no orphaned key material
+
+**Rulings:** G1, G25, G38, G68
 
 **Landing:** in three parts.
 - (a) Tests on the integration branch, with E1.
@@ -679,6 +755,8 @@ Play cannot downgrade, so a pulled release is replaced by a higher `versionCode`
 
 ### Task X-HUB: Hub revokes on removal and on the wipe (waits for Mark's ruling, O2)
 
+**Rulings:** G1
+
 **Landing:** the integration branch, or `develop` if Mark wants it in a step-1 release. It is R8 if it changes the wipe.
 **Depends on:** Mark's ruling; E7.
 
@@ -686,11 +764,22 @@ Not covered by R6. Removing a wallet that is not active revokes its session. Rem
 
 - [ ] Build what he rules, with a test that is red on `develop`. For example: `removing the active wallet revokes its session before the erase`.
 
+### Task CKPT: The checkpoint refresh, a standing task (added by G26)
+
+**Rulings:** G26
+
+**Landing:** a core PR that regenerates both checkpoint tables, whenever `checkpoint_staleness_kat`'s 14-day warning shows (the current table turns red on 2026-12-02). Its pin move rides the open companion, or its own pin PR when none is open (rule 8). Not R8.
+**Depends on:** none. It may interleave with any C track: Core landing step 5 excepts it.
+
+- [ ] The same day, sync `develop` into the integration branch and merge that into every open PR branch. The 4.1.5 train's refresh counts as the first.
+
 ## Stage 2: the core (R1: this session; core repo; one pin+KAT PR per core PR)
 
 All C tasks merge after X1 and X5 (O4: Mark may relax X5 for neutral PRs). Their branches start now.
 
 ### Task C1: The versioned wallet key record, and key equality [R8 · M1]
+
+**Rulings:** G44
 
 **Landing:** core landing. **[R8]:** waits for Mark at merge, because it fixes the format of key material at rest (R4); batch M1 with S1; after X6. A pure header, built alongside the `BRPeerManager.c` track.
 **Depends on:** X1, G6.
@@ -734,6 +823,8 @@ int    BRWalletKeyRecordEqual(const BRWalletKeyRecord *a, const BRWalletKeyRecor
 
 ### Task C2: The DigiDollar receive key from the BIP86 public key
 
+**Rulings:** G17
+
 **Landing:** core landing, as its own small PR so B3 does not wait on M1. Not R8: it reduces seed reads and stores nothing.
 **Depends on:** X1, G5.
 
@@ -753,6 +844,8 @@ size_t BRDigiDollarReceiveAddress(const BRMasterPubKey *bip86, char *out, size_t
 - [ ] **Step 4: Run.** Expected PASS. **Step 5: KAT sweep. Step 6: Land.**
 
 ### Task C3: The manager's wallet becomes a slot array (mechanical, one wallet)
+
+**Rulings:** G3, G6, G17, G27
 
 **Landing:** core landing; the first in the `BRPeerManager.c` track. The hand-off names the last core commit before it. Not R8.
 **Depends on:** X1, G2 on Android `develop`, G5, G6.
@@ -805,6 +898,8 @@ uint64_t walletSetGen;         // bumped by attach and detach (C8)
 
 ### Task C4: Heights, fee, reorg un-confirm and gap look-ahead reach every wallet
 
+**Rulings:** G3, G27
+
 **Landing:** core landing; `BRPeerManager.c` track, after C3's pin. Not R8.
 **Depends on:** C3.
 
@@ -828,6 +923,8 @@ uint64_t walletSetGen;         // bumped by attach and detach (C8)
 - [ ] **Step 4: Run.** Expected PASS. **Step 5: KAT sweep;** G5 and the white-box suites unchanged. **Step 6: Land.**
 
 ### Task C5: A transaction is registered with every wallet that owns it, and with no other
+
+**Rulings:** G27, G28
 
 **Landing:** core landing; `BRPeerManager.c` track. Not R8.
 **Depends on:** C4.
@@ -866,6 +963,8 @@ uint64_t walletSetGen;         // bumped by attach and detach (C8)
 
 ### Task C6: One owner per published transaction, across wallets
 
+**Rulings:** G3, G13, G27, G29, G30
+
 **Landing:** core landing; `BRPeerManager.c` track. Not R8.
 **Depends on:** C5.
 
@@ -902,6 +1001,8 @@ BRServerHeightResult BRPeerManagerWalletApplyServerHeight(BRPeerManager *m, BRWa
 - [ ] **Step 3: Implement.** **Step 4: Run.** Expected PASS. **Step 5: KAT sweep. Step 6: Land.**
 
 ### Task C7: The union element cache, the buffered drain, and capacity at 8 wallets
+
+**Rulings:** G24, G27
 
 **Landing:** core landing; `BRPeerManager.c` track. Not R8.
 **Depends on:** G1, C6.
@@ -940,6 +1041,8 @@ BRServerHeightResult BRPeerManagerWalletApplyServerHeight(BRPeerManager *m, BRWa
 - [ ] **Step 4: Run.** Expected PASS. **Step 5: KAT sweep. Step 6: Land.**
 
 ### Task C8: The holding constructor, attach and detach, the empty set, and parked managers that reach no wallet
+
+**Rulings:** G3, G27, G29, G31, G32, G64, G83
 
 **Landing:** core landing; `BRPeerManager.c` track. The public attach API comes last, so nothing can attach to a half-converted engine. Not R8.
 **Depends on:** C7.
@@ -991,6 +1094,8 @@ size_t BRPeerManagerWalletCount(BRPeerManager *m);
 - [ ] **Step 4: Run.** Expected PASS. **Step 5: KAT sweep. Step 6: Land.**
 
 ### Task C9: The hand-off rule, frontier records, the band cap, and band order and preemption
+
+**Rulings:** G17, G33, G34, G35, G36, G37, G38, G65, G68, G70
 
 **Landing:** core landing. A pure header, built alongside C3-C8. Not R8.
 **Depends on:** X1, G6. A4 feeds the band peer defaults.
@@ -1061,6 +1166,8 @@ The decision:
 
 ### Task C10: Hand-off under the shared lock, proven with two managers in one process
 
+**Rulings:** G3, G20, G27, G33, G34, G35, G39, G40, G71, G83
+
 **Landing:** core landing; `BRPeerManager.c` track. Not R8.
 **Depends on:** C8, C9.
 
@@ -1105,6 +1212,8 @@ void BRPeerManagerRewindScanLedgerTo(BRPeerManager *m, uint32_t F);
 - [ ] **Step 4: Run.** Expected PASS. **Step 5: KAT sweep. Step 6: Land.**
 
 ### Task C11: Recovery reasons get a scope; a reset while a band runs; the upgrade floor
+
+**Rulings:** G17, G41, G42, G67
 
 **Landing:** core landing (pure header, alongside the `BRPeerManager.c` track). The Kotlin mirror goes in the pin PR. Not R8.
 **Depends on:** X1, G6.
@@ -1152,6 +1261,8 @@ Scope of each reason:
 
 ### Task C12: "Rescan this wallet" and "Repair the chain" as new rebuild sequences
 
+**Rulings:** G3, G9, G38, G43
+
 **Landing:** core landing; `BRPeerManager.c` track (for the comment and the white-box case). E4 adopts it. Not R8.
 **Depends on:** C10, C11.
 
@@ -1186,6 +1297,8 @@ typedef enum { BR_CHAIN_REPAIR_FLUSH, BR_CHAIN_REPAIR_RELOAD_NEAR_TIP, BR_CHAIN_
 - [ ] **Step 2: Run.** Expected FAIL. **Step 3: Implement.** **Step 4: Run.** Expected PASS. **Step 5: KAT sweep. Step 6: Land.**
 
 ### Task C13: A send-all builder for MAX
+
+**Rulings:** G9
 
 **Landing:** core landing; `BRWallet.c` track, after C8's hold field. Not R8.
 **Depends on:** X1, C8.
@@ -1222,6 +1335,8 @@ BRTransaction *BRWalletCreateSendAllTransaction(BRWallet *w, const char *addr, u
 
 ### Task C14: The catching-up classification
 
+**Rulings:** G17, G67
+
 **Landing:** core landing (pure header); the Kotlin mirror goes in the pin PR. An iOS parity item. Not R8.
 **Depends on:** X1, G6.
 
@@ -1250,6 +1365,8 @@ BRSyncCatchUp BRSyncCatchUpFor(const BRSyncFrontier *f, int anyWalletSyncedBefor
 - [ ] **Steps 2-6:** run (FAIL), implement, run (PASS), KAT sweep and full suites, land.
 
 ### Task C15: Coinomi's BIP44 and BIP49 accounts as derived chains (Coinomi step 4, engine)
+
+**Rulings:** G44
 
 **Landing:** core landing; `BRWallet.c` track (after C13) and `BRPeerManager.c` (after C8). Not R8 itself: it stores nothing. The account keys at rest are B9 and U3.
 **Depends on:** X2, C5, C7, C8, C13.
@@ -1298,6 +1415,8 @@ BRWallet *BRWalletOpenWithAccounts(BRTransaction *txs[], size_t txCount, BRWalle
 
 ### Task B1: Bridge, a per-wallet context table and per-manager sync contexts (one live slot; no JNI change)
 
+**Rulings:** G10, G45, G46, G47, G48, G49, G50
+
 **Landing:** a `develop` PR after X5. Not a registry PR (the header is unchanged). Not R8: the seed slot is untouched.
 **Depends on:** G2, G3, G4, X150, X3 (Coinomi step 2 edits `jni_wallet_sign.c`). The M9 adoptions do not run alongside it.
 
@@ -1334,6 +1453,8 @@ typedef struct BRSyncContext   BRSyncContext;     // jni_peer.c: SHARED, and BAN
 
 ### Task B2: Read natives take a wallet handle (registry PR, 3rd in the queue)
 
+**Rulings:** G9, G19, G45, G49, G51, G72
+
 **Landing:** a registry PR into `develop`. Behaviour is identical with one context. Not R8.
 **Depends on:** B1; the registry queue.
 
@@ -1367,6 +1488,8 @@ external fun walletHandle(walletId: String): Long      // 0 = no such context; (
 
 ### Task B3: Signer and publish natives take a handle (registry PR, 4th; plumbing)
 
+**Rulings:** G9, G10, G19, G29, G51, G52
+
 **Landing:** a registry PR into `develop`. With one context, who can sign is unchanged. Not R8 by itself; shown to Mark with M2.
 **Depends on:** B2; the C2 pin; X3; X5.
 
@@ -1390,6 +1513,8 @@ What changes:
 - [ ] **Step 5: Registry,** then merge.
 
 ### Task B4: Only the seed owner signs or derives [R8 · M2]
+
+**Rulings:** G7, G48, G52, G82
 
 **Landing:** a `develop` PR. Body-only: no registry change, so it never holds the queue. **[R8]:** waits for Mark at merge; after X6.
 **Depends on:** B3.
@@ -1426,6 +1551,8 @@ void seed_zero(void);                                                  // zeroes
 
 ### Task B5: The MAX native and `prepareSendAll` (registry PR, 5th)
 
+**Rulings:** G7, G9, G12, G19
+
 **Landing:** a registry PR into `develop`. It adds a native that nothing calls until U1. Not R8.
 **Depends on:** the C13 pin, X150, B2.
 
@@ -1451,6 +1578,8 @@ fun TransactionBuilder.prepareSendAll(address: String, feePerKb: Long, customTot
 
 ### Task K0: Split each per-wallet clear from the chain clear
 
+**Rulings:** G2, G9, G84
+
 **Landing:** a `develop` PR after X5. In the step-1 layout the chain scope is the wallet's own, so the same files are deleted as today. Not R8.
 **Depends on:** X5.
 
@@ -1469,6 +1598,8 @@ fun TransactionBuilder.prepareSendAll(address: String, feePerKb: Long, customTot
 
 ### Task K1: An explicit wallet scope at every store call; write epochs per scope
 
+**Rulings:** G9, G11, G53, G54
+
 **Landing:** a `develop` PR after X5. Not R8.
 **Depends on:** X5.
 
@@ -1485,6 +1616,8 @@ fun TransactionBuilder.prepareSendAll(address: String, feePerKb: Long, customTot
 - [ ] **Step 4: Run, full suites.** Expected PASS. **Step 5: Open the PR.**
 
 ### Task K2: The app lock state becomes app-wide
+
+**Rulings:** G2, G9, G11, G54, G64, G89
 
 **Landing:** a `develop` PR after X5. Not R8: what unlocks, and when the seed is zeroed, are unchanged. The reviewer confirms this; if review finds any change to when the app locks or unlocks, the PR becomes [R8].
 **Depends on:** `fix/wallets-device-wide-settings` merged (X5).
@@ -1503,6 +1636,8 @@ fun TransactionBuilder.prepareSendAll(address: String, feePerKb: Long, customTot
 - [ ] **Step 4: Run.** Expected PASS; `LockGatePolicyTest` and `AutoLockPolicyTest` keep their verdicts. Full suites. **Step 5: Open the PR.**
 
 ### Task K3: A `WalletSessions` holder replaces the per-wallet singletons (active-only; switching still restarts)
+
+**Rulings:** G8, G9, G10, G11, G45, G55, G56, G57
 
 **Landing:** a `develop` PR after X5. Not R8.
 **Depends on:** K1, K2; #268 (merged); `fix/wallets-device-wide-settings` (X5).
@@ -1538,6 +1673,8 @@ class WalletSession(val scope: WalletScope, val handle: Long, val db: WalletData
 
 ### Task K4: One SpendPreflight pass per session
 
+**Rulings:** G9
+
 **Landing:** a `develop` PR after X5. It must land before any second `AssetManager` exists (E2b). Not R8.
 **Depends on:** K3.
 
@@ -1550,6 +1687,8 @@ class WalletSession(val scope: WalletScope, val handle: Long, val db: WalletData
 - [ ] **Step 4: Run, full suites.** Expected PASS. **Step 5: Open the PR.**
 
 ### Task K5: R6, server work for a wallet that is not active waits until it is active
+
+**Rulings:** G9, G58, G59
 
 **Landing:** a `develop` PR after X5. Only the active session exists then, so the gate always passes. It must land before E2b. Not R8.
 **Depends on:** K3.
@@ -1577,6 +1716,8 @@ class WalletSession(val scope: WalletScope, val handle: Long, val db: WalletData
 
 ### Task K6: Each per-wallet object reads its own native wallet; callbacks route by wallet
 
+**Rulings:** G9, G45, G46, G51
+
 **Landing:** a `develop` PR after X5 (one session, so behaviour-neutral). Not R8.
 **Depends on:** B2, K3.
 
@@ -1596,6 +1737,8 @@ class WalletSession(val scope: WalletScope, val handle: Long, val db: WalletData
 - [ ] **Step 2: Run.** Expected FAIL. **Step 3: Implement.** **Step 4: Run, full suites.** Expected PASS. **Step 5: Open the PR.**
 
 ### Task K7: ViewModels rebind when the active session changes, tested with a fake in-process switch
+
+**Rulings:** G8, G60, G61, G87
 
 **Landing:** a `develop` PR after X5. Production still restarts on a switch. Not R8.
 **Depends on:** K3.
@@ -1618,7 +1761,18 @@ Each ViewModel observes the active session (`flatMapLatest` plus the generation)
   `SeedViewSessionTest`: the phrase and the name come from one session. Red when the name comes from the registry and the phrase from a stale `WalletManager`.
 - [ ] **Step 2: Run.** Expected FAIL. **Step 3: Implement.** **Step 4: Run, full suites.** Expected PASS. **Step 5: Open the PR.**
 
+### Task K8a: `HubWebSocket.connect()` closes the socket it replaces (added by G62)
+
+**Rulings:** G62
+
+**Landing:** a `develop` PR after T, labelled a behaviour change that may ship before step 2, with its own ROADMAP line. Not R8.
+**Depends on:** X5.
+
+- [ ] A test red on `develop`: `connect()` replaces the socket without closing it. K8 depends on this task and keeps only neutral changes.
+
 ### Task K8: The Hub, Digi-ID and the web session follow the active session (D2)
+
+**Rulings:** G8, G10, G61, G62, G63, G86, G87, G89
 
 **Landing:** a `develop` PR after X5. Not R8.
 **Depends on:** K3, K7, A5; X5; X3 (`DigiScopeIdentity`).
@@ -1641,6 +1795,15 @@ Each ViewModel observes the active session (`flatMapLatest` plus the generation)
   - `NetworkLeakTest`'s "phrase" ban is kept. It also matches "passphrase"; rename locals rather than weaken it.
 - [ ] **Step 2: Run.** Expected FAIL. **Step 3: Implement.** **Step 4: Run, full suites.** Expected PASS. **Step 5: Open the PR.**
 
+### Task L1: Extract `ReconcileScreen.kt`'s remaining literals (added by G76)
+
+**Rulings:** G76
+
+**Landing:** a `develop` PR after T, in the strings cluster before E3. Not R8.
+**Depends on:** X5.
+
+- [ ] Extract the screen's remaining hardcoded literals in all 13 locales and add it to `OnboardingHardcodedStringTest.COVERED`. E4 depends on this task. Any screen that joins `COVERED` in step 2 gets the same prior PR.
+
 ## Stage 4: behaviour changes on `integration/multi-wallet-step2`
 
 Every PR here goes into the integration branch with CI (A3), an independent review and, where marked, Mark. The branch merges `develop` at least weekly. Device testing starts after E3; neither intermediate state reaches `develop`:
@@ -1648,6 +1811,8 @@ Every PR here goes into the integration branch with CI (A3), an independent revi
 - between B6 and E4, the old Full rebuild still runs, and from E1 on its chain clear means the shared chain.
 
 ### Task B6: Adopt the wallet-set engine; delete the engine rescan (registry PR, 6th)
+
+**Rulings:** G1, G7, G9, G12, G16, G19, G29, G30, G31, G32, G34, G43, G45, G46, G48, G50, G64, G65, G66, G67, G70, G82
 
 **Landing:** a registry PR into the integration branch. It is the first step-2 PR to change the rebuild or rescan, so it carries `CLAUDE.md` correction 9. Not R8.
 **Depends on:** the C8 and C10 pins, B2, B3.
@@ -1690,6 +1855,8 @@ What changes:
 - [ ] **Step 4: Run, full suites, KAT sweep.** Expected PASS. **Step 5: Registry,** merge.
 
 ### Task E1: Shared chain stores, frontier records, and the migration from step 1
+
+**Rulings:** G1, G32, G53, G65, G68, G69, G91
 
 **Landing:** the integration branch, in the same PR as E2 or immediately before it. Its migration is not invoked at launch until E2. Not R8.
 **Depends on:** K0, K1; `fix/wallets-ready-slot-and-gate-hygiene` (X5).
@@ -1743,6 +1910,8 @@ class ChainMigration(...) { fun run(testnet: Boolean): MigrationState }   // ide
 
 ### Task E2: `SyncService` runs the shared engine: the active wallet attached, frontier records kept
 
+**Rulings:** G2, G32, G41, G42, G53, G55, G64, G65, G67, G68, G70, G71, G72, G85
+
 **Landing:** the integration branch. E2 and E3 land back to back. Not R8 (D1 is today's behaviour).
 **Depends on:** E1, B6, K4, K5, K6, the C9, C10 and C11 pins.
 
@@ -1777,6 +1946,8 @@ What changes:
 - [ ] **Step 2: Run.** Expected FAIL. **Step 3: Implement.** **Step 4: Run, full suites.** Expected PASS. **Step 5: Open the PR.**
 
 ### Task B7: The band's sync context and the hand-off natives (registry PR, 7th)
+
+**Rulings:** G7, G19, G20, G23, G29, G31, G33, G34, G35, G36, G38, G46, G48, G50, G67, G71, G73, G74
 
 **Landing:** a registry PR into the integration branch. Not R8.
 **Depends on:** B6, the C9 and C10 pins, A4; #109 first if revived.
@@ -1816,6 +1987,8 @@ The band context:
 - [ ] **Step 2: Run.** Expected FAIL. **Step 3: Implement.** **Step 4: Run, full suites, KAT sweep.** Expected PASS. **Step 5: Registry,** merge.
 
 ### Task E3: Bands: scheduling, preemption, the hand-off executor, durability, spending and the wipe
+
+**Rulings:** G1, G31, G34, G35, G36, G37, G38, G42, G48, G64, G67, G73, G74, G75, G77, G83, G91
 
 **Landing:** the integration branch, immediately after E2. Device testing starts after it. Not R8.
 **Depends on:** E2, B7.
@@ -1862,6 +2035,8 @@ What it does:
 
 ### Task E4: "Rescan this wallet" and "Repair the chain" replace the Full rebuild
 
+**Rulings:** G9, G43, G66, G76, G84
+
 **Landing:** the integration branch. Not R8.
 **Depends on:** the C12 pin, E3; X5.
 
@@ -1885,6 +2060,8 @@ What it does:
 
 ### Task E5: BootGuard and StaleDataWiper on the shared engine
 
+**Rulings:** G2, G9, G41, G77, G88
+
 **Landing:** the integration branch. Not R8.
 **Depends on:** E2, the C11 pin.
 
@@ -1906,6 +2083,8 @@ What changes:
 
 ### Task E6: `SyncWorker` catch-ups persist through a process-level sink
 
+**Rulings:** G2, G7, G47, G74
+
 **Landing:** the integration branch. Not R8.
 **Depends on:** E2.
 
@@ -1920,7 +2099,18 @@ Today a worker catch-up after the service has died persists only the active wall
 - [ ] **Step 2: Run.** Expected FAIL. **Step 3: Implement.** `SyncService.onDestroy` hands persistence to the sink and re-points or clears the native handler.
 - [ ] **Step 4: Run, full suites, KAT sweep.** Expected PASS. **Step 5: Open the PR.**
 
+### Task B8a: `deriveWalletKeys`, the key-record producer (registry PR) [R8 · M1] (added by G78)
+
+**Rulings:** G78, G79
+
+**Landing:** its own registry PR, after the C1 pin and B3. [R8 · M1].
+**Depends on:** the C1 pin, B3.
+
+- [ ] `deriveWalletKeys(phrase, passphrase, accounts)` alone, stateless, in `jni_derive.c`; accounts are refused until B9. It also returns SHA-256 of the 64-byte seed it derived from, computed in the same call (G79). The "derived record equals C1's" case and the `seed_buffer_ownership_kat` pattern move here from B8. S1 depends on this task; B8 keeps `openWatchOnly`, `activateWallet` and `deactivateWallet`.
+
 ### Task S1: The wallet key record at rest (R4) [R8 · M1]
+
+**Rulings:** G9, G78, G79, G80
 
 **Landing:** the integration branch. **[R8]:** waits for Mark at merge (key material at rest and its Keystore key); batch M1 with C1; after X6. Put O5 (PD12) and O8 (ship the inert writer early) to him in the PR.
 **Depends on:** the C1 pin, K1.
@@ -1954,6 +2144,8 @@ class WalletKeyRecordStore(context: Context, vault: KeyVault, alias: String = "d
 - [ ] **Step 4: Run, full suites.** Expected PASS. **Step 5: Open the PR** with the M1 summary. Merge on Mark's OK.
 
 ### Task B8: Watch-only attach and seed-only activation (registry PR, 8th) [R8 · M3]
+
+**Rulings:** G7, G19, G30, G45, G78, G81, G82, G84, G85
 
 **Landing:** a registry PR into the integration branch. **[R8]:** waits for Mark at merge (the seed-only load, and the use of key material); batch M3; after X6. It takes the regeneration slot only after his OK.
 **Depends on:** B4, B7 (queue), the C1 pin.
@@ -1991,6 +2183,8 @@ What the natives do:
 
 ### Task S2: A seed-only load in `WalletManager` [R8 · M3]
 
+**Rulings:** G9, G57, G82, G85
+
 **Landing:** the integration branch. **[R8]:** waits for Mark at merge; batch M3; after X6.
 **Depends on:** B8, S1.
 
@@ -2017,6 +2211,8 @@ One opening gate serves both paths and is not re-implemented: `storedPassphrase`
 
 ### Task E2b: Attach every READY wallet watch-only after the PIN unlock (D1)
 
+**Rulings:** G9, G56, G66, G70, G75, G77, G83, G84, G85
+
 **Landing:** the integration branch. Not R8, although it uses R8 pieces. If Mark overrides D1, an attach before the PIN unlock becomes [R8] (O12).
 **Depends on:** E3, B4, B8, S1, S2.
 
@@ -2040,6 +2236,8 @@ Once the PIN has unlocked the process:
 - [ ] **Step 2: Run.** Expected FAIL. **Step 3: Implement.** **Step 4: Run, full suites.** Expected PASS. **Step 5: Open the PR.**
 
 ### Task S3: The in-process switch [R8 · M3]
+
+**Rulings:** G2, G30, G55, G56, G58, G59, G81, G86, G87, G88, G89, G90
 
 **Landing:** the integration branch. **[R8]:** waits for Mark at merge; batch M3; after X6.
 **Depends on:** S2, K7, K8, E2b.
@@ -2075,6 +2273,8 @@ If anything fails: no seed is resident, and B shows watch-only with "Unlock to s
 - [ ] **Step 2: Run.** Expected FAIL. **Step 3: Implement.** **Step 4: Run, full suites.** Expected PASS. **Step 5: Open the PR** (M3); merge on Mark's OK.
 
 ### Task E7: Live add, and live removal of a wallet that is not active
+
+**Rulings:** G2, G31, G55, G56, G64, G65, G83, G91, G92
 
 **Landing:** the integration branch. Not R8: the eraser and what it erases are unchanged. Mark sees it in the digest.
 **Depends on:** E3, S1, S3, X-HUB's ruling (only for its revoke behaviour).
@@ -2142,6 +2342,8 @@ MAX mode:
 
 ### Task B9: Coinomi account keys in the watch set (registry PR, 9th) [R8 · M4]
 
+**Rulings:** G7, G19, G44, G66
+
 **Landing:** a registry PR into the integration branch. **[R8]:** it derives key material for storage; batch M4 with U3; after X6.
 **Depends on:** the C15 pin, B8, X2.
 
@@ -2157,6 +2359,8 @@ MAX mode:
 - [ ] **Steps 2-4:** run (FAIL), implement, run (PASS), KAT sweep. **Step 5: Open the PR** (M4); merge on Mark's OK; registry standard.
 
 ### Task U3: Coinomi step 4: watch `watchedAccounts`, and "Also watch Coinomi's accounts" [R8 · M4]
+
+**Rulings:** G9, G10, G66
 
 **Landing:** the integration branch. **[R8]:** the account keys at rest (R4 names them); batch M4; after X6.
 **Depends on:** B9, S1, E3, X2, X3.
@@ -2186,6 +2390,8 @@ Watching follows `watchedAccounts` only. It is add-only, the sign-in toggle neve
 
 ### Task U4: The switcher's live wallet states, the notification, and abandonment for wallets not active
 
+**Rulings:** G71
+
 **Landing:** the integration branch. Not R8.
 **Depends on:** K6, U2, S3.
 
@@ -2207,6 +2413,8 @@ Each row reads its own wallet's handle, and shows its balance and one of: synced
 
 ### Task U5: Name the spending wallet (runs only on Mark's answer, O6)
 
+**Rulings:** G93
+
 **Landing:** the integration branch. Not R8.
 **Depends on:** S3; Mark's answer.
 
@@ -2214,9 +2422,20 @@ The proposed default (PD23) is that `SpendAuth`'s prompt carries `spend_auth_fro
 
 - [ ] Build what he answers, with a test that every spend-class prompt names the active wallet, and the locale gates.
 
+### Task U5b: Name the spending wallet on every spend screen (runs only on Mark's answer, O6; added by G93)
+
+**Rulings:** G93
+
+**Landing:** an integration-branch PR, only if Mark answers O6 with yes. Not R8.
+**Depends on:** U5.
+
+- [ ] The per-screen naming that U5's heading still describes. U5 itself is now unconditional: the prompt naming on every `SpendAuth` call site, in 13 locales. V1 and the stage 4 exit check depend on U5, and on U5b only if Mark answered yes before V1 starts.
+
 ## Stage 5: verification and merge
 
 ### Task V1: Device and emulator verification
+
+**Rulings:** G93, G94
 
 **Landing:** the results and a pre-publish PR into the integration branch.
 **Depends on:** every Stage 4 task.
@@ -2257,6 +2476,8 @@ Rules for this task:
 
 ### Task V2: Close-out: timings, hand-off, roadmap, CLAUDE.md, the native-speaker list
 
+**Rulings:** G5, G76
+
 **Landing:** docs PRs: one into the integration branch, and a core PR if the core's own docs need a line. Not R8.
 **Depends on:** V1.
 
@@ -2266,6 +2487,8 @@ Rules for this task:
 - [ ] **Step 4:** Hand Mark the native-speaker review list for the new warnings (switch, key mismatch, rescan, repair, MAX refusals) as a release gate.
 
 ### Task V3: Merge the integration branch into `develop` (waits for Mark's go)
+
+**Rulings:** G94
 
 **Landing:** one PR from `integration/multi-wallet-step2` into `develop`, merged with a merge commit. It waits for Mark's go: it makes step 2 the next release's content (R2, R7). The version bump and the release stay his.
 **Depends on:** V1, V2, X5.
@@ -2437,3 +2660,22 @@ Rules for this task:
 - **O11** The stage target dates.
 - **O12** If D1 is overridden, attaching before the PIN unlock becomes [R8] (E2b).
 - **O13** The Mac-only arms run at the iOS-and-core session's pace (hand-off item 4). Confirm that this blocks only its own pin moves.
+
+Added by the pre-flight scan (2026-11-19):
+
+- **O14** (conflict 117; Stages, V3) From T to V3 (about eight weeks) develop holds step 2's behaviour-neutral slices: the rewritten engine (C3-C10, through the pin), the bridge context table and handles (B1-B5) and K0-K8. A release cut from develop in that window ships them on KATs, unit tests and the standard release gates, because V1's device checks run only at the end, on the integration branch. May such a release carry them, and on what checks?
+  - Options: (a) Yes, with extra gates on that release commit: V1 step 1 (upgrade), V1 step 4's recreate after a freeze on the Note 8, and the pre-publish suite. (b) No: an interim release is built from a line that stops at T, with fixes merged there and forward to develop. (c) No step-2 slice on develop before V3: everything goes to the integration branch (O3's variant).
+  - Recommended: (a). Nothing a user can see changes before V3, so R2 holds, and the neutral slices get device time early. Whatever he answers, the plan records that step-2 merges pause during each train's landing-sync freeze (RELEASING.md:94-96) and that the stage dates move by the freeze's length; 4.1.3 and 4.1.4 shipped twelve days apart.
+- **O15** (conflict 37; B4, in the M2 packet) A sweep or foreign transfer signed from another wallet's phrase is registered only in the publishing wallet, and its coin claim ends at publish (jni_transaction.c:540-541), so the swept wallet can sign the same coins again until a peer relays the sweep back: two conflicting sends, both shown as sent. The planned check (every attached wallet's spent set, plan:1382, moved to B4 by G52) covers only the other order, and only attached wallets. When Recover funds is given a phrase that is itself a wallet on this device, should the signer refuse it, or allow it and track the spend across wallets?
+  - Options: (A) Refuse: the recovery signers refuse a phrase that is a wallet on this device (an identity match in the app; natively, any input that an open context holds, credited or spent, whatever its holder), with one new message in 13 locales telling the user to switch to that wallet and send. (B) Allow: at publish, also record the spend in every open context that owns an input, and keep the coin claim until then; a wallet not open in this process stays uncovered. (C) Keep the planned check and record the remaining double-sign window as accepted.
+  - Recommended: (A). It is the only option that also covers a wallet held by the band or not open, and the design already names the way to move such funds: a normal send from that wallet (spec:305-306), which MAX makes one step. B4 is written with (A) and cannot merge before his M2 answer; the question goes in the M2 packet. recovery_spend_gate_kat gets both orders, red on the planned check alone, and the check runs over every context in the table.
+- **O16** (conflict 87; S3, in the M3 packet) While a PIN-failure wipe is owed and could not complete (pin_wipe_pending set, the unlock screen stood down, the wallet opened with its PIN), what does a wallet switch do? In step 1 every switch restarted, so the launch backstop (MainActivity.kt:151-157) and the unlock screen's hold (UnlockScreen.kt:144, :207) retried the wipe before another wallet opened. The in-process switch (S3) passes neither.
+  - Options: (a) While a wipe is owed the switch takes step 1's path: setActive(B) and AppRestart, nothing decrypted in-process. This is a second restart reason beside D2's latch. (b) Refuse the switch until the wipe is no longer owed: on a device whose wipe keeps failing, the other wallets cannot be opened. (c) Proceed in-process behind the switch PIN, as the plan is written: the wipe is retried only at launches and unlock-screen entries.
+  - Recommended: (a). It keeps step 1's behaviour exactly on CRITICAL-1's path and never strands a wallet. S3 is written with (a) and cannot merge before his M3 answer; the question goes in the M3 packet, and SwitchSeedOrderTest adds 'a pending wipe decrypts nothing in-process: the switch restarts'.
+
+Answered by a ruling: none. No ruling settles an existing question, because each is Mark's. Four are changed in scope:
+
+- **O1** gains the unlock case (a record that differs from the seed at a cold-start unlock is marked refused, unused and unreplaced, until he rules) and the note that a replace resets the wallet's frontier to its birth (G85; the switch's messages, G90).
+- **O4** is widened: may neutral slices start at the train's landing while #264's review is still open? Default: no (G11).
+- **O6** now covers only the per-screen naming (U5b). The prompt naming (U5) is built by default (G93).
+- **O10**: part (c) depends only on A1's names and his yes; if the landing-sync freeze has begun when he answers, it can only ride the train as a row of its private scope file, which is his call (G25).
