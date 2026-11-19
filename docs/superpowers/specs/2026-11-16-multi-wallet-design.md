@@ -267,8 +267,8 @@ In step 2:
   - `jni_registry_gen.h` changes in one PR at a time (rule 6).
 - **Waits for Mark at merge (R8):** the key record and its Keystore key (R4), Coinomi's account
   keys included; the bridge's seed-owner rule and the seed-only load; the in-process switch.
-- **Open for Mark:** what a switch does when the incoming seed's keys differ from the wallet's key
-  record (refuse it, or replace the record); the Hub revokes (above).
+- **Open for Mark** (both answered on 2026-11-19): what a switch does when the incoming seed's keys differ from the wallet's key
+  record (refuse it, or replace the record): refuse; the Hub revokes (above): G95.
 - **The hand-off file (R1)** states the core API step 2 adds, its KATs, and whether the key record
   becomes a core format (versioned, with a KAT) or stays platform storage.
 
@@ -708,7 +708,7 @@ and the instant switch together (R2).
   - which step-1 chain seeds the shared engine at the migration, and the shared chain's file
     names. Legacy's 4.1.4 names are never renamed, and a band never shares a file with the shared
     engine. The attach checks the shared chain's block at F - 1, so in practice the seed is the
-    chain with the highest saved tip;
+    chain with the highest saved tip (superseded by G96, 2026-11-19: legacy's chain, where it stands);
   - the order in which waiting wallets get the band, and whether a band runs during SyncWorker's
     catch-ups;
   - how a chain-level reset (a corrupt shared chain or ledger, BootGuard's wipe) restarts the
