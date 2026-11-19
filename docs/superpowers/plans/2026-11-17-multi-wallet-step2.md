@@ -15,8 +15,9 @@
 > revokes its Hub session; task X-HUB is built) and **G96** (O7: the shared chain lives under the
 > legacy wallet's 4.1.4 names, which reverses PD13's names and its migration). Each task G96
 > changes carries an "**Amended by O7**" note. Four points G96 leaves to be designed are listed in
-> the ruling and in task E1; none is decided in this plan. Of O1-O17 none is open: O9 was answered
-> on 2026-11-19 (the phrase first) and is built outside step 2, after the 4.1.5 cut.
+> the ruling and in task E1; none is decided in this plan. Of O1-O17 none is open in step 2: O9 was
+> answered in direction on 2026-11-19 (the phrase first) and its multi-wallet rule is open as Q1 of
+> the design (Q1-Q6 there are Mark's).
 > **Where this plan's text and a ruling differ, the ruling wins.**
 > - Each affected task and section carries a "**Rulings:**" line. Read those rulings before the
 >   task's text.
@@ -245,7 +246,7 @@ Same-file clusters (never two at once):
 - **`bridge:jni_wallet.c`, `jni_peer.c`, `jni_transaction.c`, `jni_wallet_sign.c`, `jni_bridge.h`** (G7): Coinomi step 2, X150, B1, B2, B3, B4, B5, B6, B7, E6, B8, B9. Never two open at once; among PRs that do not build on each other the order is readiness (G12), and an [R8] PR never holds the cluster: B5, B6, B7 and E6 may overtake B4; B8 may not.
 - **`kt-app:service/SyncService.kt`:** K1, K2, K5, K6, E2, B7's caller, E3, E4, E5, E6, E2b, E7, U2, U4.
 - **The 13 `strings_wallet.xml`:** whatever 4.1.5 changes there (X5), then Coinomi step 3, then L1, E3, E4, S3, U1, U2, U3, U4, U5, one at a time.
-- **Added by G9** (never two members open at once): `WalletManager.kt`: K0, then K2, B6, S1, S2, E2b, E4, U3. `HistoryRebuildOnUpgrade.kt` and `StaleDataWiper.kt`: K0, then K1. `TransactionBuilder.kt` and `SpendPreflightOrderTest`: B3, K4, B5. `AssetManager.kt`: B2, B3, K4, K5, K6. `host:scan_floor_kat`: K0, C12's companion, E4. `host:prepared_send_core_kat`: X150, then C13's companion. `AppNavigation.kt`: K2, K3, E2b. `UnlockScreen.kt`: K2, S2, E5. The `SyncService.kt` cluster gains K0 and K3. Added by the review of 2026-11-19, from the tasks' own Files lists: the `SyncService.kt` cluster also gains B2, B3, B6 and S2; `HistoryRebuildOnUpgrade.kt` is K0, then K1, E4; `StaleDataWiper.kt` is K0, then K1, E5.
+- **Added by G9** (never two members open at once): `WalletManager.kt`: K0, then K2, B6, S1, S2, E2b, E4, U3. `HistoryRebuildOnUpgrade.kt` and `StaleDataWiper.kt`: K0, then K1. `TransactionBuilder.kt` and `SpendPreflightOrderTest`: B3, K4, B5. `AssetManager.kt`: B2, B3, K4, K5, K6. `host:scan_floor_kat`: K0, C12's companion, E4. `host:prepared_send_core_kat`: X150, then C13's companion. `AppNavigation.kt`: K2, K3, E2b. `UnlockScreen.kt`: K2, S2, E5. The lost-PIN PR (outside step 2; `docs/superpowers/specs/2026-11-19-lost-pin-phrase-first-design.md` §5) edits `AppNavigation.kt` and `WalletManager.kt` and is never open beside a member of either cluster; its slot is fixed when it is scheduled. The `SyncService.kt` cluster gains K0 and K3. Added by the review of 2026-11-19, from the tasks' own Files lists: the `SyncService.kt` cluster also gains B2, B3, B6 and S2; `HistoryRebuildOnUpgrade.kt` is K0, then K1, E4; `StaleDataWiper.kt` is K0, then K1, E5.
 - **Added by G8:** `AppModule.kt`, `DigiScopeClient.kt`, `DigiIdManager.kt`, `HubIdentity.kt`, `ChatViewModel.kt`, `DigiIdViewModel.kt`: Coinomi step 2, K3, K7, K8. Coinomi step 3 joins this cluster only if its PR edits one of the six files (G8 and G10, as amended by the review).
 
 ## Registry PRs (rule 6)
@@ -286,7 +287,7 @@ Also his:
 - **X-HUB**: ruled (O2, G95) and not [R8]. Nothing of it waits for him, unless its PR has to edit a seed or wipe gate;
 - **E2b**, only if he overrides D1.
 
-The open questions O1-O17 are listed at the end; after 2026-11-19 none is open (O9 was answered that day and is built outside step 2). O15 goes in the M2 packet and O16 in the M3 packet; O17 (whether an allow-list edit to a seed or wipe gate is [R8]) goes in A1's digest, because B6 waits on it. One test decides whether a PR that touches the wipe is [R8] (G1). M2 does not gate stage 4's start (G7).
+The open questions O1-O17 are listed at the end; after 2026-11-19 none is open in step 2 (O9 was answered in direction that day; its multi-wallet rule is open as Q1 of the lost-PIN design). O15 goes in the M2 packet and O16 in the M3 packet; O17 (whether an allow-list edit to a seed or wipe gate is [R8]) goes in A1's digest, because B6 waits on it. One test decides whether a PR that touches the wipe is [R8] (G1). M2 does not gate stage 4's start (G7).
 
 ## Stages, target dates and exit checks
 
@@ -379,7 +380,7 @@ The design leaves these to the builder, or the code required a choice. Each is a
   - Signing-only actions (Digi-ID, Hub) are unaffected.
   - **Amended by G37 and G36:** the typed BUSY, with its own string, also answers a spend from a wallet that no manager holds or whose band is paused; the wait for publishes comes before the band is freed.
 - **PD21** The `CF_ELEMS_CACHE_NOINVALIDATE` and `CF_ELEMS_CACHE_COUNT_ONLY` arm names stay through step 2. Renaming them would turn core `develop`'s runs red against Android `develop`.
-- **PD22 The lost-PIN path** (`kt-app:ui/navigation/AppNavigation.kt:178-195`, `:345-387`). No watch-only wallet attaches until the new PIN is set and the app reaches Unlocked. The restore deferred there opens only the active wallet from its seed, as today. iOS's D-3 (ask for the phrase first) was put to Mark as O9 and answered on 2026-11-19: Android switches to it, outside step 2 and after the 4.1.5 cut (`docs/superpowers/specs/2026-11-19-lost-pin-phrase-first-design.md`). PD22 holds under either flow.
+- **PD22 The lost-PIN path** (`kt-app:ui/navigation/AppNavigation.kt:178-195`, `:345-387`). No watch-only wallet attaches until the new PIN is set and the app reaches Unlocked. The restore deferred there opens only the active wallet from its seed, as today. iOS's D-3 (ask for the phrase first) was put to Mark as O9 and answered on 2026-11-19: Android switches to it (`docs/superpowers/specs/2026-11-19-lost-pin-phrase-first-design.md`; as recommended with the question, outside step 2 and after the 4.1.5 cut). PD22 holds under either flow; under the design's option C, E2b must also skip a wallet that still owes its phrase.
 - **PD23** The spend-auth prompt names the wallet that spends. Whether every spend screen names it too is O6. U5 runs only on his answer. **Amended by G93:** U5 (the prompt) is built unconditionally; the per-screen naming (U5b) is built too: Mark answered O6 yes (2026-11-19).
 - **PD24 The wallet handle** is a `jlong`: `(slot << 32) | generation`. A stale or unknown handle is refused, never resolved to the active context. **Amended by G49:** handle 0 is reserved; generations start at 1 and skip 0 when they wrap.
 - **PD25** No publish-time copies. An A-to-B send shows in B when it confirms (about 15 s), as today.
@@ -2752,7 +2753,7 @@ Rules for this task:
 - **O8** Whether S1's inert record writer may ship in a release before step 2, so more wallets hold a record when the engine ships.
   - **Answered (Mark, 2026-11-19):** yes. S1's inert record writer may ship in a release before step 2. It is still [R8]: its PR waits for him.
 - **O9** The lost-PIN path. iOS's D-3 asks for the phrase first; Android does not. This predates step 2 and is not built here (PD22).
-  - **Answered (Mark, 2026-11-19):** switch to the iOS flow (the phrase first). Built outside step 2, after the 4.1.5 cut; design: `docs/superpowers/specs/2026-11-19-lost-pin-phrase-first-design.md`.
+  - **Answered (Mark, 2026-11-19):** "Switch to the iOS flow" (the phrase first). As recommended with the question, not said by him: built outside step 2, after the 4.1.5 cut. Still his: Q1-Q6 of the design, `docs/superpowers/specs/2026-11-19-lost-pin-phrase-first-design.md`.
 - **O10** (before the 4.1.5 cut) Should 4.1.5's wipe erase the reserved step-2 names (X-ROLLBACK c)?
   - **Answered (Mark, 2026-11-19):** yes. A wipe clears every file, so 4.1.5's wipe erases the reserved step-2 names (X-ROLLBACK c). It rides the 4.1.5 train as a row of the private scope file.
   - **Narrowed by O7 (2026-11-19, G96):** his yes stands, over a shorter list. Still reserved, and still to be erased by 4.1.5's wipe: the key-record prefs `dgb_wallet_keys` and `dgb_wallet_keys_<id>`, and the Keystore alias `dgb_wallet_keys_wrap`. No longer reserved: the `chain_*` files and `dgb_chain<net>`, which no step-2 build writes. The shared chain needs nothing from 4.1.5: its wipe already erases legacy's names on both networks. The private 4.1.5 scope row is to be narrowed to match. One thing can lengthen the list again: names for legacy's own band files, if that design (G96) needs new ones and fixes them before the cut.
@@ -2785,7 +2786,7 @@ Added by the independent review of the rulings (2026-11-19):
   - Recommended: (a). It costs one small PR and keeps every loosening of a seed or wipe gate in front of him. Until he answers, (a) is what the plan does.
   - **Answered (Mark, 2026-11-19): option (a).** An edit to a seed or wipe gate's allow-list is itself [R8]; B6's `WipeNativeStepsGateTest` entry lands as its own small [R8] PR ahead of B6.
 
-Open after 2026-11-19: **none.** O9 was answered by Mark that day (the phrase first; built outside step 2, after the 4.1.5 cut; the design's own questions are in `docs/superpowers/specs/2026-11-19-lost-pin-phrase-first-design.md`). O2 and O7 were answered by Mark that day and are recorded as G95 and G96.
+Open after 2026-11-19: **none in step 2.** O9 was answered in direction by Mark that day (the phrase first); its multi-wallet rule and five more questions are open as Q1-Q6 of `docs/superpowers/specs/2026-11-19-lost-pin-phrase-first-design.md`. O2 and O7 were answered by Mark that day and are recorded as G95 and G96.
 
 Answered by a ruling: none. No ruling settles an existing question, because each is Mark's. Four are changed in scope:
 
