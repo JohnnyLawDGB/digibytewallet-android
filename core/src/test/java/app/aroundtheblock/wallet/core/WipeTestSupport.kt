@@ -6,12 +6,14 @@ import app.aroundtheblock.wallet.core.security.PinStore
 import io.mockk.every
 import io.mockk.mockk
 import java.io.File
+import java.util.concurrent.CopyOnWriteArraySet
 
 /**
  * In-memory stand-ins for the wipe tests. Ported from the app module's stale-data test harness
  * (`InMemoryPrefsFactory` + a context over a scratch directory) — a port, not an import, because
  * `core` cannot see `app` test sources — and extended with the one thing a wipe test needs that
- * the original did not: a store whose `commit()` reports that the write did not land.
+ * the original did not: a store whose `commit()` reports that the write did not land. A store also
+ * tells its change listeners of each commit, for a reader that listens (`AutoLockPrefs.timeoutFlow`).
  */
 internal class InMemoryPrefsFactory(
     /** When set, every landed `commit()` that clears a store appends `clear:<name>` here. */
@@ -43,6 +45,23 @@ internal class InMemoryPrefs : SharedPreferences {
     /** Called when a `commit()` that clears this store lands. */
     var onClear: (() -> Unit)? = null
 
+    /**
+     * The registered change listeners. A commit tells them what the platform does, once the write is
+     * over, landed or not (the in-memory view has the edit either way): `null` for a clear, as API
+     * 30+ reports one, then the key of each value the edit changed. Held strongly, where the platform
+     * holds them weakly: a test cannot make the garbage collector run, so this fake never drops one.
+     */
+    private val listeners = CopyOnWriteArraySet<SharedPreferences.OnSharedPreferenceChangeListener>()
+
+    /** How many listeners are registered now. */
+    val listenerCount: Int get() = listeners.size
+
+    /**
+     * Runs once, as the next listener registers and before it is added: a write made here lands just
+     * before a reader starts listening, so that reader is never told of it.
+     */
+    var beforeNextRegistration: (() -> Unit)? = null
+
     fun seed(key: String, value: Any?) { memory[key] = value; durable[key] = value }
 
     override fun getAll(): MutableMap<String, *> = LinkedHashMap(memory)
@@ -55,8 +74,14 @@ internal class InMemoryPrefs : SharedPreferences {
     override fun getFloat(key: String?, defValue: Float) = memory[key] as? Float ?: defValue
     override fun getBoolean(key: String?, defValue: Boolean) = memory[key] as? Boolean ?: defValue
     override fun contains(key: String?) = memory.containsKey(key)
-    override fun registerOnSharedPreferenceChangeListener(l: SharedPreferences.OnSharedPreferenceChangeListener?) = Unit
-    override fun unregisterOnSharedPreferenceChangeListener(l: SharedPreferences.OnSharedPreferenceChangeListener?) = Unit
+    override fun registerOnSharedPreferenceChangeListener(l: SharedPreferences.OnSharedPreferenceChangeListener?) {
+        if (l == null) return
+        beforeNextRegistration?.let { beforeNextRegistration = null; it() }
+        listeners += l
+    }
+    override fun unregisterOnSharedPreferenceChangeListener(l: SharedPreferences.OnSharedPreferenceChangeListener?) {
+        listeners.remove(l)
+    }
 
     override fun edit(): SharedPreferences.Editor = object : SharedPreferences.Editor {
         private val puts = LinkedHashMap<String, Any?>()
@@ -71,17 +96,34 @@ internal class InMemoryPrefs : SharedPreferences {
         override fun remove(key: String) = apply { removes += key }
         override fun clear() = apply { clearAll = true }
         override fun commit(): Boolean {
+            val before = LinkedHashMap(memory)
             write(memory)
-            if (refuseWrites) return false
-            write(durable)
-            if (clearAll) onClear?.invoke()
-            return true
+            val landed = !refuseWrites
+            if (landed) {
+                write(durable)
+                if (clearAll) onClear?.invoke()
+            }
+            tellListeners(before)
+            return landed
         }
         override fun apply() { commit() }
         private fun write(target: MutableMap<String, Any?>) {
             if (clearAll) target.clear()
             removes.forEach(target::remove)
             target.putAll(puts)
+        }
+
+        /**
+         * As the platform counts a change: a clear is told as `null`; a key this edit put or removed
+         * is told when its value is not what it was, counted from the cleared map after a clear.
+         */
+        private fun tellListeners(before: Map<String, Any?>) {
+            if (listeners.isEmpty()) return
+            val base = if (clearAll) emptyMap() else before
+            val changed = (removes + puts.keys).filter { k -> base.containsKey(k) != memory.containsKey(k) || base[k] != memory[k] }
+            val told = listeners.toList()
+            if (clearAll) told.forEach { it.onSharedPreferenceChanged(this@InMemoryPrefs, null) }
+            for (key in changed) told.forEach { it.onSharedPreferenceChanged(this@InMemoryPrefs, key) }
         }
     }
 }

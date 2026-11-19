@@ -127,16 +127,19 @@ class TorManager(private val context: Context) {
     /** Where an app-made connection may go right now; see [TorRoute]. */
     fun route(): TorRoute = TorRoute.of(isEnabled, getSocksPort(), _clearnetFallbackAnnounced.value)
 
-    private val prefs = context.getSharedPreferences("dgb_tor", Context.MODE_PRIVATE)
+    // The install's Tor file. Only the setters of isEnabled and upgradePromptShown write it, and it
+    // never leaves this class: a remove or a clear anywhere else would read as a new install at the
+    // next launch, which writes Tor off (AppWideSettingsSourceGateTest).
+    private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
-    private val _enabled = MutableStateFlow(prefs.getBoolean("tor_enabled", false))
+    private val _enabled = MutableStateFlow(prefs.getBoolean(KEY_ENABLED, false))
     /** The user's Tor setting, as [isEnabled] last wrote it. */
     val enabled: StateFlow<Boolean> = _enabled.asStateFlow()
 
     var isEnabled: Boolean
-        get() = prefs.getBoolean("tor_enabled", false)
+        get() = prefs.getBoolean(KEY_ENABLED, false)
         set(value) {
-            prefs.edit().putBoolean("tor_enabled", value).apply()
+            prefs.edit().putBoolean(KEY_ENABLED, value).apply()
             // Off: nothing waits for Tor, so an announced fallback is over. Turning Tor back on
             // starts again from "wait for Tor" until it connects or a new banner is raised.
             if (!value) _clearnetFallbackAnnounced.value = false
@@ -145,8 +148,35 @@ class TorManager(private val context: Context) {
         }
 
     var upgradePromptShown: Boolean
-        get() = prefs.getBoolean("upgrade_prompt_shown", false)
-        set(value) { prefs.edit().putBoolean("upgrade_prompt_shown", value).apply() }
+        get() = prefs.getBoolean(KEY_UPGRADE_PROMPT_SHOWN, false)
+        set(value) { prefs.edit().putBoolean(KEY_UPGRADE_PROMPT_SHOWN, value).apply() }
+
+    /**
+     * A new install's Tor defaults: the setting written off and the old upgrade prompt marked shown.
+     * Written only while the setting has never been written, so they can never change a setting that
+     * exists: after this, only the user's own switch writes it.
+     *
+     * Off because Tor is an opt-in (Settings → Network Info) that the app does not promote: privacy by
+     * default is the compact-filter sync, which keeps the address set on the device, and IP anonymity
+     * is the user's choice to turn on (or Orbot, or a system VPN). See ROADMAP for Tor's disposition.
+     *
+     * "New install" is read from this file alone, which belongs to the install: there is one Tor
+     * setting for every wallet. It used to be read from the wallet database ("no `wallet_config`
+     * row"). Since multi-wallet step 1 every wallet has its own database and one just added has no
+     * row, so the first launch of an added wallet (adding restarts into it) turned a Tor user's
+     * setting off, and every connection after it went direct. The testnet database, a database set
+     * aside by recovery or by the crash-loop breaker, a wiped one, and the temporary database a
+     * Keystore fault gives a session all read the same way.
+     *
+     * @return true when this call wrote the defaults: the first launch that found the setting never
+     *   written (a new install, or an older one whose owner never touched Tor).
+     */
+    fun applyNewInstallDefaults(): Boolean {
+        if (prefs.contains(KEY_ENABLED)) return false
+        isEnabled = false
+        upgradePromptShown = true
+        return true
+    }
 
     // I2: Nullable backing field instead of `by lazy` so stop() can skip
     // initialization when start() was never called. Uses double-checked locking
@@ -390,5 +420,20 @@ class TorManager(private val context: Context) {
     companion object {
         private const val TAG = "TorManager"
         private const val BOOTSTRAP_TIMEOUT_MS = 90_000L
+
+        /**
+         * The install's Tor settings: one file for every wallet, in no wallet's scope and not
+         * network-suffixed. No wallet store or database holds a copy (the Room `torEnabled` column is
+         * no longer written), and neither the wipe nor removing a wallet clears it.
+         *
+         * Internal, so app code cannot name the file or its keys (it does not compile) and reaches
+         * the setting only through [isEnabled]. AppWideSettingsSourceGateTest holds the rest of core
+         * to the same, and this class to writing the file only in the setters of [isEnabled] and
+         * [upgradePromptShown]. Never renamed: a setting under another name reads as never written,
+         * and the next launch writes Tor off.
+         */
+        internal const val PREFS = "dgb_tor"
+        internal const val KEY_ENABLED = "tor_enabled"
+        internal const val KEY_UPGRADE_PROMPT_SHOWN = "upgrade_prompt_shown"
     }
 }
