@@ -24,7 +24,6 @@ import androidx.navigation.NavController
 import app.aroundtheblock.wallet.ui.theme.DigiByteAccent
 import app.aroundtheblock.wallet.ui.theme.DigiByteBlue
 import app.aroundtheblock.wallet.ui.theme.DigiByteNavy
-import kotlinx.coroutines.launch
 
 @Composable
 fun OnboardingScreen(
@@ -47,23 +46,9 @@ fun OnboardingScreen(
     val keepsPin by produceState<Boolean?>(initialValue = if (adding) false else null) {
         if (!adding) value = viewModel.keepsStoredPin()
     }
-    // The app's one PIN dialog: a wrong PIN here counts, cools down and wipes as anywhere else.
-    val spendAuth = app.aroundtheblock.wallet.ui.components.rememberSpendAuth()
-    spendAuth.Dialogs()
-    val pinScope = rememberCoroutineScope()
-    val currentPinSubtitle = stringResource(R.string.sec_verify_pin_sub)
-    val afterCurrentPin: (() -> Unit) -> Unit = { go ->
-        if (viewModel.currentPinOwed()) {
-            pinScope.launch {
-                if (spendAuth.authorizeWithPin(currentPinSubtitle)) {
-                    viewModel.onCurrentPinVerified()
-                    go()
-                }
-            }
-        } else {
-            go()
-        }
-    }
+    // The app's one PIN dialog, behind the step every first-run screen that needs the PIN shares.
+    val afterCurrentPin = rememberCurrentPinStep(viewModel, navController)
+    // Until it is known whether the PIN is kept, neither flow can start: a tap must find the answer.
     val ready = canAdd && keepsPin != null
 
     Box(

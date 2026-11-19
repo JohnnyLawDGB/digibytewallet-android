@@ -98,8 +98,23 @@ fun PinSetupScreen(
     // INT-2026-11-19-B: no onboarding path sets or replaces the app PIN while any wallet record
     // exists. A flow that keeps the stored PIN (it took that PIN on its first screen) shows no
     // keypad here and stores nothing: this step only creates the wallet and goes on. Null until
-    // read; a flow that came through the first screen has it already.
+    // read (off the main thread), as this screen opens.
     val keepsPin by produceState<Boolean?>(initialValue = null) { value = viewModel.keepsStoredPin() }
+
+    // The kept-PIN step's ways forward when it did not go on by itself (KeptPinContent).
+    var pinDeclined by remember { mutableStateOf(false) }
+    val afterCurrentPin = rememberCurrentPinStep(
+        viewModel, navController,
+        onDeclined = {
+            pinDeclined = true
+            isPinSaving = false
+        },
+    )
+    val firstScreenBelow = remember { runCatching { navController.getBackStackEntry(ONBOARDING_ROUTE) }.isSuccess }
+    val startOver: () -> Unit = {
+        viewModel.resetError()
+        navController.popBackStack(ONBOARDING_ROUTE, inclusive = false)
+    }
 
     // What follows the PIN step, with the PIN just stored or the stored one kept.
     val createThenGoOn: () -> Unit = {
@@ -170,10 +185,15 @@ fun PinSetupScreen(
             // both in the ViewModel's scope so leaving this screen while
             // the prompt is up cannot orphan the create.
             // No wallet is open yet, so the prompt's onStop locks nothing.
-            viewModel.createWallet(
-                seedKeyPromptFor(biometricAuth, activity, ksbPromptTitle, ksbPromptSubtitle),
-                afterWalletReady,
-            )
+            // INT-2026-11-19-B: a flow that keeps the stored PIN took it on the first screen; it
+            // is asked for again here, at the write, only if the app has left the foreground
+            // since. A flow that has just set its own PIN holds it and is asked nothing.
+            afterCurrentPin {
+                viewModel.createWallet(
+                    seedKeyPromptFor(biometricAuth, activity, ksbPromptTitle, ksbPromptSubtitle),
+                    afterWalletReady,
+                )
+            }
         } else {
             afterWalletReady(walletManager.isWalletReady())
         }
@@ -185,11 +205,23 @@ fun PinSetupScreen(
             .background(Color(0xFF0A1628))
     ) {
         if (keepsPin == true) {
-            LaunchedEffect(Unit) {
+            // The PIN was taken on the first screen: nothing to enter here unless the write asks
+            // for it again (createThenGoOn).
+            val start: () -> Unit = {
+                errorMessage = null
+                pinDeclined = false
                 isPinSaving = true
                 createThenGoOn()
             }
-            KeptPinContent(working = isPinSaving, errorMessage = errorMessage)
+            LaunchedEffect(Unit) { start() }
+            KeptPinContent(
+                working = isPinSaving,
+                errorMessage = errorMessage,
+                // The PIN was not entered: asked again, nothing lost.
+                onContinue = start.takeIf { pinDeclined },
+                // The write failed and the phrase is gone from memory: back to the first screen.
+                onStartOver = startOver.takeIf { firstScreenBelow },
+            )
         }
         if (keepsPin == false) {
             when (step) {
@@ -298,10 +330,17 @@ fun PinSetupScreen(
 
 /**
  * PIN setup for a flow that keeps the stored app PIN (INT-2026-11-19-B): no keypad and nothing to
- * enter, only the wallet being made, or why it was not.
+ * enter, only the wallet being made, or why it was not. When it is neither working nor done it
+ * offers one way forward: [onContinue] after the current PIN was not entered, [onStartOver] after
+ * the wallet could not be made.
  */
 @Composable
-private fun KeptPinContent(working: Boolean, errorMessage: String?) {
+private fun KeptPinContent(
+    working: Boolean,
+    errorMessage: String?,
+    onContinue: (() -> Unit)?,
+    onStartOver: (() -> Unit)?,
+) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -331,6 +370,25 @@ private fun KeptPinContent(working: Boolean, errorMessage: String?) {
                 strokeWidth = 2.dp,
                 color = DigiByteAccent
             )
+        } else {
+            val action = if (errorMessage != null) onStartOver else onContinue
+            if (action != null) {
+                Spacer(Modifier.height(24.dp))
+                Button(
+                    onClick = action,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = DigiByteBlue)
+                ) {
+                    Text(
+                        text = stringResource(if (errorMessage != null) R.string.verify_try_again else R.string.recover_continue),
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
         }
     }
 }

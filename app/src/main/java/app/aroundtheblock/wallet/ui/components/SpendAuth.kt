@@ -178,6 +178,12 @@ class SpendAuth internal constructor(private val vm: AuthGateViewModel) {
         return awaitPin(subtitle)
     }
 
+    /**
+     * Whether [authorizeWithPin] has a PIN to ask for. False with none stored and with a PIN store
+     * that cannot be read: its caller tells "refused" from "could not be asked".
+     */
+    fun pinCanBeAsked(): Boolean = vm.hasPin()
+
     private suspend fun awaitPin(subtitle: String): Boolean {
         // A second request while one dialog is open (double-tap) resolves the first as denied
         // rather than leaving two callers waiting on one keypad.

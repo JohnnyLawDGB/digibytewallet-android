@@ -36,7 +36,10 @@ Path from first launch through seed backup to a unlocked home screen.
    `OnboardingPin.setFirstPin` (the setup screens' only way to the PIN). While a wallet record
    and a PIN are already stored, that call refuses: the flow asked for the current PIN on its
    first screen instead, this step shows no keypad, and the stored PIN stays (INT-2026-11-19-B:
-   no onboarding path sets or replaces the app PIN while any wallet record exists).
+   no onboarding path sets or replaces the app PIN while any wallet record exists). The PIN
+   entered there is held for that stay in the foreground only (`ForegroundVisits`, counted in
+   `MainActivity.onStop`): after the app has been left, the same step (`CurrentPinStep.kt`) asks
+   again at the write, and the ViewModel refuses a write without it.
    `PinManager.setPin(pin)`:
    - Generates 32-byte salt (`SecureRandom`).
    - Hashes PIN with Argon2id (t=3, m=64 MiB, p=4). Falls back to

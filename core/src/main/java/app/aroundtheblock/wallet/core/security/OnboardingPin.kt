@@ -1,5 +1,7 @@
 package app.aroundtheblock.wallet.core.security
 
+import app.aroundtheblock.wallet.core.wallets.WalletRegistry
+
 /**
  * The app PIN as onboarding may touch it: the ONLY PIN writes the setup screens can reach.
  *
@@ -13,12 +15,17 @@ package app.aroundtheblock.wallet.core.security
  *
  * A PIN store that cannot be read while a wallet record exists throws from every call here; it is
  * never read as "no PIN".
+ *
+ * It takes the registry itself, not a question about it: "any wallet record" cannot be narrowed
+ * (to one network, or to nothing) by whoever builds this.
  */
 class OnboardingPin(
     private val pinManager: PinManager,
-    /** Any wallet's seed record on this device, of either network and in any registry state. */
-    private val anyWalletRecordExists: () -> Boolean,
+    private val registry: WalletRegistry,
 ) {
+    /** Any wallet's seed record on this device, of either network and in any registry state. */
+    private fun anyWalletRecordExists(): Boolean = registry.anyRecordExists()
+
     /**
      * True while a wallet record exists and a PIN is stored: that PIN guards the wallet, and
      * onboarding must ask for it and keep it. False on a device with no wallet record (a PIN

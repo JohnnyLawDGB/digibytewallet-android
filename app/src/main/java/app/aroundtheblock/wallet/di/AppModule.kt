@@ -72,7 +72,7 @@ object AppModule {
     /** What onboarding may do to the app PIN: nothing, while the stored PIN guards a wallet (INT-2026-11-19-B). */
     @Provides @Singleton
     fun provideOnboardingPin(pinManager: PinManager, registry: WalletRegistry): app.aroundtheblock.wallet.core.security.OnboardingPin =
-        app.aroundtheblock.wallet.core.security.OnboardingPin(pinManager) { registry.anyRecordExists() }
+        app.aroundtheblock.wallet.core.security.OnboardingPin(pinManager, registry)
 
     @Provides @Singleton
     fun provideBiometricAuth(): BiometricAuth = BiometricAuth()

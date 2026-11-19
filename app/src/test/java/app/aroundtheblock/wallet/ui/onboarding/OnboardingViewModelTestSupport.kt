@@ -27,8 +27,9 @@ internal fun onboardingViewModel(
     switcher: WalletSwitcher = mockk(relaxed = true),
     quickStartScans: QuickStartScans = mockk(relaxed = true),
     context: Context = mockk(relaxed = true),
+    foregroundVisits: app.aroundtheblock.wallet.ForegroundVisits = app.aroundtheblock.wallet.ForegroundVisits(),
 ): OnboardingViewModel = OnboardingViewModel(
-    walletManager, OnboardingPin(pinManager) { registry.anyRecordExists() }, scanService,
+    walletManager, OnboardingPin(pinManager, registry), scanService,
     SavedStateHandle(mapOf("mode" to if (mode == OnboardingMode.ADD) "add" else "first_run")),
-    provisioner, switcher, registry, context, quickStartScans,
+    provisioner, switcher, registry, context, quickStartScans, foregroundVisits,
 )

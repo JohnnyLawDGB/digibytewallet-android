@@ -51,6 +51,10 @@ fun RecoveryDateScreen(
     val ksbPromptSubtitle = stringResource(R.string.ksb_prompt_subtitle)
     // One restore per tap: the prompt opens a gap in which a second tap would start a second one.
     var restoreStarting by remember { mutableStateOf(false) }
+    // INT-2026-11-19-B: whether the stored PIN is kept is read again as this screen opens, so the
+    // step before the write asks on what the device holds now.
+    LaunchedEffect(Unit) { viewModel.keepsStoredPin() }
+    val afterCurrentPin = rememberCurrentPinStep(viewModel, navController)
 
     Box(
         modifier = Modifier
@@ -188,20 +192,25 @@ fun RecoveryDateScreen(
                     viewModel.setRecoveryTimestamp(ts)
                     if (viewModel.mode == OnboardingMode.FIRST_RUN) {
                         if (restoreStarting) return@Button
-                        restoreStarting = true
-                        // KS-BIND: the probe, the one prompt if needed, and the restore run in the
-                        // ViewModel's scope, in one coroutine, so leaving this screen cannot orphan them.
-                        viewModel.recoverWallet(
-                            seedKeyPromptFor(
-                                biometricAuth,
-                                context as? androidx.fragment.app.FragmentActivity,
-                                ksbPromptTitle, ksbPromptSubtitle,
-                            ),
-                        ) { success ->
-                            restoreStarting = false
-                            if (success) {
-                                navController.navigate("pin_setup") {
-                                    popUpTo(ONBOARDING_ROUTE) { inclusive = true }
+                        // INT-2026-11-19-B: a flow that keeps the stored PIN took it on the first
+                        // screen; it is asked for again here, at the write, only if the app has
+                        // left the foreground since.
+                        afterCurrentPin {
+                            restoreStarting = true
+                            // KS-BIND: the probe, the one prompt if needed, and the restore run in the
+                            // ViewModel's scope, in one coroutine, so leaving this screen cannot orphan them.
+                            viewModel.recoverWallet(
+                                seedKeyPromptFor(
+                                    biometricAuth,
+                                    context as? androidx.fragment.app.FragmentActivity,
+                                    ksbPromptTitle, ksbPromptSubtitle,
+                                ),
+                            ) { success ->
+                                restoreStarting = false
+                                if (success) {
+                                    navController.navigate("pin_setup") {
+                                        popUpTo(ONBOARDING_ROUTE) { inclusive = true }
+                                    }
                                 }
                             }
                         }

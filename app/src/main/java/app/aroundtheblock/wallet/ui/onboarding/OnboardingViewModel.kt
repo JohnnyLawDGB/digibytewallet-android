@@ -47,6 +47,8 @@ class OnboardingViewModel @Inject constructor(
     private val registry: WalletRegistry,
     @ApplicationContext private val appContext: Context,
     private val quickStartScans: QuickStartScans,
+    /** The stay in the foreground a PIN was entered in: what this flow holds does not outlive it. */
+    private val foregroundVisits: app.aroundtheblock.wallet.ForegroundVisits,
 ) : ViewModel() {
 
     /** The flow these screens run: the route argument of the onboarding entry this ViewModel belongs to. */
@@ -313,30 +315,41 @@ class OnboardingViewModel @Inject constructor(
     // A first run that starts while a wallet and its PIN are stored (the selected network has no
     // wallet, another one has) asks for that PIN before anything else and sets none.
 
-    /** [keepsStoredPin], read once per flow: what the flow found when it started. */
-    @Volatile private var keepsPinAtStart: Boolean? = null
+    /** What [keepsStoredPin] last answered; null until it has been asked. */
+    @Volatile private var keepsPinAnswer: Boolean? = null
 
-    /** The current app PIN was entered for this flow ([onCurrentPinVerified]). */
-    @Volatile private var currentPinVerified = false
+    /**
+     * The stay in the foreground ([foregroundVisits]) in which this flow came to hold the app PIN:
+     * the current one was entered ([onCurrentPinVerified]), or the flow stored the first one itself
+     * ([setPin]). Null when neither. Held for that stay only: once the app has left the foreground
+     * the PIN is owed again, at the first screen and at the write.
+     */
+    @Volatile private var pinHeldInVisit: Long? = null
+
+    private fun holdsPin(): Boolean = pinHeldInVisit == foregroundVisits.current()
 
     /**
      * Whether this flow keeps the stored app PIN: it then asks for that PIN before the phrase is
-     * shown or typed, shows no PIN setup and sets none. Decided when the flow starts, before it has
-     * written anything. Never in ADD mode, which touches no PIN and runs behind the unlock.
+     * shown or typed, shows no PIN setup and sets none. Asked afresh each time, off the main
+     * thread; a screen reads it once when it opens. Never in ADD mode, which touches no PIN and
+     * runs behind the unlock.
      */
     suspend fun keepsStoredPin(): Boolean {
         if (mode != OnboardingMode.FIRST_RUN) return false
-        keepsPinAtStart?.let { return it }
-        return withContext(Dispatchers.IO) { storedPinGuardsAWallet() }.also { keepsPinAtStart = it }
+        return withContext(Dispatchers.IO) { storedPinGuardsAWallet() }.also { keepsPinAnswer = it }
     }
 
     /** The screen calls this once the app's PIN check has accepted the current PIN. */
     fun onCurrentPinVerified() {
-        currentPinVerified = true
+        pinHeldInVisit = foregroundVisits.current()
     }
 
-    /** True until the current PIN has been entered, in a flow that keeps it: the buttons ask first. */
-    fun currentPinOwed(): Boolean = keepsPinAtStart == true && !currentPinVerified
+    /**
+     * True while a first run must ask for the current PIN before it goes on: the stored PIN guards
+     * a wallet (or that has not been read yet, which is not read as "no PIN") and this flow does
+     * not hold it in this stay in the foreground.
+     */
+    fun currentPinOwed(): Boolean = mode == OnboardingMode.FIRST_RUN && keepsPinAnswer != false && !holdsPin()
 
     /** A PIN store that cannot be read beside a wallet record counts as guarding it. */
     private fun storedPinGuardsAWallet(): Boolean = try {
@@ -344,12 +357,6 @@ class OnboardingViewModel @Inject constructor(
     } catch (e: Exception) {
         true
     }
-
-    /**
-     * The write of a first-run wallet is refused while a stored PIN guards a wallet and this flow
-     * has not taken that PIN, however its screens were reached. Asked afresh, off the main thread.
-     */
-    private fun writeNeedsCurrentPin(): Boolean = !currentPinVerified && storedPinGuardsAWallet()
 
     /** Who waits for the first-run create in flight; null when none runs. Main thread only. */
     private var createWaiters: MutableList<(Boolean) -> Unit>? = null
@@ -384,9 +391,11 @@ class OnboardingViewModel @Inject constructor(
         // This create's own copy: clearing the screen's copy (onCleared) never changes the bytes a
         // create in progress is using, and this one is zeroed however the create ends.
         val pass = _passphrase?.copyOf()
+        // Read as the write is asked for: the seed-key prompt below may take the app out of the foreground.
+        val holdsPin = holdsPin()
         viewModelScope.launch {
             _uiState.value = OnboardingUiState.Loading
-            if (refusedWithoutCurrentPin("Wallet creation failed", answer)) {
+            if (refusedWithoutCurrentPin(holdsPin, "Wallet creation failed", answer)) {
                 pass?.fill(0)
                 return@launch
             }
@@ -428,9 +437,11 @@ class OnboardingViewModel @Inject constructor(
         val ts = _recoveryTimestamp
         // This restore's own copy, as in createWallet.
         val pass = _passphrase?.copyOf()
+        // As in createWallet: read as the write is asked for.
+        val holdsPin = holdsPin()
         viewModelScope.launch {
             _uiState.value = OnboardingUiState.Loading
-            if (refusedWithoutCurrentPin("Recovery failed", onResult)) {
+            if (refusedWithoutCurrentPin(holdsPin, "Recovery failed", onResult)) {
                 pass?.fill(0)
                 return@launch
             }
@@ -588,11 +599,14 @@ class OnboardingViewModel @Inject constructor(
     }
 
     /**
-     * The first run's wallet write is refused while [writeNeedsCurrentPin]: reported as a failed
+     * The write of a first-run wallet is refused while a stored PIN guards a wallet and this flow
+     * does not hold that PIN ([holdsPin], as it stood when the write was asked for), however its
+     * screens were reached. The store is asked afresh, off the main thread. Reported as a failed
      * [message], with nothing written and the phrase left for the flow to end on its own.
      */
-    private suspend fun refusedWithoutCurrentPin(message: String, onResult: (Boolean) -> Unit): Boolean {
-        if (!withContext(Dispatchers.Default) { writeNeedsCurrentPin() }) return false
+    private suspend fun refusedWithoutCurrentPin(holdsPin: Boolean, message: String, onResult: (Boolean) -> Unit): Boolean {
+        if (holdsPin) return false
+        if (!withContext(Dispatchers.Default) { storedPinGuardsAWallet() }) return false
         runCatching { android.util.Log.w("OnboardingVM", "a wallet and its PIN are stored and the PIN was not entered; nothing written") }
         _uiState.value = OnboardingUiState.Error(message)
         onResult(false)
@@ -601,13 +615,16 @@ class OnboardingViewModel @Inject constructor(
 
     /**
      * Stores the PIN chosen at PIN setup. False, with nothing written, when it did not land or
-     * while the stored PIN guards a wallet ([OnboardingPin.setFirstPin]).
+     * while the stored PIN guards a wallet ([OnboardingPin.setFirstPin]). A flow whose own first
+     * PIN landed holds the PIN from then on: the wallet write that follows is not refused for want
+     * of a PIN this flow has just set.
      */
     fun setPin(pin: String, onResult: (Boolean) -> Unit) {
         viewModelScope.launch {
             val success = withContext(Dispatchers.Default) {
                 runCatching { onboardingPin.setFirstPin(pin); true }.getOrDefault(false)
             }
+            if (success) pinHeldInVisit = foregroundVisits.current()
             onResult(success)
         }
     }

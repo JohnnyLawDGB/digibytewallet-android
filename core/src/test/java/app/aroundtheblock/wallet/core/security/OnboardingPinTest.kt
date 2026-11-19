@@ -43,7 +43,7 @@ class OnboardingPinTest {
         recordExists = { scope -> if (scope.isLegacy) legacyRecord else scope.walletId in records },
         recordsOnDisk = { records.map { it to null } },
     )
-    private val onboardingPin = OnboardingPin(pinManager) { registry.anyRecordExists() }
+    private val onboardingPin = OnboardingPin(pinManager, registry)
 
     /** A READY wallet on mainnet, with its record. */
     private fun mainnetWallet(): String {
@@ -134,7 +134,7 @@ class OnboardingPinTest {
 
     @Test fun `a PIN store that cannot be read beside a wallet is never no PIN`() {
         mainnetWallet()
-        val unreadable = OnboardingPin(PinManager(UnavailablePinStore)) { registry.anyRecordExists() }
+        val unreadable = OnboardingPin(PinManager(UnavailablePinStore), registry)
         assertTrue("an unreadable store read as no PIN", runCatching { unreadable.mustKeepPin() }.isFailure)
         assertTrue("a PIN was offered to an unreadable store", runCatching { unreadable.setFirstPin(chosen) }.isFailure)
     }
@@ -164,6 +164,19 @@ class OnboardingPinTest {
         assertFalse(onboardingPin.mustKeepPin())
         onboardingPin.setFirstPin(chosen)
         assertEquals(PinVerifyResult.Success, pinManager.verifyPin(chosen))
+    }
+
+    /**
+     * "Any wallet record" is the registry's own answer, asked inside [OnboardingPin]: whoever builds
+     * one hands over the registry and cannot hand over a narrower question in its place.
+     */
+    @Test fun `the guard asks the registry itself, not a question its builder supplies`() {
+        val constructors = OnboardingPin::class.java.declaredConstructors.map { it.parameterTypes.toList() }
+        assertEquals(
+            "OnboardingPin can be built over something other than the PIN manager and the wallet registry",
+            listOf(listOf<Class<*>>(PinManager::class.java, WalletRegistry::class.java)),
+            constructors,
+        )
     }
 
     /** The app module cannot write the PIN around [OnboardingPin]: both writes are `internal` to core. */
