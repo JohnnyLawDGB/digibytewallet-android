@@ -35,7 +35,11 @@ hold:
    it, merge current `develop` into the branch, run `python3 scripts/gen-jni-registry.py`, push,
    and wait for its CI. One registry PR at a time.
 7. **An Android pin moves only to a core commit whose `develop` CI run is green.** Core CI tests
-   a PR's head; the merge commit is tested by the run on `develop` that follows it.
+   a PR's head; the merge commit is tested by the run on `develop` that follows it. Decided by
+   Mark, 2026-11-17: when a core change leaves Android `develop`'s host KATs unable to compile (a
+   changed signature), the push run on core `develop` after the merge is red by construction. The
+   rule-7 run is then a `workflow_dispatch` of core CI on `develop` at that merge commit, with
+   `android_ref` set to the companion Android branch, and the pin PR follows it.
 8. **A pin conflict is resolved to core `develop`, never to a PR's older pin**: an older pin can
    silently roll back core fixes (check `git merge-base --is-ancestor <last release's core> <pin>`).
 
