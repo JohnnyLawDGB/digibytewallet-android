@@ -36,6 +36,33 @@ Status: for owner approval (2026-11-16); builder-checked. Follow-on, separate de
 > - Rename rejects another wallet's shown default name.
 > - Machine-written warnings in the non-English locales (wipe, removal, backup) need a native-speaker review
 >   before release.
+>
+> **Waits for the owner (2026-11-17): a READY wallet with no record, erased at launch.** Launch
+> housekeeping (`WalletHousekeeping`) also erases the seed key aliases, the database and every other
+> store of a non-legacy READY wallet whose seed record is gone, and drops its entry once that erase
+> verified, so the wallet stops holding one of its network's 8 slots. It acts only when no sealed
+> seed can be read and no record file (`.xml` or `.xml.bak`) is on disk. Every other erase of a
+> wallet's seed key and database follows a request: a wipe, a removal the user confirmed, an add
+> that was abandoned. This one acts on what it finds at launch, so it changes when they are wiped: a
+> security decision that stays with the owner (`docs/development-process.md`, "Still Mark's,
+> always"). By reading, only a wipe leaves that state: it erases every record first and clears the
+> registry afterwards. The PR that brings this waits for his answer even with review and CI green;
+> the answer replaces this paragraph, with its date.
+>
+> **Part of the same decision (2026-11-19): that erase covers both networks.** Only a registry entry
+> says which network a wallet's stores were written under, and the wipe does not rely on it: it
+> erases every wallet under both. The launch erase above runs before the wipe a launch may still owe,
+> and it removes what a wipe finds a wallet by (the entry and the key aliases), so anything it left
+> under the other network would never be looked for again. It therefore erases the wallet's stores
+> under both networks first, and deletes the key aliases and drops the entry only once both read back
+> empty. Either network unverified keeps the entry and the key for the next launch.
+>
+> **Also for him (2026-11-19): a removal erases both networks too.** A confirmed removal drops its
+> entry in the same way, so it erases the wallet's stores under both networks as well
+> (`WalletRemoval`, and the launch step that finishes a removal), its seed record and its key first
+> as before. Every name it erases carries the removed wallet's own id. Legacy, whose stores already
+> span both networks, is unchanged. An add that never completed is erased as before: it was never
+> loaded, and its record and key are all it wrote.
 
 
 ## Intent
