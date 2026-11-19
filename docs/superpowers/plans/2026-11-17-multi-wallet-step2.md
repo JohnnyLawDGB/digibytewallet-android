@@ -2669,21 +2669,31 @@ Rules for this task:
 ## Open for Mark
 
 - **O1** Key mismatch at activation: refuse (PD2) or replace the record.
+  - **Answered (Mark, 2026-11-19):** refuse (PD2 stands). A record that differs from the seed is refused, unused and unreplaced.
 - **O2** The Hub revokes on removal and on the wipe (X-HUB).
 - **O3** The integration branch (PD11), or a stack of PRs into `develop` merged in one sitting.
+  - **Answered (Mark, 2026-11-19):** the integration branch (PD11).
 - **O4** Whether step-2 core PRs may merge before the 4.1.5 cut. Default: no.
+  - **Answered (Mark, 2026-11-19):** no. No step-2 core PR and no neutral slice merges before the 4.1.5 cut or while #264's review is open (G11's default).
 - **O5** Device-lock removal: keep the watch-only records (PD12) or drop them.
+  - **Answered (Mark, 2026-11-19):** keep the watch-only records (PD12).
 - **O6** Naming the spending wallet on every spend screen (U5).
+  - **Answered (Mark, 2026-11-19):** yes. Every spend screen names the spending wallet (U5b is built).
 - **O7** The shared chain under legacy's 4.1.4 names instead of new ones. That would make a 4.1.4 upgrade move no file. The costs:
   - seeding from legacy even when another wallet is ahead;
   - a rollback in which legacy reads a ledger evaluated while it was not attached, so missed receives (X-ROLLBACK);
   - removal and the eraser special-casing legacy's names.
 - **O8** Whether S1's inert record writer may ship in a release before step 2, so more wallets hold a record when the engine ships.
+  - **Answered (Mark, 2026-11-19):** yes. S1's inert record writer may ship in a release before step 2. It is still [R8]: its PR waits for him.
 - **O9** The lost-PIN path. iOS's D-3 asks for the phrase first; Android does not. This predates step 2 and is not built here (PD22).
 - **O10** (before the 4.1.5 cut) Should 4.1.5's wipe erase the reserved step-2 names (X-ROLLBACK c)?
+  - **Answered (Mark, 2026-11-19):** yes. A wipe clears every file, so 4.1.5's wipe erases the reserved step-2 names (X-ROLLBACK c). It rides the 4.1.5 train as a row of the private scope file.
 - **O11** The stage target dates.
+  - **Answered (Mark, 2026-11-19):** as soon as possible. No calendar date is set; each stage starts when its gate opens, and `ROADMAP.md` carries no step-2 date (G14).
 - **O12** If D1 is overridden, attaching before the PIN unlock becomes [R8] (E2b).
+  - **Answered (Mark, 2026-11-19):** not applicable. D1 is not overridden.
 - **O13** The Mac-only arms run at the iOS-and-core session's pace (hand-off item 4). Confirm that this blocks only its own pin moves.
+  - **Answered (Mark, 2026-11-19):** confirmed. The Mac-only arms block only their own pin moves.
 
 Added by the pre-flight scan (2026-11-19):
 
