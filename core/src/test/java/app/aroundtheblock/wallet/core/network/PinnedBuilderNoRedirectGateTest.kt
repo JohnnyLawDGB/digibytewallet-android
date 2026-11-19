@@ -49,7 +49,7 @@ class PinnedBuilderNoRedirectGateTest {
 
     // ── IPFS-NO-REDIRECT: every sender states its redirect policy ──────────────────────────────
 
-    private enum class Redirects { NEVER, FOLLOWS }
+    private enum class Redirects { NEVER, FOLLOWS, OPEN }
 
     private val core = "core/src/main/java/app/aroundtheblock/wallet/core"
     private val app = "app/src/main/java/app/aroundtheblock/wallet"
@@ -58,6 +58,8 @@ class PinnedBuilderNoRedirectGateTest {
      * Every shipped file that sends a request, and what it does with a 3xx. NEVER: the file derives a
      * client with both switches off for the host whose identity it relies on. FOLLOWS: it sends on the
      * client it is given, to hosts whose answer is not trusted for who served it; the reason says why.
+     * OPEN: it sends on the client it is given and has NOT been reviewed against the row 30 invariant.
+     * That is a recorded open item, not an exemption; the set of them is fixed in [openItems].
      */
     private val senderPolicy: Map<String, Pair<Redirects, String>> = mapOf(
         "$core/asset/network/DigiScopeAssetClient.kt" to (Redirects.NEVER to "pinned (4.1.2 row 30)"),
@@ -71,12 +73,17 @@ class PinnedBuilderNoRedirectGateTest {
             "the trusted gateway, whose answer is accepted on its pinned identity (IPFS-NO-REDIRECT) -- IpfsNoRedirectTest"),
         "$core/PriceProvider.kt" to (Redirects.FOLLOWS to "public price sources; none is pinned"),
         "$core/UpdateChecker.kt" to (Redirects.FOLLOWS to "the public release listing; not pinned"),
-        "$core/hub/HubWebSocket.kt" to (Redirects.FOLLOWS to "a WebSocket opened on the shared client"),
+        "$core/hub/HubWebSocket.kt" to (Redirects.OPEN to
+            "a WebSocket to the pinned host, opened on the shared client; to be decided in its own row (HUB-WS-NO-REDIRECT)"),
         "$app/DigiByteApp.kt" to (Redirects.FOLLOWS to
             "Coil's client: AssetImageResolver hands Coil ipfs:// only, which IpfsFetcher reads through IpfsClient"),
     )
 
-    private val sends = Regex("""\.newCall\s*\(|\.newWebSocket\s*\(|\.okHttpClient\s*\(\s*\w""")
+    /** The senders not yet reviewed. Nothing joins this set: a new sender is NEVER or FOLLOWS with a reason. */
+    private val openItems = setOf("$core/hub/HubWebSocket.kt")
+
+    /** A send, however the member is reached: called (`.newCall(`) or taken as a reference (`::newCall`). */
+    private val sends = Regex("""(?:\.|::)\s*newCall\b|(?:\.|::)\s*newWebSocket\b|\.okHttpClient\s*\(\s*\w""")
     private val bothOff = Regex(
         """newBuilder\(\)(?:(?!\.build\(\)).)*?\.followRedirects\(false\)\s*\.followSslRedirects\(false\)""",
         RegexOption.DOT_MATCHES_ALL,
@@ -88,6 +95,22 @@ class PinnedBuilderNoRedirectGateTest {
             .map { File(root, it) }.filter { it.isDirectory }
             .flatMap { dir -> dir.walkTopDown().filter { it.isFile && it.extension == "kt" }.toList() }
             .associate { it.relativeTo(root).invariantSeparatorsPath to KotlinText.withoutComments(it.readText(), keepStrings = false) }
+
+    /** The sender search is checked against samples, so a way of reaching a send it cannot see fails here. */
+    @Test fun `the sender search sees a request however the send is reached`() {
+        val seen = listOf(
+            "client.newCall(request).execute()",
+            "client\n    .newCall (request)",
+            "val send = client::newCall",
+            "val send: (Request) -> Call = httpClient :: newCall",
+            "webSocket = httpClient.newWebSocket(request, listener)",
+            "val open = httpClient::newWebSocket",
+            "ImageLoader.Builder(this).okHttpClient(client)",
+        )
+        assertEquals("a send the gate does not see", emptyList<String>(), seen.filter { !sends.containsMatchIn(it) })
+        val notASend = listOf("val newCallCount = 0", "fun renewCalls() {}", "// newCall", "okHttpClient()")
+        assertEquals("not a send, but counted as one", emptyList<String>(), notASend.filter { sends.containsMatchIn(it) })
+    }
 
     @Test fun `every file that sends a request states its redirect policy`() {
         val code = shippedCode()
@@ -107,9 +130,13 @@ class PinnedBuilderNoRedirectGateTest {
             val text = code[path] ?: return@filter true
             when (policy.first) {
                 Redirects.NEVER -> !bothOff.containsMatchIn(text)
-                Redirects.FOLLOWS -> text.contains("followRedirects(") || text.contains("followSslRedirects(")
+                Redirects.FOLLOWS, Redirects.OPEN -> text.contains("followRedirects(") || text.contains("followSslRedirects(")
             }
         }.keys.sorted()
         assertEquals("the stated redirect policy is not what the source does", emptyList<String>(), wrong)
+    }
+
+    @Test fun `the senders not yet reviewed are the recorded ones and no other`() {
+        assertEquals(openItems, senderPolicy.filterValues { it.first == Redirects.OPEN }.keys)
     }
 }

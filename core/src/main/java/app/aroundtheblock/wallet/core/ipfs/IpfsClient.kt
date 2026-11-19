@@ -26,13 +26,23 @@ import okhttp3.Request
  *
  * No IPFS daemon or libp2p dependency is required.
  */
-class IpfsClient(
+class IpfsClient internal constructor(
     private val httpClient: OkHttpClient,
-    private val cidVerifier: CidVerifier = CidVerifier(),
-    private val gateways: List<String> = DEFAULT_GATEWAYS,
-    /** The gateways trusted on their pinned identity. Not the default only where a test serves one locally. */
-    private val trustedGatewayPrefixes: List<String> = TRUSTED_GATEWAY_PREFIXES,
+    private val cidVerifier: CidVerifier,
+    private val gateways: List<String>,
+    /**
+     * The gateways trusted on their pinned identity. Settable only inside this module, where a test
+     * serves one locally: no caller outside it can name a host the pinner holds no pins for.
+     */
+    private val trustedGatewayPrefixes: List<String>,
 ) {
+    /** The shipped client: the trusted gateways are [TRUSTED_GATEWAY_PREFIXES] and nothing else. */
+    constructor(
+        httpClient: OkHttpClient,
+        cidVerifier: CidVerifier = CidVerifier(),
+        gateways: List<String> = DEFAULT_GATEWAYS,
+    ) : this(httpClient, cidVerifier, gateways, TRUSTED_GATEWAY_PREFIXES)
+
     /**
      * The client a trusted gateway is asked on: [httpClient] (its Tor routing, pins and pool) with
      * both redirect switches off, as on every other pinned client (4.1.2 row 30). Made on first use.
