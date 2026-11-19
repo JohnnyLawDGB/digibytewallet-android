@@ -335,7 +335,7 @@ The design's test plan (`2026-11-16-multi-wallet-design.md`, "Left to the builde
 The design leaves these to the builder, or the code required a choice. Each is a default the owner may override. A1 records them by number.
 
 - **PD1 Switch order.** Zero A's seed, then decrypt B's seed record (its mnemonic, under B's `_v2` key), then activate B. If anything fails, no seed is resident and B shows watch-only with "Unlock to send". That reads R5 and "one resident seed" literally. **Amended by G86:** the app PIN comes first and a declined or failed PIN changes nothing of either wallet; "no seed resident, B watch-only" applies only to failures after the zeroing.
-- **PD2 Key mismatch at activation.** If the keys derived from B's seed differ from B's key record, activation is refused, the seed is zeroed, and B stays watch-only. iOS does the same (`SeedStore.swift:327-335`). Mark rules refuse or replace (O1). **Amended by G85:** the refusal applies only to `activateWallet` on a context built from the record (the switch); at a cold-start unlock a record that differs from the seed is marked refused and never stops the unlock.
+- **PD2 Key mismatch at activation.** If the keys derived from B's seed differ from B's key record, activation is refused, the seed is zeroed, and B stays watch-only. iOS does the same (`SeedStore.swift:327-335`). Mark ruled refuse (O1, 2026-11-19). **Amended by G85:** the refusal applies only to `activateWallet` on a context built from the record (the switch); at a cold-start unlock a record that differs from the seed is marked refused and never stops the unlock.
 - **PD3** Removing the active wallet keeps F8's mark-and-restart.
 - **PD4** Stranded-send rebroadcast runs for the active wallet only.
 - **PD5 Band order.** The active wallet first, then the one fewest blocks behind, then registry order. A running band is preempted (quiesced, never discarded) only when the active wallet changes to one that needs a band. No band runs during a `SyncWorker` catch-up. **Amended by G37:** any band need of the active wallet preempts a non-active wallet's band whenever it arises (a rescan, Coinomi accounts, a lagging frontier), not only at a switch.
@@ -352,7 +352,7 @@ The design leaves these to the builder, or the code required a choice. Each is a
 - **PD9** The key record is a versioned core format with a KAT (C1). Encryption at rest stays on the platform.
 - **PD10** The post-reorg height lag (`core:BRPeerManager.c:4693`; `wallet->blockHeight` stays at the join until the next block) stays as today. Changing it changes one-wallet results and would need both pins.
 - **PD11 The integration branch** is `integration/multi-wallet-step2`. It is created from `develop` at the 4.1.5 cut, made CI-enabled by A3, merged with `develop` at least weekly and before every registry PR, and merged into `develop` once (V3). The alternative, a stack of PRs into `develop` merged in one sitting, is O3. **Amended by G12:** each sync of `develop` into it is a merge-only PR (conflict resolution only, CI green, a review of the resolutions).
-- **PD12** When the device lock is removed, every `_v2` key is invalidated and spending needs each wallet's phrase. The unbound key records stay, so balances keep showing. Open for Mark (O5).
+- **PD12** When the device lock is removed, every `_v2` key is invalidated and spending needs each wallet's phrase. The unbound key records stay, so balances keep showing. Mark ruled keep (O5, 2026-11-19).
 - **PD13 Shared chain names and the migration. Reversed by O7 (Mark, 2026-11-19; G96).**
   - The shared chain lives under the legacy wallet's 4.1.4 names, per network: the files `saved_blocks<net>.bin`, `saved_filter_headers<net>.bin` and `saved_cf_ledger<net>.bin`, and the chain keys in `dgb_sync_data<net>`. These are the names `WalletStores` resolves for the legacy scope (`kt-core:wallets/WalletStores.kt:16-17`, `:51-54`; `kt-core:wallets/WalletScope.kt:45-52`), and they are the shared chain's whether or not a legacy wallet exists on the device.
   - The migration moves, links, copies and renames nothing. Legacy's chain is the shared chain as it stands, when it passes today's restore preflight (G69's test, applied to legacy's chain alone). No other wallet's chain is ranked against it, even one that is ahead.
@@ -379,7 +379,7 @@ The design leaves these to the builder, or the code required a choice. Each is a
   - **Amended by G37 and G36:** the typed BUSY, with its own string, also answers a spend from a wallet that no manager holds or whose band is paused; the wait for publishes comes before the band is freed.
 - **PD21** The `CF_ELEMS_CACHE_NOINVALIDATE` and `CF_ELEMS_CACHE_COUNT_ONLY` arm names stay through step 2. Renaming them would turn core `develop`'s runs red against Android `develop`.
 - **PD22 The lost-PIN path** (`kt-app:ui/navigation/AppNavigation.kt:178-195`, `:345-387`). No watch-only wallet attaches until the new PIN is set and the app reaches Unlocked. The restore deferred there opens only the active wallet from its seed, as today. iOS's D-3 (ask for the phrase first) is noted for Mark (O9).
-- **PD23** The spend-auth prompt names the wallet that spends. Whether every spend screen names it too is O6. U5 runs only on his answer. **Amended by G93:** U5 (the prompt) is built unconditionally; only the per-screen naming (U5b) waits for O6.
+- **PD23** The spend-auth prompt names the wallet that spends. Whether every spend screen names it too is O6. U5 runs only on his answer. **Amended by G93:** U5 (the prompt) is built unconditionally; the per-screen naming (U5b) is built too: Mark answered O6 yes (2026-11-19).
 - **PD24 The wallet handle** is a `jlong`: `(slot << 32) | generation`. A stale or unknown handle is refused, never resolved to the active context. **Amended by G49:** handle 0 is reserved; generations start at 1 and skip 0 when they wrap.
 - **PD25** No publish-time copies. An A-to-B send shows in B when it confirms (about 15 s), as today.
 - **PD26** A detached `BRWallet` is freed only after the core detach has returned. PD15 guarantees that no holding manager still reaches it.
@@ -2191,7 +2191,7 @@ Today a worker catch-up after the service has died persists only the active wall
 
 **Rulings:** G9, G78, G79, G80
 
-**Landing:** the integration branch. **[R8]:** waits for Mark at merge (key material at rest and its Keystore key); batch M1 with C1; after X6. Put O5 (PD12) and O8 (ship the inert writer early) to him in the PR.
+**Landing:** the integration branch. **[R8]:** waits for Mark at merge (key material at rest and its Keystore key); batch M1 with C1; after X6. He answered O5 (keep) and O8 (yes, the inert writer may ship early) on 2026-11-19.
 **Depends on:** the C1 pin, K1.
 
 **Files:**
@@ -2292,7 +2292,7 @@ One opening gate serves both paths and is not re-implemented: `storedPassphrase`
 
 **Rulings:** G9, G56, G66, G70, G75, G77, G83, G84, G85
 
-**Landing:** the integration branch. Not R8, although it uses R8 pieces. If Mark overrides D1, an attach before the PIN unlock becomes [R8] (O12).
+**Landing:** the integration branch. Not R8, although it uses R8 pieces. D1 is not overridden (O12, answered 2026-11-19).
 **Depends on:** E3, B4, B8, S1, S2.
 
 **Files:**
