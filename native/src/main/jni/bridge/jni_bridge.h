@@ -185,17 +185,8 @@ extern int g_walletSwapped;
 void saved_transactions_release_after_build(BRWallet *wallet);
 void saved_transactions_discard(void);
 
-/* Callback handler (NativeCallback interface) */
-extern jobject  g_callbackHandler;
-
-/* Cached method IDs for NativeCallback — set in JNI_OnLoad or setCallbackHandler */
-extern jmethodID g_mid_onSyncProgress;
-extern jmethodID g_mid_onTransactionReceived;
-extern jmethodID g_mid_onPeerConnected;
-extern jmethodID g_mid_onPeerDisconnected;
-extern jmethodID g_mid_onSyncComplete;
-extern jmethodID g_mid_onSyncFailed;
-extern jmethodID g_mid_onBalanceChanged;
+/* The callback handler (NativeCallback) and its method IDs are private to jni_peer.c (g_cb there,
+ * JNI-CB-HANDLER): a callback reaches the handler only through cb_acquire/cb_release. */
 
 /* ---------- Helper functions ---------- */
 

@@ -48,16 +48,6 @@ uint32_t      g_walletCreationTime = 0;
 int           g_peerManagerNeedsRecreate = 0;
 int           g_walletSwapped = 0;   /* see jni_bridge.h */
 
-/* Callback globals — defined here, used by jni_peer.c via extern */
-jobject   g_callbackHandler  = NULL;
-jmethodID g_mid_onSyncProgress         = NULL;
-jmethodID g_mid_onTransactionReceived  = NULL;
-jmethodID g_mid_onPeerConnected        = NULL;
-jmethodID g_mid_onPeerDisconnected     = NULL;
-jmethodID g_mid_onSyncComplete         = NULL;
-jmethodID g_mid_onSyncFailed           = NULL;
-jmethodID g_mid_onBalanceChanged       = NULL;
-
 /* ---------- JNI_OnLoad ---------- */
 
 JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void *reserved) {
