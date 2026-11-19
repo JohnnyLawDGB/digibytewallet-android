@@ -112,9 +112,10 @@ class WalletStoreEraser internal constructor(
      * network, each attempted whatever the other reported. True when neither reads anything back.
      * For legacy this is [eraseStores], which spans both already.
      *
-     * Only a wallet's registry entry says which network its stores were written under, and
-     * `WalletManager.wipeWallet` does not rely on it: it erases every wallet under both. This is the
-     * same erase, for a caller about to drop an entry: no wipe can find the wallet afterwards.
+     * The ONE copy of the both-networks rule. Only a wallet's registry entry says which network its
+     * stores were written under, and `WalletManager.wipeWallet` does not rely on it: it erases every
+     * other wallet through this. A caller about to drop an entry does the same: the wipe finds the
+     * wallet afterwards only if it owed it this erase ([WipeOwedStores]).
      */
     fun eraseStoresOnBothNetworks(scope: WalletScope): Boolean = bothNetworksOf(scope).map(::eraseStores).all { it }
 

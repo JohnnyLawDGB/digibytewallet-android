@@ -19,7 +19,11 @@ Status: for owner approval (2026-11-16); builder-checked. Step 2 amended 2026-11
 > - Wipe: Settings -> Wipe Wallet wipes every wallet through one routine. The owed-wipe way out
 >   decides on all-wallet records gone, after attempting every listed alias; a key with no record
 >   does not block. Phase 2 deletes only listed wallets' aliases. "Last wallet" means the last on
->   the device, across both networks.
+>   the device, across both networks. Before a wallet's stores go, the wipe puts every other
+>   wallet's id on record (`dgb_wipe_owed`, `WipeOwedStores`) and takes it off only when that
+>   wallet's stores read back empty on both networks: the next launch's wipe lists those ids, and
+>   no wipe verifies while one is on record (INT-2026-11-19-A; waits for the owner, it changes the
+>   wipe). The both-networks erase is the eraser's (`eraseStoresOnBothNetworks`), one copy.
 > - Removal: `RemoveResult.NotRemoved` (nothing written) vs `Incomplete` (REMOVING; housekeeping
 >   finishes). Removing legacy first releases the DB password's legacy wrap. No concurrent add/remove.
 > - Add: a cancelled add abandons its reserved slot; a duplicate cleans up its entry and alias.

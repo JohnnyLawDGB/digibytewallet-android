@@ -19,8 +19,9 @@ import android.content.Context
  * [app.aroundtheblock.wallet.core.wallets.WalletStores]), so a testnet session never reads or
  * overwrites mainnet data, and vice versa.
  *
- * Shared by every wallet (one copy per install): `dgb_wallets` (the registry),
- * `dgb_web_session_owner`, `dgb_pin_store`, `dgb_db_key` and the network-only stores listed in
+ * Shared by every wallet (one copy per install): `dgb_wallets` (the registry), `dgb_wipe_owed`
+ * (the ids a wipe still owes a store erase), `dgb_web_session_owner`, `dgb_pin_store`,
+ * `dgb_db_key` and the network-only stores listed in
  * [app.aroundtheblock.wallet.core.wallets.WalletStores.NETWORK_PREFS]. See WalletStores for the
  * full per-wallet / per-network table.
  *
