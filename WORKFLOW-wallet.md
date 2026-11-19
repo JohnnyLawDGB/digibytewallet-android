@@ -1,5 +1,13 @@
 # Claude Code Workflow — digibytewallet-android
 
+> **Historical sequence checklist; status corrected 2026-11-19.** This file retains the
+> older checklist for provenance. Its unchecked boxes and old versions are not a current
+> task queue: duress PIN was cancelled, seed-key binding and other items have since landed,
+> and release-please is gone. Start with [CLAUDE.md](CLAUDE.md), the current checkpoint in
+> [ROADMAP.md](ROADMAP.md), and [docs/development-process.md](docs/development-process.md).
+> Use [RELEASING.md](RELEASING.md) for releases. Those current records take precedence over
+> the dated sequencing below; this note changes none of their rules.
+
 Drop this file in the repo root. Each Claude Code session in this
 terminal starts by reading: `CLAUDE.md` → `ROADMAP.md` → this file →
 the one spec for the sequence in flight. One sequence = one branch =
