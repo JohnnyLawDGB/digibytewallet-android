@@ -2,6 +2,7 @@ package app.aroundtheblock.wallet.core.hub
 
 import android.util.Log
 import app.aroundtheblock.wallet.core.digiscope.DigiScopeClient
+import app.aroundtheblock.wallet.core.tor.TorRoute
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkStatic
@@ -63,7 +64,7 @@ class HubSessionEndTest {
         every { client.newWebSocket(any(), capture(listener)) } returns socket
         val digiScope = mockk<DigiScopeClient>()
         every { digiScope.getToken() } answers { token }
-        val hub = HubWebSocket(client, digiScope)
+        val hub = HubWebSocket(client, digiScope, route = { TorRoute.Direct })
         hub.connect()
         listener.captured.onOpen(socket, Response.Builder().request(socket.request()).protocol(Protocol.HTTP_1_1)
             .code(101).message("Switching Protocols").build())

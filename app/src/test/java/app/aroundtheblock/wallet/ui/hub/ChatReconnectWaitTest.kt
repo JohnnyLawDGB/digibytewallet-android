@@ -7,6 +7,7 @@ import app.aroundtheblock.wallet.core.hub.ConnectionState
 import app.aroundtheblock.wallet.core.hub.HubWebSocket
 import app.aroundtheblock.wallet.core.hub.WebSocketEvent
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -34,11 +35,11 @@ class ChatReconnectWaitTest {
 
     private val scheduler = TestCoroutineScheduler()
     private val socket = mockk<HubWebSocket>(relaxed = true)
+    private val client = mockk<DigiScopeClient>(relaxed = true)
     private lateinit var chat: ChatViewModel
 
     @Before fun setUp() {
         Dispatchers.setMain(StandardTestDispatcher(scheduler))
-        val client = mockk<DigiScopeClient>(relaxed = true)
         every { client.isLoggedIn() } returns true
         coEvery { client.getMessages(any(), any(), any()) } returns emptyList()
         // The server refuses every connection: the socket stays down and asks for a minute's wait.
@@ -65,5 +66,33 @@ class ChatReconnectWaitTest {
 
         // Five minutes at one try a minute: five more, not sixty.
         verify(exactly = 6) { socket.connect() }
+    }
+
+    /**
+     * A retry that starts no socket (Tor on and not connected yet: [HubWebSocket.connect] answers
+     * false) asks for no history either. The retries come every 5 s then, and a history request
+     * made on each would wait on Tor beside the ones before it.
+     */
+    @Test fun `a retry that starts no socket asks for no history`() {
+        every { socket.connect() } returns false
+        every { socket.reconnectDelayMs() } returns HubWebSocket.RECONNECT_FIRST_MS
+        scheduler.runCurrent()
+        coVerify(exactly = 1) { client.getMessages(any(), any(), any()) } // on opening the chat
+
+        scheduler.advanceTimeBy(60_000L)
+        scheduler.runCurrent()
+
+        verify(exactly = 13) { socket.connect() }
+        coVerify(exactly = 1) { client.getMessages(any(), any(), any()) }
+    }
+
+    @Test fun `GUARD a retry that starts a socket reloads the history`() {
+        every { socket.connect() } returns true
+        scheduler.runCurrent()
+
+        scheduler.advanceTimeBy(60_000L)
+        scheduler.runCurrent()
+
+        coVerify(exactly = 2) { client.getMessages(any(), any(), any()) }
     }
 }
