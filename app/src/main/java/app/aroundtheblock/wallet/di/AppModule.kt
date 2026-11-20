@@ -303,8 +303,16 @@ object AppModule {
     ): DigiScopeClient = DigiScopeClient(client, context)
 
     @Provides @Singleton
-    fun provideHubWebSocket(client: OkHttpClient, digiScopeClient: DigiScopeClient): HubWebSocket =
-        HubWebSocket(client, digiScopeClient)
+    fun provideHubWebSocket(client: OkHttpClient, digiScopeClient: DigiScopeClient, torManager: TorManager): HubWebSocket =
+        HubWebSocket(client, digiScopeClient, route = { NetworkModule.torRoute(torManager) }).also { hub ->
+            // HUB-WS-TOR: a route change closes the socket opened on the old route. Unconfined, so
+            // the close runs on the thread that changed the route, before that change returns;
+            // process-lifetime, as the socket holder is.
+            hub.closeOnRouteChange(
+                torManager.routes,
+                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Unconfined),
+            )
+        }
 
     @Provides fun provideCachedMessageDao(db: WalletDatabase): CachedMessageDao = db.cachedMessageDao()
 

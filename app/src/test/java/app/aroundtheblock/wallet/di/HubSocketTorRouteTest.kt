@@ -4,11 +4,13 @@ import android.util.Log
 import app.aroundtheblock.wallet.core.digiscope.DigiScopeClient
 import app.aroundtheblock.wallet.core.hub.ConnectionState
 import app.aroundtheblock.wallet.core.hub.HubWebSocket
+import app.aroundtheblock.wallet.core.tor.TorManager
 import app.aroundtheblock.wallet.core.tor.TorRoute
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkStatic
 import io.mockk.unmockkStatic
+import kotlinx.coroutines.flow.flowOf
 import okhttp3.Interceptor
 import okhttp3.Response
 import org.junit.After
@@ -28,7 +30,10 @@ import java.util.concurrent.atomic.AtomicInteger
  * is never opened outside Tor. Built through AppModule's provider on the shared client, as the app
  * builds it:
  *  - Tor on and not connected: the handshake request is held by the shared client's Tor wait and
- *    then refused; it never gets past it;
+ *    then refused; it never gets past it. Since HUB-WS-TOR the socket holder does not start a
+ *    socket in that state at all (HubRouteChangeTest); here it is told the route is direct, so
+ *    what is shown is that the client holds the request back on its own, whatever the holder
+ *    believed when it started the socket;
  *  - Tor connected: the handshake goes to Tor's SOCKS port, not to the host.
  */
 class HubSocketTorRouteTest {
@@ -43,6 +48,12 @@ class HubSocketTorRouteTest {
     @After fun restoreLog() = unmockkStatic(Log::class)
 
     private val digiScope = mockk<DigiScopeClient>().also { every { it.getToken() } returns "token" }
+
+    /** A Tor state holder that reports [route] and never changes it. */
+    private fun torReporting(route: TorRoute): TorManager = mockk<TorManager>().also {
+        every { it.route() } returns route
+        every { it.routes } returns flowOf(route)
+    }
 
     /** Counts the requests that reach it. */
     private class Seen : Interceptor {
@@ -63,7 +74,7 @@ class HubSocketTorRouteTest {
             interceptors().add(after)
         }.build()
 
-        val hub = AppModule.provideHubWebSocket(client, digiScope)
+        val hub = AppModule.provideHubWebSocket(client, digiScope, torReporting(TorRoute.Direct))
         hub.connect()
         awaitDisconnected(hub, timeoutMs = 10_000)
 
@@ -75,7 +86,7 @@ class HubSocketTorRouteTest {
         StandInTor().use { tor ->
             val client = NetworkModule.buildSharedClient({ TorRoute.Socks(tor.port) })
 
-            val hub = AppModule.provideHubWebSocket(client, digiScope)
+            val hub = AppModule.provideHubWebSocket(client, digiScope, torReporting(TorRoute.Socks(tor.port)))
             hub.connect()
             // The stand-in closes after the SOCKS greeting, so the handshake then fails.
             awaitDisconnected(hub, timeoutMs = 10_000)

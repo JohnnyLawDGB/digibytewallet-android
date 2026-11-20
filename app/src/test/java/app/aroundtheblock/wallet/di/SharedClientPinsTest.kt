@@ -66,7 +66,7 @@ class SharedClientPinsTest {
     }
 
     @Test fun `the Hub WebSocket is made on a pinned client`() {
-        val hub = AppModule.provideHubWebSocket(shared, mockk(relaxed = true))
+        val hub = AppModule.provideHubWebSocket(shared, mockk(relaxed = true), TorManager(context()))
         val client = clientOf(hub, "httpClient")
         assertPinsDigiScope("the Hub WebSocket's client", client)
         // OkHttp opens a WebSocket on a copy of the client it is given, changing only the event

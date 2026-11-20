@@ -15,9 +15,12 @@ import io.matthewnelson.kmp.tor.runtime.core.config.TorOption
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -126,6 +129,18 @@ class TorManager(private val context: Context) {
 
     /** Where an app-made connection may go right now; see [TorRoute]. */
     fun route(): TorRoute = TorRoute.of(isEnabled, getSocksPort(), _clearnetFallbackAnnounced.value)
+
+    /**
+     * [route] as it changes: the current route first, then each new one. For a long-lived
+     * connection, which must be closed when the route it was opened on is no longer the route
+     * (HUB-WS-TOR); a request asks [route] when it is made and needs no more. Built lazily: the
+     * three flows it reads are declared around it.
+     */
+    val routes: Flow<TorRoute> by lazy {
+        combine(_state, _enabled, _clearnetFallbackAnnounced) { state, enabled, fallback ->
+            TorRoute.of(enabled, (state as? TorState.Connected)?.socksPort, fallback)
+        }.distinctUntilChanged()
+    }
 
     // The install's Tor file. Only the setters of isEnabled and upgradePromptShown write it, and it
     // never leaves this class: a remove or a clear anywhere else would read as a new install at the

@@ -2,6 +2,7 @@ package app.aroundtheblock.wallet.core.hub
 
 import android.util.Log
 import app.aroundtheblock.wallet.core.digiscope.DigiScopeClient
+import app.aroundtheblock.wallet.core.tor.TorRoute
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkStatic
@@ -143,7 +144,7 @@ class HubSocketFrameCapTest {
         val digiScope = mockk<DigiScopeClient>()
         every { digiScope.getToken() } returns "token"
 
-        val hub = HubWebSocket(client, digiScope)
+        val hub = HubWebSocket(client, digiScope, route = { TorRoute.Direct })
         hub.connect()
         val handshake = Response.Builder()
             .request(socket.request())

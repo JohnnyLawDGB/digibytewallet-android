@@ -2,12 +2,17 @@ package app.aroundtheblock.wallet.core.hub
 
 import app.aroundtheblock.wallet.core.LogSafe
 import app.aroundtheblock.wallet.core.digiscope.DigiScopeClient
+import app.aroundtheblock.wallet.core.tor.TorRoute
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -17,9 +22,19 @@ import okio.ByteString
 import okio.utf8Size
 import org.json.JSONObject
 
+/**
+ * The Hub chat socket. At most one runs at a time, and none outlives the route it was opened on
+ * (HUB-WS-TOR): each connection records the [TorRoute] in force when it was started, and it is
+ * closed as soon as the route is another one — when [closeOnRouteChange] hears of the change, and
+ * again, should that have been missed, when the socket opens and before any frame is sent on it.
+ * Nothing is opened while the route is [TorRoute.Blocked] (Tor on and not connected yet): the
+ * caller's ordinary retry opens the next socket once there is a route, which is then Tor's.
+ */
 class HubWebSocket(
     private val httpClient: OkHttpClient,
     private val digiScopeClient: DigiScopeClient,
+    /** Where a connection made now would go; the app passes the Tor state holder's answer. */
+    private val route: () -> TorRoute,
     /** Milliseconds on a clock that only moves forward; a parameter so tests can move it. */
     private val nowMs: () -> Long = { System.nanoTime() / 1_000_000 },
 ) {
@@ -61,8 +76,10 @@ class HubWebSocket(
     private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
     val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
 
-    private var webSocket: WebSocket? = null
-    private var listener: Listener? = null
+    /** Guards [webSocket] and [listener]: connect, disconnect and a route change arrive on different threads. */
+    private val lock = Any()
+    @Volatile private var webSocket: WebSocket? = null
+    @Volatile private var listener: Listener? = null
 
     /**
      * Connections refused in a row: one that failed, one the server ended within
@@ -77,17 +94,63 @@ class HubWebSocket(
             android.util.Log.w("HubWS", "connect: no token, skipping")
             return
         }
-        android.util.Log.i("HubWS", "connect: attempting WebSocket to $WS_URL")
-        val request = Request.Builder()
-            .url(WS_URL)
-            .header("Authorization", "Bearer $token")
-            .build()
+        synchronized(lock) {
+            // One socket at a time: whatever is open, or still opening, is ended before another is started.
+            endCurrent("Replaced by a new connection")
+            val openedOn = route()
+            if (openedOn is TorRoute.Blocked) {
+                // Tor is on and not connected yet. Nothing is started; the caller's retry comes back.
+                android.util.Log.i("HubWS", "connect: Tor is on and not connected yet, not connecting")
+                _connectionState.value = ConnectionState.DISCONNECTED
+                return
+            }
+            android.util.Log.i("HubWS", "connect: attempting WebSocket to $WS_URL")
+            val request = Request.Builder()
+                .url(WS_URL)
+                .header("Authorization", "Bearer $token")
+                .build()
 
-        _connectionState.value = ConnectionState.RECONNECTING
+            _connectionState.value = ConnectionState.RECONNECTING
 
-        val listener = Listener().also { this.listener = it }
-        webSocket = httpClient.newWebSocket(request, listener)
+            val listener = Listener(openedOn).also { this.listener = it }
+            webSocket = httpClient.newWebSocket(request, listener)
+        }
     }
+
+    /**
+     * Ends the current connection, open or still opening, without counting it as a refusal: the
+     * close is ours. Cancelled as well as closed, so the connection is down now and not when the
+     * server answers the close. Call with [lock] held.
+     */
+    private fun endCurrent(reason: String) {
+        val socket = webSocket ?: return
+        listener?.ended = true
+        webSocket = null
+        socket.close(1000, reason)
+        socket.cancel()
+        _connectionState.value = ConnectionState.DISCONNECTED
+    }
+
+    /**
+     * Closes the socket if it was opened on a route other than [now] or than the route in force.
+     * Returns true if it closed one. The caller's ordinary retry opens the next socket, on the
+     * new route.
+     */
+    fun closeIfRouteChanged(now: TorRoute = route()): Boolean = synchronized(lock) {
+        val openedOn = listener?.openedOn
+        if (webSocket == null || openedOn == null) return false
+        if (openedOn == now && openedOn == route()) return false
+        android.util.Log.i("HubWS", "the route changed: closing the socket opened on the old one")
+        endCurrent("Route changed")
+        true
+    }
+
+    /**
+     * Follows [routes] (the Tor state holder's route, as it changes) for as long as [scope] lives,
+     * closing the socket whenever the route is no longer the one it was opened on.
+     */
+    fun closeOnRouteChange(routes: Flow<TorRoute>, scope: CoroutineScope): Job =
+        scope.launch { routes.collect { closeIfRouteChanged(it) } }
 
     /**
      * How long to wait before trying again: [reconnectDelayAfter] the refusals in a row so far. A
@@ -101,7 +164,10 @@ class HubWebSocket(
      * passed on. OkHttp hands a frame over only once it is wholly in memory, so what this protects
      * is that an oversized frame is never trusted and the connection that sent it ends.
      */
-    private inner class Listener : WebSocketListener() {
+    private inner class Listener(
+        /** The route in force when this connection was started. */
+        val openedOn: TorRoute,
+    ) : WebSocketListener() {
         @Volatile private var refused = false
         @Volatile private var openedAtMs = -1L
 
@@ -115,10 +181,15 @@ class HubWebSocket(
             // once and never joined: left open and unjoined it would read as CONNECTED, so it would
             // never be replaced, and would later carry frames for a newer session. Closed as
             // sendAuthorized closes a socket with no session: by us, so not counted as a refusal.
-            if (ended || digiScopeClient.getToken() == null) {
-                android.util.Log.i("HubWS", "opened with no Hub session: closing")
+            // The same for a socket that opens after the route changed under its handshake
+            // (HUB-WS-TOR): it is never joined, and is cancelled as well, so it is down at once.
+            val noSession = ended || digiScopeClient.getToken() == null
+            val routeChanged = !noSession && route() != openedOn
+            if (noSession || routeChanged) {
+                android.util.Log.i("HubWS", if (routeChanged) "opened on a route no longer in force: closing" else "opened with no Hub session: closing")
                 ended = true
-                webSocket.close(1000, "No Hub session")
+                webSocket.close(1000, if (routeChanged) "Route changed" else "No Hub session")
+                if (routeChanged) webSocket.cancel()
                 if (this@HubWebSocket.webSocket === webSocket) this@HubWebSocket.webSocket = null
                 // Only the current connection's listener speaks for the state: a stale one must not
                 // overwrite a newer connection's.
@@ -130,7 +201,7 @@ class HubWebSocket(
             // the first connect and each reconnect alike. Sent on the socket that opened, which
             // may not be stored in [webSocket] yet.
             webSocket.send(joinFrame(CHAT_CHANNEL_ID))
-            _connectionState.value = ConnectionState.CONNECTED
+            if (isCurrent()) _connectionState.value = ConnectionState.CONNECTED
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
@@ -157,20 +228,26 @@ class HubWebSocket(
             android.util.Log.w("HubWS", "closing: $code ${LogSafe.text(reason)}")
             webSocket.close(1000, null)
             end(refusal = !held())
-            _connectionState.value = ConnectionState.DISCONNECTED
+            if (isCurrent()) _connectionState.value = ConnectionState.DISCONNECTED
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
             android.util.Log.w("HubWS", "closed: $code ${LogSafe.text(reason)}")
             end(refusal = !held())
-            _connectionState.value = ConnectionState.DISCONNECTED
+            if (isCurrent()) _connectionState.value = ConnectionState.DISCONNECTED
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
             android.util.Log.e("HubWS", "failure: ${LogSafe.text(t.message)}, response=${response?.code}")
             end(refusal = !held())
-            _connectionState.value = ConnectionState.DISCONNECTED
+            if (isCurrent()) _connectionState.value = ConnectionState.DISCONNECTED
         }
+
+        /**
+         * Only the current connection's listener speaks for the state: one that [connect] or a
+         * route change has replaced ends later, and must not mark its successor disconnected.
+         */
+        private fun isCurrent(): Boolean = this@HubWebSocket.listener === this
 
         /** True once this connection has stayed up [ACCEPTED_AFTER_MS]. */
         private fun held(): Boolean = openedAtMs >= 0 && nowMs() - openedAtMs >= ACCEPTED_AFTER_MS
@@ -189,11 +266,11 @@ class HubWebSocket(
             webSocket.close(CLOSE_MESSAGE_TOO_BIG, "frame over the size limit")
             webSocket.cancel()
             if (this@HubWebSocket.webSocket === webSocket) this@HubWebSocket.webSocket = null
-            _connectionState.value = ConnectionState.DISCONNECTED
+            if (isCurrent()) _connectionState.value = ConnectionState.DISCONNECTED
         }
     }
 
-    fun disconnect() {
+    fun disconnect() = synchronized(lock) {
         // The user's own close is not a refusal: it is never counted.
         listener?.ended = true
         webSocket?.close(1000, "User disconnect")
@@ -205,6 +282,8 @@ class HubWebSocket(
      * Every frame goes out only while the Hub session it was opened for is still held (4.1.2 row 8, N4).
      * A socket outlives a logout unless something closes it, and the server knows it by the token it
      * was opened with: with no token now, nothing is sent and the socket is closed instead.
+     * Nor does a frame go out on a socket opened on a route no longer in force (HUB-WS-TOR): it is
+     * closed instead, and the frame is dropped as it is on any closed socket.
      */
     private fun sendAuthorized(frame: String) {
         if (digiScopeClient.getToken() == null) {
@@ -214,6 +293,7 @@ class HubWebSocket(
             }
             return
         }
+        if (closeIfRouteChanged()) return
         webSocket?.send(frame)
     }
 
