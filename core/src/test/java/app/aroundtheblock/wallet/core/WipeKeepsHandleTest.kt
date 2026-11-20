@@ -80,6 +80,30 @@ class WipeKeepsHandleTest {
         }
     }
 
+    /**
+     * A store as the platform's behaves when a commit fails: `commit()` reports false and the file
+     * keeps what it held, but this process reads its own write back until it ends.
+     */
+    private class MemoryOnlyPrefs(private val inner: SharedPreferences) : SharedPreferences by inner {
+        private val view = HashMap<String, Any?>(inner.all)
+        override fun getAll(): MutableMap<String, *> = HashMap(view)
+        override fun getString(key: String, defValue: String?) = view[key] as? String ?: defValue
+        override fun contains(key: String) = view.containsKey(key)
+        override fun edit(): SharedPreferences.Editor = object : SharedPreferences.Editor {
+            private val ops = ArrayList<() -> Unit>()
+            override fun putString(key: String, value: String?) = apply { ops += { view[key] = value } }
+            override fun putStringSet(key: String, values: MutableSet<String>?) = apply { ops += { view[key] = values } }
+            override fun putInt(key: String, value: Int) = apply { ops += { view[key] = value } }
+            override fun putLong(key: String, value: Long) = apply { ops += { view[key] = value } }
+            override fun putFloat(key: String, value: Float) = apply { ops += { view[key] = value } }
+            override fun putBoolean(key: String, value: Boolean) = apply { ops += { view[key] = value } }
+            override fun remove(key: String) = apply { ops += { view.remove(key) } }
+            override fun clear() = apply { ops += { view.clear() } }
+            override fun commit(): Boolean { ops.forEach { it() }; return false }
+            override fun apply() { ops.forEach { it() } }
+        }
+    }
+
     private inner class Device {
         val root: File = tmp.newFolder()
         val vault = FakeVault()
@@ -87,6 +111,10 @@ class WipeKeepsHandleTest {
 
         /** Prefs files whose writes are refused, in every launch, until taken out again. */
         val refusing = mutableSetOf<String>()
+
+        /** Prefs files whose writes this process reads back although they never reach the file. */
+        val memoryOnly = mutableSetOf<String>()
+        private val memoryOnlyOpen = HashMap<String, SharedPreferences>()
 
         lateinit var ctx: Context
         lateinit var prefs: FilePrefsFactory
@@ -105,6 +133,12 @@ class WipeKeepsHandleTest {
         fun launch() {
             ActiveWallet.resetForTest()
             filePrefsContext(root).also { (c, p) -> ctx = c; prefs = p }
+            WipeOwedStores.resetForTest()
+            memoryOnlyOpen.clear()
+            every { ctx.getSharedPreferences(match { it in memoryOnly }, any()) } answers {
+                memoryOnlyOpen.getOrPut(firstArg()) { MemoryOnlyPrefs(prefs.prefsFor(firstArg())) }
+            }
+            every { ctx.deleteSharedPreferences(match { it in memoryOnly }) } returns false
             every { ctx.getSharedPreferences(match { it in refusing }, any()) } answers {
                 RefusingPrefs(prefs.prefsFor(firstArg()))
             }
@@ -289,6 +323,37 @@ class WipeKeepsHandleTest {
         assertTrue("$third", third.verified)
         assertEquals("a verified wipe left the wallet's id on the device", emptyList<String>(), d.namingB())
         assertFalse("a verified wipe left the registry", File(d.root, "shared_prefs/${WalletRegistry.PREFS}.xml").exists())
+    }
+
+    @Test fun `a record write this process reads back but that never reached the file does not release the registry`() = runTest {
+        val d = Device().apply { populate() }
+        // One run in which B's store refuses and the record of ids takes its writes in memory only.
+        d.refusing += d.stuck
+        d.memoryOnly += WipeOwedStores.PREFS
+
+        val first = d.walletManager().wipeThenReleasePin(d.pin())
+
+        assertTrue("precondition: every seed record and key went", first.seedGone)
+        assertFalse(first.verified)
+        assertTrue("precondition: this process reads the id back", d.b.walletId in WipeOwedStores.ids(d.ctx))
+        assertFalse("precondition: the id never reached the file", File(d.root, "shared_prefs/${WipeOwedStores.PREFS}.xml").exists())
+
+        // The next launch: the record takes writes again, the store still refuses.
+        d.memoryOnly.clear()
+        d.launch()
+        val pin = d.pin()
+        val second = d.walletManager().wipeThenReleasePin(pin)
+
+        assertTrue("precondition: the store is still on the device", d.stuckStoreOnDisk())
+        assertFalse("a wallet's store is on the device, yet the wipe verified", second.verified)
+        assertTrue("the PIN store was cleared by a wipe that left a wallet's store", pin.hasPin())
+
+        d.refusing.clear()
+        d.launch()
+        val third = d.walletManager().wipeThenReleasePin(d.pin())
+
+        assertTrue("$third", third.verified)
+        assertEquals("a verified wipe left the wallet's id on the device", emptyList<String>(), d.namingB())
     }
 
     @Test fun `a wipe does not verify while the record of ids cannot be read`() = runTest {

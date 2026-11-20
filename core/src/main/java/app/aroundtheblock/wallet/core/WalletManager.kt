@@ -1108,7 +1108,10 @@ class WalletManager @Suppress("LongParameterList") constructor(
             attempt("owed stores settled") {
                 val (cleared, left) = otherIds.partition { othersCleared[it] == true }
                 val landed = WipeOwedStores.record(context, owed = left, cleared = cleared)
-                leftOnRecord = left.isEmpty() || WipeOwedStores.read(context)?.containsAll(left) == true
+                // Read back only behind a write that landed: a failed commit still changes what this
+                // process reads, and the registry does not go on that view alone.
+                leftOnRecord = left.isEmpty() ||
+                    (landed && WipeOwedStores.everyWriteLanded() && WipeOwedStores.read(context)?.containsAll(left) == true)
                 landed && WipeOwedStores.settled(context)
             },
             // The registry goes only once no wallet's record is left (while one is, the registry

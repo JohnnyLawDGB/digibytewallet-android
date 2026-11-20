@@ -21,6 +21,18 @@ object WipeOwedStores {
     private const val KEY_IDS = "ids"
     private const val TAG = "WipeOwedStores"
 
+    /**
+     * True after a write of this process that did not land. What [read] answers may then be this
+     * process's view only, not the file's, so nothing relies on it until a write lands.
+     */
+    @Volatile private var unlanded = false
+
+    /** Whether what [read] answers is what the file holds, as far as this process wrote it. */
+    fun everyWriteLanded(): Boolean = !unlanded
+
+    /** A new process holds nothing from the one before; tests model a launch with this. */
+    internal fun resetForTest() { unlanded = false }
+
     private fun store(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     /** The ids on record, each once; null when the record cannot be read. */
@@ -45,12 +57,19 @@ object WipeOwedStores {
     fun record(context: Context, owed: Collection<String> = emptyList(), cleared: Collection<String> = emptyList()): Boolean {
         val held = read(context) ?: return false
         val next = (held - cleared.toSet() + owed.filter(::listable)).distinct()
-        if (next == held) return true
+        // "Nothing to write" is trusted only while every earlier write of this process landed: a
+        // commit that fails still changes what this process reads back, so after one the record is
+        // written again in full until a write lands.
+        if (next == held && !unlanded) return true
         val store = store(context)
-        if (next.isNotEmpty()) return store.edit().putString(KEY_IDS, next.joinToString(SEPARATOR)).commit()
-        val landed = store.edit().clear().commit()
+        val landed = if (next.isNotEmpty()) {
+            store.edit().putString(KEY_IDS, next.joinToString(SEPARATOR)).commit()
+        } else {
+            store.edit().clear().commit()
+        }
+        unlanded = !landed
         // The emptied file names no wallet; [settled] reads back that it went.
-        if (landed) runCatching { context.deleteSharedPreferences(PREFS) }
+        if (landed && next.isEmpty()) runCatching { context.deleteSharedPreferences(PREFS) }
         return landed
     }
 
