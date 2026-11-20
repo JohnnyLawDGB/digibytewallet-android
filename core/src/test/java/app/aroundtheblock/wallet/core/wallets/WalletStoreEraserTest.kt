@@ -64,7 +64,7 @@ class WalletStoreEraserTest {
 
     /** The names a scope owns, from the one list. */
     private fun prefsOf(scope: WalletScope): Set<String> =
-        (WalletStores.WALLET_AND_NETWORK_PREFS + WalletStores.WALLET_PREFS).map { WalletStores.prefsName(it, scope) }.toSet()
+        (WalletStores.WALLET_AND_NETWORK_PREFS + WalletStores.WALLET_PREFS + WalletStores.RESERVED_WALLET_PREFS).map { WalletStores.prefsName(it, scope) }.toSet()
 
     private fun filesOf(scope: WalletScope): Set<String> =
         WalletStores.WALLET_AND_NETWORK_FILES.flatMap { listOf(WalletStores.fileName(it, scope), WalletStores.fileName(it, scope) + ".tmp") }.toSet()

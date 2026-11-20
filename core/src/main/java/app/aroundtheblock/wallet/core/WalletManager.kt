@@ -198,8 +198,9 @@ class WalletManager @Suppress("LongParameterList") constructor(
     // Every seed key alias of every wallet, which the wipe deletes and reads back. Not
     // [keyStoreManager], which is bound to this manager's own wallet.
     private val keystoreAliases: KeystoreAliases = AndroidKeystoreAliases,
-    // Every wallet id on the device: the registry, the seed records on disk, the Keystore aliases
-    // and the ids an earlier wipe still owes a store erase. Injectable because in-memory test
+    // Every wallet id on the device, as [ActiveWallet.everyWalletId] finds them (the registry, the
+    // seed records and key records on disk, the Keystore aliases and the ids an earlier wipe still
+    // owes a store erase). Injectable because in-memory test
     // prefs create no files to list.
     private val allWalletIds: () -> List<String> = {
         app.aroundtheblock.wallet.core.wallets.ActiveWallet.everyWalletId(context) { keystoreAliases.aliases() }
@@ -1008,7 +1009,7 @@ class WalletManager @Suppress("LongParameterList") constructor(
      * address set, recorded sends, filter-header chain, Room DB), so a security wipe (manual
      * Settings OR the PIN wipe-after-N backstop) doesn't leave transaction history behind. Both
      * paths call this single routine, and one run covers every wallet ([allWalletIds]: the
-     * registry, the seed records on disk, the Keystore aliases and the ids an earlier wipe left
+     * registry, the seed records and key records on disk, the Keystore aliases and the ids an earlier wipe left
      * on record), BOTH networks' stores, the registry `dgb_wallets` and the identity sessions
      * ([IdentitySessionWipe]).
      *
@@ -1035,6 +1036,19 @@ class WalletManager @Suppress("LongParameterList") constructor(
      * alias has no entry to keep, so if the record's write and one of that wallet's stores both
      * refuse in one run, the next wipe does not list it; and ids in a record file the platform
      * can no longer parse are lost with it.
+     *
+     * The stores include the names multi-wallet step 2 reserves (WIPE-RESERVED-NAMES; the one
+     * list is the plan's task A1, held in code by [WalletStores]). No build writes them yet; the
+     * wipe erases them so that a later version's file or key is not left for a downgrade or a
+     * rollback build to find. All of it is the third phase, and nothing in the first two waits on
+     * any of it: each wallet's key record (`dgb_wallet_keys`, `dgb_wallet_keys_<id>`) is one of
+     * that wallet's stores, so one that is left keeps its wallet's id on record as any other store
+     * does; legacy's own band stores go on both networks (`saved_filter_headers_legacy<net>.bin`,
+     * `saved_cf_ledger_legacy<net>.bin`, `saved_blocks_legacy<net>.bin`, each with its
+     * `.bin.tmp`, and the prefs `dgb_sync_data_legacy<net>`, deleted and not only cleared); and
+     * the alias `dgb_wallet_keys_wrap` goes with legacy's leftover state. That alias is not a
+     * seed key (it will wrap public master keys), so it is neither deleted with the seed keys nor
+     * counted in [WipeReport.seedGone]: left behind, it makes the wipe unverified as a store does.
      *
      * Nothing of the wiped wallet keeps running once the erase begins: every session running for
      * it in this process ([WalletSessionStop] — the sync service) is stopped first, then the

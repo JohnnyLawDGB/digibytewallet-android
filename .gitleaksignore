@@ -1,0 +1,7 @@
+# One line per finding gitleaks got wrong, as "<commit>:<file>:<rule>:<line>". Each entry names
+# exactly one line of one commit; it exempts nothing else, and a real secret added anywhere is
+# still reported. Say what the line is.
+#
+# A test's list of prefs FILE NAMES that must not be read as a wallet's key record
+# ("dgb_wallet_keys.xml", "dgb_wallet_keys_legacy.xml", ...). File names, no credential.
+4a71d78990bfbd5d4a73ad6e9756d14d89492112:core/src/test/java/app/aroundtheblock/wallet/core/WipeLeavesNoWalletNamesTest.kt:generic-api-key:213

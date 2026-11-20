@@ -51,7 +51,9 @@ class StoreSuffixSourceGateTest {
     }
 
     @Test fun `no per-wallet store is named by a bare literal`() {
-        val bases = WalletStores.WALLET_AND_NETWORK_PREFS + WalletStores.WALLET_PREFS
+        // The reserved names too: no build opens one yet, and the first that does must go through
+        // WalletStores, or every wallet would share legacy's.
+        val bases = WalletStores.WALLET_AND_NETWORK_PREFS + WalletStores.WALLET_PREFS + WalletStores.RESERVED_WALLET_PREFS
         val literal = bases.flatMap { base ->
             val b = Regex.escape(base)
             listOf(
@@ -72,6 +74,25 @@ class StoreSuffixSourceGateTest {
             "per-wallet stores named outside WalletStores.prefsName:\n" + offenders.joinToString("\n"),
             offenders.isEmpty(),
         )
+    }
+
+    /**
+     * The band spelling ("_legacy" for the real legacy wallet) is asked for only through
+     * [WalletStores.bandFileName] and [WalletStores.bandPrefsName], which refuse every base but the
+     * reserved four. [StoreScope.BAND] is public, so a direct `storageSuffix(scope, StoreScope.BAND)`
+     * would spell a "_legacy" name for any store, past that refusal.
+     */
+    @Test fun `the band suffix is asked for only by WalletStores`() {
+        val band = Regex("""\bBAND\b(?!_)""")
+        val mayName = listOf("wallets/WalletStores.kt", "wallets/WalletScope.kt")
+        fun naming(f: File) = statements(f).filter { band.containsMatchIn(it) }
+        val offenders = sources()
+            .filter { f -> mayName.none { f.invariantSeparatorsPath.endsWith(it) } }
+            .flatMap { f -> naming(f).map { "${f.name}: $it" } }
+        assertTrue("StoreScope.BAND named outside WalletStores:\n" + offenders.joinToString("\n"), offenders.isEmpty())
+        // Not blind: the two files that may name it do, and the scan sees them.
+        val seen = sources().filter { f -> mayName.any { f.invariantSeparatorsPath.endsWith(it) } }.associate { it.name to naming(it).size }
+        assertTrue("the scan does not see BAND where it is defined and used: $seen", seen.size == 2 && seen.values.all { it >= 1 })
     }
 
     /** The seed record's network field: one key and two values, defined once, in [WalletStores]. */

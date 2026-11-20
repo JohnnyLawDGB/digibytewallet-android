@@ -23,7 +23,8 @@ import java.io.File
  * F12. The full wipe erases legacy's stores through [AndroidWalletDataEraser], which names them
  * itself; [WalletStores] is the one list of per-wallet stores. This holds the two together: every
  * per-wallet base in that list, under legacy's names on both networks, is reached by the full wipe.
- * A per-wallet base added to [WalletStores] later fails here until the full wipe reaches it.
+ * A per-wallet base added to [WalletStores] later fails here until the full wipe reaches it. So do
+ * the names multi-wallet step 2 reserves for legacy: its key record and its own band's stores.
  */
 class WalletDataEraserReachTest {
 
@@ -56,17 +57,19 @@ class WalletDataEraserReachTest {
         val hubStores = setOf(HubTokenStore.LEGACY_PREFS_NAME, HubTokenStore.SECURE_PREFS_NAME)
 
         val prefsNames = legacy.flatMap { s ->
-            (WalletStores.WALLET_AND_NETWORK_PREFS + WalletStores.WALLET_PREFS).map { WalletStores.prefsName(it, s) }
+            (WalletStores.WALLET_AND_NETWORK_PREFS + WalletStores.WALLET_PREFS + WalletStores.RESERVED_WALLET_PREFS)
+                .map { WalletStores.prefsName(it, s) } +
+                // Reserved for step 2: legacy's own band (WIPE-RESERVED-NAMES).
+                WalletStores.BAND_PREFS.map { WalletStores.bandPrefsName(it, s) }
         }.distinct()
         prefsNames.forEach { name ->
             // The Hub session stores hold one thing, the token, and the wipe removes the token.
             prefs.prefsFor(name).seed(if (name in hubStores) HubTokenStore.KEY_JWT else "held", "$name-value")
         }
         val files = legacy.flatMap { s ->
-            WalletStores.WALLET_AND_NETWORK_FILES.flatMap { base ->
-                val name = WalletStores.fileName(base, s)
-                listOf(File(ctx.filesDir, name), File(ctx.filesDir, "$name.tmp"))
-            }
+            (WalletStores.WALLET_AND_NETWORK_FILES.map { WalletStores.fileName(it, s) } +
+                WalletStores.BAND_FILES.map { WalletStores.bandFileName(it, s) })
+                .flatMap { name -> listOf(File(ctx.filesDir, name), File(ctx.filesDir, "$name.tmp")) }
         }
         files.forEach { it.writeBytes(byteArrayOf(1)) }
 

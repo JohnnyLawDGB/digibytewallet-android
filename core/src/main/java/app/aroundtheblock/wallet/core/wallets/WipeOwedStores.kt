@@ -6,8 +6,9 @@ import android.util.Log
 /**
  * The ids of the wallets a full wipe still owes a store erase (INT-2026-11-19-A).
  *
- * A wallet is found by its registry entry, its seed record or its seed key alias, and
- * `WalletManager.wipeWallet` removes all three before a wallet's other stores. So before those
+ * A wallet is found by its registry entry, its seed record or its seed key alias (and, for a
+ * wallet that left one, its reserved key record), and `WalletManager.wipeWallet` removes the first
+ * three before a wallet's other stores. So before those
  * stores go the wipe puts every other wallet's id here, and takes an id off only when that wallet's
  * stores read back empty on both networks. [ActiveWallet.everyWalletId] reads it, so a store one
  * wipe could not clear is still listed by the next, and that wipe cannot verify while it is there.

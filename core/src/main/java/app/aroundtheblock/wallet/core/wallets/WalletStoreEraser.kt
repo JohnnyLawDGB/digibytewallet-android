@@ -51,7 +51,10 @@ data class EraseReport(
  * Never touched, for any scope: the network-shared prefs ([WalletStores.NETWORK_PREFS]),
  * `dgb_settings` except the scope's own floor key, the device's custom node endpoint
  * ([WalletStores.SHARED_RECONCILE_KEY]) in legacy's `dgb_reconcile<net>`, the database password's
- * record `dgb_db_key`, the PIN store `dgb_pin_store` and the registry `dgb_wallets`.
+ * record `dgb_db_key`, the PIN store `dgb_pin_store` and the registry `dgb_wallets`. Nor, of the
+ * names multi-wallet step 2 reserves, the shared alias [WalletStores.KEYS_WRAP_ALIAS] and legacy's
+ * band stores ([WalletStores.bandFileName]): only the full wipe erases those. The scope's own key
+ * record ([WalletStores.RESERVED_WALLET_PREFS]) is one of its stores and goes with it.
  *
  * The legacy wallet is one wallet on both networks (one seed), so for it every per-network store
  * is erased on both. Any other wallet writes its stores under one network, the one its registry
@@ -191,7 +194,8 @@ class WalletStoreEraser internal constructor(
                 .filterNot { s.isLegacy && it == RECONCILE }
                 .map { WalletStores.prefsName(it, s) }
         }
-        val perWallet = WalletStores.WALLET_PREFS.map { WalletStores.prefsName(it, scope) }
+        // The reserved key record is a per-wallet store: it goes with its wallet (WIPE-RESERVED-NAMES).
+        val perWallet = (WalletStores.WALLET_PREFS + WalletStores.RESERVED_WALLET_PREFS).map { WalletStores.prefsName(it, scope) }
         return (perNetwork + perWallet).distinct() - WalletStores.seedRecordPrefs(scope)
     }
 
