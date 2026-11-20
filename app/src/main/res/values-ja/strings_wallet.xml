@@ -649,6 +649,7 @@
     <string name="reconcile_not_in_wallet">このウォレットにはありません</string>
     <string name="reconcile_wallet_only">ウォレットにありますが、ノードから報告されていません</string>
     <string name="reconcile_no_missing_funds">不足している資金は見つかりませんでした。</string>
+    <string name="reconcile_intro_body">ウォレットは通常、DigiByte のピアから受け取るコンパクトブロックフィルター（BIP157/158）を使って、自分で取引を見つけます。同期が中断されると、チェーン上にある取引がウォレットに表示されないことがあります。\n\nこのスキャンは、ウォレットのアドレスを DigiByte ノードに送り、それらに属する未使用の出力と取引を問い合わせて、ウォレットにないものを追加します。</string>
     <string name="reconcile_txs_already_in_wallet">すでにウォレットにある取引</string>
     <string name="reconcile_txs_not_added">追加されなかった取引（このウォレットのものではありません）</string>
     <string name="reconcile_stage_comparing">ウォレットと比較しています…</string>

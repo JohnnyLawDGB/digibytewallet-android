@@ -649,6 +649,7 @@
     <string name="reconcile_not_in_wallet">Không có trong ví này</string>
     <string name="reconcile_wallet_only">Có trong ví, nút không báo cáo</string>
     <string name="reconcile_no_missing_funds">Không tìm thấy tiền bị thiếu.</string>
+    <string name="reconcile_intro_body">Thông thường ví tự tìm các giao dịch của bạn bằng bộ lọc khối rút gọn (BIP157/158) từ các nút ngang hàng DigiByte. Nếu một lần đồng bộ bị gián đoạn, một số giao dịch có thể thiếu trong ví dù chúng có trên chuỗi.\n\nLần quét này gửi các địa chỉ của ví đến một nút DigiByte, hỏi những đầu ra chưa tiêu và giao dịch nào thuộc về chúng, rồi thêm những gì ví còn thiếu.</string>
     <string name="reconcile_txs_already_in_wallet">Giao dịch đã có trong ví</string>
     <string name="reconcile_txs_not_added">Giao dịch không được thêm (không thuộc ví này)</string>
     <string name="reconcile_stage_comparing">Đang so sánh với ví…</string>

@@ -660,6 +660,7 @@
     <string name="reconcile_not_in_wallet">Nicht in dieser Wallet</string>
     <string name="reconcile_wallet_only">In der Wallet, vom Knoten nicht gemeldet</string>
     <string name="reconcile_no_missing_funds">Keine fehlenden Guthaben gefunden.</string>
+    <string name="reconcile_intro_body">Die Wallet findet Ihre Transaktionen normalerweise selbst, mit Compact Block Filters (BIP157/158) von DigiByte-Peers. Wurde eine Synchronisierung unterbrochen, können Transaktionen in der Wallet fehlen, obwohl sie in der Blockchain stehen.\n\nDieser Scan sendet die Adressen Ihrer Wallet an einen DigiByte-Knoten, fragt, welche unverbrauchten Ausgänge und Transaktionen zu ihnen gehören, und fügt hinzu, was der Wallet fehlt.</string>
     <string name="reconcile_txs_already_in_wallet">Transaktionen bereits in der Wallet</string>
     <string name="reconcile_txs_not_added">Nicht hinzugefügte Transaktionen (nicht von dieser Wallet)</string>
     <string name="reconcile_stage_comparing">Abgleich mit der Wallet…</string>

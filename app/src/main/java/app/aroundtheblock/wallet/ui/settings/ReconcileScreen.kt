@@ -130,13 +130,8 @@ fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
                     }
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "The wallet normally finds your transactions via SPV (bloom " +
-                        "filters + peer merkleblocks). If a sync was interrupted or " +
-                        "peers dropped blocks, some of your transactions may be " +
-                        "missing from the local state even though they're on-chain.\n\n" +
-                        "This tool asks a DigiByte full node to list the unspent " +
-                        "outputs on every address your wallet derives, then imports " +
-                        "any missing transactions into the local wallet.",
+                        // What the scan does, in the user's language (RECONCILE-COPY).
+                        stringResource(R.string.reconcile_intro_body),
                         color = Color(0xFFB0BEC5),
                         fontSize = 13.sp,
                         lineHeight = 18.sp
