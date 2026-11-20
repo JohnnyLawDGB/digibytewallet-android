@@ -652,6 +652,7 @@
     <string name="reconcile_not_in_wallet">Wala sa wallet na ito</string>
     <string name="reconcile_wallet_only">Nasa wallet, hindi iniulat ng node</string>
     <string name="reconcile_no_missing_funds">Walang nakitang nawawalang pondo.</string>
+    <string name="reconcile_intro_body">Karaniwang ang wallet mismo ang nakakahanap ng iyong mga transaksyon, gamit ang compact block filters (BIP157/158) mula sa mga DigiByte peer. Kung naputol ang isang sync, maaaring may mga transaksyong wala sa wallet kahit nasa chain ang mga ito.\n\nIpinapadala ng scan na ito ang mga address ng iyong wallet sa isang DigiByte node, itinatanong kung aling mga hindi pa nagagastos na output at transaksyon ang sa mga iyon, at idinadagdag ang mga wala pa sa wallet.</string>
     <string name="reconcile_txs_already_in_wallet">Mga transaksyong nasa wallet na</string>
     <string name="reconcile_txs_not_added">Mga transaksyong hindi naidagdag (hindi sa wallet na ito)</string>
     <string name="reconcile_stage_comparing">Ikinukumpara sa wallet…</string>

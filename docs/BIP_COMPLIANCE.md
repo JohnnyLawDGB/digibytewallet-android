@@ -14,7 +14,7 @@ and file references. Kept in sync with `ROADMAP.md` phases.
 | BIP 22 / 23 / 152 | Block template / Compact blocks | Not applicable (wallet, not miner/node) | — |
 | BIP 32 | Hierarchical Deterministic Wallets | Implemented (non-standard variant — see detail §1) | `native/…/BRBIP32Sequence.{c,h}` |
 | BIP 37 | Connection Bloom filtering | **Removed** as a data path — never loaded (see §3); C code retained pending X.0.0 deletion | `native/…/BRBloomFilter.{c,h}` (dead on the app path) |
-| BIP 39 | Mnemonic code for seeds | Implemented | `native/…/BRBIP39Mnemonic.{c,h}` + `BRBIP39WordsEn.h` |
+| BIP 39 | Mnemonic code for seeds | Implemented — 12- and 24-word phrases, optional passphrase (see §8) | `native/…/BRBIP39Mnemonic.{c,h}` + `BRBIP39WordsEn.h` |
 | BIP 44 | Multi-account hierarchy | Partial — single account (`account'=0`); multi-account is Phase 4 | `native/…/BRBIP32Sequence.c` |
 | BIP 49 | Derivation for P2WPKH-nested-in-P2SH | Not applicable — we use native SegWit (BIP 84) | — |
 | BIP 84 | Derivation for P2WPKH (native SegWit) | Implemented (v3.4.0+) | `native/…/BRBIP32Sequence.c` (see detail §2) |
@@ -194,6 +194,27 @@ What is NOT implemented (why this is Partial):
   spend flow. Key-path signing exists in the C core (and is exercised
   by DigiDollar), but sweeping/spending arbitrary P2TR from the wallet
   UI is not wired up.
+
+### §8 — BIP 39 (address vectors, 12 and 24 words)
+
+The committed host KATs hold derivation to address vectors that come from
+implementations independent of the C core (Python standard library; the
+BIP 39 specification's published test phrases and seeds), so a change
+that breaks either phrase length fails CI:
+
+- `derivation_vectors_kat` — the wallet's own trees (BIP 84, BIP 86,
+  legacy `m/0'`) for a 12-word and a 24-word phrase, each without and
+  with a passphrase.
+- `derivation_profiles_kat` — every derivation profile Recover funds
+  probes (BIP 44 and BIP 49 included), 12-word phrases.
+- `bip39_24w_vectors_kat` — every profile again for four published
+  24-word phrases, each without and with a passphrase, through the core,
+  the Android bridge and a wallet opened by the recipe create/restore
+  call (`BRWalletOpen.h`).
+- `bip39_passphrase_kat` — phrase → seed against the published seeds.
+
+All of these are mainnet vectors. Passphrase normalisation (NFKD) is done
+in Kotlin before the bridge is called; the vectors use ASCII passphrases.
 
 ## How this doc is kept honest
 

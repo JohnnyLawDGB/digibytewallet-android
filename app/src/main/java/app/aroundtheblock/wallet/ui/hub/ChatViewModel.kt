@@ -84,8 +84,10 @@ class ChatViewModel @Inject constructor(
                 kotlinx.coroutines.delay(hubWebSocket.reconnectDelayMs().coerceAtLeast(HubWebSocket.RECONNECT_FIRST_MS))
                 if (digiScopeClient.isLoggedIn() &&
                     hubWebSocket.connectionState.value == ConnectionState.DISCONNECTED) {
-                    hubWebSocket.connect()
-                    loadHistory()
+                    // The history is reloaded only with a socket that was started: a retry that
+                    // starts none (Tor on and not connected yet) comes back every 5 s, and a
+                    // request made on each would wait on Tor beside the ones before it.
+                    if (hubWebSocket.connect()) loadHistory()
                 }
             }
         }

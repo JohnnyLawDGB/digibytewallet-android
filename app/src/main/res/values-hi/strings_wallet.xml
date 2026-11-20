@@ -652,6 +652,7 @@
     <string name="reconcile_not_in_wallet">इस वॉलेट में नहीं</string>
     <string name="reconcile_wallet_only">वॉलेट में है, नोड ने रिपोर्ट नहीं किया</string>
     <string name="reconcile_no_missing_funds">कोई छूटा हुआ फंड नहीं मिला।</string>
+    <string name="reconcile_intro_body">वॉलेट आम तौर पर आपके लेन-देन खुद ढूँढता है, DigiByte पीयर से मिले कॉम्पैक्ट ब्लॉक फ़िल्टर (BIP157/158) की मदद से। अगर कोई सिंक बीच में रुक गया हो, तो कुछ लेन-देन चेन पर होते हुए भी वॉलेट में नहीं दिख सकते।\n\nयह स्कैन आपके वॉलेट के पते एक DigiByte नोड को भेजता है, पूछता है कि कौन से बिना खर्च हुए आउटपुट और लेन-देन उनके हैं, और जो वॉलेट में नहीं हैं उन्हें जोड़ देता है।</string>
     <string name="reconcile_txs_already_in_wallet">लेनदेन जो पहले से वॉलेट में हैं</string>
     <string name="reconcile_txs_not_added">लेनदेन जो जोड़े नहीं गए (इस वॉलेट के नहीं)</string>
     <string name="reconcile_stage_comparing">वॉलेट से तुलना की जा रही है…</string>

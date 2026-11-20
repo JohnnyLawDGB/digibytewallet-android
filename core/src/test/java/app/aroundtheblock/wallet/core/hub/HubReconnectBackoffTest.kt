@@ -2,6 +2,7 @@ package app.aroundtheblock.wallet.core.hub
 
 import android.util.Log
 import app.aroundtheblock.wallet.core.digiscope.DigiScopeClient
+import app.aroundtheblock.wallet.core.tor.TorRoute
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkStatic
@@ -52,7 +53,7 @@ class HubReconnectBackoffTest {
         }
         val digiScope = mockk<DigiScopeClient>()
         every { digiScope.getToken() } returns "token"
-        hub = HubWebSocket(client, digiScope, nowMs = { now })
+        hub = HubWebSocket(client, digiScope, route = { TorRoute.Direct }, nowMs = { now })
     }
 
     @After fun tearDown() = unmockkStatic(Log::class)

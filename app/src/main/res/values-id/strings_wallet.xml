@@ -649,6 +649,7 @@
     <string name="reconcile_not_in_wallet">Tidak ada di dompet ini</string>
     <string name="reconcile_wallet_only">Ada di dompet, tidak dilaporkan oleh node</string>
     <string name="reconcile_no_missing_funds">Tidak ditemukan dana yang hilang.</string>
+    <string name="reconcile_intro_body">Dompet biasanya menemukan transaksi Anda sendiri, dengan compact block filter (BIP157/158) dari peer DigiByte. Jika sinkronisasi terputus, beberapa transaksi bisa hilang dari dompet meskipun ada di chain.\n\nPemindaian ini mengirim alamat dompet Anda ke sebuah node DigiByte, menanyakan output yang belum dibelanjakan dan transaksi mana yang menjadi milik alamat itu, lalu menambahkan yang belum ada di dompet.</string>
     <string name="reconcile_txs_already_in_wallet">Transaksi yang sudah ada di dompet</string>
     <string name="reconcile_txs_not_added">Transaksi yang tidak ditambahkan (bukan milik dompet ini)</string>
     <string name="reconcile_stage_comparing">Membandingkan dengan dompet…</string>

@@ -655,6 +655,7 @@
     <string name="reconcile_not_in_wallet">Não está nesta carteira</string>
     <string name="reconcile_wallet_only">Na carteira, não informado pelo nó</string>
     <string name="reconcile_no_missing_funds">Nenhum fundo ausente encontrado.</string>
+    <string name="reconcile_intro_body">Normalmente a carteira encontra suas transações sozinha, usando filtros de bloco compactos (BIP157/158) de pares DigiByte. Se uma sincronização foi interrompida, algumas transações podem faltar na carteira mesmo estando na cadeia.\n\nEsta varredura envia os endereços da sua carteira a um nó DigiByte, pergunta quais saídas não gastas e transações pertencem a eles e adiciona as que faltam na carteira.</string>
     <string name="reconcile_txs_already_in_wallet">Transações já na carteira</string>
     <string name="reconcile_txs_not_added">Transações não adicionadas (não são desta carteira)</string>
     <string name="reconcile_stage_comparing">Comparando com a carteira…</string>

@@ -103,7 +103,8 @@ class AssetMetadataService(
          *
          * Unassigned code points are kept on purpose: which ones are unassigned depends on the
          * device's Unicode version, and a newer emoji must not vanish from a name on an older phone.
-         * The exception is the unassigned ranges Unicode reserves as default-ignorable.
+         * Two exceptions: the unassigned ranges Unicode reserves as default-ignorable, and the
+         * noncharacters (see [isNoncharacter]), which no Unicode version will ever assign.
          *
          * Internal so the security test suite can verify the predicate
          * directly without standing up Room + IPFS infrastructure.
@@ -132,8 +133,22 @@ class AssetMetadataService(
             Character.SURROGATE,            // Cs: an unpaired half of a surrogate pair
             Character.PRIVATE_USE,          // Co: renders as whatever the installed fonts decide
             -> false
-            else -> !drawsNothing(codePoint)
+            else -> !drawsNothing(codePoint) && !isNoncharacter(codePoint)
         }
+
+        /**
+         * The 66 code points Unicode sets aside for good (ASSET-NONCHAR): U+FDD0..U+FDEF, and the
+         * last two of each of the 17 planes, U+FFFE and U+FFFF through U+10FFFE and U+10FFFF. They
+         * are not text and are not meant to be interchanged, a font draws them as nothing or as a
+         * box of its own choosing, and the JVM reports them as unassigned, the category kept above.
+         * The reason for keeping unassigned code points does not reach them: their status is fixed
+         * by the standard, so the answer is the same on every device.
+         *
+         * The plane-end test works on a whole code point, so a supplementary one arrives here as
+         * the pair [sanitize] already joined; a lone surrogate never matches (it is dropped as Cs).
+         */
+        private fun isNoncharacter(cp: Int): Boolean =
+            cp in 0xFDD0..0xFDEF || (cp and 0xFFFE) == 0xFFFE
 
         /**
          * Code points that draw nothing but are not in the categories above. Unicode marks them

@@ -88,12 +88,17 @@ object DigiDollarScan {
             // unspent_count 2` while listing four transactions, three of which pay its taproot
             // key. Without this, three outpoints would be claimed for two dollars and the
             // transfer would spend an input that does not exist.
+            //
+            // One spelling of a transaction id, here and in the spent set: lower case, each listed
+            // transaction once. An id is compared as text below, so a second spelling of the same
+            // transaction would be a second transaction that nothing spends.
+            val txids = holding.txids.map { it.lowercase() }.distinct()
             val spent = HashSet<DigiDollarHolding.PrevOut>()
-            for (txid in holding.txids) {
+            for (txid in txids) {
                 // Null proves nothing. An unreadable transaction must not cost the user a dollar
                 // we CAN see, so it drops nothing — worst case the stale outpoint survives and
                 // the transfer is rejected, which is reported rather than silent.
-                inputsFor(txid)?.let { spent += it }
+                inputsFor(txid)?.forEach { spent += it.copy(txid = it.txid.lowercase()) }
             }
 
             // The outpoint has to be found inside one of the listed transactions by matching the
@@ -108,7 +113,7 @@ object DigiDollarScan {
             var heldCount = 0
             var heldCents = 0L
             var heldUndecodable = false
-            for (txid in holding.txids) {
+            for (txid in txids) {
                 val outputs = outputsFor(txid)
                 if (outputs == null) { unreadable = true; continue }
                 val live = DigiDollarHolding.locateAll(outputs, address.taprootOutputKeyHex)
