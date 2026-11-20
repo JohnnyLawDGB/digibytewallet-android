@@ -15,7 +15,9 @@
 > revokes its Hub session; task X-HUB is built) and **G96** (O7: the shared chain lives under the
 > legacy wallet's 4.1.4 names, which reverses PD13's names and its migration). Each task G96
 > changes carries an "**Amended by O7**" note. Four points G96 leaves to be designed are listed in
-> the ruling and in task E1; none is decided in this plan. Of O1-O17 none is open in step 2: O9 was
+> the ruling and in task E1; the first is decided by G97; the other three are not decided in this
+> plan. **G97** is the lead's decision of that first point (2026-11-19): it is not the scan's and
+> not an owner answer. It reserves legacy's band names in A1 before the 4.1.5 cut. Of O1-O17 none is open in step 2: O9 was
 > answered in direction on 2026-11-19 (the phrase first) and its multi-wallet rule is open as Q1 of
 > the design (Mark answered its Q1-Q6 on 2026-11-19).
 > **Where this plan's text and a ruling differ, the ruling wins.**
@@ -270,7 +272,7 @@ Amended by the pre-flight rulings: the slot goes by readiness, not by the list's
 
 ## What waits for Mark
 
-**Rulings:** G1, G7, G78, G95, G96
+**Rulings:** G1, G7, G78, G95, G96, G97
 
 **[R8] batches**, each put to him as one packet with a summary. M1 goes first, because E2b waits on it:
 
@@ -283,7 +285,7 @@ Amended by the pre-flight rulings: the slot goes by readiness, not by the list's
 
 Also his:
 - **V3**, the merge of the integration branch into `develop`, which makes step 2 the next release's content;
-- **X-ROLLBACK (c)**, adopted (O10) and narrowed by G96 to the key-record names: a 4.1.5 wipe change;
+- **X-ROLLBACK (c)**, adopted (O10) and narrowed by G96 to the key-record names, plus G97's legacy band names: a 4.1.5 wipe change;
 - **X-HUB**: ruled (O2, G95) and not [R8]. Nothing of it waits for him, unless its PR has to edit a seed or wipe gate;
 - **E2b**, only if he overrides D1.
 
@@ -332,7 +334,7 @@ The design's test plan (`2026-11-16-multi-wallet-design.md`, "Left to the builde
 
 ## Decisions this plan takes (PD1-PD28)
 
-**Rulings:** G12, G20, G30, G31, G32, G36, G37, G38, G41, G42, G49, G65, G68, G69, G72, G80, G81, G84, G85, G86, G93, G96
+**Rulings:** G12, G20, G30, G31, G32, G36, G37, G38, G41, G42, G49, G65, G68, G69, G72, G80, G81, G84, G85, G86, G93, G96, G97
 
 The design leaves these to the builder, or the code required a choice. Each is a default the owner may override. A1 records them by number.
 
@@ -361,7 +363,7 @@ The design leaves these to the builder, or the code required a choice. Each is a
   - Every other wallet's step-1 chain stores become its band files until its hand-off is durable, and are deleted then, with its own chain keys (G38). Its abandonment record stays. A hand-off never deletes anything under legacy's names.
   - **Withdrawn:** "new NETWORK-scoped names (A1's list)", the seed "from the step-1 chain with the highest verified saved tip", the hard link and its copy fallback, and G69's ranking of candidates.
   - **Accepted costs (Mark, 2026-11-19):** the chain starts from legacy's even when another wallet is ahead; on a rollback build legacy reads a ledger that was evaluated while it was not attached, so it can miss receives until it is rescanned; removal, the eraser and every per-wallet clear treat legacy's chain names specially.
-  - **To be designed, not decided here** (G96; E1's note has the detail): the names of legacy's own band files; which keys of `dgb_sync_data<net>` are the chain's and which are legacy's; what the chain starts from when legacy's names hold none that passes; one store target per file.
+  - **To be designed, not decided here** (G96; E1's note has the detail; the first is decided by G97): the names of legacy's own band files (G97: the `_legacy` spelling); which keys of `dgb_sync_data<net>` are the chain's and which are legacy's; what the chain starts from when legacy's names hold none that passes; one store target per file.
 - **PD14 Frontier records.**
   - Every READY wallet has a durable frontier per network in the registry: the lowest height not yet proven evaluated for it, with the main-chain hash below it.
   - The record is raised only while the wallet is attached: at a hand-off, and after each durable shared-ledger persist.
@@ -466,7 +468,7 @@ The existing `send_max`, the `KeystoreKeyInvalidated` message and the step-1 swi
 
 ### Task A1: Land the plan, the rulings file, the core hand-off and the ROADMAP item
 
-**Rulings:** G3, G4, G5, G6, G13, G14, G15, G16, G17, G18, G30, G48, G96
+**Rulings:** G3, G4, G5, G6, G13, G14, G15, G16, G17, G18, G30, G48, G96, G97
 
 **Landing:** a docs PR from `feat/multi-wallet-step2` into `develop`. It carries the design amendment `e227b4e60` and this plan. It may land before the 4.1.5 cut, outside the landing-sync freeze. Not R8; not a registry PR; no pin.
 **Depends on:** none. Land it first: the names it reserves must be fixed before the 4.1.5 cut for X-ROLLBACK (c).
@@ -486,7 +488,12 @@ The existing `send_max`, the `KeystoreKeyInvalidated` message and the step-1 swi
 
 **Names reserved here.** This is the one copy; E1, S1 and X-ROLLBACK use it.
 - **Amended by O7 (2026-11-19, G96): no chain name is reserved.** The two lines that stood here are withdrawn: the files `chain_saved_blocks<net>.bin`, `chain_filter_headers<net>.bin` and `chain_cf_ledger<net>.bin`, and the prefs file `dgb_chain<net>`. No step-2 build writes them. The shared chain uses legacy's 4.1.4 names (PD13): `saved_blocks<net>.bin`, `saved_filter_headers<net>.bin`, `saved_cf_ledger<net>.bin`, and in `dgb_sync_data<net>` the keys `saved_blocks_tip`, `last_chain_tip`, `sync_start_height`, `saved_peers` and `saved_peer_penalties`. The one new chain key, `chain_synced`, is a key in that same file, not a new file.
-- **Not reserved yet, and time-sensitive.** If legacy's own band files need names that 4.1.4 never wrote (G96's first open point), they are added to this list before the 4.1.5 cut. Otherwise 4.1.5's wipe does not know them (O10).
+- **Legacy's own band stores (G97, 2026-11-19; G96's first open point, decided by the lead).** A band for legacy uses the per-wallet name rule with the id spelled out, for the chain stores listed here and no other: `_legacy` where another wallet has `_<id>`, before the network part. Reserved here:
+  - files `saved_filter_headers_legacy<net>.bin`, `saved_cf_ledger_legacy<net>.bin`, `saved_blocks_legacy<net>.bin` (each with its `.bin.tmp`);
+  - prefs `dgb_sync_data_legacy<net>` (the band's chain keys only).
+  - Not reserved: `saved_transactions_legacy`, `dgb_history_rebuild_legacy`, `dgb_reconcile_legacy` and `wallet_legacy.db`. Those stores are the wallet's own, not a chain's, and legacy keeps its 4.1.4 names for them. Also not reserved: `dgb_cf_abandonment_legacy`. A band's abandonment is written to its wallet's record (G71, G73), which for legacy is `dgb_cf_abandonment<net>`, not a shared-chain name (G96), and it stays through a hand-off (PD13).
+  - 4.1.4 never wrote any of these names, `legacy` is not sixteen hex characters, so no wallet id can spell them, and `storageSuffix` stays the one place a suffix is built (the band asks it for legacy's band spelling; no second builder). `WalletStores` refuses the band spelling for any base outside this list (a test pins `saved_transactions`, `dgb_history_rebuild`, `dgb_reconcile`, `dgb_cf_abandonment`, the database, the seed record, the alias and the floor key), and `LegacyStoreNameParityTest` stays green unedited.
+  - 4.1.5's wipe erases them on both networks (O10; private row WIPE-RESERVED-NAMES), beside `dgb_wallet_keys*` and the alias below. The prefs are deleted, not only cleared (`deleteSharedPreferences`, read back by file and `.bak`, as `WalletStoreEraser.clearAndDelete` does), by exact name. `deleteWalletNamedPrefsFiles` keeps excluding `legacy` from its substring match. `WipeLeavesNoWalletNamesTest` asserts that no file or prefs name containing `_legacy` is left.
 - Prefs base `dgb_wallet_keys` (WALLET class: legacy `dgb_wallet_keys`, others `dgb_wallet_keys_<id>`).
 - Alias `dgb_wallet_keys_wrap`.
 - Registry fields `frontier`, `holder`, `band` (per entry and network) and `chainMigration` (per network). `"v"` stays `1`.
@@ -756,7 +763,7 @@ Both KATs test hand-copied mirrors of `jni_peer.c`'s `startSync`, `loadSavedBloc
 
 ### Task X-ROLLBACK: A pulled step-2 release leaves no wrong balance and no orphaned key material
 
-**Rulings:** G1, G25, G38, G68, G96
+**Rulings:** G1, G25, G38, G68, G96, G97
 
 **Landing:** in three parts.
 - (a) Tests on the integration branch, with E1.
@@ -777,7 +784,7 @@ Play cannot downgrade, so a pulled release is replaced by a higher `versionCode`
   - with no legacy wallet on the device, nothing reads the files under legacy's names;
   - the shared chain is not orphaned: every wipe since 4.1.4 erases legacy's names on both networks, legacy listed or not (`kt-core:WalletManager.kt:1149-1159`; `kt-core:WalletDataEraser.kt:239`, `:257`, `:262`, `:267`);
   - the key records and `dgb_wallet_keys_wrap` are orphaned, and a 4.1.5 wipe leaves them behind unless (c) shipped.
-- [ ] **Step 4 (c), on Mark's yes (given, O10):** 4.1.5's full wipe also erases the reserved step-2 names if they exist. **Amended by O7 (G96):** those are now `dgb_wallet_keys*` and the alias `dgb_wallet_keys_wrap` only. `chain_*` files and `dgb_chain*` leave the list, because no step-2 build writes them. Any name reserved later for legacy's own band files (A1) joins it if it is fixed before the cut. `WalletWipeEveryWalletTest` reads them back. A step-1 gap PR, [R8].
+- [ ] **Step 4 (c), on Mark's yes (given, O10):** 4.1.5's full wipe also erases the reserved step-2 names if they exist. **Amended by O7 (G96):** those are now `dgb_wallet_keys*` and the alias `dgb_wallet_keys_wrap` only. `chain_*` files and `dgb_chain*` leave the list, because no step-2 build writes them. **Amended by G97:** the list also holds legacy's band names reserved in A1, on both networks: the three `saved_*_legacy<net>.bin` files with their `.bin.tmp`, and the prefs `dgb_sync_data_legacy<net>`. `WalletWipeEveryWalletTest` plants each and reads it back gone. A step-1 gap PR, [R8].
 
 ### Task X-HUB: Removing the active wallet revokes its Hub session (ruled by Mark, O2; G95)
 
@@ -1913,10 +1920,10 @@ What changes:
 
 ### Task E1: Shared chain stores, frontier records, and the migration from step 1
 
-**Rulings:** G1, G32, G53, G65, G68, G69, G91, G96
+**Rulings:** G1, G32, G53, G65, G68, G69, G91, G96, G97
 
 **Landing:** the integration branch, in the same PR as E2 or immediately before it. Its migration is not invoked at launch until E2. Not R8.
-**Depends on:** K0, K1; `fix/wallets-ready-slot-and-gate-hygiene` (X5); the four design points below.
+**Depends on:** K0, K1; `fix/wallets-ready-slot-and-gate-hygiene` (X5); the design points below that are still open (2-4; point 1 is decided by G97).
 
 **Amended by O7 (2026-11-19, G96).** The shared chain gets no new names. It lives under the legacy wallet's 4.1.4 names (PD13, as reversed). What that changes in this task:
 - `ChainStores` resolves to legacy's names: the three files that `WalletStores.fileName` gives for the legacy scope, and `dgb_sync_data<net>` for the chain keys. It still hands no File to a writer (G53).
@@ -1925,8 +1932,8 @@ What changes:
 - Withdrawn: the hard-link test and its timing record; the red arms "rename instead of link or copy" and "seed from the active wallet instead of the highest tip"; the three `ChainMigrationTest` cases G69 added about ranked candidates.
 - G1's "E1 erases chain files only, and says so" stands. E1 also changes what the removal of legacy erases, but only of chain files and chain keys, never of seed, key or PIN material, so it is still not [R8]; its PR says so.
 
-**To be designed before this task is written** (G96). None is decided in this plan, because each can change what a wallet shows or what a removal or the wipe erases:
-1. **Legacy's own band files.** The design forbids a band sharing a file with the shared engine (spec:708-710), so a band for legacy (Rescan this wallet, Coinomi's accounts, a lagging frontier, a rejoin below the window) cannot use legacy's names. It needs file names and chain keys that 4.1.4 never wrote. They must be in `WalletStores`' lists, so that removal, the eraser, the wipe and `WipeLeavesNoWalletNamesTest` reach them, and G38's retire step must never run on the shared keys. If they are new names, A1 reserves them before the 4.1.5 cut (O10). B7, E3, E4 and E5 wait on this for the legacy wallet only.
+**To be designed before this task is written** (G96). Points 2-4 are not decided in this plan; point 1 is decided by G97. They are listed here because each can change what a wallet shows or what a removal or the wipe erases:
+1. **Legacy's own band files. Decided by G97 (2026-11-19): the `_legacy` band names reserved in A1; what follows is the reason they are needed.** The design forbids a band sharing a file with the shared engine (spec:708-710), so a band for legacy (Rescan this wallet, Coinomi's accounts, a lagging frontier, a rejoin below the window) cannot use legacy's names. It needs file names and chain keys that 4.1.4 never wrote. They must be in `WalletStores`' lists, so that removal, the eraser, the wipe and `WipeLeavesNoWalletNamesTest` reach them, and G38's retire step must never run on the shared keys. A1 reserves them before the 4.1.5 cut (O10, G97). B7, E3, E4 and E5 no longer wait on this point; E4 and E5 still wait on point 2.
 2. **Whose key is whose in `dgb_sync_data<net>`.** That file now holds the chain's keys and legacy's own (`has_synced`, `last_balance`, the checkpoint keys). Needed: an exhaustive list, pinned by a test that fails on a key in neither part; how a per-wallet clear and the removal of legacy, with its read-back, work on a file that must remain; how a chain-scoped clear keeps legacy's own keys. The eraser already keeps one shared key in a legacy-named file (`custom_rpc_endpoint` in `dgb_reconcile<net>`: `kt-core:wallets/WalletStoreEraser.kt:96`, `:214`).
 3. **No usable chain under legacy's names.** Legacy was removed under step 1, never synced on this network, or its chain fails the preflight. G69's fallback is the floor: the chain is not seeded, the engine arms as G64 says for no stored chain, and each wallet joins from its own frontier or bands over its own files. Whether another wallet's chain may instead be copied under legacy's names is not decided.
 4. **One store target per file.** G53 keys each store's epoch and io lock by target. `Wallet(legacy)` and `Chain(testnet)` would name the same file under two locks. After E1 only the chain target may reach the three files.
@@ -2020,12 +2027,12 @@ What changes:
 
 ### Task B7: The band's sync context and the hand-off natives (registry PR, 7th)
 
-**Rulings:** G7, G19, G20, G23, G29, G31, G33, G34, G35, G36, G38, G46, G48, G50, G67, G71, G73, G74, G96
+**Rulings:** G7, G19, G20, G23, G29, G31, G33, G34, G35, G36, G38, G46, G48, G50, G67, G71, G73, G74, G96, G97
 
 **Landing:** a registry PR into the integration branch. Not R8.
 **Depends on:** B6, the C9 and C10 pins, A4; #109 first if revived.
 
-**Amended by O7 (2026-11-19, G96).** "The wallet's band files" are the wallet's step-1 names for every wallet but legacy. Legacy's names are the shared chain, so legacy's band cannot use them; what it uses is G96's first open point, and `startBand` for legacy waits on it. `band_context_kat`'s "band saves never touch the shared files" gains the legacy case.
+**Amended by O7 (2026-11-19, G96).** "The wallet's band files" are the wallet's step-1 names for every wallet but legacy. Legacy's names are the shared chain, so legacy's band cannot use them; what it uses is G96's first open point, decided by G97 (the `_legacy` band names in A1); `startBand` for legacy no longer waits on it. `band_context_kat`'s "band saves never touch the shared files" gains the legacy case.
 
 **Files:**
 - `bridge:jni_peer.c`, `jni_bridge.h`, `jni_registry_gen.h`.
@@ -2063,12 +2070,12 @@ The band context:
 
 ### Task E3: Bands: scheduling, preemption, the hand-off executor, durability, spending and the wipe
 
-**Rulings:** G1, G31, G34, G35, G36, G37, G38, G42, G48, G64, G67, G73, G74, G75, G77, G83, G91, G96
+**Rulings:** G1, G31, G34, G35, G36, G37, G38, G42, G48, G64, G67, G73, G74, G75, G77, G83, G91, G96, G97
 
 **Landing:** the integration branch, immediately after E2. Device testing starts after it. Not R8.
 **Depends on:** E2, B7.
 
-**Amended by O7 (2026-11-19, G96).** Step 6 of the executor ("Delete the band files") and G38's retire of the wallet's chain keys never touch anything under legacy's names: for legacy they would delete the shared chain. What legacy's hand-off deletes is G96's first open point. `BandHandoffExecutorTest` adds: a hand-off of legacy leaves the three chain files and every chain key.
+**Amended by O7 (2026-11-19, G96).** Step 6 of the executor ("Delete the band files") and G38's retire of the wallet's chain keys never touch anything under legacy's names: for legacy they would delete the shared chain. What legacy's hand-off deletes is G96's first open point, decided by G97 (the `_legacy` band names in A1). `BandHandoffExecutorTest` adds: a hand-off of legacy leaves the three chain files and every chain key.
 
 **Files:**
 - Create `kt-app:service/{BandScheduler,BandHandoffExecutor}.kt`.
@@ -2112,12 +2119,12 @@ What it does:
 
 ### Task E4: "Rescan this wallet" and "Repair the chain" replace the Full rebuild
 
-**Rulings:** G9, G43, G66, G76, G84, G96
+**Rulings:** G9, G43, G66, G76, G84, G96, G97
 
 **Landing:** the integration branch. Not R8.
 **Depends on:** the C12 pin, E3; X5.
 
-**Amended by O7 (2026-11-19, G96).** "Rescan this wallet" on legacy is a band for legacy, so it needs legacy's own band files (G96's first open point) and clears only legacy's own keys in `dgb_sync_data<net>` (the second). `RebuildSplitTest` adds: rescanning legacy leaves every shared chain file and chain key.
+**Amended by O7 (2026-11-19, G96).** "Rescan this wallet" on legacy is a band for legacy, so it needs legacy's own band files (G96's first open point, decided by G97 (the `_legacy` band names in A1)) and clears only legacy's own keys in `dgb_sync_data<net>` (the second). `RebuildSplitTest` adds: rescanning legacy leaves every shared chain file and chain key.
 
 **Files:**
 - `kt-core:WalletManager.kt`: `rebuildFromChainRescan[From]` becomes a band rescan, and a repair entry point is added.
@@ -2139,12 +2146,12 @@ What it does:
 
 ### Task E5: BootGuard and StaleDataWiper on the shared engine
 
-**Rulings:** G2, G9, G41, G77, G88, G96
+**Rulings:** G2, G9, G41, G77, G88, G96, G97
 
 **Landing:** the integration branch. Not R8.
 **Depends on:** E2, the C11 pin.
 
-**Amended by O7 (2026-11-19, G96).** For legacy the per-wallet tier never reaches the files and keys under legacy's chain names; it covers legacy's database, legacy's own keys in `dgb_sync_data<net>` and legacy's band files (G96's first two open points). The test below gains the case "a crash bracketed on legacy's attach leaves the shared chain".
+**Amended by O7 (2026-11-19, G96).** For legacy the per-wallet tier never reaches the files and keys under legacy's chain names; it covers legacy's database, legacy's own keys in `dgb_sync_data<net>` and legacy's band files (G96's first open point, decided by G97) and legacy's own keys (the second). The test below gains the case "a crash bracketed on legacy's attach leaves the shared chain".
 
 **Files:**
 - `kt-app:{BootGuard,StaleDataWiper}.kt`; `kt-app:ui/onboarding/UnlockScreen.kt` (the bracket); `kt-app:service/SyncService.kt`.
@@ -2756,7 +2763,7 @@ Rules for this task:
   - **Answered (Mark, 2026-11-19):** "Switch to the iOS flow" (the phrase first). As recommended with the question, not said by him: built outside step 2, after the 4.1.5 cut. He answered Q1-Q6 of the design the same day, `docs/superpowers/specs/2026-11-19-lost-pin-phrase-first-design.md`.
 - **O10** (before the 4.1.5 cut) Should 4.1.5's wipe erase the reserved step-2 names (X-ROLLBACK c)?
   - **Answered (Mark, 2026-11-19):** yes. A wipe clears every file, so 4.1.5's wipe erases the reserved step-2 names (X-ROLLBACK c). It rides the 4.1.5 train as a row of the private scope file.
-  - **Narrowed by O7 (2026-11-19, G96):** his yes stands, over a shorter list. Still reserved, and still to be erased by 4.1.5's wipe: the key-record prefs `dgb_wallet_keys` and `dgb_wallet_keys_<id>`, and the Keystore alias `dgb_wallet_keys_wrap`. No longer reserved: the `chain_*` files and `dgb_chain<net>`, which no step-2 build writes. The shared chain needs nothing from 4.1.5: its wipe already erases legacy's names on both networks. The private 4.1.5 scope row is to be narrowed to match. One thing can lengthen the list again: names for legacy's own band files, if that design (G96) needs new ones and fixes them before the cut.
+  - **Narrowed by O7 (2026-11-19, G96):** his yes stands, over a shorter list. Still reserved, and still to be erased by 4.1.5's wipe: the key-record prefs `dgb_wallet_keys` and `dgb_wallet_keys_<id>`, and the Keystore alias `dgb_wallet_keys_wrap`. No longer reserved: the `chain_*` files and `dgb_chain<net>`, which no step-2 build writes. The shared chain needs nothing from 4.1.5: its wipe already erases legacy's names on both networks. The private 4.1.5 scope row is to be narrowed to match. **Lengthened by G97 (2026-11-19):** legacy's band names (A1) join the list: the three `saved_*_legacy<net>.bin` files with their `.bin.tmp`, and the prefs `dgb_sync_data_legacy<net>`, on both networks. The private 4.1.5 scope row gains them.
 - **O11** The stage target dates.
   - **Answered (Mark, 2026-11-19):** as soon as possible. No calendar date is set; each stage starts when its gate opens, and `ROADMAP.md` carries no step-2 date (G14).
 - **O12** If D1 is overridden, attaching before the PIN unlock becomes [R8] (E2b).
@@ -2793,4 +2800,4 @@ Answered by a ruling: none. No ruling settles an existing question, because each
 - **O1** gains the unlock case (a record that differs from the seed at a cold-start unlock is marked refused, unused and unreplaced, until he rules) and the note that a replace resets the wallet's frontier to its birth (G85; the switch's messages, G90).
 - **O4** is widened: may neutral slices start at the train's landing while #264's review is still open? Default: no (G11).
 - **O6** now covers only the per-screen naming (U5b). The prompt naming (U5) is built by default (G93).
-- **O10**: part (c) depends only on A1's names and his yes; if the landing-sync freeze has begun when he answers, it can only ride the train as a row of its private scope file, which is his call (G25). G96 shortens A1's names to the key-record ones.
+- **O10**: part (c) depends only on A1's names and his yes; if the landing-sync freeze has begun when he answers, it can only ride the train as a row of its private scope file, which is his call (G25). G96 shortens A1's names to the key-record ones; G97 adds legacy's band names (A1) to them.
