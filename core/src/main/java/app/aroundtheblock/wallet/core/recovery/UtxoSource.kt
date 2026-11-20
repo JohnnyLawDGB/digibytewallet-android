@@ -44,10 +44,37 @@ interface UtxoSource {
     suspend fun fetchVersion(txid: String): Int? = null
 }
 
-/** First implementation: the existing reconcile backend (api.digiscope.me). */
-class ReconcileBackendUtxoSource(
+/**
+ * First implementation: the existing reconcile backend (api.digiscope.me).
+ *
+ * DD-LOCATOR-BIND: every raw transaction this reads for the DigiDollar locator is bound to the
+ * transaction id it asked for. [boundRawTransaction] is the only place raw bytes enter; it hands
+ * them on only when their own id (computed from the bytes by [txidOf], the function every other
+ * bound raw-transaction path uses) equals the requested txid. Anything else is "could not be
+ * read" (null), never "no such output", "spends nothing" or a version.
+ */
+class ReconcileBackendUtxoSource internal constructor(
     private val nodeClient: DgbNodeClient,
+    /** The id of raw transaction bytes, or null when they do not parse. */
+    private val txidOf: (ByteArray) -> String?,
+    /** "vout|sats|scriptHex" per output, or null when the bytes do not parse. */
+    private val outputLines: (ByteArray) -> Array<String>?,
+    /** "prevTxid|prevVout" per input, or null when the bytes do not parse. */
+    private val inputLines: (ByteArray) -> Array<String>?,
 ) : UtxoSource {
+
+    /**
+     * Production wiring. Parsed natively rather than in Kotlin: these bytes are remote-supplied,
+     * and the native parser is the hardened one every other raw-tx path already uses — a second
+     * parser written here would be new attack surface for no benefit.
+     */
+    constructor(nodeClient: DgbNodeClient) : this(
+        nodeClient = nodeClient,
+        txidOf = RawTxBinding.transactionId,
+        outputLines = { app.aroundtheblock.wallet.core.bridge.NativeBridge.getRawTransactionOutputs(it) },
+        inputLines = { app.aroundtheblock.wallet.core.bridge.NativeBridge.getRawTransactionInputs(it) },
+    )
+
     override suspend fun fetchUtxos(addresses: List<String>): ReconcileResult? =
         nodeClient.reconcileAddresses(addresses)
 
@@ -55,13 +82,18 @@ class ReconcileBackendUtxoSource(
         nodeClient.digiDollarHolding(ddAddress)
 
     /**
-     * Parsed natively rather than in Kotlin. These bytes are remote-supplied, and
-     * BRTransactionParse is the hardened parser every other raw-tx path already uses — a second
-     * parser written here would be new attack surface for no benefit.
+     * The bytes of transaction [txid], or null when they could not be read. Bytes whose own id is
+     * not [txid] (or that have no id) were not read: they are some other answer.
      */
-    override suspend fun fetchOutputs(txid: String): List<DigiDollarHolding.Output>? {
+    private suspend fun boundRawTransaction(txid: String): ByteArray? {
         val raw = nodeClient.fetchRawTransaction(txid) ?: return null
-        return app.aroundtheblock.wallet.core.bridge.NativeBridge.getRawTransactionOutputs(raw)
+        val id = runCatching { txidOf(raw) }.getOrNull() ?: return null
+        return raw.takeIf { id.equals(txid, ignoreCase = true) }
+    }
+
+    override suspend fun fetchOutputs(txid: String): List<DigiDollarHolding.Output>? {
+        val raw = boundRawTransaction(txid) ?: return null
+        return outputLines(raw)
             ?.mapNotNull { line ->
                 val parts = line.split("|", limit = 3)
                 if (parts.size < 3) return@mapNotNull null
@@ -72,14 +104,14 @@ class ReconcileBackendUtxoSource(
     }
 
     override suspend fun fetchVersion(txid: String): Int? {
-        val raw = nodeClient.fetchRawTransaction(txid) ?: return null
+        val raw = boundRawTransaction(txid) ?: return null
         return app.aroundtheblock.wallet.core.asset.OneFamily.rawTxVersion(raw)
     }
 
     /** Same native parser, reading the other end of the transaction. */
     override suspend fun fetchInputs(txid: String): List<DigiDollarHolding.PrevOut>? {
-        val raw = nodeClient.fetchRawTransaction(txid) ?: return null
-        return app.aroundtheblock.wallet.core.bridge.NativeBridge.getRawTransactionInputs(raw)
+        val raw = boundRawTransaction(txid) ?: return null
+        return inputLines(raw)
             ?.mapNotNull { line ->
                 val parts = line.split("|", limit = 2)
                 if (parts.size < 2) return@mapNotNull null
