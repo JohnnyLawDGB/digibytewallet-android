@@ -16,8 +16,8 @@
 #
 # ==== RED-BEFORE-GREEN =======================================================
 # PRESENCE of the macro selects the comparison arm (the shipped arm is built with no -D at all):
-#   -DCALLBACK_HANDLER_UNFIXED   the handler is read in place, unlocked, and deleted before it is replaced,
-#                                as the bridge did before.
+#   -DCALLBACK_HANDLER_UNFIXED   the handler record without its lock and without the callback's own
+#                                local reference.
 #   RED-THEN-GREEN  during-delete-swap, during-delete-clear -- the comparison arm fails exactly
 #                       "no callback used a handler reference that had been deleted";
 #                   clear-mid-callback -- the comparison arm fails exactly
@@ -26,6 +26,13 @@
 #                   red: the handler does not change at a point where the comparison arm misreads it. They
 #                   hold the harness (all ten upcall sites deliver, references balance) and, in the shipped
 #                   arm, that no lock is held across an upcall.
+#                   early-return -- a callback that leaves after taking the handler and before any upcall
+#                   releases its reference. One such path can be driven from here (no wallet); the
+#                   self-check below reads the source for all of them, because the others need a failed
+#                   allocation or a handler record that registration never produces.
+#                   partial-handler -- a handler whose class lacks a callback method is refused whole:
+#                   after the failed lookup setCallbackHandler only releases references, and the
+#                   registered handler is unchanged. Registration is the same code in both arms.
 # A comparison arm that passes a red scenario, fails another line, or stops for any other reason proves
 # nothing and fails the gate. Every run has a time limit. All arms are built 64- and 32-bit and must give
 # the same verdicts.
@@ -68,6 +75,39 @@ for f in "${BRIDGE_C[@]}"; do
         gate_fail "$(basename "$f") makes a JNI upcall; this suite covers the upcalls of jni_peer.c only."
     fi
 done
+# Every callback that takes the handler gives it back on every way out. In each function, from its
+# cb_acquire to its closing brace, a `return` must have cb_release on its own line or on the line before,
+# and the closing brace must be reached through a cb_release with no `return` after it (the failed
+# acquire itself has nothing to release).
+release_check() {   # $1 source file: prints "<acquires> <returns checked> <returns without a release>"
+    awk '
+        { gsub(/\/\*.*\*\//, "") }   # a release inside a comment releases nothing
+        /^static .*cb_(acquire|release|install)\(/ { next }
+        /cb_acquire\(env, &cb\)/ { acquires++; held = 1; failing = ($0 ~ /\{[ \t]*$/); prev = ""; next }
+        held && failing { if ($0 ~ /^    \}/) failing = 0; next }
+        held && /^\}/ { held = 0; if (!ended) bad++; ended = 0; next }
+        held && /cb_release\(env, &cb\);[ \t]*$/ { ended = 1 }
+        held && /return/ { checked++; ended = 0; if ($0 !~ /cb_release\(env, &cb\)/ && prev !~ /cb_release\(env, &cb\)/) bad++ }
+        held && NF { prev = $0 }
+        END { printf "%d %d %d\n", acquires, checked, bad }
+    ' "$1"
+}
+read -r ACQUIRES RETURNS UNRELEASED <<<"$(release_check "$PEER_C")"
+[ "$ACQUIRES" -eq 7 ] && [ "$ACQUIRES" -eq "$(grep -c "cb_acquire(env, &cb)" "$PEER_C")" ] && [ "$RETURNS" -ge 4 ] ||
+    gate_fail "the release self-check read $ACQUIRES callbacks taking the handler and $RETURNS early returns in jni_peer.c; it expects seven callbacks and at least four early returns (is it blind?)."
+[ "$UNRELEASED" -eq 0 ] ||
+    gate_fail "$UNRELEASED way(s) out of a callback in jni_peer.c do not release the handler it took (cb_release before every return after cb_acquire)."
+# The self-check is not blind: with any one release taken out of a copy of the source, it reports it.
+RELEASE_LINES="$(grep -n "cb_release(env, &cb)" "$PEER_C" | cut -d: -f1)"
+[ -n "$RELEASE_LINES" ] || gate_fail "jni_peer.c has no cb_release(env, &cb) to take out."
+for n in $RELEASE_LINES; do
+    sed "${n}s/cb_release(env, &cb);//" "$PEER_C" > "$BUILD_DIR/peer_mutant.c"
+    read -r _ _ MUTANT_BAD <<<"$(release_check "$BUILD_DIR/peer_mutant.c")"
+    [ "$MUTANT_BAD" -ge 1 ] ||
+        gate_fail "the release self-check does not see the release at jni_peer.c:$n taken out."
+done
+echo "release self-check: $ACQUIRES callbacks, $RETURNS early returns, every one releases; each of $(wc -w <<<"$RELEASE_LINES") releases is seen when taken out"
+
 # The handler's global reference is created and deleted in one place per arm.
 [ "$(grep -c "DeleteGlobalRef(" "$PEER_C")" -eq 2 ] && [ "$(grep -c "NewGlobalRef(" "$PEER_C")" -eq 1 ] ||
     gate_fail "jni_peer.c creates or deletes a global reference outside setCallbackHandler/cb_install."
@@ -140,7 +180,7 @@ red_line() {   # $1 scenario: the one line the comparison arm fails
     esac
 }
 RED="during-delete-swap during-delete-clear clear-mid-callback"
-GUARD="deliver none swap-between swap-mid-callback swap-during-upcall"
+GUARD="deliver none swap-between swap-mid-callback swap-during-upcall early-return partial-handler"
 
 green() {   # $1 label, $2 output file, $3 exit code: counts a failure unless the run is clean and complete
     if [ "$3" -eq 0 ] && grep -q "^ALL PASS$" "$2" && ! grep -q "FAIL:\|Sanitizer" "$2"; then

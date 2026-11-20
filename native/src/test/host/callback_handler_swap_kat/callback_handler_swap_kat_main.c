@@ -17,6 +17,10 @@
  * The step runs on another thread and is waited for with a limit, so a lock held across either point is
  * a reported failure, not a hang.
  *
+ * The env also keeps, per thread, the error a failed method lookup leaves pending, and counts every call
+ * made under it that is not the release of a reference: a handler whose class lacks a callback method
+ * is refused at registration, with nothing else done.
+ *
  * One scenario per run (argv[1]); run.sh says which arms must be red on which. */
 #include <stdio.h>
 #include <stdlib.h>
@@ -37,12 +41,14 @@
 /* ---- references ----------------------------------------------------------------------------------- */
 
 enum { REF_PARAM, REF_LOCAL, REF_GLOBAL };
-enum { OBJ_OTHER = 0, OBJ_HANDLER_A = 1, OBJ_HANDLER_B = 2, OBJ_COUNT };
+/* OBJ_HANDLER_PARTIAL: a handler whose class has the first PARTIAL_METHODS callback methods only. */
+enum { OBJ_OTHER = 0, OBJ_HANDLER_A = 1, OBJ_HANDLER_B = 2, OBJ_HANDLER_PARTIAL = 3, OBJ_COUNT };
 
 typedef struct Ref {
     struct Ref *next;
     int kind;
     int object;          /* which object it refers to */
+    int partialClass;    /* a class reference: the class of OBJ_HANDLER_PARTIAL */
     _Atomic int live;
 } Ref;
 
@@ -65,6 +71,15 @@ static const char *const METHODS[][2] = {
 #define METHOD_COUNT ((int)(sizeof(METHODS) / sizeof(METHODS[0])))
 static _Atomic int g_methodCalls[METHOD_COUNT];
 static _Atomic int g_unknownMethods;  /* GetMethodID for a name or signature NativeCallback does not have */
+#define PARTIAL_METHODS 6             /* the partial handler's class lacks the methods after these */
+
+/* The error a failed method lookup leaves pending on its thread until the native returns. Under it the
+ * JNI specification allows releasing references and little else. */
+static _Thread_local int g_pendingError;
+static _Atomic int g_callsUnderError;     /* an env call under a pending error, other than a release */
+static _Atomic int g_registrationErrors;  /* setCallbackHandler returned with an error pending */
+
+static void env_call(void) { if (g_pendingError) atomic_fetch_add(&g_callsUnderError, 1); }
 
 static Ref *new_ref(int kind, int object)
 {
@@ -139,6 +154,7 @@ static int use_ref(jobject obj)
 static jobject h_NewGlobalRef(JNIEnv *e, jobject obj)
 {
     (void)e;
+    env_call();
     if (!obj) return NULL;
     use_ref(obj);
     return new_ref(REF_GLOBAL, ((Ref *)obj)->object);
@@ -157,6 +173,7 @@ static void h_DeleteGlobalRef(JNIEnv *e, jobject obj)
 static jobject h_NewLocalRef(JNIEnv *e, jobject obj)
 {
     (void)e;
+    env_call();
     if (!obj) return NULL;
     if (!use_ref(obj)) return NULL;
     return new_ref(REF_LOCAL, ((Ref *)obj)->object);
@@ -174,16 +191,23 @@ static void h_DeleteLocalRef(JNIEnv *e, jobject obj)
 static jclass h_GetObjectClass(JNIEnv *e, jobject obj)
 {
     (void)e;
+    env_call();
     use_ref(obj);
-    return new_ref(REF_LOCAL, OBJ_OTHER);
+    Ref *cls = new_ref(REF_LOCAL, OBJ_OTHER);
+    cls->partialClass = ((Ref *)obj)->object == OBJ_HANDLER_PARTIAL;
+    return cls;
 }
 
 static jmethodID h_GetMethodID(JNIEnv *e, jclass cls, const char *name, const char *sig)
 {
     (void)e;
+    env_call();
     use_ref(cls);
     for (int i = 0; i < METHOD_COUNT; i++) {
-        if (strcmp(METHODS[i][0], name) == 0 && strcmp(METHODS[i][1], sig) == 0) return (jmethodID)&METHODS[i];
+        if (strcmp(METHODS[i][0], name) == 0 && strcmp(METHODS[i][1], sig) == 0) {
+            if (((Ref *)cls)->partialClass && i >= PARTIAL_METHODS) { g_pendingError = 1; return NULL; }
+            return (jmethodID)&METHODS[i];
+        }
     }
     atomic_fetch_add(&g_unknownMethods, 1);
     return NULL;
@@ -192,6 +216,7 @@ static jmethodID h_GetMethodID(JNIEnv *e, jclass cls, const char *name, const ch
 static void h_CallVoidMethod(JNIEnv *e, jobject obj, jmethodID mid, ...)
 {
     (void)e;
+    env_call();
     if (!obj) { atomic_fetch_add(&g_nullUpcalls, 1); return; }
     if (!use_ref(obj)) return;
     if (!mid) { atomic_fetch_add(&g_nullMethods, 1); return; }
@@ -203,6 +228,7 @@ static void h_CallVoidMethod(JNIEnv *e, jobject obj, jmethodID mid, ...)
 static jbyteArray h_NewByteArray(JNIEnv *e, jsize len)
 {
     (void)e; (void)len;
+    env_call();
     run_step(&g_atNewByteArray, "while a callback was between taking the handler and calling it");
     return new_ref(REF_LOCAL, OBJ_OTHER);
 }
@@ -210,12 +236,14 @@ static jbyteArray h_NewByteArray(JNIEnv *e, jsize len)
 static void h_SetByteArrayRegion(JNIEnv *e, jbyteArray a, jsize start, jsize len, const jbyte *buf)
 {
     (void)e; (void)start; (void)len; (void)buf;
+    env_call();
     use_ref(a);
 }
 
 static jstring h_NewStringUTF(JNIEnv *e, const char *s)
 {
     (void)e; (void)s;
+    env_call();
     return new_ref(REF_LOCAL, OBJ_OTHER);
 }
 
@@ -263,10 +291,16 @@ static void check(int ok, const char *what)
     if (!ok) g_failures++;
 }
 
-static Ref *g_handlerA, *g_handlerB;       /* what Kotlin passes to setCallbackHandler */
+static Ref *g_handlerA, *g_handlerB, *g_handlerPartial;   /* what Kotlin passes to setCallbackHandler */
 static BRCompactFilterChain *g_chain;
 
-static void set_handler(Ref *handler) { NativeBridge_setCallbackHandler(env, NULL, handler); }
+/* As Kotlin calls it: an error left pending is thrown to the caller when the native returns. */
+static void set_handler(Ref *handler)
+{
+    NativeBridge_setCallbackHandler(env, NULL, handler);
+    if (g_pendingError) { g_pendingError = 0; atomic_fetch_add(&g_registrationErrors, 1); }
+}
+static void set_partial(void) { set_handler(g_handlerPartial); }
 static void set_a(void)    { set_handler(g_handlerA); }
 static void set_b(void)    { set_handler(g_handlerB); }
 static void set_none(void) { set_handler(NULL); }
@@ -358,6 +392,36 @@ static void scenario_swap_between(void)
           "control: callbacks after a replacement reach the new handler");
 }
 
+/* A callback that leaves after taking the handler and before any upcall: no wallet to report on. */
+static void scenario_early_return(void)
+{
+    BRWallet *wallet = g_wallet;
+    set_a();
+    g_wallet = NULL;
+    bridge_txStatusUpdate(NULL);
+    g_wallet = wallet;
+    check(upcalls(OBJ_HANDLER_A) == 0, "control: a callback with nothing to report made no upcall");
+    check(atomic_load(&g_liveLocals) == 0, "a callback that left before its upcall released its reference");
+}
+
+/* A handler whose class lacks a callback method: registered over a handler, and over none. */
+static void scenario_partial_handler(void)
+{
+    set_a();
+    set_partial();
+    check(atomic_load(&g_liveGlobals) == 1, "control: a refused handler takes no global reference");
+    fire_all();
+    set_none();
+    set_partial();
+    fire_all();
+    check(atomic_load(&g_registrationErrors) == 2,
+          "control: registering a handler whose class lacks a callback method ends with the lookup's error");
+    check(atomic_load(&g_callsUnderError) == 0,
+          "after a failed method lookup setCallbackHandler only releases references");
+    check(upcalls(OBJ_HANDLER_A) == UPCALL_SITES && upcalls(OBJ_HANDLER_PARTIAL) == 0,
+          "a handler whose class lacks a callback method is not registered, and the registered handler is unchanged");
+}
+
 /* The handler is replaced while a callback is between taking it and calling it. */
 static void scenario_swap_mid_callback(void)
 {
@@ -436,6 +500,8 @@ static const struct { const char *name; void (*run)(void); } SCENARIOS[] = {
     { "deliver", scenario_deliver },
     { "none", scenario_none },
     { "swap-between", scenario_swap_between },
+    { "early-return", scenario_early_return },
+    { "partial-handler", scenario_partial_handler },
     { "swap-mid-callback", scenario_swap_mid_callback },
     { "swap-during-upcall", scenario_swap_during_upcall },
     { "clear-mid-callback", scenario_clear_mid_callback },
@@ -469,6 +535,7 @@ int main(int argc, char **argv)
 
     g_handlerA = new_ref(REF_PARAM, OBJ_HANDLER_A);
     g_handlerB = new_ref(REF_PARAM, OBJ_HANDLER_B);
+    g_handlerPartial = new_ref(REF_PARAM, OBJ_HANDLER_PARTIAL);
 
     printf("SCENARIO %s\n", argv[1]);
     run();

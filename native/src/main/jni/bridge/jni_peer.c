@@ -8,6 +8,7 @@
  */
 
 #include <stdatomic.h>
+#include <stddef.h>
 #include "jni_bridge.h"
 #include "BRCompactFilterChain.h"
 #include "BRNetwork.h"
@@ -169,11 +170,13 @@ static uint16_t g_pinnedPort = 0;
  *     dropped.
  *
  * All method IDs are resolved in setCallbackHandler, with the handler they belong to, so a
- * callback never looks a method up and never pairs one handler with another's IDs.
+ * callback never looks a method up and never pairs one handler with another's IDs. A handler
+ * whose class lacks any of them is refused whole (CB_METHODS, below): a registered record has
+ * every method ID.
  *
  * CALLBACK_HANDLER_UNFIXED is a host-KAT comparison arm (callback_handler_swap_kat): the handler
- * as it was read before, in place and unlocked, deleted before it was replaced. No app build
- * defines it (seam_macros_unbuilt_kat). */
+ * record without the lock and the local reference. No app build defines it
+ * (seam_macros_unbuilt_kat). */
 typedef struct {
     jobject   handler;   /* in g_cb: the global reference; in a callback: that thread's local one */
     jmethodID onSyncProgress;
@@ -185,6 +188,19 @@ typedef struct {
     jmethodID onSaveFilterHeaders;
     jmethodID onSaveCfLedger;
 } BridgeCallback;
+
+/* Every NativeCallback method a callback calls. setCallbackHandler resolves them all, in this
+ * order, against the handler's class. */
+static const struct { const char *name; const char *sig; size_t at; } CB_METHODS[] = {
+    { "onSyncProgress",      "(FJ)V",                   offsetof(BridgeCallback, onSyncProgress) },
+    { "onSyncComplete",      "()V",                     offsetof(BridgeCallback, onSyncComplete) },
+    { "onSyncFailed",        "(ILjava/lang/String;)V",  offsetof(BridgeCallback, onSyncFailed) },
+    { "onBalanceChanged",    "(J)V",                    offsetof(BridgeCallback, onBalanceChanged) },
+    { "onSaveBlocks",        "([BI)V",                  offsetof(BridgeCallback, onSaveBlocks) },
+    { "onSavePeers",         "([BI)V",                  offsetof(BridgeCallback, onSavePeers) },
+    { "onSaveFilterHeaders", "([B)V",                   offsetof(BridgeCallback, onSaveFilterHeaders) },
+    { "onSaveCfLedger",      "([B)V",                   offsetof(BridgeCallback, onSaveCfLedger) },
+};
 
 static pthread_mutex_t g_cbLock = PTHREAD_MUTEX_INITIALIZER;
 static BridgeCallback  g_cb;   /* guarded by g_cbLock */
@@ -1409,23 +1425,19 @@ NativeBridge_setCallbackHandler(JNIEnv *env, jobject thiz,
         return;
     }
 
-    /* Every method a callback calls, resolved here against this handler's class. */
-    next.onSyncProgress = (*env)->GetMethodID(env, callbackClass,
-        "onSyncProgress", "(FJ)V");
-    next.onSyncComplete = (*env)->GetMethodID(env, callbackClass,
-        "onSyncComplete", "()V");
-    next.onSyncFailed = (*env)->GetMethodID(env, callbackClass,
-        "onSyncFailed", "(ILjava/lang/String;)V");
-    next.onBalanceChanged = (*env)->GetMethodID(env, callbackClass,
-        "onBalanceChanged", "(J)V");
-    next.onSaveBlocks = (*env)->GetMethodID(env, callbackClass,
-        "onSaveBlocks", "([BI)V");
-    next.onSavePeers = (*env)->GetMethodID(env, callbackClass,
-        "onSavePeers", "([BI)V");
-    next.onSaveFilterHeaders = (*env)->GetMethodID(env, callbackClass,
-        "onSaveFilterHeaders", "([B)V");
-    next.onSaveCfLedger = (*env)->GetMethodID(env, callbackClass,
-        "onSaveCfLedger", "([B)V");
+    /* Every method a callback calls, resolved here against this handler's class. A failed lookup
+     * leaves NoSuchMethodError pending, and under a pending error only a release is a legal JNI
+     * call: stop at the first one, register nothing, and let the caller see the error. */
+    for (size_t i = 0; i < sizeof(CB_METHODS) / sizeof(CB_METHODS[0]); i++) {
+        jmethodID mid = (*env)->GetMethodID(env, callbackClass, CB_METHODS[i].name, CB_METHODS[i].sig);
+        if (!mid) {
+            (*env)->DeleteLocalRef(env, callbackClass);
+            LOGE("setCallbackHandler: the handler has no %s%s; the registered handler is unchanged",
+                 CB_METHODS[i].name, CB_METHODS[i].sig);
+            return;
+        }
+        *(jmethodID *)((char *)&next + CB_METHODS[i].at) = mid;
+    }
 
     (*env)->DeleteLocalRef(env, callbackClass);
 
