@@ -1109,7 +1109,9 @@ class WalletManager @Suppress("LongParameterList") constructor(
                 val (cleared, left) = otherIds.partition { othersCleared[it] == true }
                 val landed = WipeOwedStores.record(context, owed = left, cleared = cleared)
                 // Read back only behind a write that landed: a failed commit still changes what this
-                // process reads, and the registry does not go on that view alone.
+                // process reads, and the registry does not go on that view alone. `landed` implies
+                // every write landed today (record's contract); both are asked on purpose, so a
+                // change to either one alone does not open this gate.
                 leftOnRecord = left.isEmpty() ||
                     (landed && WipeOwedStores.everyWriteLanded() && WipeOwedStores.read(context)?.containsAll(left) == true)
                 landed && WipeOwedStores.settled(context)

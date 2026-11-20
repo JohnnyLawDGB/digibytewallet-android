@@ -62,6 +62,9 @@ object WipeOwedStores {
         // written again in full until a write lands.
         if (next == held && !unlanded) return true
         val store = store(context)
+        // Not landed until the commit says so: one that changes this process's view and then
+        // does not return leaves the flag set.
+        unlanded = true
         val landed = if (next.isNotEmpty()) {
             store.edit().putString(KEY_IDS, next.joinToString(SEPARATOR)).commit()
         } else {
