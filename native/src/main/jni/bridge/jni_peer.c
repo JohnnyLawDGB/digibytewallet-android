@@ -8,6 +8,7 @@
  */
 
 #include <stdatomic.h>
+#include <stddef.h>
 #include "jni_bridge.h"
 #include "BRCompactFilterChain.h"
 #include "BRNetwork.h"
@@ -143,21 +144,138 @@ static int g_ownNodeExclusive = 0;
 static UInt128  g_pinnedAddr = { .u64 = {0, 0} };
 static uint16_t g_pinnedPort = 0;
 
+/* ---------- The callback handler (JNI-CB-HANDLER) ----------
+ *
+ * INVARIANT: a native callback never calls into a handler reference that setCallbackHandler has
+ * deleted, and never calls with no handler.
+ *
+ * The callbacks below run on peer threads, which outlive a stopSync (its wait is bounded) and so
+ * can still be running when the next SyncService registers its handler. The registered handler is
+ * therefore never read in place:
+ *
+ *   - g_cb (the handler's global reference and the NativeCallback method IDs resolved from that
+ *     handler's class) is file-static and guarded by g_cbLock. Nothing outside cb_acquire and
+ *     cb_install reads or writes it.
+ *   - A callback takes, under g_cbLock, a LOCAL reference of its own to the handler and a copy of
+ *     the method IDs (cb_acquire), makes every upcall through that local reference (CB_OBJ), and
+ *     deletes it when done (cb_release). The local reference keeps the handler object alive for
+ *     the callback whatever setCallbackHandler does meanwhile.
+ *   - setCallbackHandler builds the new record first, swaps it in under g_cbLock, and deletes the
+ *     old global reference only after the swap and outside the lock (cb_install): once it is
+ *     deleted no thread can still find it.
+ *   - g_cbLock is a leaf lock: held only across NewLocalRef or the pointer swap, never across an
+ *     upcall into Kotlin, DeleteGlobalRef, PEER_GUARD or a core call. A callback that started on
+ *     the old handler finishes on it; Kotlin's own stand-down covers a late call.
+ *   - No handler (never registered, cleared, or no local reference to be had): the callback is
+ *     dropped.
+ *
+ * All method IDs are resolved in setCallbackHandler, with the handler they belong to, so a
+ * callback never looks a method up and never pairs one handler with another's IDs. A handler
+ * whose class lacks any of them is refused whole (CB_METHODS, below): a registered record has
+ * every method ID.
+ *
+ * CALLBACK_HANDLER_UNFIXED is a host-KAT comparison arm (callback_handler_swap_kat): the handler
+ * record without the lock and the local reference. No app build defines it
+ * (seam_macros_unbuilt_kat). */
+typedef struct {
+    jobject   handler;   /* in g_cb: the global reference; in a callback: that thread's local one */
+    jmethodID onSyncProgress;
+    jmethodID onSyncComplete;
+    jmethodID onSyncFailed;
+    jmethodID onBalanceChanged;
+    jmethodID onSaveBlocks;
+    jmethodID onSavePeers;
+    jmethodID onSaveFilterHeaders;
+    jmethodID onSaveCfLedger;
+} BridgeCallback;
+
+/* Every NativeCallback method a callback calls. setCallbackHandler resolves them all, in this
+ * order, against the handler's class. */
+static const struct { const char *name; const char *sig; size_t at; } CB_METHODS[] = {
+    { "onSyncProgress",      "(FJ)V",                   offsetof(BridgeCallback, onSyncProgress) },
+    { "onSyncComplete",      "()V",                     offsetof(BridgeCallback, onSyncComplete) },
+    { "onSyncFailed",        "(ILjava/lang/String;)V",  offsetof(BridgeCallback, onSyncFailed) },
+    { "onBalanceChanged",    "(J)V",                    offsetof(BridgeCallback, onBalanceChanged) },
+    { "onSaveBlocks",        "([BI)V",                  offsetof(BridgeCallback, onSaveBlocks) },
+    { "onSavePeers",         "([BI)V",                  offsetof(BridgeCallback, onSavePeers) },
+    { "onSaveFilterHeaders", "([B)V",                   offsetof(BridgeCallback, onSaveFilterHeaders) },
+    { "onSaveCfLedger",      "([B)V",                   offsetof(BridgeCallback, onSaveCfLedger) },
+};
+
+static pthread_mutex_t g_cbLock = PTHREAD_MUTEX_INITIALIZER;
+static BridgeCallback  g_cb;   /* guarded by g_cbLock */
+
+#ifdef CALLBACK_HANDLER_UNFIXED
+#define CB_OBJ(cb) (g_cb.handler)
+static int cb_acquire(JNIEnv *env, BridgeCallback *cb) {
+    *cb = g_cb;
+    return env && g_cb.handler;
+}
+static void cb_release(JNIEnv *env, BridgeCallback *cb) {
+    (void)env;
+    (void)cb;
+}
+static void cb_install(JNIEnv *env, const BridgeCallback *next) {
+    if (g_cb.handler) {
+        (*env)->DeleteGlobalRef(env, g_cb.handler);
+        g_cb.handler = NULL;
+    }
+    g_cb = *next;
+}
+#else
+/* The handler a callback makes its upcalls on: its own local reference. */
+#define CB_OBJ(cb) ((cb).handler)
+
+/* 1 with *cb holding a local reference to the registered handler and its method IDs; 0, with
+ * nothing to release, when there is no env or no handler. Pair every 1 with cb_release. */
+static int cb_acquire(JNIEnv *env, BridgeCallback *cb) {
+    memset(cb, 0, sizeof(*cb));
+    if (!env) return 0;
+    pthread_mutex_lock(&g_cbLock);
+    if (g_cb.handler) {
+        *cb = g_cb;
+        cb->handler = (*env)->NewLocalRef(env, g_cb.handler);
+    }
+    pthread_mutex_unlock(&g_cbLock);
+    return cb->handler != NULL;
+}
+
+static void cb_release(JNIEnv *env, BridgeCallback *cb) {
+    if (cb->handler) {
+        (*env)->DeleteLocalRef(env, cb->handler);
+        cb->handler = NULL;
+    }
+}
+
+/* Make *next (its handler a global reference this call now owns, or NULL) the registered record.
+ * The old global reference is deleted after the swap, outside the lock. */
+static void cb_install(JNIEnv *env, const BridgeCallback *next) {
+    pthread_mutex_lock(&g_cbLock);
+    jobject old = g_cb.handler;
+    g_cb = *next;
+    pthread_mutex_unlock(&g_cbLock);
+    if (old) (*env)->DeleteGlobalRef(env, old);
+}
+#endif
+
 static void bridge_syncStarted(void *info) {
     (void)info;
     LOGD("bridge_syncStarted (rescanning=%d)", g_isRescanning);
 
     JNIEnv *env = jni_get_env();
-    if (!env || !g_callbackHandler || !g_mid_onSyncProgress) return;
+    BridgeCallback cb;
+    if (!cb_acquire(env, &cb)) return;
+    if (!cb.onSyncProgress) { cb_release(env, &cb); return; }
 
     jlong height = g_peerManager ? (jlong)BRPeerManagerLastBlockHeight(g_peerManager) : 0;
 
     if (g_isRescanning) {
         /* Signal Kotlin that a rescan is in progress — use progress=-1 as marker */
-        (*env)->CallVoidMethod(env, g_callbackHandler, g_mid_onSyncProgress, (jfloat)-1.0f, height);
+        (*env)->CallVoidMethod(env, CB_OBJ(cb), cb.onSyncProgress, (jfloat)-1.0f, height);
     } else {
-        (*env)->CallVoidMethod(env, g_callbackHandler, g_mid_onSyncProgress, (jfloat)0.0f, height);
+        (*env)->CallVoidMethod(env, CB_OBJ(cb), cb.onSyncProgress, (jfloat)0.0f, height);
     }
+    cb_release(env, &cb);
 
     _refreshBridgeStatusMirror();
 }
@@ -165,7 +283,8 @@ static void bridge_syncStarted(void *info) {
 static void bridge_syncStopped(void *info, int error) {
     (void)info;
     JNIEnv *env = jni_get_env();
-    if (!env || !g_callbackHandler) return;
+    BridgeCallback cb;
+    if (!cb_acquire(env, &cb)) return;
 
     if (error) {
         LOGW("bridge_syncStopped: error=%d (%s)", error, strerror(error));
@@ -181,9 +300,9 @@ static void bridge_syncStopped(void *info, int error) {
          * infinite loop that burns CPU and keeps resetting the UI to 0%.
          * The Kotlin SyncService handles reconnection via its peer-count
          * polling loop (every 30s) which will call startSync if needed. */
-        if (g_mid_onSyncFailed) {
+        if (cb.onSyncFailed) {
             jstring msg = (*env)->NewStringUTF(env, strerror(error));
-            (*env)->CallVoidMethod(env, g_callbackHandler, g_mid_onSyncFailed, (jint)error, msg);
+            (*env)->CallVoidMethod(env, CB_OBJ(cb), cb.onSyncFailed, (jint)error, msg);
             (*env)->DeleteLocalRef(env, msg);
         }
     } else {
@@ -208,11 +327,12 @@ static void bridge_syncStopped(void *info, int error) {
             /* Don't fire onSyncComplete yet — wait for rescan to finish */
         } else {
             g_isRescanning = 0;
-            if (g_mid_onSyncComplete) {
-                (*env)->CallVoidMethod(env, g_callbackHandler, g_mid_onSyncComplete);
+            if (cb.onSyncComplete) {
+                (*env)->CallVoidMethod(env, CB_OBJ(cb), cb.onSyncComplete);
             }
         }
     }
+    cb_release(env, &cb);
 
     _refreshBridgeStatusMirror();
 }
@@ -221,24 +341,27 @@ static void bridge_txStatusUpdate(void *info) {
     (void)info;
     LOGD("bridge_txStatusUpdate");
     JNIEnv *env = jni_get_env();
-    if (!env || !g_callbackHandler || !g_wallet) return;
+    BridgeCallback cb;
+    if (!cb_acquire(env, &cb)) return;
+    if (!g_wallet) { cb_release(env, &cb); return; }
 
     /* Report balance change */
-    if (g_mid_onBalanceChanged) {
+    if (cb.onBalanceChanged) {
         jlong balance = (jlong)BRWalletBalance(g_wallet);
-        (*env)->CallVoidMethod(env, g_callbackHandler, g_mid_onBalanceChanged, balance);
+        (*env)->CallVoidMethod(env, CB_OBJ(cb), cb.onBalanceChanged, balance);
     }
 
     /* Report sync progress — suppress during rescan and at 1.0.
      * onSyncComplete (via bridge_syncStopped) is the proper "done" signal. */
-    if (g_mid_onSyncProgress && g_peerManager && !g_isRescanning) {
+    if (cb.onSyncProgress && g_peerManager && !g_isRescanning) {
         double progress = BRPeerManagerSyncProgress(g_peerManager, 0);
         if (progress < 1.0) {
             jlong height = (jlong)BRPeerManagerLastBlockHeight(g_peerManager);
-            (*env)->CallVoidMethod(env, g_callbackHandler, g_mid_onSyncProgress,
+            (*env)->CallVoidMethod(env, CB_OBJ(cb), cb.onSyncProgress,
                                    (jfloat)progress, height);
         }
     }
+    cb_release(env, &cb);
 
     _refreshBridgeStatusMirror();
 }
@@ -249,12 +372,6 @@ static void bridge_txStatusUpdate(void *info) {
  * On restart, Kotlin passes the blobs back to startSync which deserializes
  * and feeds them to BRPeerManagerNew.
  */
-
-/* Cached method IDs for save callbacks */
-static jmethodID g_mid_onSaveBlocks = NULL;
-static jmethodID g_mid_onSavePeers = NULL;
-static jmethodID g_mid_onSaveFilterHeaders = NULL;
-static jmethodID g_mid_onSaveCfLedger = NULL;
 
 // The core (BRPeerManager _serializeSavedBlocks) now serializes the blocks to
 // `bytes` WHILE HOLDING manager->lock and hands us the immutable buffer — NOT
@@ -271,27 +388,23 @@ static void bridge_saveBlocks(void *info, int replace, const uint8_t *bytes,
     if (len == 0 || !bytes) return;
 
     JNIEnv *env = jni_get_env();
-    if (!env || !g_callbackHandler) {
-        LOGD("bridge_saveBlocks: %zu bytes (no JNI env, skipping persist)", len);
+    BridgeCallback cb;
+    if (!cb_acquire(env, &cb)) {
+        LOGD("bridge_saveBlocks: %zu bytes (no JNI env or handler, skipping persist)", len);
         return;
     }
-
-    /* Cache method ID on first call */
-    if (!g_mid_onSaveBlocks) {
-        jclass cls = (*env)->GetObjectClass(env, g_callbackHandler);
-        g_mid_onSaveBlocks = (*env)->GetMethodID(env, cls, "onSaveBlocks", "([BI)V");
-        (*env)->DeleteLocalRef(env, cls);
-        if (!g_mid_onSaveBlocks) {
-            LOGW("bridge_saveBlocks: onSaveBlocks method not found");
-            return;
-        }
+    if (!cb.onSaveBlocks) {
+        LOGW("bridge_saveBlocks: onSaveBlocks method not found");
+        cb_release(env, &cb);
+        return;
     }
 
     /* Hand the already-serialized bytes to Kotlin. */
     jbyteArray jbuf = (*env)->NewByteArray(env, (jsize)len);
     (*env)->SetByteArrayRegion(env, jbuf, 0, (jsize)len, (jbyte *)bytes);
-    (*env)->CallVoidMethod(env, g_callbackHandler, g_mid_onSaveBlocks, jbuf, (jint)replace);
+    (*env)->CallVoidMethod(env, CB_OBJ(cb), cb.onSaveBlocks, jbuf, (jint)replace);
     (*env)->DeleteLocalRef(env, jbuf);
+    cb_release(env, &cb);
 
     LOGD("bridge_saveBlocks: %zu bytes, replace=%d", len, replace);
 
@@ -304,27 +417,22 @@ static void bridge_savePeers(void *info, int replace, const BRPeer peers[], size
     if (peersCount == 0 || !peers) return;
 
     JNIEnv *env = jni_get_env();
-    if (!env || !g_callbackHandler) {
-        LOGD("bridge_savePeers: %zu peers (no JNI env, skipping persist)", peersCount);
+    BridgeCallback cb;
+    if (!cb_acquire(env, &cb)) {
+        LOGD("bridge_savePeers: %zu peers (no JNI env or handler, skipping persist)", peersCount);
         return;
     }
-
-    /* Cache method ID on first call */
-    if (!g_mid_onSavePeers) {
-        jclass cls = (*env)->GetObjectClass(env, g_callbackHandler);
-        g_mid_onSavePeers = (*env)->GetMethodID(env, cls, "onSavePeers", "([BI)V");
-        (*env)->DeleteLocalRef(env, cls);
-        if (!g_mid_onSavePeers) {
-            LOGW("bridge_savePeers: onSavePeers method not found");
-            return;
-        }
+    if (!cb.onSavePeers) {
+        LOGW("bridge_savePeers: onSavePeers method not found");
+        cb_release(env, &cb);
+        return;
     }
 
     /* Serialize peers: [4 bytes count] + [per peer: 16 bytes addr + 2 bytes port + 8 bytes timestamp + 8 bytes services] */
     size_t peerSize = 16 + 2 + 8 + 8; /* 34 bytes per peer */
     size_t totalSize = 4 + peersCount * peerSize;
     uint8_t *buf = malloc(totalSize);
-    if (!buf) return;
+    if (!buf) { cb_release(env, &cb); return; }
 
     size_t pos = 0;
     UInt32SetLE(&buf[pos], (uint32_t)peersCount); pos += 4;
@@ -338,8 +446,9 @@ static void bridge_savePeers(void *info, int replace, const BRPeer peers[], size
 
     jbyteArray jbuf = (*env)->NewByteArray(env, (jsize)pos);
     (*env)->SetByteArrayRegion(env, jbuf, 0, (jsize)pos, (jbyte *)buf);
-    (*env)->CallVoidMethod(env, g_callbackHandler, g_mid_onSavePeers, jbuf, (jint)replace);
+    (*env)->CallVoidMethod(env, CB_OBJ(cb), cb.onSavePeers, jbuf, (jint)replace);
     (*env)->DeleteLocalRef(env, jbuf);
+    cb_release(env, &cb);
     free(buf);
 
     LOGD("bridge_savePeers: serialized %zu peers (%zu bytes, replace=%d)", peersCount, pos, replace);
@@ -1299,50 +1408,46 @@ NativeBridge_setCallbackHandler(JNIEnv *env, jobject thiz,
                                                               jobject handler) {
     (void)thiz;
 
-    /* Release old global ref if exists */
-    if (g_callbackHandler) {
-        (*env)->DeleteGlobalRef(env, g_callbackHandler);
-        g_callbackHandler = NULL;
-    }
+    /* Build the whole new record first; cb_install swaps it in and only then deletes the old
+     * global reference (JNI-CB-HANDLER, at g_cb above). */
+    BridgeCallback next;
+    memset(&next, 0, sizeof(next));
 
     if (!handler) {
+        cb_install(env, &next);
         LOGI("setCallbackHandler: handler cleared");
-        g_mid_onSyncProgress        = NULL;
-        g_mid_onTransactionReceived = NULL;
-        g_mid_onPeerConnected       = NULL;
-        g_mid_onPeerDisconnected    = NULL;
-        g_mid_onSyncComplete        = NULL;
-        g_mid_onSyncFailed          = NULL;
-        g_mid_onBalanceChanged      = NULL;
         return;
     }
 
-    /* Create global ref so the handler survives across JNI calls */
-    g_callbackHandler = (*env)->NewGlobalRef(env, handler);
-
-    /* Cache method IDs for the NativeCallback interface */
     jclass callbackClass = (*env)->GetObjectClass(env, handler);
     if (!callbackClass) {
-        LOGE("setCallbackHandler: failed to get handler class");
+        LOGE("setCallbackHandler: failed to get handler class; the registered handler is unchanged");
         return;
     }
 
-    g_mid_onSyncProgress = (*env)->GetMethodID(env, callbackClass,
-        "onSyncProgress", "(FJ)V");
-    g_mid_onTransactionReceived = (*env)->GetMethodID(env, callbackClass,
-        "onTransactionReceived", "(Ljava/lang/String;JZ)V");
-    g_mid_onPeerConnected = (*env)->GetMethodID(env, callbackClass,
-        "onPeerConnected", "(I)V");
-    g_mid_onPeerDisconnected = (*env)->GetMethodID(env, callbackClass,
-        "onPeerDisconnected", "(I)V");
-    g_mid_onSyncComplete = (*env)->GetMethodID(env, callbackClass,
-        "onSyncComplete", "()V");
-    g_mid_onSyncFailed = (*env)->GetMethodID(env, callbackClass,
-        "onSyncFailed", "(ILjava/lang/String;)V");
-    g_mid_onBalanceChanged = (*env)->GetMethodID(env, callbackClass,
-        "onBalanceChanged", "(J)V");
+    /* Every method a callback calls, resolved here against this handler's class. A failed lookup
+     * leaves NoSuchMethodError pending, and under a pending error only a release is a legal JNI
+     * call: stop at the first one, register nothing, and let the caller see the error. */
+    for (size_t i = 0; i < sizeof(CB_METHODS) / sizeof(CB_METHODS[0]); i++) {
+        jmethodID mid = (*env)->GetMethodID(env, callbackClass, CB_METHODS[i].name, CB_METHODS[i].sig);
+        if (!mid) {
+            (*env)->DeleteLocalRef(env, callbackClass);
+            LOGE("setCallbackHandler: the handler has no %s%s; the registered handler is unchanged",
+                 CB_METHODS[i].name, CB_METHODS[i].sig);
+            return;
+        }
+        *(jmethodID *)((char *)&next + CB_METHODS[i].at) = mid;
+    }
 
     (*env)->DeleteLocalRef(env, callbackClass);
+
+    /* Global ref so the handler survives across JNI calls */
+    next.handler = (*env)->NewGlobalRef(env, handler);
+    if (!next.handler) {
+        LOGE("setCallbackHandler: no global reference; the registered handler is unchanged");
+        return;
+    }
+    cb_install(env, &next);
 
     LOGI("setCallbackHandler: handler registered, method IDs cached");
 }
@@ -1567,32 +1672,29 @@ static void bridge_saveFilterHeaders(void *info, const BRCompactFilterChain *cha
     if (!chain) return;
 
     JNIEnv *env = jni_get_env();
-    if (!env || !g_callbackHandler) {
-        LOGD("bridge_saveFilterHeaders: no JNI env, skipping persist");
+    BridgeCallback cb;
+    if (!cb_acquire(env, &cb)) {
+        LOGD("bridge_saveFilterHeaders: no JNI env or handler, skipping persist");
+        return;
+    }
+    if (!cb.onSaveFilterHeaders) {
+        LOGW("bridge_saveFilterHeaders: onSaveFilterHeaders method not found");
+        cb_release(env, &cb);
         return;
     }
 
-    if (!g_mid_onSaveFilterHeaders) {
-        jclass cls = (*env)->GetObjectClass(env, g_callbackHandler);
-        g_mid_onSaveFilterHeaders = (*env)->GetMethodID(env, cls, "onSaveFilterHeaders", "([B)V");
-        (*env)->DeleteLocalRef(env, cls);
-        if (!g_mid_onSaveFilterHeaders) {
-            LOGW("bridge_saveFilterHeaders: onSaveFilterHeaders method not found");
-            return;
-        }
-    }
-
     size_t need = BRCompactFilterChainSerialize(chain, NULL, 0);
-    if (need == 0) return;
+    if (need == 0) { cb_release(env, &cb); return; }
     uint8_t *buf = malloc(need);
-    if (!buf) return;
+    if (!buf) { cb_release(env, &cb); return; }
     size_t got = BRCompactFilterChainSerialize(chain, buf, need);
-    if (got != need) { free(buf); return; }
+    if (got != need) { free(buf); cb_release(env, &cb); return; }
 
     jbyteArray jbuf = (*env)->NewByteArray(env, (jsize)got);
     (*env)->SetByteArrayRegion(env, jbuf, 0, (jsize)got, (jbyte *)buf);
-    (*env)->CallVoidMethod(env, g_callbackHandler, g_mid_onSaveFilterHeaders, jbuf);
+    (*env)->CallVoidMethod(env, CB_OBJ(cb), cb.onSaveFilterHeaders, jbuf);
     (*env)->DeleteLocalRef(env, jbuf);
+    cb_release(env, &cb);
     free(buf);
 }
 
@@ -1605,25 +1707,22 @@ static void bridge_saveCFLedger(void *info, const uint8_t *bytes, size_t len) {
     if (!bytes || len == 0) return;
 
     JNIEnv *env = jni_get_env();
-    if (!env || !g_callbackHandler) {
-        LOGD("bridge_saveCFLedger: no JNI env, skipping persist");
+    BridgeCallback cb;
+    if (!cb_acquire(env, &cb)) {
+        LOGD("bridge_saveCFLedger: no JNI env or handler, skipping persist");
         return;
     }
-
-    if (!g_mid_onSaveCfLedger) {
-        jclass cls = (*env)->GetObjectClass(env, g_callbackHandler);
-        g_mid_onSaveCfLedger = (*env)->GetMethodID(env, cls, "onSaveCfLedger", "([B)V");
-        (*env)->DeleteLocalRef(env, cls);
-        if (!g_mid_onSaveCfLedger) {
-            LOGW("bridge_saveCFLedger: onSaveCfLedger method not found");
-            return;
-        }
+    if (!cb.onSaveCfLedger) {
+        LOGW("bridge_saveCFLedger: onSaveCfLedger method not found");
+        cb_release(env, &cb);
+        return;
     }
 
     jbyteArray jbuf = (*env)->NewByteArray(env, (jsize)len);
     (*env)->SetByteArrayRegion(env, jbuf, 0, (jsize)len, (const jbyte *)bytes);
-    (*env)->CallVoidMethod(env, g_callbackHandler, g_mid_onSaveCfLedger, jbuf);
+    (*env)->CallVoidMethod(env, CB_OBJ(cb), cb.onSaveCfLedger, jbuf);
     (*env)->DeleteLocalRef(env, jbuf);
+    cb_release(env, &cb);
 }
 
 void JNICALL
