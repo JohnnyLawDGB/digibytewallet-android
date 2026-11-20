@@ -5,12 +5,14 @@ import android.content.SharedPreferences
 import app.aroundtheblock.wallet.core.UpdateChecker
 import app.aroundtheblock.wallet.core.asset.network.MultiEndpointAssetClient
 import app.aroundtheblock.wallet.core.digistamp.DigistampClient
+import app.aroundtheblock.wallet.core.ipfs.IpfsClient
 import app.aroundtheblock.wallet.core.network.DigiScopePins
 import app.aroundtheblock.wallet.core.reconcile.DgbNodeClient
 import app.aroundtheblock.wallet.core.tor.TorManager
 import io.mockk.every
 import io.mockk.mockk
 import okhttp3.EventListener
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import org.junit.Assert.assertEquals
@@ -74,7 +76,39 @@ class SharedClientPinsTest {
     }
 
     @Test fun `the IPFS gateway fetch is made on a pinned client`() {
-        assertPinsDigiScope("the IPFS client", clientOf(AppModule.provideIpfsClient(shared), "httpClient"))
+        val ipfs = AppModule.provideIpfsClient(shared)
+        assertPinsDigiScope("the IPFS client", clientOf(ipfs, "httpClient"))
+        // IPFS-NO-REDIRECT: the trusted gateway is asked on a client derived from that one. It keeps
+        // the pins and follows no redirect, so what it reads is the pinned host's own answer.
+        val trusted = (privateFieldOf(ipfs, "trustedGatewayClient\$delegate") as Lazy<*>).value as OkHttpClient
+        assertPinsDigiScope("the IPFS client's trusted-gateway client", trusted)
+        assertTrue("the trusted-gateway client follows redirects", !trusted.followRedirects && !trusted.followSslRedirects)
+    }
+
+    /**
+     * IPFS-NO-REDIRECT: trust-by-pin covers only hosts the pinner holds pins for. The gateways the
+     * shipped IPFS client accepts on identity are the one list in IpfsClient, and every entry is an
+     * https origin, ended at the host, that the client it is asked on has pins for.
+     */
+    @Test fun `every gateway the IPFS client trusts on identity is a host the client pins`() {
+        val ipfs = AppModule.provideIpfsClient(shared)
+        val trusted = privateFieldOf(ipfs, "trustedGatewayPrefixes") as List<*>
+        assertEquals("the shipped IPFS client trusts a list of its own", IpfsClient.TRUSTED_GATEWAY_PREFIXES, trusted)
+        assertTrue("the IPFS client trusts no gateway at all", trusted.isNotEmpty())
+        for (prefix in IpfsClient.TRUSTED_GATEWAY_PREFIXES) {
+            val url = prefix.toHttpUrlOrNull()
+            assertTrue("$prefix is not an https origin ended at its host", url != null && url.isHttps && prefix == "https://${url.host}/")
+            assertTrue("$prefix is trusted on identity but ${url!!.host} holds no pins",
+                shared.certificatePinner.findMatchingPins(url.host).isNotEmpty())
+        }
+    }
+
+    /** A private member of a component, by the name the compiler gives its field (`name$delegate` for `by lazy`). */
+    private fun privateFieldOf(component: Any, field: String): Any? = try {
+        component.javaClass.getDeclaredField(field).apply { isAccessible = true }.get(component)
+    } catch (e: NoSuchFieldException) {
+        throw AssertionError("${component.javaClass.simpleName} has no field '$field': it was renamed or is no longer " +
+            "held this way; update this test to read it where it now lives", e)
     }
 
     @Test fun `the Digi-ID callback is posted on a pinned client`() {

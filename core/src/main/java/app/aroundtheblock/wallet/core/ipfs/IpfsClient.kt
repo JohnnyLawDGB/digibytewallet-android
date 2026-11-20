@@ -19,14 +19,41 @@ import okhttp3.Request
  *  - A response larger than [MAX_RESPONSE_SIZE] is refused while it streams; it is never held whole.
  *  - Gateways are tried in order; failures (network or hash mismatch) cause a
  *    transparent fall-through to the next gateway.
+ *  - A redirect from a trusted gateway is never followed (IPFS-NO-REDIRECT): trust-by-pin covers
+ *    only bytes the pinned host itself answered. Its 3xx is a failed fetch like any other, and the
+ *    next gateway is asked. The public gateways are content-verified on every answer, wherever it
+ *    came from, and keep following redirects.
  *
  * No IPFS daemon or libp2p dependency is required.
  */
-class IpfsClient(
+class IpfsClient internal constructor(
     private val httpClient: OkHttpClient,
-    private val cidVerifier: CidVerifier = CidVerifier(),
-    private val gateways: List<String> = DEFAULT_GATEWAYS
+    private val cidVerifier: CidVerifier,
+    private val gateways: List<String>,
+    /**
+     * The gateways trusted on their pinned identity. Settable only inside this module, where a test
+     * serves one locally: no caller outside it can name a host the pinner holds no pins for.
+     */
+    private val trustedGatewayPrefixes: List<String>,
 ) {
+    /** The shipped client: the trusted gateways are [TRUSTED_GATEWAY_PREFIXES] and nothing else. */
+    constructor(
+        httpClient: OkHttpClient,
+        cidVerifier: CidVerifier = CidVerifier(),
+        gateways: List<String> = DEFAULT_GATEWAYS,
+    ) : this(httpClient, cidVerifier, gateways, TRUSTED_GATEWAY_PREFIXES)
+
+    /**
+     * The client a trusted gateway is asked on: [httpClient] (its Tor routing, pins and pool) with
+     * both redirect switches off, as on every other pinned client (4.1.2 row 30). Made on first use.
+     */
+    private val trustedGatewayClient: OkHttpClient by lazy {
+        httpClient.newBuilder()
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .build()
+    }
+
     companion object {
         /**
          * Reduce a provider's CID to the bare identifier, or null if it is not one.
@@ -135,7 +162,12 @@ class IpfsClient(
                 .header("Accept", "application/vnd.ipld.raw")
                 .build()
 
-            httpClient.newCall(request).execute().use { response ->
+            // Decided from the configured gateway, before the request: a trusted gateway is asked on
+            // the client that follows no redirect, so the answer read below is that host's own.
+            val isTrustedGateway = trustedGatewayPrefixes.any { gateway.startsWith(it) }
+            val client = if (isTrustedGateway) trustedGatewayClient else httpClient
+
+            client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
                     android.util.Log.d(TAG, "tryGateway: $gateway → HTTP ${response.code} for $cid")
                     return null
@@ -154,7 +186,6 @@ class IpfsClient(
                 // For those CIDs, trust rests on the pinned server identity of
                 // the gateway in [TRUSTED_GATEWAY_PREFIXES] — a weakening
                 // documented there. CIDv1 raw fetches stay strictly content-verified.
-                val isTrustedGateway = TRUSTED_GATEWAY_PREFIXES.any { gateway.startsWith(it) }
                 // dag-pb / UnixFS CIDs hash the WRAPPER block, not the raw file content —
                 // CIDv0 (Qm…) AND CIDv1 dag-pb (bafybe…). Content-hash verification against
                 // the assembled bytes our trusted (cert-pinned) gateway serves can never
