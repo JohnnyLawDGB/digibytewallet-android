@@ -112,9 +112,10 @@ class WalletStoreEraser internal constructor(
      * network, each attempted whatever the other reported. True when neither reads anything back.
      * For legacy this is [eraseStores], which spans both already.
      *
-     * Only a wallet's registry entry says which network its stores were written under, and
-     * `WalletManager.wipeWallet` does not rely on it: it erases every wallet under both. This is the
-     * same erase, for a caller about to drop an entry: no wipe can find the wallet afterwards.
+     * The ONE copy of the both-networks rule. Only a wallet's registry entry says which network its
+     * stores were written under, and `WalletManager.wipeWallet` does not rely on it: it erases every
+     * other wallet through this. A caller about to drop an entry does the same: the wipe finds the
+     * wallet afterwards only if it owed it this erase ([WipeOwedStores]).
      */
     fun eraseStoresOnBothNetworks(scope: WalletScope): Boolean = bothNetworksOf(scope).map(::eraseStores).all { it }
 
@@ -293,11 +294,11 @@ class WalletStoreEraser internal constructor(
         const val RECONCILE = "dgb_reconcile"
         const val SETTINGS = "dgb_settings"
         const val TMP = ".tmp"
-
-        /** The platform's file for prefs [name], or its backup, is on disk. */
-        fun prefsFileOnDisk(context: Context, name: String): Boolean {
-            val dir = File(context.dataDir, "shared_prefs")
-            return File(dir, "$name.xml").exists() || File(dir, "$name.xml.bak").exists()
-        }
     }
+}
+
+/** The platform's file for prefs [name], or its backup, is on disk. The one on-disk check a read-back uses. */
+internal fun prefsFileOnDisk(context: Context, name: String): Boolean {
+    val dir = File(context.dataDir, "shared_prefs")
+    return File(dir, "$name.xml").exists() || File(dir, "$name.xml.bak").exists()
 }

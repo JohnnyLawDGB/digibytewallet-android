@@ -138,6 +138,8 @@ internal fun wipeTestContext(prefs: InMemoryPrefsFactory, root: File): Context {
     val ctx = mockk<Context>(relaxed = true)
     every { ctx.getSharedPreferences(any(), any()) } answers { prefs.prefsFor(firstArg()) }
     every { ctx.filesDir } returns filesDir
+    // A device always has a data directory. These preferences are in memory, so none has a file in it.
+    every { ctx.dataDir } returns root
     every { ctx.getDatabasePath(any()) } answers { File(dbDir, firstArg<String>()) }
     every { ctx.applicationContext } returns ctx
     return ctx

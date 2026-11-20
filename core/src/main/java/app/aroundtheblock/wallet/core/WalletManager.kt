@@ -31,6 +31,7 @@ import app.aroundtheblock.wallet.core.wallets.WalletOrigin
 import app.aroundtheblock.wallet.core.wallets.WalletRegistry
 import app.aroundtheblock.wallet.core.wallets.WalletScope
 import app.aroundtheblock.wallet.core.wallets.WalletStores
+import app.aroundtheblock.wallet.core.wallets.WipeOwedStores
 import app.aroundtheblock.wallet.core.wallets.storageSuffix
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -197,8 +198,9 @@ class WalletManager @Suppress("LongParameterList") constructor(
     // Every seed key alias of every wallet, which the wipe deletes and reads back. Not
     // [keyStoreManager], which is bound to this manager's own wallet.
     private val keystoreAliases: KeystoreAliases = AndroidKeystoreAliases,
-    // Every wallet id on the device: the registry, the seed records on disk and the Keystore
-    // aliases. Injectable because in-memory test prefs create no files to list.
+    // Every wallet id on the device: the registry, the seed records on disk, the Keystore aliases
+    // and the ids an earlier wipe still owes a store erase. Injectable because in-memory test
+    // prefs create no files to list.
     private val allWalletIds: () -> List<String> = {
         app.aroundtheblock.wallet.core.wallets.ActiveWallet.everyWalletId(context) { keystoreAliases.aliases() }
     },
@@ -1006,17 +1008,33 @@ class WalletManager @Suppress("LongParameterList") constructor(
      * address set, recorded sends, filter-header chain, Room DB), so a security wipe (manual
      * Settings OR the PIN wipe-after-N backstop) doesn't leave transaction history behind. Both
      * paths call this single routine, and one run covers every wallet ([allWalletIds]: the
-     * registry, the seed records on disk and the Keystore aliases), BOTH networks' stores, the
-     * registry `dgb_wallets` and the identity sessions ([IdentitySessionWipe]).
+     * registry, the seed records on disk, the Keystore aliases and the ids an earlier wipe left
+     * on record), BOTH networks' stores, the registry `dgb_wallets` and the identity sessions
+     * ([IdentitySessionWipe]).
      *
      * It runs each phase across every wallet before the next phase starts, never one wallet at a
      * time: every seed record first; then, once every record reads back gone, every seed key alias
      * of every wallet (legacy's `dgb_wallet_master(_v2)` included, whichever wallet is active);
-     * then every store. Order holds across a process death: a wipe cut short leaves no
+     * then every store, each other wallet's by the eraser's one both-networks rule
+     * (`WalletStoreEraser.eraseStoresOnBothNetworks`). Order holds across a process death: a wipe
+     * cut short leaves no
      * half-loadable wallet and nothing that could decrypt a record that did survive, while a
      * record that is still on the device keeps the key that opens it and stays the wallet its
      * PIN opened before this run. A wipe that could not finish is always one that can be run
      * again, from a device its owner can still open.
+     *
+     * The first two phases and the registry's clear remove everything a wallet is found by, so
+     * before the stores go every other wallet's id is put on record ([WipeOwedStores]) and taken
+     * off only when that wallet's stores read back empty on both networks. A store this run could
+     * not clear is therefore listed again by the next launch's wipe, which cannot report verified
+     * while it is there; a verified wipe leaves neither that record nor an id (INT-2026-11-19-A).
+     * The registry is cleared only when every wallet whose stores are left reads back on that
+     * record, so a run in which the record's write did not land keeps the registry's entries for
+     * the next wipe to list. A record that cannot be read, or whose file is still on the device,
+     * is not a verified wipe either. Remaining: a wallet known only by its seed record or key
+     * alias has no entry to keep, so if the record's write and one of that wallet's stores both
+     * refuse in one run, the next wipe does not list it; and ids in a record file the platform
+     * can no longer parse are lost with it.
      *
      * Nothing of the wiped wallet keeps running once the erase begins: every session running for
      * it in this process ([WalletSessionStop] — the sync service) is stopped first, then the
@@ -1060,8 +1078,18 @@ class WalletManager @Suppress("LongParameterList") constructor(
         } catch (t: Throwable) {
             android.util.Log.w("WalletManager", "wipe: utxo cache not emptied (${t.javaClass.simpleName})")
         }
+        // Before any store goes: the registry, the records and the keys are all a later wipe finds a
+        // wallet by, and this run removes them. Every other wallet's id is put on record, and comes
+        // off only when its stores read back empty (INT-2026-11-19-A). After the seed steps, so no
+        // record or key waits on this write; attempted, and what it left is read back below.
+        val otherIds = others.map { it.walletId }
+        attempt("owed stores noted") { WipeOwedStores.record(context, owed = otherIds) }
         // Phase 3. Regenerable + privacy-sensitive persisted data: legacy's on both networks, then
-        // every other wallet's on both networks (a wallet's own network is not trusted to be known).
+        // every other wallet's on both networks (a wallet's own network is not trusted to be known),
+        // by the eraser's one both-networks rule.
+        val othersCleared = LinkedHashMap<String, Boolean>()
+        // Whether every wallet whose stores are left reads back on the record (true when none is left).
+        var leftOnRecord = false
         val storesCleared = listOf(
             attempt("sync data") { dataEraser.eraseSyncData() },
             attempt("peer cache") { dataEraser.eraseBloomPeerCache() },
@@ -1071,12 +1099,27 @@ class WalletManager @Suppress("LongParameterList") constructor(
             attempt("database") { dataEraser.eraseDatabase() },
             attempt("leftover state") { dataEraser.eraseLeftoverState() },
             attempt("hub session") { dataEraser.eraseHubSession() },
-        ) + others.flatMap { listOf(it, it.copy(testnet = true)) }.map { wallet ->
-            attempt("wallet stores") { scopeEraser.eraseStores(wallet) }
+        ) + others.map { wallet ->
+            attempt("wallet stores") { scopeEraser.eraseStoresOnBothNetworks(wallet) }.also { othersCleared[wallet.walletId] = it }
         } + listOf(
-            // The registry goes only once no wallet's record is left: while one is, the registry
-            // still lists it.
-            recordGone && attempt("wallet registry") { clearWalletRegistry() },
+            // The record keeps exactly the wallets whose stores did not read back empty, and the
+            // wipe cannot verify while it names one, whichever run put it there, nor while it cannot
+            // be read or its file is on the device.
+            attempt("owed stores settled") {
+                val (cleared, left) = otherIds.partition { othersCleared[it] == true }
+                val landed = WipeOwedStores.record(context, owed = left, cleared = cleared)
+                // Read back only behind a write that landed: a failed commit still changes what this
+                // process reads, and the registry does not go on that view alone. `landed` implies
+                // every write landed today (record's contract); both are asked on purpose, so a
+                // change to either one alone does not open this gate.
+                leftOnRecord = left.isEmpty() ||
+                    (landed && WipeOwedStores.everyWriteLanded() && WipeOwedStores.read(context)?.containsAll(left) == true)
+                landed && WipeOwedStores.settled(context)
+            },
+            // The registry goes only once no wallet's record is left (while one is, the registry
+            // still lists it), and only once the record of ids holds every wallet whose stores are
+            // left: until then the registry is the last thing that lists such a wallet.
+            recordGone && leftOnRecord && attempt("wallet registry") { clearWalletRegistry() },
             attempt("identity sessions") { identitySessions.eraseIdentitySessions() },
         )
         // READ-BACK, not "no step threw": the removal of every record is confirmed (above) and no
