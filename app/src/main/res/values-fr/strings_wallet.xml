@@ -635,6 +635,7 @@
     <string name="reconcile_not_in_wallet">Pas dans ce portefeuille</string>
     <string name="reconcile_wallet_only">Dans le portefeuille, non signalé par le nœud</string>
     <string name="reconcile_no_missing_funds">Aucun fonds manquant trouvé.</string>
+    <string name="reconcile_intro_body">Le portefeuille trouve normalement vos transactions lui-même, à l’aide de filtres de blocs compacts (BIP157/158) fournis par des pairs DigiByte. Si une synchronisation a été interrompue, des transactions peuvent manquer dans le portefeuille alors qu’elles sont sur la chaîne.\n\nCe scan envoie les adresses de votre portefeuille à un nœud DigiByte, demande quelles sorties non dépensées et quelles transactions leur appartiennent, et ajoute celles qui manquent au portefeuille.</string>
     <string name="reconcile_txs_already_in_wallet">Transactions déjà dans le portefeuille</string>
     <string name="reconcile_txs_not_added">Transactions non ajoutées (pas de ce portefeuille)</string>
     <string name="reconcile_stage_comparing">Comparaison avec le portefeuille…</string>

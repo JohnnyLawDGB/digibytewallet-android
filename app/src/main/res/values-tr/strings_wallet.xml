@@ -652,6 +652,7 @@
     <string name="reconcile_not_in_wallet">Bu cüzdanda değil</string>
     <string name="reconcile_wallet_only">Cüzdanda var, düğüm tarafından bildirilmedi</string>
     <string name="reconcile_no_missing_funds">Eksik bakiye bulunamadı.</string>
+    <string name="reconcile_intro_body">Cüzdan işlemlerinizi normalde kendisi, DigiByte eşlerinden gelen kompakt blok filtreleriyle (BIP157/158) bulur. Bir eşitleme yarıda kaldıysa, bazı işlemler zincirde olduğu hâlde cüzdanda eksik olabilir.\n\nBu tarama cüzdanınızın adreslerini bir DigiByte düğümüne gönderir, hangi harcanmamış çıktıların ve işlemlerin bu adreslere ait olduğunu sorar ve cüzdanda eksik olanları ekler.</string>
     <string name="reconcile_txs_already_in_wallet">Zaten cüzdanda olan işlemler</string>
     <string name="reconcile_txs_not_added">Eklenmeyen işlemler (bu cüzdana ait değil)</string>
     <string name="reconcile_stage_comparing">Cüzdanla karşılaştırılıyor…</string>

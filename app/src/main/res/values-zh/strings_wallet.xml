@@ -649,6 +649,7 @@
     <string name="reconcile_not_in_wallet">不在此钱包中</string>
     <string name="reconcile_wallet_only">在钱包中，节点未报告</string>
     <string name="reconcile_no_missing_funds">未发现缺失的资金。</string>
+    <string name="reconcile_intro_body">钱包通常使用来自 DigiByte 节点的紧凑区块过滤器（BIP157/158）自行查找您的交易。如果同步曾被中断，某些交易即使已在链上，也可能不在钱包中。\n\n此扫描会把您钱包的地址发送给一个 DigiByte 节点，询问哪些未花费输出和交易属于这些地址，并添加钱包中缺少的部分。</string>
     <string name="reconcile_txs_already_in_wallet">已在钱包中的交易</string>
     <string name="reconcile_txs_not_added">未添加的交易（不属于此钱包）</string>
     <string name="reconcile_stage_comparing">正在与钱包比对…</string>

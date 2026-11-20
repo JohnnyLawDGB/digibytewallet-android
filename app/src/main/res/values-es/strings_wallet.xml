@@ -657,6 +657,7 @@
     <string name="reconcile_not_in_wallet">No está en esta billetera</string>
     <string name="reconcile_wallet_only">En la billetera, no informado por el nodo</string>
     <string name="reconcile_no_missing_funds">No se encontraron fondos faltantes.</string>
+    <string name="reconcile_intro_body">Normalmente la billetera encuentra tus transacciones por sí misma, con filtros de bloque compactos (BIP157/158) de pares de DigiByte. Si una sincronización se interrumpió, pueden faltar transacciones en la billetera aunque estén en la cadena.\n\nEste escaneo envía las direcciones de tu billetera a un nodo DigiByte, pregunta qué salidas sin gastar y transacciones les pertenecen, y añade las que le falten a la billetera.</string>
     <string name="reconcile_txs_already_in_wallet">Transacciones ya en la billetera</string>
     <string name="reconcile_txs_not_added">Transacciones no añadidas (no son de esta billetera)</string>
     <string name="reconcile_stage_comparing">Comparando con la billetera…</string>
