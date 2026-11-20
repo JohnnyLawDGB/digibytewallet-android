@@ -88,13 +88,18 @@ class HubWebSocket(
      */
     @Volatile private var refusals = 0
 
-    fun connect() {
+    /**
+     * Starts a connection, ending the one there is first. Returns true if a socket was started,
+     * false if none was: no Hub session, or Tor on and not connected yet. A caller that does more
+     * on a reconnect (the chat reloads its history) does it only when this says a socket started.
+     */
+    fun connect(): Boolean {
         val token = digiScopeClient.getToken()
         if (token == null) {
             android.util.Log.w("HubWS", "connect: no token, skipping")
-            return
+            return false
         }
-        synchronized(lock) {
+        return synchronized(lock) {
             // One socket at a time: whatever is open, or still opening, is ended before another is started.
             endCurrent("Replaced by a new connection")
             val openedOn = route()
@@ -102,7 +107,7 @@ class HubWebSocket(
                 // Tor is on and not connected yet. Nothing is started; the caller's retry comes back.
                 android.util.Log.i("HubWS", "connect: Tor is on and not connected yet, not connecting")
                 _connectionState.value = ConnectionState.DISCONNECTED
-                return
+                return@synchronized false
             }
             android.util.Log.i("HubWS", "connect: attempting WebSocket to $WS_URL")
             val request = Request.Builder()
@@ -114,6 +119,7 @@ class HubWebSocket(
 
             val listener = Listener(openedOn).also { this.listener = it }
             webSocket = httpClient.newWebSocket(request, listener)
+            true
         }
     }
 
@@ -270,11 +276,15 @@ class HubWebSocket(
         }
     }
 
+    /**
+     * Ends the connection, open or still opening. Cancelled as well as closed, as a route change
+     * or a new [connect] ends one (HUB-WS-TOR): a socket only asked to close stays up until the
+     * server answers, where neither of those can see it any more.
+     */
     fun disconnect() = synchronized(lock) {
         // The user's own close is not a refusal: it is never counted.
         listener?.ended = true
-        webSocket?.close(1000, "User disconnect")
-        webSocket = null
+        endCurrent("User disconnect")
         _connectionState.value = ConnectionState.DISCONNECTED
     }
 

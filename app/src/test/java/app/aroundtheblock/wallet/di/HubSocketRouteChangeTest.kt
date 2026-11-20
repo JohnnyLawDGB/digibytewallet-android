@@ -91,8 +91,13 @@ class HubSocketRouteChangeTest {
         torConnects(9050)
         startSocket()
 
-        tor.stop()                         // what Settings does on Tor off: the setting, then the daemon
+        // What Settings does on Tor off (SettingsViewModel.setTorEnabled): the setting, then the daemon.
         tor.isEnabled = false
+        // The daemon is still up, so the route is still Tor's and the socket is still on it.
+        assertEquals(TorRoute.Socks(9050), tor.route())
+        assertFalse("the socket was closed though the route had not changed yet", sockets[0].ended)
+
+        tor.stop()
 
         assertEquals(TorRoute.Direct, tor.route())
         assertEnded(sockets[0])

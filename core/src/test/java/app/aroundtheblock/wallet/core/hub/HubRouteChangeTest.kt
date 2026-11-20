@@ -148,6 +148,16 @@ class HubRouteChangeTest {
         assertEquals(ConnectionState.CONNECTED, hub.connectionState.value)
     }
 
+    /** The reported route can be stale: equal to the opening route while the route in force has moved on. */
+    @Test fun `a stale report of the old route does not keep the socket when the route in force changed`() {
+        connectAndOpen()
+        route = TorRoute.Blocked
+
+        assertTrue("a stale report kept the socket of the old route", hub.closeIfRouteChanged(now = TorRoute.Direct))
+        assertEnded(sockets[0])
+        assertEquals(ConnectionState.DISCONNECTED, hub.connectionState.value)
+    }
+
     // ── a change nobody reported ──────────────────────────────────────────────────────────────
 
     @Test fun `no frame goes out on a socket whose route changed unheard`() {
@@ -189,8 +199,8 @@ class HubRouteChangeTest {
     }
 
     @Test fun `connect while a socket is still opening ends it before the next is started`() {
-        hub.connect()
-        hub.connect()
+        assertTrue(hub.connect())
+        assertTrue(hub.connect())
         assertEquals(listOf("open 1", "close 1", "cancel 1", "open 2"), events)
     }
 
@@ -218,12 +228,34 @@ class HubRouteChangeTest {
         assertEquals("the replaced socket's opening changed the new one's state", ConnectionState.RECONNECTING, hub.connectionState.value)
     }
 
+    // ── disconnect() ends the socket as a route change or a new connect() does ───────────────
+
+    @Test fun `a socket still opening is down at disconnect and not left for a route change`() {
+        hub.connect()                      // started, not open yet
+        hub.disconnect()
+        route = TorRoute.Blocked
+        hub.closeIfRouteChanged()
+
+        assertEquals("disconnect() left the opening socket up on the old route", listOf("open 1", "close 1", "cancel 1"), events)
+        assertEquals(ConnectionState.DISCONNECTED, hub.connectionState.value)
+    }
+
+    @Test fun `disconnect then connect - the old socket is down before the next is started`() {
+        connectAndOpen()
+
+        hub.disconnect()
+        hub.connect()
+
+        assertEquals(listOf("open 1", "close 1", "cancel 1", "open 2"), events)
+        assertEquals("our own close was counted as a refusal", HubWebSocket.RECONNECT_FIRST_MS, hub.reconnectDelayMs())
+    }
+
     // ── nothing is started while Tor is on and not connected ─────────────────────────────────
 
     @Test fun `with Tor on and not connected connect starts nothing`() {
         route = TorRoute.Blocked
 
-        hub.connect()
+        assertFalse("connect() said it started a socket", hub.connect())
 
         assertTrue("a socket was started while Tor was on and not connected: $events", events.isEmpty())
         assertEquals(ConnectionState.DISCONNECTED, hub.connectionState.value)
