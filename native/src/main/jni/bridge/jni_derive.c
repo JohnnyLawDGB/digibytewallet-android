@@ -1016,14 +1016,16 @@ NativeBridge_buildAndSignForeignAssetTransfer(
  *
  * ## Checked before signing (DD-FEE-CEIL)
  *
- * The caller states the DGB change, so what it leaves out is paid as fee. Before anything is signed
- * dd_transfer_check (digidollar_transfer_guard.h) must hold on the assembled transfer: every input
- * names a different outpoint, and the fee is not below the required fee (the 0.1 DGB floor, or what
- * the size needs at feePerKb), not above approvedMaxFeeSats, and not above the band over the
- * required fee whatever was approved. A refused transfer is not signed and claims no coin.
+ * Before anything is signed dd_transfer_check (digidollar_transfer_guard.h) must hold on the
+ * assembled transfer: feePerKb is within the native bound, every input names a different outpoint,
+ * and the fee is not below the required fee (the 0.1 DGB floor, or what the size needs at feePerKb),
+ * not above approvedMaxFeeSats, and not above the band over the required fee whatever was approved.
+ * A call with no rate or no approved fee (either not above zero) is refused before any input is
+ * read. A refused transfer is not signed and claims no coin.
  *
- * @param feePerKb            the rate the caller sized the transfer at.
- * @param approvedMaxFeeSats  the most the transfer may pay: the fee of the plan being signed.
+ * @param feePerKb            the rate the caller sized the transfer at; above zero and not above
+ *                            DD_TRANSFER_MAX_FEE_PER_KB.
+ * @param approvedMaxFeeSats  the most the transfer may pay: the fee of the plan being signed; above zero.
  * @return signed transaction hex, or NULL on any refusal (each logged with its reason).
  */
 jstring JNICALL
@@ -1228,7 +1230,8 @@ NativeBridge_buildAndSignForeignDigiDollarTransfer(
                                                               (uint64_t)approvedMaxFeeSats, NULL);
         if (ddVerdict != DD_TRANSFER_OK) {
             LOGW("foreignDD: not signed (DD-FEE-CEIL verdict %d: 2 duplicate input, 3 change over the fee "
-                 "inputs, 4 fee below the required fee, 5 fee above the approved fee, 6 fee above the band)",
+                 "inputs, 4 fee below the required fee, 5 fee above the approved fee, 6 fee above the band, "
+                 "7 rate out of range)",
                  (int)ddVerdict);
             ok = 0;
         }

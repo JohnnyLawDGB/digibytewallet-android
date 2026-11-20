@@ -4,7 +4,8 @@
 //
 // THE INVARIANT. buildAndSignForeignDigiDollarTransfer signs the transfer it assembled only when
 // dd_transfer_check (digidollar_transfer_guard.h) holds on it:
-//   - no outpoint is listed twice among the inputs (the check the asset signer makes);
+//   - the rate the caller states is above zero and not above DD_TRANSFER_MAX_FEE_PER_KB;
+//   - no outpoint is listed twice among the inputs (the check the wallet asset signer makes);
 //   - the fee -- the inputs as listed, minus the outputs -- is at least the required fee (the 0.1 DGB
 //     DigiDollar floor, or what the size needs at the caller's rate), at most the fee the caller
 //     approved, and at most FOREIGN_TX_MAX_FEE_FACTOR times the required fee whatever was approved.
@@ -16,7 +17,8 @@
 //
 // RED (comparison arm, -DDD_TRANSFER_GUARD_UNFIXED=1): the checks before the header -- outputs within
 // the inputs and the 0.1 DGB floor. There a transfer below the fee its size needs, one above the
-// approved fee, one above the band and one listing a coin twice are all SIGNED: those cases must fail.
+// approved fee, one above the band, one at a rate out of range and one listing a coin twice are all
+// SIGNED: those cases must fail.
 // GUARDS (both arms): a fee under the 0.1 DGB floor and outputs over the inputs are refused; valid
 // transfers sign, and their bytes are the bytes BRTransactionSign alone gives and the pinned digests.
 //
@@ -222,30 +224,48 @@ static void overspend_refused(void)
 
 // ---- the invariant: each of these is signed in the comparison arm ------------------------------
 
+// A DigiDollar coin and `feeCoins` plain coins, each a different output of one transaction, that hold
+// `total` between them.
+static void manyCoins(Coin *out, size_t feeCoins, uint64_t total)
+{
+    const uint64_t each = total / feeCoins;
+    out[0] = (Coin){ 0x31, 0, -1, 0 };
+    for (size_t i = 0; i < feeCoins; i++) {
+        out[1 + i] = (Coin){ 0x41, (uint32_t)i, (int)(i % 2), (i + 1 == feeCoins) ? total - each * (feeCoins - 1) : each };
+    }
+}
+
 static void fee_below_size_required_refused(void)
 {
-    // At 100,000 sat/byte the estimate for 2 inputs and 2 outputs (10 + 2*160 + 2*34 = 398 bytes) is
-    // 0.398 DGB: above the 0.1 DGB floor, so the size sets the required fee.
-    const uint64_t rate = 100000000ULL, required = 39800000ULL;
-    const Coin under[] = { { 0x31, 0, -1, 0 }, { 0x41, 0, 0, required - 1 } };
-    const Coin at[] = { { 0x31, 0, -1, 0 }, { 0x41, 0, 0, required } };
+    // At the highest rate accepted (1,000 sat/byte) the estimate for 70 inputs and 2 outputs
+    // (10 + 70*160 + 2*34 = 11,278 bytes) is 0.11278 DGB: above the 0.1 DGB floor, so the size sets the
+    // required fee.
+    enum { INPUTS = 70 };
+    const uint64_t rate = DD_TRANSFER_MAX_FEE_PER_KB, required = 11278000ULL;
+    Coin under[INPUTS], at[INPUTS];
     DdTransferVerdict verdict;
     BRTransaction *tx;
 
-    ck(dd_transfer_required_fee(2, 2, rate) == required, "the required fee of 2 inputs and 2 outputs at 100,000 sat/byte is 0.398 DGB");
+    // The estimate itself, at any rate: 2 inputs and 2 outputs are 398 bytes.
+    ck(dd_transfer_required_fee(2, 2, 100000000ULL) == 39800000ULL, "the required fee of 2 inputs and 2 outputs at 100,000 sat/byte is 0.398 DGB");
     ck(dd_transfer_required_fee(2, 2, RATE) == FLOOR, "at 100 sat/byte the 0.1 DGB floor is the required fee");
-    refused("a fee over the 0.1 DGB floor and one satoshi under what the size needs", under, 2, 0, rate, required,
+    ck(dd_transfer_required_fee(2, 2, rate) == FLOOR, "for 2 inputs the 0.1 DGB floor is the required fee at the highest rate accepted too");
+    ck(dd_transfer_required_fee(INPUTS, 2, rate) == required, "the required fee of 70 inputs and 2 outputs at 1,000 sat/byte is 0.11278 DGB");
+    manyCoins(under, INPUTS - 1, required - 1);
+    manyCoins(at, INPUTS - 1, required);
+    refused("a fee over the 0.1 DGB floor and one satoshi under what the size needs", under, INPUTS, 0, rate, required,
             DD_TRANSFER_FEE_TOO_LOW);
-    tx = transfer(at, 2, 0);
+    tx = transfer(at, INPUTS, 0);
     ck(bridgeSign(tx, rate, required, &verdict) && verdict == DD_TRANSFER_OK, "exactly the required fee is signed");
+    coin_reservation_release(tx->txHash);
     BRTransactionFree(tx);
 }
 
 static void fee_above_approved_refused(void)
 {
-    // A 100 DGB coin and no change output: all of it would be the fee. Approved: 0.1 DGB.
-    const Coin whole[] = { { 0x31, 0, -1, 0 }, { 0x41, 0, 0, 10000000000ULL } };
-    refused("a 100 DGB coin with no change against an approved 0.1 DGB", whole, 2, 0, RATE, FLOOR,
+    // The fee is held to the approved fee: a transfer with no change output against an approved 0.1 DGB.
+    const Coin whole[] = { { 0x31, 0, -1, 0 }, { 0x41, 0, 0, 2500000000ULL } };
+    refused("a 25 DGB coin with no change against an approved 0.1 DGB", whole, 2, 0, RATE, FLOOR,
             DD_TRANSFER_FEE_ABOVE_APPROVED);
     const Coin over[] = { { 0x31, 0, -1, 0 }, { 0x41, 0, 0, 26000000 } };
     refused("a fee one satoshi above the approved fee", over, 2, 26000000 - FLOOR - 1, RATE, FLOOR,
@@ -255,22 +275,50 @@ static void fee_above_approved_refused(void)
 static void fee_above_band_refused(void)
 {
     // The caller approves the whole of what its own plan pays: the band still holds.
-    const Coin whole[] = { { 0x31, 0, -1, 0 }, { 0x41, 0, 0, 10000000000ULL } };
-    refused("a 100 DGB fee the caller itself approved", whole, 2, 0, RATE, 10000000000ULL, DD_TRANSFER_FEE_TOO_HIGH);
+    const Coin whole[] = { { 0x31, 0, -1, 0 }, { 0x41, 0, 0, 2500000000ULL } };
+    refused("a 25 DGB fee the caller itself approved", whole, 2, 0, RATE, 2500000000ULL, DD_TRANSFER_FEE_TOO_HIGH);
     const Coin over[] = { { 0x31, 0, -1, 0 }, { 0x41, 0, 0, 3 * FLOOR + 1 } };
     refused("a fee one satoshi over the band, approved", over, 2, 0, RATE, 3 * FLOOR + 1, DD_TRANSFER_FEE_TOO_HIGH);
     refused("a fee one satoshi over the band, approved without limit", over, 2, 0, RATE, UINT64_MAX, DD_TRANSFER_FEE_TOO_HIGH);
+    // The band at the highest rate accepted is still the band over the 0.1 DGB floor for this shape.
+    refused("a fee one satoshi over the band at the highest rate accepted", over, 2, 0, DD_TRANSFER_MAX_FEE_PER_KB,
+            UINT64_MAX, DD_TRANSFER_FEE_TOO_HIGH);
+}
+
+static void rate_out_of_range_refused(void)
+{
+    // The band is sized at the caller's rate, so the rate has a bound of the signer's own: a rate and
+    // an approved fee that agree with each other do not widen it.
+    const uint64_t big = 2500000000ULL, rate = 6000000000ULL;   // at this rate 2 inputs "need" 23.88 DGB
+    const Coin whole[] = { { 0x31, 0, -1, 0 }, { 0x41, 0, 0, big } };
+    const Coin ok[] = { { 0x31, 0, -1, 0 }, { 0x41, 0, 0, 11000000 } };
+    DdTransferVerdict verdict;
+    BRTransaction *tx;
+
+    ck(dd_transfer_required_fee(2, 2, rate) * FOREIGN_TX_MAX_FEE_FACTOR >= big && dd_transfer_required_fee(2, 2, rate) <= big,
+       "at the stated rate the whole coin would sit inside the band");
+    refused("a rate and an approved fee that agree on the whole coin", whole, 2, 0, rate, big, DD_TRANSFER_RATE_OUT_OF_RANGE);
+    refused("an otherwise valid transfer one above the highest rate", ok, 2, 0, DD_TRANSFER_MAX_FEE_PER_KB + 1, 11000000,
+            DD_TRANSFER_RATE_OUT_OF_RANGE);
+    refused("an otherwise valid transfer at a rate of zero", ok, 2, 0, 0, 11000000, DD_TRANSFER_RATE_OUT_OF_RANGE);
+    refused("an otherwise valid transfer at a rate read from a negative number", ok, 2, 0, (uint64_t)(int64_t)-1, 11000000,
+            DD_TRANSFER_RATE_OUT_OF_RANGE);
+    tx = transfer(ok, 2, 0);
+    ck(bridgeSign(tx, DD_TRANSFER_MAX_FEE_PER_KB, 11000000, &verdict) && verdict == DD_TRANSFER_OK,
+       "the same transfer at exactly the highest rate is signed");
+    coin_reservation_release(tx->txHash);
+    BRTransactionFree(tx);
 }
 
 static void duplicate_input_refused(void)
 {
-    // One 0.06 DGB coin listed twice reads as 0.12 DGB of fee.
-    const Coin fee[] = { { 0x31, 0, -1, 0 }, { 0x41, 0, 0, 6000000 }, { 0x41, 0, 0, 6000000 } };
-    refused("a fee coin listed twice", fee, 3, 0, RATE, 12000000, DD_TRANSFER_DUPLICATE_INPUT);
+    // Every input names a different outpoint.
+    const Coin fee[] = { { 0x31, 0, -1, 0 }, { 0x41, 0, 0, 7000000 }, { 0x41, 0, 0, 7000000 } };
+    refused("a fee coin listed twice", fee, 3, 0, RATE, 14000000, DD_TRANSFER_DUPLICATE_INPUT);
     const Coin dd[] = { { 0x31, 0, -1, 0 }, { 0x31, 0, -1, 0 }, { 0x41, 0, 0, 11000000 } };
     refused("a DigiDollar coin listed twice", dd, 3, 0, RATE, 11000000, DD_TRANSFER_DUPLICATE_INPUT);
-    const Coin apart[] = { { 0x31, 0, -1, 0 }, { 0x41, 0, 0, 6000000 }, { 0x42, 1, 1, 5000000 }, { 0x41, 0, 0, 6000000 } };
-    refused("a fee coin listed twice with another coin between", apart, 4, 0, RATE, 17000000, DD_TRANSFER_DUPLICATE_INPUT);
+    const Coin apart[] = { { 0x31, 0, -1, 0 }, { 0x41, 0, 0, 7000000 }, { 0x42, 1, 1, 5000000 }, { 0x41, 0, 0, 7000000 } };
+    refused("a fee coin listed twice with another coin between", apart, 4, 0, RATE, 19000000, DD_TRANSFER_DUPLICATE_INPUT);
 }
 
 typedef struct { const char *name; void (*run)(void); } Case;
@@ -281,6 +329,7 @@ static const Case kCases[] = {
     { "fee_below_size_required_refused", fee_below_size_required_refused },
     { "fee_above_approved_refused", fee_above_approved_refused },
     { "fee_above_band_refused", fee_above_band_refused },
+    { "rate_out_of_range_refused", rate_out_of_range_refused },
     { "duplicate_input_refused", duplicate_input_refused },
 };
 

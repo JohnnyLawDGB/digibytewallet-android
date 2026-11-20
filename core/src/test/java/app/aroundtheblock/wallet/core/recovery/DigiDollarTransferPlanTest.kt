@@ -1,6 +1,7 @@
 package app.aroundtheblock.wallet.core.recovery
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -129,11 +130,16 @@ class DigiDollarTransferPlanTest {
 
     /**
      * What `dd_transfer_check` (digidollar_transfer_guard.h) answers for a plan, written out here:
-     * the fee the transfer pays -- its fee inputs minus its change -- is at least the required fee
-     * (the 0.1 DGB floor, or the signer's own size estimate at the plan's rate), at most the fee
-     * handed over as approved ([DigiDollarTransferPlan.Plan.feeSat]), and at most three times the
-     * required fee. dd_transfer_guard_kat pins the native side of the same figures.
+     * the rate is above zero and not above the signer's own bound (DD_TRANSFER_MAX_FEE_PER_KB,
+     * 1,000,000), and the fee the transfer pays -- its fee inputs minus its change -- is at least the
+     * required fee (the 0.1 DGB floor, or the signer's own size estimate at the plan's rate), at most
+     * the fee handed over as approved ([DigiDollarTransferPlan.Plan.feeSat]), and at most three times
+     * the required fee. dd_transfer_guard_kat pins the native side of the same figures.
      */
+    private val signerMaxFeePerKb = 1_000_000L
+
+    private fun signerAcceptsRate(plan: DigiDollarTransferPlan.Plan) = plan.feePerKb in 1..signerMaxFeePerKb
+
     private fun signerAccepts(plan: DigiDollarTransferPlan.Plan): Boolean {
         val inputs = plan.ddInputs.size + plan.feeInputs.size
         val outputs = 2 + if (plan.changeAmountSat > 0) 1 else 0
@@ -142,17 +148,18 @@ class DigiDollarTransferPlanTest {
         val paid = plan.feeInputs.sumOf { it.amountSat } - plan.changeAmountSat
         val distinct = (plan.ddInputs.map { it.txid to it.vout } + plan.feeInputs.map { it.txid to it.vout })
             .let { it.toSet().size == it.size }
-        return distinct && paid >= required && paid <= plan.feeSat && paid <= 3 * required
+        return signerAcceptsRate(plan) && distinct && paid >= required && paid <= plan.feeSat && paid <= 3 * required
     }
 
     @Test fun `every plan pays a fee inside the band the signer holds it to`() {
         var planned = 0
-        for (rate in listOf(1_000L, 100_000L, 1_000_000L, 100_000_000L)) {
+        var inRange = 0
+        for (rate in listOf(1_000L, 100_000L, 1_000_000L, 1_000_001L, 100_000_000L)) {
             for (ddCount in listOf(1, 2, 7, 40)) {
                 for (feeCount in listOf(1, 2, 5)) {
                     // From just under the fee to far over it, across the dust threshold of the change.
                     for (each in listOf(3_400_000L, 5_000_000L, 10_000_000L, 10_001_000L, 10_005_460L,
-                        10_005_461L, 26_000_000L, 10_000_000_000L)) {
+                        10_005_461L, 26_000_000L, 2_500_000_000L)) {
                         val hs = (0 until ddCount).map {
                             DigiDollarScan.Holding(
                                 address = DigiDollarAddress("DD1x", xq, chain = 0, index = it),
@@ -167,6 +174,16 @@ class DigiDollarTransferPlanTest {
                         val plan = (r as? DigiDollarTransferPlan.Result.Ok)?.plan ?: continue
                         planned++
                         assertEquals("the plan carries the rate it was sized at", rate, plan.feePerKb)
+                        assertEquals(
+                            "the plan's fee is what its fee inputs pay after the change",
+                            plan.feeInputs.sumOf { it.amountSat } - plan.changeAmountSat, plan.feeSat,
+                        )
+                        if (rate > signerMaxFeePerKb) {
+                            // Above the signer's own bound on the rate nothing is signed, whatever the plan.
+                            assertFalse("a plan sized at $rate must not pass the signer", signerAccepts(plan))
+                            continue
+                        }
+                        inRange++
                         assertTrue(
                             "rate $rate, $ddCount DD + $feeCount fee input(s) of $each: fee ${plan.feeSat}, " +
                                 "change ${plan.changeAmountSat} is outside the signer's band",
@@ -177,13 +194,14 @@ class DigiDollarTransferPlanTest {
             }
         }
         assertTrue("the grid must reach plans to say anything ($planned)", planned > 100)
+        assertTrue("and plans at a rate the signer accepts ($inRange)", inRange > 100)
     }
 
     /** The whole of a large coin is never the fee: the plan writes the change back. */
     @Test fun `a large fee coin pays the required fee and the rest is change`() {
-        val ok = plan(feeInputs = listOf(fee("big", 10_000_000_000L))) as DigiDollarTransferPlan.Result.Ok
+        val ok = plan(feeInputs = listOf(fee("big", 2_500_000_000L))) as DigiDollarTransferPlan.Result.Ok
         assertEquals(DigiDollarTransferPlan.DD_MIN_FEE_SATS, ok.plan.feeSat)
-        assertEquals(10_000_000_000L - DigiDollarTransferPlan.DD_MIN_FEE_SATS, ok.plan.changeAmountSat)
+        assertEquals(2_500_000_000L - DigiDollarTransferPlan.DD_MIN_FEE_SATS, ok.plan.changeAmountSat)
         assertTrue(signerAccepts(ok.plan))
     }
 }

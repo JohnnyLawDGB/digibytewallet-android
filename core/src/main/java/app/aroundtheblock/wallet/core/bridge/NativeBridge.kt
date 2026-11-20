@@ -1002,7 +1002,8 @@ object NativeBridge {
      * whatever was approved. Otherwise nothing is signed and no coin is claimed.
      *
      * @param recipientKeyHex the destination's 32-byte taproot output key, hex. Used verbatim.
-     * @param feePerKb the rate the transfer was sized at, satoshis per 1000 bytes.
+     * @param feePerKb the rate the transfer was sized at, satoshis per 1000 bytes: above zero and at
+     *   most 1,000,000 (ten times the rate the wallet sizes at), or nothing is signed.
      * @param approvedMaxFeeSats the most the transfer may pay: the fee of the plan being signed.
      * @return signed transaction hex, or null on any refusal — reasons are logged natively.
      */

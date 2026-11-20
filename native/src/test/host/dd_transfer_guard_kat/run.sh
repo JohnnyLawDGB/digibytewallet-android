@@ -12,7 +12,8 @@
 #   shipped     -DDD_TRANSFER_GUARD_UNFIXED=0: every case passes, with no sanitizer report.
 # The valid transfers' signed bytes (VECTOR lines) must be the same in both arms and in both widths.
 # Every run is time-limited. Last, a SOURCE GATE over the real jni_derive.c (Android headers keep it off
-# the host): buildAndSignForeignDigiDollarTransfer takes the rate and the approved fee, asks
+# the host): buildAndSignForeignDigiDollarTransfer takes the rate and the approved fee, refuses a call
+# where either is not above zero before it builds anything, asks
 # dd_transfer_check once about the assembled transfer with both, and signs only after it, once, and only
 # when it answered DD_TRANSFER_OK. DD_TRANSFER_GATE_FILE=<path> points the source gate at another copy.
 #
@@ -39,6 +40,7 @@ CASES=(
     fee_below_size_required_refused:fail
     fee_above_approved_refused:fail
     fee_above_band_refused:fail
+    rate_out_of_range_refused:fail
     duplicate_input_refused:fail
 )
 
@@ -163,6 +165,12 @@ if [ -z "$FN" ]; then
 else
     grep -Eq 'jlong feePerKb[ ,)]' <<<"$FN" || say "the transfer does not take the rate it was sized at (jlong feePerKb)"
     grep -Eq 'jlong approvedMaxFeeSats[ ,)]' <<<"$FN" || say "the transfer does not take the approved fee (jlong approvedMaxFeeSats)"
+    # A jlong that is not above zero would read as a huge unsigned value in dd_transfer_check.
+    entry_re='if ?\( ?feePerKb <= 0 \|\| approvedMaxFeeSats <= 0 ?\) ?\{[^}]*return NULL; ?\}'
+    grep -Eq "$entry_re" <<<"$FN" || say "a rate or an approved fee that is not above zero is not refused (if (feePerKb <= 0 || approvedMaxFeeSats <= 0) { ... return NULL; })"
+    entry_at="$(awk -v s="$FN" 'BEGIN { print index(s, "approvedMaxFeeSats <= 0") }')"
+    first_tx_at="$(awk -v s="$FN" 'BEGIN { print index(s, "BRTransaction") }')"
+    { [ "$entry_at" -gt 0 ] && [ "$first_tx_at" -gt "$entry_at" ]; } || say "the refusal of a rate or approved fee that is not above zero does not come before the transfer is built"
     n_check="$(grep -oE 'dd_transfer_check ?\(' <<<"$FN" | wc -l | tr -d ' ')"
     [ "$n_check" -eq 1 ] || say "the assembled transfer must be asked of dd_transfer_check exactly once (found $n_check)"
     grep -Eq 'ddVerdict = dd_transfer_check ?\( ?tx, ?\(uint64_t\) ?feePerKb, ?\(uint64_t\) ?approvedMaxFeeSats, ?NULL ?\)' <<<"$FN" ||
@@ -177,7 +185,7 @@ else
     { [ "$check_at" -gt 0 ] && [ "$sign_at" -gt "$check_at" ]; } || say "dd_transfer_check does not come before BRTransactionSign"
     { [ "$check_at" -gt 0 ] && [ "$add_at" -gt 0 ] && [ "$check_at" -gt "$add_at" ]; } || say "an input or output is added after dd_transfer_check: the check would not see the transfer that is signed"
 fi
-[ "$gate_fail" -eq 0 ] && echo "  gate: buildAndSignForeignDigiDollarTransfer takes the rate and the approved fee, asks dd_transfer_check once about the assembled transfer, and signs once, after it, only on DD_TRANSFER_OK"
+[ "$gate_fail" -eq 0 ] && echo "  gate: buildAndSignForeignDigiDollarTransfer takes the rate and the approved fee, refuses either when not above zero before building, asks dd_transfer_check once about the assembled transfer, and signs once, after it, only on DD_TRANSFER_OK"
 [ "$gate_fail" -ne 0 ] && { echo "SOURCE GATE FAILED"; FAIL=1; }
 
 echo
