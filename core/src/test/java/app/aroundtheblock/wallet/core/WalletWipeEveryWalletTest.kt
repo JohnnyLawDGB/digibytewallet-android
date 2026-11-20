@@ -198,6 +198,74 @@ class WalletWipeEveryWalletTest {
         assertEquals(mapOf("app_language" to "de"), d.prefs.prefsFor("dgb_settings").all)
     }
 
+    /** The names multi-wallet step 2 reserves (plan task A1, "Names reserved here"), as literals. */
+    private val reservedWrapAlias = "dgb_wallet_keys_wrap"
+    private val reservedPrefs = listOf(
+        "dgb_wallet_keys", "dgb_wallet_keys_$idB", "dgb_wallet_keys_$idC",
+        "dgb_sync_data_legacy", "dgb_sync_data_legacy_testnet",
+    )
+    private val reservedFiles = listOf("", "_testnet").flatMap { net ->
+        listOf("saved_filter_headers", "saved_cf_ledger", "saved_blocks").flatMap { listOf("${it}_legacy$net.bin", "${it}_legacy$net.bin.tmp") }
+    }
+
+    private fun Device.plantReservedNames() {
+        reservedPrefs.forEach { prefs.prefsFor(it).seed("held", "$it-value") }
+        reservedFiles.forEach { File(filesDir, it).writeBytes(byteArrayOf(1)) }
+        vault.createUnboundKey(reservedWrapAlias)
+        events.clear()
+    }
+
+    @Test fun `a wipe erases every name multi-wallet step 2 reserves, on both networks`() = runTest {
+        val d = Device().apply { populateDevice(); plantReservedNames() }
+
+        val report = d.walletManager().wipeThenReleasePin(d.pin)
+
+        assertTrue("$report", report.verified)
+        assertEquals("reserved prefs left", emptyList<String>(), reservedPrefs.filter { d.prefs.prefsFor(it).all.isNotEmpty() })
+        assertEquals("files left", emptyList<String>(), d.filesDir.list()!!.toList())
+        assertFalse("the alias $reservedWrapAlias is left", reservedWrapAlias in d.vault.keys.keys)
+        assertFalse("the PIN store was not cleared", d.pin.hasPin())
+    }
+
+    @Test fun `the key-record wrap alias goes with the stores, after every seed record and seed key`() = runTest {
+        val d = Device().apply { populateDevice(); plantReservedNames() }
+
+        d.walletManager().wipeThenReleasePin(d.pin)
+
+        val wrapDeleted = d.events.indexOf("delete:$reservedWrapAlias")
+        assertTrue("the alias was never deleted: ${d.events}", wrapDeleted >= 0)
+        val lastSeedKey = d.events.indexOfLast { it.startsWith("delete:dgb_wallet_master") }
+        val lastRecord = d.events.indexOfLast { it.startsWith("clear:dgb_wallet_seed") }
+        assertTrue("precondition: seed keys and records went", lastSeedKey >= 0 && lastRecord >= 0)
+        assertTrue("the alias went before a seed key: ${d.events}", wrapDeleted > lastSeedKey)
+        assertTrue("the alias went before a seed record: ${d.events}", wrapDeleted > lastRecord)
+    }
+
+    @Test fun `a wrap alias that will not go keeps the wipe unverified, and holds no seed step`() = runTest {
+        val d = Device(stuckAlias = reservedWrapAlias).apply { populateDevice(); plantReservedNames() }
+
+        val report = d.walletManager().wipeThenReleasePin(d.pin)
+
+        assertTrue("precondition: the alias is still there", reservedWrapAlias in d.vault.keys.keys)
+        assertTrue("it is not a seed key: the seed is gone", report.seedGone)
+        assertFalse("the alias is left, yet the wipe verified", report.verified)
+        assertTrue("the PIN store must be kept", d.pin.hasPin())
+    }
+
+    @Test fun `a reserved band file that will not go keeps the wipe unverified`() = runTest {
+        for (name in reservedFiles) {
+            val d = Device().apply { populateDevice() }
+            // A directory that holds something cannot be deleted as a file.
+            File(d.filesDir, name).apply { mkdirs() }.resolve("held").writeBytes(byteArrayOf(1))
+
+            val report = d.walletManager().wipeThenReleasePin(d.pin)
+
+            assertTrue("$name", report.seedGone)
+            assertFalse("$name is on the device, yet the wipe verified", report.verified)
+            assertTrue("$name: the PIN store must be kept", d.pin.hasPin())
+        }
+    }
+
     @Test fun `a wipe with another wallet active erases legacy's key too`() = runTest {
         val d = Device(active = scopeB).apply { populateDevice() }
 

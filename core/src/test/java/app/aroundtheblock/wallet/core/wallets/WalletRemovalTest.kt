@@ -160,6 +160,30 @@ class WalletRemovalTest {
         assertEquals(listOf("legacy", c), d.registry.list(false).map { it.id })
     }
 
+    /** The names multi-wallet step 2 reserves (plan task A1), as literals. */
+    @Test fun `removing one wallet erases its key record, and no other reserved name`() = runBlocking {
+        val d = Device()
+        d.installLegacy()
+        val b = d.addWallet(false)
+        val c = d.addWallet(true)
+        val kept = listOf("dgb_wallet_keys", "dgb_wallet_keys_$c", "dgb_sync_data_legacy", "dgb_sync_data_legacy_testnet")
+        (kept + "dgb_wallet_keys_$b").forEach { d.prefs.prefsFor(it).seed("held", "$it-value") }
+        val bandFiles = listOf("", "_testnet").flatMap { net ->
+            listOf("saved_filter_headers", "saved_cf_ledger", "saved_blocks").flatMap { listOf("${it}_legacy$net.bin", "${it}_legacy$net.bin.tmp") }
+        }
+        bandFiles.forEach { File(d.ctx.filesDir, it).writeBytes(byteArrayOf(1)) }
+        d.vault.createUnboundKey("dgb_wallet_keys_wrap")
+        assertTrue("a key record is one of the wallet's stores", d.eraser().storesLeft(WalletScope(b, false)))
+
+        assertEquals(RemoveResult.Removed, d.removal(active = legacyMain).remove(b, "Wallet 2", "Wallet 2"))
+
+        assertEquals("B's key record is left", emptyMap<String, Any?>(), d.prefs.prefsFor("dgb_wallet_keys_$b").all.toMap())
+        assertEquals(emptyList<String>(), d.namedFor(b))
+        assertEquals("reserved prefs of another wallet were touched", kept, kept.filter { d.prefs.prefsFor(it).all == mapOf("held" to "$it-value") })
+        assertEquals("legacy's band files were touched", bandFiles, bandFiles.filter { File(d.ctx.filesDir, it).exists() })
+        assertTrue("the shared alias was deleted", "dgb_wallet_keys_wrap" in d.vault.keys.keys)
+    }
+
     @Test fun `removing a wallet that is not running revokes its Hub session first, and a failed revoke does not stop it`() = runBlocking {
         val d = Device()
         d.installLegacy()

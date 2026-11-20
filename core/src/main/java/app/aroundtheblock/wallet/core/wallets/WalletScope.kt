@@ -39,6 +39,14 @@ enum class StoreScope {
 
     /** Legacy: ""; other: "_<id>" (stores that 4.1.4 never network-suffixed). */
     WALLET,
+
+    /**
+     * A wallet's own band stores (multi-wallet step 2, ruling G97): the id always spelled out,
+     * "_<id>" | "_<id>_testnet", so legacy's are "_legacy" | "_legacy_testnet" and never the names
+     * the shared chain uses. Asked for only through [WalletStores.bandFileName] and
+     * [WalletStores.bandPrefsName], which refuse every base but the reserved four.
+     */
+    BAND,
 }
 
 /** The ONLY place a store suffix is built. */
@@ -49,5 +57,6 @@ fun storageSuffix(scope: WalletScope, store: StoreScope): String {
         StoreScope.NETWORK -> net
         StoreScope.WALLET_AND_NETWORK -> wallet + net
         StoreScope.WALLET -> wallet
+        StoreScope.BAND -> "_${scope.walletId}" + net
     }
 }

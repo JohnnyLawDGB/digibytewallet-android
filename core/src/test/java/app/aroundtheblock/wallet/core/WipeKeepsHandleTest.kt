@@ -244,6 +244,58 @@ class WipeKeepsHandleTest {
         assertEquals("a verified wipe left the wallet's id on the device", emptyList<String>(), d.namingB())
     }
 
+    /**
+     * The names multi-wallet step 2 reserves (plan task A1), as literals. A reserved name the wipe
+     * cannot erase is a store failure like any other: the wipe does not verify and the PIN stays.
+     */
+    @Test fun `a reserved prefs file that refuses its delete keeps the wipe unverified and the PIN store`() = runTest {
+        for (name in listOf("dgb_sync_data_legacy", "dgb_sync_data_legacy_testnet", "dgb_wallet_keys")) {
+            val d = Device().apply { populate() }
+            d.prefs.prefsFor(name).seed("held", "x")
+            d.undeletable += name
+            d.launch()
+            val pin = d.pin()
+
+            val report = d.walletManager().wipeThenReleasePin(pin)
+
+            assertTrue("$name: no seed record or key waits on a reserved name", report.seedGone)
+            assertTrue("precondition: $name is still on the device", File(d.root, "shared_prefs/$name.xml").exists())
+            assertFalse("$name is on the device, yet the wipe verified", report.verified)
+            assertTrue("$name: the PIN store was cleared by a wipe that did not verify", pin.hasPin())
+
+            // The next launch, where the file takes its delete.
+            d.undeletable.clear()
+            d.launch()
+            val again = d.pin()
+            assertTrue("$name", d.walletManager().wipeThenReleasePin(again).verified)
+            assertFalse("$name was never looked for again", File(d.root, "shared_prefs/$name.xml").exists())
+            assertFalse(again.hasPin())
+        }
+    }
+
+    @Test fun `a wallet's key record that refuses its delete keeps that wallet's id on record`() = runTest {
+        val d = Device().apply { populate() }
+        val keys = "dgb_wallet_keys_${d.b.walletId}"
+        d.prefs.prefsFor(keys).seed("held", "x")
+        d.undeletable += keys
+        d.launch()
+        val pin = d.pin()
+
+        val report = d.walletManager().wipeThenReleasePin(pin)
+
+        assertTrue(report.seedGone)
+        assertFalse("B's key record is on the device, yet the wipe verified", report.verified)
+        assertTrue(pin.hasPin())
+        assertEquals("the wallet whose store is left is not on record", listOf(d.b.walletId), WipeOwedStores.read(d.ctx))
+
+        d.undeletable.clear()
+        d.launch()
+        val again = d.pin()
+        assertTrue(d.walletManager().wipeThenReleasePin(again).verified)
+        assertEquals("a verified wipe left the wallet's id on the device", emptyList<String>(), d.namingB())
+        assertFalse(again.hasPin())
+    }
+
     @Test fun `the PIN store is kept while a wallet's store is left`() = runTest {
         val d = Device().apply { populate() }
         d.refusing += d.stuck

@@ -13,6 +13,7 @@ import app.aroundtheblock.wallet.core.sync.SavedTransactionsStore
 import app.aroundtheblock.wallet.core.wallets.StoreScope
 import app.aroundtheblock.wallet.core.wallets.WalletScope
 import app.aroundtheblock.wallet.core.wallets.WalletStores
+import app.aroundtheblock.wallet.core.wallets.prefsFileOnDisk
 import app.aroundtheblock.wallet.core.wallets.storageSuffix
 
 /**
@@ -38,11 +39,21 @@ import app.aroundtheblock.wallet.core.wallets.storageSuffix
  * wallet through `WalletStoreEraser`'s phases, and deletes and reads back every wallet's seed key
  * aliases itself. `WalletDataEraserReachTest` holds these steps to every per-wallet store in
  * [WalletStores].
+ *
+ * The names multi-wallet step 2 reserves go here too, legacy's and the device-wide one
+ * (WIPE-RESERVED-NAMES): no build writes them yet, and a wipe that left one would leave it for a
+ * later downgrade or rollback to find. Legacy's band prefs go with the sync data, its band files
+ * with the compact-filter state, its key record and the alias that wraps the key records with the
+ * leftover state. Each is looked for by its exact name, deleted (a prefs file with its backup, not
+ * only cleared) and read back gone; one that is not there costs nothing and creates no file.
  */
 interface WalletDataEraser {
     /** Clear the encrypted-seed prefs (`dgb_wallet_seed`). MUST run first. */
     fun eraseSeedCiphertext(): Boolean
-    /** Clear the SPV sync blob (`dgb_sync_data<net>`: blocks/peers/tx/has_synced/balance). */
+    /**
+     * Clear the SPV sync blob (`dgb_sync_data<net>`: blocks/peers/tx/has_synced/balance), and delete
+     * the reserved prefs of legacy's own band (`dgb_sync_data_legacy<net>`) on both networks.
+     */
     fun eraseSyncData(): Boolean
     /** Clear the cached bloom-peer list (`dgb_bloom_peers<net>`). */
     fun eraseBloomPeerCache(): Boolean
@@ -55,7 +66,9 @@ interface WalletDataEraser {
      * the compact-filter scan ledger, AND the saved-blocks window (I2 fix — moved out
      * of `dgb_sync_data` into a file, so [eraseSyncData]'s prefs `.clear()` no longer
      * reaches it). All three are keyed to the wallet that built them, so a wipe that
-     * leaves any behind hands the next wallet another wallet's scan/header state.
+     * leaves any behind hands the next wallet another wallet's scan/header state. Also the
+     * reserved files of legacy's own band, on both networks (`saved_filter_headers_legacy<net>.bin`,
+     * `saved_cf_ledger_legacy<net>.bin`, `saved_blocks_legacy<net>.bin`, each with its `.bin.tmp`).
      */
     fun eraseCfSyncState(): Boolean
     /**
@@ -75,6 +88,11 @@ interface WalletDataEraser {
      * else in `dgb_settings` is wallet state — the language and the network selection stay.
      * Also the auto-lock timeout ([AutoLockPrefs], `dgb_auto_lock`): app-wide lock policy that goes
      * with the one PIN, as it went with the wallet database before it was app-wide.
+     * Also the two reserved names of the key records: legacy's `dgb_wallet_keys` (deleted, not only
+     * cleared) and the Keystore alias `dgb_wallet_keys_wrap`. That alias is not a seed key (it will
+     * wrap public master keys, for every wallet at once), so it goes here, with the stores, and
+     * never in the seed phases: no seed record or seed key waits on it, and it is not part of
+     * "the seed is gone".
      */
     fun eraseLeftoverState(): Boolean
     /** Remove the persisted Hub session token, from the encrypted store and the legacy one. */
@@ -206,6 +224,51 @@ class AndroidWalletDataEraser internal constructor(
         landed
     }
 
+    /**
+     * Clear [name] with a checked commit, then DELETE its file and backup, and read back that
+     * neither is on the device: for a name the next wallet must not find at all, where a cleared,
+     * empty file would still be found. A clear that did not land leaves the file, and this process
+     * reading what it holds. A store that is not there is not committed to (which would create its
+     * file); the delete and the read-back still run.
+     */
+    private fun clearAndDeletePrefs(name: String): Boolean = step("erase $name") {
+        val store = context.getSharedPreferences(name, Context.MODE_PRIVATE)
+        val held = store.all
+        val landed = held.isEmpty() || store.edit().clear().commit()
+        if (!landed) {
+            readWhatTheFileHolds(TAG, name, store, held)
+            return@step false
+        }
+        // Judged by the read-back, as [deleteFile] is: the platform's own answer is that same look.
+        context.deleteSharedPreferences(name)
+        !prefsFileOnDisk(context, name)
+    }
+
+    /** Legacy on each network: the scopes whose reserved band names the full wipe erases. */
+    private val legacyOnEveryNetwork = listOf(false, true).map(WalletScope::legacy)
+
+    /** The reserved prefs of legacy's own band, both networks. All are attempted even when one refuses. */
+    private fun eraseReservedBandPrefs(): Boolean = legacyOnEveryNetwork
+        .flatMap { scope -> WalletStores.BAND_PREFS.map { WalletStores.bandPrefsName(it, scope) } }
+        .map(::clearAndDeletePrefs).all { it }
+
+    /** The reserved files of legacy's own band, both networks, each with its `.tmp`. All are attempted. */
+    private fun eraseReservedBandFiles(): Boolean = legacyOnEveryNetwork
+        .flatMap { scope -> WalletStores.BAND_FILES.map { WalletStores.bandFileName(it, scope) } }
+        .flatMap { name -> listOf(java.io.File(context.filesDir, name), java.io.File(context.filesDir, name + TMP)) }
+        .map(::deleteFile).all { it }
+
+    /** Legacy's reserved key record, and the alias that wraps every wallet's. Both are attempted. */
+    private fun eraseReservedKeyRecord(): Boolean {
+        val record = WalletStores.RESERVED_WALLET_PREFS
+            .map { clearAndDeletePrefs(WalletStores.prefsName(it, WalletScope.legacy(false))) }.all { it }
+        val wrapAlias = step("key record alias") {
+            if (keystore.contains(WalletStores.KEYS_WRAP_ALIAS)) keystore.delete(WalletStores.KEYS_WRAP_ALIAS)
+            !keystore.contains(WalletStores.KEYS_WRAP_ALIAS)
+        }
+        return record && wrapAlias
+    }
+
     /** [clearPrefs] for [base] on EVERY network. All are attempted even when one refuses. */
     private fun clearPrefsOnEveryNetwork(base: String): Boolean =
         WALLET_NETWORK_SUFFIXES.map { net -> clearPrefs(base + net) }.all { it }
@@ -242,7 +305,9 @@ class AndroidWalletDataEraser internal constructor(
         // outlive the wipe and be written straight back on the next poll — a tip from the WIPED
         // wallet reappearing under the newly restored one.
         app.aroundtheblock.wallet.core.sync.ChainTipStore.invalidateCache()
-        return cleared
+        // Reserved for step 2: legacy's own band keeps its chain keys under these names.
+        val reservedBand = eraseReservedBandPrefs()
+        return cleared && reservedBand
     }
 
     override fun eraseBloomPeerCache(): Boolean = clearPrefsOnEveryNetwork("dgb_bloom_peers")
@@ -270,7 +335,9 @@ class AndroidWalletDataEraser internal constructor(
         val savedTransactions = step("saved transactions") { SavedTransactionsStore.deleteAllNetworks(context) }
         // The abandoned-band record describes the scan of the wallet that made it.
         val abandonedBand = step("abandoned band") { CfAbandonmentStore.clearAllNetworks(context) }
-        return headerChain && scanLedger && savedBlocks && savedTransactions && abandonedBand
+        // Reserved for step 2: the files of legacy's own band, a scan like the ones above.
+        val reservedBand = eraseReservedBandFiles()
+        return headerChain && scanLedger && savedBlocks && savedTransactions && abandonedBand && reservedBand
     }
 
     override fun eraseDatabase(): Boolean {
@@ -337,7 +404,10 @@ class AndroidWalletDataEraser internal constructor(
             if (!landed) readWhatTheFileHolds(TAG, "dgb_settings", settings, held)
             landed
         }
-        return filterPeers && dandelionPeers && reconcile && assetBackfill && assetHeal && diag && logTag && quickstart && autoLock && scanFloor
+        // Reserved for step 2: legacy's key record and the alias that wraps every wallet's. Here, in
+        // the store phase, because neither is seed material (see the interface).
+        val reservedKeys = eraseReservedKeyRecord()
+        return filterPeers && dandelionPeers && reconcile && assetBackfill && assetHeal && diag && logTag && quickstart && autoLock && scanFloor && reservedKeys
     }
 
     override fun eraseHubSession(): Boolean = step("hub session") { hubTokenStore().clearConfirmed() }
@@ -345,5 +415,6 @@ class AndroidWalletDataEraser internal constructor(
     private companion object {
         const val TAG = "WalletDataEraser"
         const val DB_KEY_ALIAS = "dgb_db_passphrase"
+        const val TMP = ".tmp"
     }
 }
