@@ -282,24 +282,61 @@ class AssetMetadataNoncharacterTest {
 
     private fun rel(f: File) = f.relativeTo(root).path
 
-    /** A read of the cached row: the DAO's two readers, on any receiver whose name ends in "etadataDao". */
-    private val daoRead = Regex("""etadataDao\s*\.\s*(getMetadata|getAllMetadata)\s*\(""")
+    /**
+     * A read of the cached row: a call of one of the DAO's two readers, on any receiver. The receiver's
+     * name is not asked, so `dao.getMetadata(id)` and `db.assetMetadataDao().getMetadata(id)` count like
+     * `metadataDao.getMetadata(id)` does.
+     */
+    private val readerCall = Regex("""\.\s*(getMetadata|getAllMetadata)\s*\(""")
 
-    /** How far below a read the sanitizer may stand: the Assets-screen flow debounces in between. */
+    /** The one other thing with a `getMetadata`: the service, which returns a model built through the sanitizer. */
+    private val onTheService = Regex("""etadataService\s*$""")
+
+    private fun isRowRead(code: String) =
+        readerCall.findAll(code).any { !onTheService.containsMatchIn(code.substring(0, it.range.first)) }
+
+    private fun rowReadCount(code: String) =
+        readerCall.findAll(code).count { !onTheService.containsMatchIn(code.substring(0, it.range.first)) }
+
+    /** How far below a read the sanitizer may stand, in lines of code: the Assets-screen flow debounces in between. */
     private val window = 8
 
-    private fun unsanitizedReads(path: String, lines: List<String>): List<String> =
-        lines.withIndex().filter { daoRead.containsMatchIn(it.value) }.mapNotNull { (i, line) ->
-            val below = lines.subList(i, minOf(lines.size, i + window)).joinToString("\n")
+    /** Each line with its comments taken out, so that a comment is neither a read, nor a sanitizer, nor a line of the window. */
+    private fun codeOf(lines: List<String>): List<String> {
+        var inBlock = false
+        return lines.map { raw ->
+            val out = StringBuilder()
+            var i = 0
+            while (i < raw.length) {
+                if (inBlock) {
+                    val end = raw.indexOf("*/", i)
+                    if (end < 0) { i = raw.length } else { inBlock = false; i = end + 2 }
+                } else if (raw.startsWith("/*", i)) {
+                    inBlock = true; i += 2
+                } else if (raw.startsWith("//", i)) {
+                    i = raw.length
+                } else {
+                    out.append(raw[i]); i++
+                }
+            }
+            out.toString()
+        }
+    }
+
+    private fun unsanitizedReads(path: String, lines: List<String>): List<String> {
+        val code = codeOf(lines)
+        return code.withIndex().filter { isRowRead(it.value) }.mapNotNull { (i, line) ->
+            val below = code.subList(i, code.size).filter { it.isNotBlank() }.take(window).joinToString("\n")
             val clean = below.contains(".displaySafe()") || below.contains(".toModel()") ||
                 // Asks only whether a name exists; shows nothing.
                 line.contains("?.name.isNullOrBlank()")
-            if (clean) null else "$path:${i + 1}: ${line.trim()}"
+            if (clean) null else "$path:${i + 1}: ${lines[i].trim()}"
         }
+    }
 
     @Test
     fun `only the metadata service and the asset manager read cached metadata rows`() {
-        val readers = mainSources.filter { f -> f.readLines().any { daoRead.containsMatchIn(it) } }.map { rel(it) }.sorted()
+        val readers = mainSources.filter { f -> codeOf(f.readLines()).any { isRowRead(it) } }.map { rel(it) }.sorted()
         assertEquals(
             listOf(
                 "core/src/main/java/app/aroundtheblock/wallet/core/asset/AssetManager.kt",
@@ -311,7 +348,7 @@ class AssetMetadataNoncharacterTest {
 
     @Test
     fun `every read of a cached metadata row goes through the sanitizer`() {
-        val sites = mainSources.sumOf { f -> f.readLines().count { daoRead.containsMatchIn(it) } }
+        val sites = mainSources.sumOf { f -> codeOf(f.readLines()).sumOf { rowReadCount(it) } }
         assertEquals("cached-row read sites; a new one must be added to this count knowingly", 5, sites)
         val hits = mainSources.flatMap { unsanitizedReads(rel(it), it.readLines()) }
         assertEquals("a cached metadata row is read without the sanitizer", emptyList<String>(), hits)
@@ -323,6 +360,67 @@ class AssetMetadataNoncharacterTest {
         assertEquals(1, unsanitizedReads("x.kt", bad).size)
         val good = listOf("val row = metadataDao.getMetadata(id)?.displaySafe()", "return row?.name")
         assertEquals(0, unsanitizedReads("x.kt", good).size)
+    }
+
+    @Test
+    fun `the read gate sees a read whatever the receiver is called`() {
+        val spellings = listOf(
+            listOf("val row = metadataDao.getMetadata(id)"),
+            listOf("val row = dao.getMetadata(id)"),
+            listOf("val row = db.assetMetadataDao().getMetadata(id)"),
+            listOf("val rows = dao.getAllMetadata()"),
+            listOf("val row = db.assetMetadataDao()", "    .getMetadata(id)"),
+            listOf("val row = store . getMetadata (id)"),
+        )
+        for (read in spellings) {
+            assertEquals(read.toString(), 1, unsanitizedReads("x.kt", read + "return row?.name").size)
+            val clean = read.dropLast(1) + (read.last() + "?.displaySafe()")
+            assertEquals(clean.toString(), 0, unsanitizedReads("x.kt", clean + "return row?.name").size)
+        }
+    }
+
+    @Test
+    fun `the read gate leaves the service's own model lookup and declarations alone`() {
+        // The service returns a model, which it builds through the sanitizer (held below).
+        assertEquals(0, unsanitizedReads("x.kt", listOf("val m = metadataService.getMetadata(id, cid)", "return m?.name")).size)
+        assertEquals(0, unsanitizedReads("x.kt", listOf("suspend fun getMetadata(assetId: String): AssetMetadataEntity?")).size)
+        assertEquals(0, unsanitizedReads("x.kt", listOf("fun getAllMetadata(): Flow<List<AssetMetadataEntity>>")).size)
+    }
+
+    @Test
+    fun `comments between a read and the sanitizer do not use up the window`() {
+        val comments = List(40) { "    // a line of explanation" } + "    /* and a block" + "     * of it */"
+        val good = listOf("val rows = dao.getAllMetadata()") + comments + "" + "val shown = rows.map { it.displaySafe() }"
+        assertEquals(0, unsanitizedReads("x.kt", good).size)
+        // Code does: a sanitizer further down than the window is not this read's.
+        val far = listOf("val rows = dao.getAllMetadata()") + List(window) { "val x$it = $it" } + "val shown = rows.map { it.displaySafe() }"
+        assertEquals(1, unsanitizedReads("x.kt", far).size)
+        // A sanitizer named only in a comment is no sanitizer.
+        val talk = listOf("val row = dao.getMetadata(id)", "// later: row.displaySafe()", "return row?.name")
+        assertEquals(1, unsanitizedReads("x.kt", talk).size)
+    }
+
+    @Test
+    fun `the DAO hands out rows through its two readers alone`() {
+        val dao = File(root, "core/src/main/java/app/aroundtheblock/wallet/core/db/dao/AssetMetadataDao.kt").readText()
+        val rowReaders = Regex("""fun\s+(\w+)\s*\([^)]*\)\s*:\s*[^\n]*AssetMetadataEntity""").findAll(dao).map { it.groupValues[1] }.toList()
+        assertEquals(listOf("getMetadata", "getAllMetadata"), rowReaders)
+        // No query hands out a text column on its own either.
+        assertEquals(0, Regex("""SELECT\s+[^"]*\b(name|symbol|description)\b[^"]*FROM""").findAll(dao).count())
+    }
+
+    @Test
+    fun `the DAO is handed out by the database and the DI module alone`() {
+        val accessors = mainSources.filter { it.readText().contains("assetMetadataDao()") }.map { rel(it) }.sorted()
+        assertEquals(
+            listOf(
+                "app/src/main/java/app/aroundtheblock/wallet/di/AppModule.kt",
+                "core/src/main/java/app/aroundtheblock/wallet/core/db/WalletDatabase.kt",
+            ),
+            accessors,
+        )
+        val calls = mainSources.sumOf { Regex("""assetMetadataDao\(\)""").findAll(it.readText()).count() }
+        assertEquals("one declaration and one provider", 2, calls)
     }
 
     @Test
