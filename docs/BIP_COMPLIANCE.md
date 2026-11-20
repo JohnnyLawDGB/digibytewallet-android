@@ -209,7 +209,8 @@ that breaks either phrase length fails CI:
   probes (BIP 44 and BIP 49 included), 12-word phrases.
 - `bip39_24w_vectors_kat` — every profile again for four published
   24-word phrases, each without and with a passphrase, through the core,
-  the Android bridge and the create/restore trees.
+  the Android bridge and a wallet opened by the recipe create/restore
+  call (`BRWalletOpen.h`).
 - `bip39_passphrase_kat` — phrase → seed against the published seeds.
 
 All of these are mainnet vectors. Passphrase normalisation (NFKD) is done

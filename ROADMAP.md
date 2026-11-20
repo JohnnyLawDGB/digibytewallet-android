@@ -18,8 +18,8 @@
 > - **24-word address vectors: landed.** The wallet's own trees have been held to an independent
 >   24-word vector since 4.1.4 (`derivation_vectors_kat`). 4.1.5 adds `bip39_24w_vectors_kat`: four
 >   published 24-word phrases, each without and with a passphrase, through every derivation profile
->   Recover funds probes (BIP44 and BIP49 included), on the core, the Android bridge and the
->   create/restore trees.
+>   Recover funds probes (BIP44 and BIP49 included), on the core, the Android bridge and a wallet
+>   opened by the recipe create/restore call (`BRWalletOpen.h`).
 >
 > **Unchanged:** the phase order below (sovereignty first). Choosing chains by accumulated work
 > is still the scheduled structural change under Phase 1.

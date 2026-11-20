@@ -4,8 +4,8 @@
 # independent implementation computes, for every address type the wallet derives: the seven derivation
 # profiles (BIP84, BIP86, legacy m/0' under both master keys, BIP44 coin 20 and coin 0, BIP49), for four
 # published 24-word BIP39 test phrases, each without and with a passphrase, through the core, through
-# Android's bridge (jni_derive.c with Kotlin's BUILT_INS) and through the wallet's own create/restore
-# trees. See bip39_24w_vectors_kat_main.c for the cases and generate.py for where vectors.txt comes from.
+# Android's bridge (jni_derive.c with Kotlin's BUILT_INS) and through the wallet's own trees, with the
+# wallet opened by the one recipe create/restore call (the core's BRWalletOpen.h). See bip39_24w_vectors_kat_main.c for the cases and generate.py for where vectors.txt comes from.
 #
 #   RED    -DBIP39_24W_TRUNCATE_RED (only the first 12 words reach the seed): every seed_, core_, bridge_
 #          and wallet_ case MUST fail; the two GUARD cases pass.
@@ -13,8 +13,10 @@
 #          every case of an even seed and the GUARD cases pass.
 #   RED    -DDERIVATION_PROFILES_RED, -DRECOVERY_ENCODER_RED (the core's seams): core_s<s>_p5 MUST fail for
 #          every seed, every other case pass.
+#   RED    -DWALLET_OPEN_SINGLE_TREE_UNFIXED (the recipe's seam in BRWalletOpen.h: BIP84 alone is watched):
+#          wallet_s<s> MUST fail for every seed, every other case pass.
 #   GREEN  every case passes, ALL PASS, exit 0.
-#   All five arms under ASan + UBSan (no recovery).
+#   All six arms under ASan + UBSan (no recovery).
 #   SELF-TEST  on copies of vectors.txt, the shipped arm: one changed address fails exactly its two cases;
 #          a 24-word phrase with a bad checksum, and a 12-word phrase, fail phrases_24_words.
 #   CROSS  the rows vectors.txt shares with the core's vectors/derivation/abandon-art*.txt (a second
@@ -47,7 +49,7 @@ export UBSAN_OPTIONS="halt_on_error=1 print_stacktrace=1"
 SAN_RE='ERROR: (AddressSanitizer|LeakSanitizer)|runtime error:'
 
 [ -s "$VECTORS" ] || { echo "GATE FAILURE: no vector file at $VECTORS"; exit 1; }
-for f in BRDerivationProfiles.h BRRecoveryDerive.h vectors/recovery-derivation/independent.py \
+for f in BRDerivationProfiles.h BRRecoveryDerive.h BRWalletOpen.h vectors/recovery-derivation/independent.py \
          vectors/derivation/bip39-english.wordlist vectors/derivation/abandon-art.txt vectors/derivation/abandon-art-trezor.txt; do
     [ -s "$CORE_DIR/$f" ] || { echo "GATE FAILURE: $CORE_DIR/$f is missing"; exit 1; }
 done
@@ -62,6 +64,8 @@ GEN_PID=$!
     gate_fail "DERIVATION_PROFILES_RED does not select exactly one block in BRDerivationProfiles.h"
 [ "$(grep -c '^#ifdef RECOVERY_ENCODER_RED$' "$CORE_DIR/BRRecoveryDerive.h")" -eq 1 ] ||
     gate_fail "RECOVERY_ENCODER_RED does not select exactly one block in BRRecoveryDerive.h"
+[ "$(grep -c '^#ifdef WALLET_OPEN_SINGLE_TREE_UNFIXED$' "$CORE_DIR/BRWalletOpen.h")" -eq 1 ] ||
+    gate_fail "WALLET_OPEN_SINGLE_TREE_UNFIXED does not select exactly one block in BRWalletOpen.h"
 [ "$(grep -c '^#ifdef BIP39_24W_TRUNCATE_RED$' "$SCRIPT_DIR/bip39_24w_vectors_kat_main.c")" -eq 1 ] ||
     gate_fail "BIP39_24W_TRUNCATE_RED does not select exactly one block in the KAT"
 [ "$(grep -c '^#ifdef BIP39_24W_NO_PASSPHRASE_RED$' "$SCRIPT_DIR/bip39_24w_vectors_kat_main.c")" -eq 1 ] ||
@@ -84,9 +88,9 @@ UNITS=(
 )
 
 # The core units and the bridge are compiled once; each arm compiles only the KAT's own translation unit,
-# the one place the four macros are read (the core's two seams are in header-only code that no .c file of
+# the one place the five macros are read (the core's three seams are in header-only code that no .c file of
 # the core or the bridge includes -- checked here, since an arm built this way would otherwise be half RED).
-SEAM_USERS="$(grep -lE 'BRRecoveryDerive\.h|BRDerivationProfiles\.h|BRRecoveryScan\.h|BRDigiId\.h' "$BRIDGE_DIR/jni_derive.c" "${UNITS[@]}" || true)"
+SEAM_USERS="$(grep -lE 'BRRecoveryDerive\.h|BRDerivationProfiles\.h|BRRecoveryScan\.h|BRDigiId\.h|BRWalletOpen\.h' "$BRIDGE_DIR/jni_derive.c" "${UNITS[@]}" || true)"
 [ -z "$SEAM_USERS" ] || gate_fail "a unit compiled once includes a header with a seam: $SEAM_USERS"
 # -O1: unoptimised, the core's secp256k1 under two sanitizers makes each of the eight runs take about 25 s.
 CFLAGS=(-w -include stdint.h -g -O1 -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer
@@ -109,7 +113,7 @@ SEEDS=(0 1 2 3 4 5 6 7)
 PROFILES=(0 1 2 3 4 5 6)
 GUARD_CASES=(vectors_parsed phrases_24_words)
 ALL_CASES=("${GUARD_CASES[@]}")
-RED_ALL=""; RED_ODD=""; RED_P5=""
+RED_ALL=""; RED_ODD=""; RED_P5=""; RED_WALLET=""
 for s in "${SEEDS[@]}"; do
     mine=("seed_$s")
     for p in "${PROFILES[@]}"; do mine+=("core_s${s}_p$p"); done
@@ -119,6 +123,7 @@ for s in "${SEEDS[@]}"; do
     RED_ALL+=" ${mine[*]}"
     [ $((s % 2)) -eq 1 ] && RED_ODD+=" ${mine[*]}"
     RED_P5+=" core_s${s}_p5"
+    RED_WALLET+=" wallet_s$s"
 done
 
 ARM_LIMIT_S="${BIP39_24W_ARM_LIMIT:-600}"   # an arm takes seconds; the limit only bounds a hang
@@ -154,6 +159,7 @@ build "$BUILD_DIR/truncate_red" -DBIP39_24W_TRUNCATE_RED || { echo "GATE FAILURE
 build "$BUILD_DIR/pass_red" -DBIP39_24W_NO_PASSPHRASE_RED || { echo "GATE FAILURE: BIP39_24W_NO_PASSPHRASE_RED arm did not compile"; exit 1; }
 build "$BUILD_DIR/profiles_red" -DDERIVATION_PROFILES_RED || { echo "GATE FAILURE: DERIVATION_PROFILES_RED arm did not compile"; exit 1; }
 build "$BUILD_DIR/encoder_red" -DRECOVERY_ENCODER_RED || { echo "GATE FAILURE: RECOVERY_ENCODER_RED arm did not compile"; exit 1; }
+build "$BUILD_DIR/recipe_red" -DWALLET_OPEN_SINGLE_TREE_UNFIXED || { echo "GATE FAILURE: WALLET_OPEN_SINGLE_TREE_UNFIXED arm did not compile"; exit 1; }
 
 echo "--- COMPARISON ARM -DBIP39_24W_TRUNCATE_RED: every case but the two GUARDS must fail ---"
 check_arm truncate_red "$BUILD_DIR/truncate_red" "$VECTORS" "$RED_ALL"
@@ -163,6 +169,8 @@ echo "--- COMPARISON ARM -DDERIVATION_PROFILES_RED: only core_s<s>_p5 may fail -
 check_arm profiles_red "$BUILD_DIR/profiles_red" "$VECTORS" "$RED_P5"
 echo "--- COMPARISON ARM -DRECOVERY_ENCODER_RED: only core_s<s>_p5 may fail ---"
 check_arm encoder_red "$BUILD_DIR/encoder_red" "$VECTORS" "$RED_P5"
+echo "--- COMPARISON ARM -DWALLET_OPEN_SINGLE_TREE_UNFIXED: only wallet_s<s> may fail ---"
+check_arm recipe_red "$BUILD_DIR/recipe_red" "$VECTORS" "$RED_WALLET"
 echo "--- SHIPPED ARM: every case passes ---"
 check_arm green "$BUILD_DIR/green" "$VECTORS" ""
 
@@ -215,7 +223,7 @@ elif cmp -s "$BUILD_DIR/generated.txt" "$VECTORS"; then
 else gate_fail "vectors.txt is not what generate.py prints"; diff "$VECTORS" "$BUILD_DIR/generated.txt" | head -5; fi
 
 if [ $FAIL -eq 0 ]; then
-    echo "PASS: bip39_24w_vectors_kat (24-word phrases, without and with a passphrase: core, bridge and wallet trees give the independent addresses for every profile; four RED arms fail only their cases; ASan+UBSan; vectors current)"
+    echo "PASS: bip39_24w_vectors_kat (24-word phrases, without and with a passphrase: core, bridge and wallet trees give the independent addresses for every profile, the wallet opened by the shared recipe; five RED arms fail only their cases; ASan+UBSan; vectors current)"
     exit 0
 fi
 echo "FAIL: bip39_24w_vectors_kat"

@@ -24,15 +24,18 @@
 //                     has no format the table does not probe.
 //   bridge_s<s>_p<p>  the same through Android's bridge (jni_derive.c) with Kotlin's table (BUILT_INS),
 //                     from the seed the bridge derived from the phrase.
-//   wallet_s<s>       the wallet's own trees, as create/restore build them: BIP84, BIP86 and legacy
-//                     addresses from the master PUBLIC keys (what is watched) and from the signing keys
-//                     (what can be spent), and a wallet built by the shared recipe watches them.
+//   wallet_s<s>       the wallet's own trees: BIP84, BIP86 and legacy addresses from the master PUBLIC
+//                     keys (what is watched) and from the signing keys (what can be spent), and a wallet
+//                     opened from the seed by BRWalletOpenFromSeed -- the core's BRWalletOpen.h, the one
+//                     recipe create/restore call on every platform -- watches them.
 //
-// Built five times by run.sh. The two macros below live in this file only (comparison arms of the KAT):
+// Built six times by run.sh. The two macros below live in this file only (comparison arms of the KAT):
 //   -DBIP39_24W_TRUNCATE_RED       a wrong word-count handling: only the first 12 words of each phrase
 //                                  reach the seed. Every seed_, core_, bridge_ and wallet_ case fails.
 //   -DBIP39_24W_NO_PASSPHRASE_RED  the passphrase is dropped. Every case of an odd seed fails; even seeds pass.
 //   -DDERIVATION_PROFILES_RED, -DRECOVERY_ENCODER_RED  the core's own seams: only core_s<s>_p5 fails.
+//   -DWALLET_OPEN_SINGLE_TREE_UNFIXED  the recipe's own seam (BRWalletOpen.h): the wallet watches BIP84
+//                                  alone. Only wallet_s<s> fails.
 //   (default)                      everything as shipped; every case passes.
 
 #include <stdarg.h>
@@ -45,6 +48,7 @@
 #include "BRBIP39Mnemonic.h"
 #include "BRBIP39WordsEn.h"
 #include "BRWallet.h"
+#include "BRWalletOpen.h"
 #include "kotlin_profiles.h"
 #include "wallet_spend_gate.h"   /* jni_derive.c's one wallet question, stubbed below */
 
@@ -386,8 +390,9 @@ static void case_wallet(unsigned s)
     mpk84 = BRBIP32MasterPubKeyBIP84(seed.u8, sizeof(seed));
     mpk86 = BRBIP32MasterPubKeyBIP86(seed.u8, sizeof(seed));
     mpkLegacy = BRBIP32MasterPubKeyLegacy(seed.u8, sizeof(seed));
-    w = BRWalletNewDual(NULL, 0, mpk84, mpkLegacy);
-    if (w) BRWalletSetTaprootKey(w, mpk86);
+    // The wallet is opened by the recipe itself, not by a copy of its steps: a change to which trees
+    // the recipe derives or installs is then seen here.
+    w = BRWalletOpenFromSeed(seed.u8, sizeof(seed), NULL, 0);
     if (! w) failf(c, "the recipe wallet was not built");
     for (unsigned chain = 0; chain <= 1; chain++) {
         for (unsigned i = 0; i < PER_CHAIN; i++) {
