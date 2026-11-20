@@ -41,6 +41,9 @@ object DigiDollarTransferPlan {
         val changeAmountSat: Long,
         val feeSat: Long,
         val cents: Long,
+        /** The rate the fee was sized at. The native signer sizes its own required fee at this rate
+         *  and holds [feeSat] to it on both sides (DD-FEE-CEIL). */
+        val feePerKb: Long,
     )
 
     enum class Reason {
@@ -123,6 +126,7 @@ object DigiDollarTransferPlan {
                 changeAmountSat = change,
                 feeSat = available - change,
                 cents = totalCents,
+                feePerKb = feePerKb,
             )
         )
     }
