@@ -94,11 +94,13 @@ class WipeLeavesNoWalletNamesTest {
         fun walletManager(
             identitySessions: IdentitySessionWipe = IdentitySessionWipe { true },
             hubRevoke: HubSessionRevoke = HubSessionRevoke.NONE,
+            /** The Keystore the legacy eraser asks; the wipe's own seed phases keep [aliases]. */
+            eraserAliases: KeystoreAliases = aliases,
         ) = WalletManager(
             context = ctx,
             keyStoreManager = keyStoreManagerOver(vault, alias = WalletStores.keyAlias(b)),
             utxoManager = mockk(relaxed = true),
-            dataEraser = AndroidWalletDataEraser(ctx, aliases) { hubStoreOf(WalletScope.legacy(false)) },
+            dataEraser = AndroidWalletDataEraser(ctx, eraserAliases) { hubStoreOf(WalletScope.legacy(false)) },
             quiesceNative = { },
             identitySessions = identitySessions,
             hubRevoke = hubRevoke,
@@ -159,6 +161,45 @@ class WipeLeavesNoWalletNamesTest {
         assertEquals("files or prefs files naming _legacy or dgb_wallet_keys", emptyList<String>(), d.reservedNamesLeft())
         assertFalse("the alias $reservedWrapAlias is left", reservedWrapAlias in d.vault.keys.keys)
         assertFalse("the PIN store was not cleared", pin.hasPin())
+    }
+
+    /**
+     * "Deleted" is the file AND its backup: the platform restores a preferences file from
+     * `<name>.xml.bak` on the next open, so a backup left behind is the store left behind.
+     */
+    @Test fun `a reserved prefs backup that will not go keeps the wipe unverified`() = runTest {
+        for (name in reservedBandPrefs + "dgb_wallet_keys") {
+            val d = Device().apply { populate() }
+            // A directory that holds something cannot be deleted as a file; there is no `<name>.xml`.
+            val backup = File(d.root, "shared_prefs/$name.xml.bak")
+            backup.apply { mkdirs() }.resolve("held").writeBytes(byteArrayOf(1))
+            val pin = PinManager(RecordingPinStore().apply { map["pin_hash"] = "00"; map["pin_salt"] = "00"; map["pin_method"] = "pbkdf2" })
+
+            val report = d.walletManager().wipeThenReleasePin(pin)
+
+            assertTrue("$name: precondition: the backup is still there", backup.exists())
+            assertFalse("$name: precondition: only the backup is left", File(d.root, "shared_prefs/$name.xml").exists())
+            assertTrue("$name: no seed step waits on it", report.seedGone)
+            assertFalse("$name: its backup is left, yet the wipe verified", report.verified)
+            assertTrue("$name: the PIN store must be kept", pin.hasPin())
+            ActiveWallet.resetForTest()
+        }
+    }
+
+    /** A Keystore that cannot answer for the alias has not said the alias is gone. */
+    @Test fun `a Keystore that cannot answer for the wrap alias keeps the wipe unverified`() = runTest {
+        val d = Device().apply { populate(); plantReservedNames() }
+        val cannotAnswer = object : KeystoreAliases by d.aliases {
+            override fun contains(alias: String): Boolean =
+                if (alias == reservedWrapAlias) throw KeystoreHiccup() else d.aliases.contains(alias)
+        }
+        val pin = PinManager(RecordingPinStore().apply { map["pin_hash"] = "00"; map["pin_salt"] = "00"; map["pin_method"] = "pbkdf2" })
+
+        val report = d.walletManager(eraserAliases = cannotAnswer).wipeThenReleasePin(pin)
+
+        assertTrue("it is not a seed key: the seed is gone", report.seedGone)
+        assertFalse("the alias was never answered for, yet the wipe verified", report.verified)
+        assertTrue("the PIN store must be kept", pin.hasPin())
     }
 
     @Test fun `a wipe of a device that holds no reserved name verifies and creates no file`() = runTest {
