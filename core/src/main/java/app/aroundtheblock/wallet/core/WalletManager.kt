@@ -198,8 +198,9 @@ class WalletManager @Suppress("LongParameterList") constructor(
     // Every seed key alias of every wallet, which the wipe deletes and reads back. Not
     // [keyStoreManager], which is bound to this manager's own wallet.
     private val keystoreAliases: KeystoreAliases = AndroidKeystoreAliases,
-    // Every wallet id on the device: the registry, the seed records on disk, the Keystore aliases
-    // and the ids an earlier wipe still owes a store erase. Injectable because in-memory test
+    // Every wallet id on the device, as [ActiveWallet.everyWalletId] finds them (the registry, the
+    // seed records and key records on disk, the Keystore aliases and the ids an earlier wipe still
+    // owes a store erase). Injectable because in-memory test
     // prefs create no files to list.
     private val allWalletIds: () -> List<String> = {
         app.aroundtheblock.wallet.core.wallets.ActiveWallet.everyWalletId(context) { keystoreAliases.aliases() }
@@ -1008,7 +1009,7 @@ class WalletManager @Suppress("LongParameterList") constructor(
      * address set, recorded sends, filter-header chain, Room DB), so a security wipe (manual
      * Settings OR the PIN wipe-after-N backstop) doesn't leave transaction history behind. Both
      * paths call this single routine, and one run covers every wallet ([allWalletIds]: the
-     * registry, the seed records on disk, the Keystore aliases and the ids an earlier wipe left
+     * registry, the seed records and key records on disk, the Keystore aliases and the ids an earlier wipe left
      * on record), BOTH networks' stores, the registry `dgb_wallets` and the identity sessions
      * ([IdentitySessionWipe]).
      *

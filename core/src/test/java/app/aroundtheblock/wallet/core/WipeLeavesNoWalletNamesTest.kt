@@ -12,6 +12,7 @@ import app.aroundtheblock.wallet.core.wallets.WalletRegistry
 import app.aroundtheblock.wallet.core.wallets.WalletScope
 import app.aroundtheblock.wallet.core.wallets.WalletStoreEraser
 import app.aroundtheblock.wallet.core.wallets.WalletStores
+import app.aroundtheblock.wallet.core.wallets.WipeOwedStores
 import io.mockk.clearMocks
 import io.mockk.every
 import io.mockk.mockk
@@ -96,6 +97,8 @@ class WipeLeavesNoWalletNamesTest {
             hubRevoke: HubSessionRevoke = HubSessionRevoke.NONE,
             /** The Keystore the legacy eraser asks; the wipe's own seed phases keep [aliases]. */
             eraserAliases: KeystoreAliases = aliases,
+            /** How the per-wallet eraser reads back that a prefs file went. */
+            prefsOnDisk: (String) -> Boolean = { name -> File(root, "shared_prefs/$name.xml").exists() },
         ) = WalletManager(
             context = ctx,
             keyStoreManager = keyStoreManagerOver(vault, alias = WalletStores.keyAlias(b)),
@@ -105,7 +108,7 @@ class WipeLeavesNoWalletNamesTest {
             identitySessions = identitySessions,
             hubRevoke = hubRevoke,
             scope = b,
-            scopeEraser = WalletStoreEraser(ctx, aliases, { true }) { name -> File(root, "shared_prefs/$name.xml").exists() },
+            scopeEraser = WalletStoreEraser(ctx, aliases, { true }, prefsOnDisk),
             keystoreAliases = aliases,
         )
 
@@ -204,6 +207,33 @@ class WipeLeavesNoWalletNamesTest {
         assertFalse("a key record is on the device after the wipe", file.exists())
         assertTrue("$report", report.verified)
         assertFalse("a verified wipe clears the PIN store", pin.hasPin())
+    }
+
+    /** The same wallet, when all that is left of its key record is the platform's backup file. */
+    @Test fun `a key record left only as a backup that will not go names its wallet and keeps the wipe unverified`() = runTest {
+        val d = Device().apply { populate() }
+        val stray = "0123456789abcdef"
+        val backup = File(d.root, "shared_prefs/dgb_wallet_keys_$stray.xml.bak")
+        // A directory that holds something cannot be deleted as a file.
+        backup.apply { mkdirs() }.resolve("held").writeBytes(byteArrayOf(1))
+        val pin = PinManager(RecordingPinStore().apply { map["pin_hash"] = "00"; map["pin_salt"] = "00"; map["pin_method"] = "pbkdf2" })
+        val dir = File(d.root, "shared_prefs")
+
+        val report = d.walletManager(prefsOnDisk = { name -> File(dir, "$name.xml").exists() || File(dir, "$name.xml.bak").exists() })
+            .wipeThenReleasePin(pin)
+
+        assertTrue("precondition: the backup is still there", backup.exists())
+        assertTrue("no seed step waits on it", report.seedGone)
+        assertFalse("a key record's backup is left, yet the wipe verified", report.verified)
+        assertTrue("the PIN store must be kept", pin.hasPin())
+        assertEquals("the wallet is not on record for the next wipe", listOf(stray), WipeOwedStores.read(d.ctx))
+    }
+
+    @Test fun `every reserved per-wallet store's file name is read back to its wallet`() {
+        val id = "0123456789abcdef"
+        for (base in WalletStores.RESERVED_WALLET_PREFS) {
+            assertEquals(base, id, WalletStores.walletIdOfKeyRecordPrefsFile(WalletStores.prefsName(base, WalletScope(id, false)) + ".xml"))
+        }
     }
 
     @Test fun `a key record file names its wallet, and nothing else does`() {

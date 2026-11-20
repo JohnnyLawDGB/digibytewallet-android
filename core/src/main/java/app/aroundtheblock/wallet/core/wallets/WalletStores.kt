@@ -58,7 +58,8 @@ object WalletStores {
     const val NETWORK_TESTNET = "testnet"
 
     private const val SEED_PREFS = "dgb_wallet_seed"
-    private const val KEY_RECORD_PREFS = "dgb_wallet_keys"
+    /** The key record's base: the one reserved per-wallet prefs store, so the two cannot drift. */
+    private val KEY_RECORD_PREFS: String get() = RESERVED_WALLET_PREFS.single()
     private const val PREFS_BACKUP_SUFFIX = ".bak"
     private const val KEY_ALIAS_BASE = "dgb_wallet_master"
     private const val CF_BIRTH_KEY = "cf_birth_height"
