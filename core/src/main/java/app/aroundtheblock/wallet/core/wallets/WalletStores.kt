@@ -58,6 +58,8 @@ object WalletStores {
     const val NETWORK_TESTNET = "testnet"
 
     private const val SEED_PREFS = "dgb_wallet_seed"
+    private const val KEY_RECORD_PREFS = "dgb_wallet_keys"
+    private const val PREFS_BACKUP_SUFFIX = ".bak"
     private const val KEY_ALIAS_BASE = "dgb_wallet_master"
     private const val CF_BIRTH_KEY = "cf_birth_height"
     private const val SEED_PREFS_SUFFIX = ".xml"
@@ -116,6 +118,18 @@ object WalletStores {
         if (!alias.startsWith(prefix)) return null
         val rest = alias.removePrefix(prefix).removeSuffix(V2)
         return rest.takeIf { it != WalletIds.LEGACY && WalletIds.isValid(it) }
+    }
+
+    /**
+     * A shared_prefs file name "dgb_wallet_keys_<id>.xml" (or its ".bak") to its id, or null. Strict:
+     * legacy's own record, the wrap alias's name and anything that is not a wallet id name no wallet.
+     */
+    fun walletIdOfKeyRecordPrefsFile(fileName: String): String? {
+        val prefix = "${KEY_RECORD_PREFS}_"
+        val name = fileName.removeSuffix(PREFS_BACKUP_SUFFIX)
+        if (!name.startsWith(prefix) || !name.endsWith(SEED_PREFS_SUFFIX)) return null
+        val id = name.removePrefix(prefix).removeSuffix(SEED_PREFS_SUFFIX)
+        return id.takeIf { it != WalletIds.LEGACY && WalletIds.isValid(it) }
     }
 
     /** A shared_prefs file name "dgb_wallet_seed_<id>.xml" to its id, or null. */

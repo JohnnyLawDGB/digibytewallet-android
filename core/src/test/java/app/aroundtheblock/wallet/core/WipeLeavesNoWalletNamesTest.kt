@@ -186,6 +186,36 @@ class WipeLeavesNoWalletNamesTest {
         }
     }
 
+    /**
+     * A key record is itself a way to find its wallet: after a rollback it can be the only thing a
+     * wallet left (no registry entry, no seed record, no seed key alias, no id on the owed record).
+     */
+    @Test fun `a key record whose wallet is known nowhere else is found and erased by the wipe`() = runTest {
+        val d = Device().apply { populate() }
+        val stray = "0123456789abcdef"
+        val name = "dgb_wallet_keys_$stray"
+        d.prefs.prefsFor(name).seed("held", "x")
+        val file = File(d.root, "shared_prefs/$name.xml")
+        assertTrue("precondition: the key record is on the device", file.exists())
+        val pin = PinManager(RecordingPinStore().apply { map["pin_hash"] = "00"; map["pin_salt"] = "00"; map["pin_method"] = "pbkdf2" })
+
+        val report = d.walletManager().wipeThenReleasePin(pin)
+
+        assertFalse("a key record is on the device after the wipe", file.exists())
+        assertTrue("$report", report.verified)
+        assertFalse("a verified wipe clears the PIN store", pin.hasPin())
+    }
+
+    @Test fun `a key record file names its wallet, and nothing else does`() {
+        assertEquals("0123456789abcdef", WalletStores.walletIdOfKeyRecordPrefsFile("dgb_wallet_keys_0123456789abcdef.xml"))
+        assertEquals("0123456789abcdef", WalletStores.walletIdOfKeyRecordPrefsFile("dgb_wallet_keys_0123456789abcdef.xml.bak"))
+        for (not in listOf(
+            "dgb_wallet_keys.xml", "dgb_wallet_keys_legacy.xml", "dgb_wallet_keys_wrap.xml", "dgb_wallet_keys_0123.xml",
+            "dgb_wallet_keys_0123456789ABCDEF.xml", "dgb_wallet_keys_0123456789abcdef", "dgb_wallet_seed_0123456789abcdef.xml",
+            "xdgb_wallet_keys_0123456789abcdef.xml", "dgb_wallet_keys_0123456789abcdef_testnet.xml",
+        )) assertEquals(not, null, WalletStores.walletIdOfKeyRecordPrefsFile(not))
+    }
+
     /** A Keystore that cannot answer for the alias has not said the alias is gone. */
     @Test fun `a Keystore that cannot answer for the wrap alias keeps the wipe unverified`() = runTest {
         val d = Device().apply { populate(); plantReservedNames() }
