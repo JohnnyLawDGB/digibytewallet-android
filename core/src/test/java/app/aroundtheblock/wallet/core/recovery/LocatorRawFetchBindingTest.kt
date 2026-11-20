@@ -48,6 +48,12 @@ class LocatorRawFetchBindingTest {
     private val txB = "70070000" + txA.substring(8)
     private val idB = RawTxBinding.witnessFreeTransactionId(bytes(txB))!!
 
+    // Two more transactions, again the same bytes under other nVersions.
+    private val txC = "02000000" + txA.substring(8)
+    private val idC = RawTxBinding.witnessFreeTransactionId(bytes(txC))!!
+    private val txD = "03000000" + txA.substring(8)
+    private val idD = RawTxBinding.witnessFreeTransactionId(bytes(txD))!!
+
     private val xq = "076cc826d55b011a868ca89317d79db554ab248c9736b6c34a89f4e6ba1159e9"
     private val address = DigiDollarAddress("DD1JAMfBqU9mVnwqZE5SJfJCYT7TKCBnpGeMQQgdDThvbcKbDaTN", xq, 0, 0)
 
@@ -55,10 +61,16 @@ class LocatorRawFetchBindingTest {
     private val outputsByTx = mapOf(
         txA to arrayOf("0|5000000000|76a914${"11".repeat(20)}88ac"),
         txB to arrayOf("0|0|5120$xq", "1|0|6a02444401020164"),
+        txC to arrayOf("0|4999990000|76a914${"22".repeat(20)}88ac"),
+        // Pays the address's key beside a DigiAsset carrier, with no DigiDollar OP_RETURN.
+        txD to arrayOf("0|0|5120$xq", "1|0|6a0644410115000a"),
     )
     private val inputsByTx = mapOf(
         txA to arrayOf("${"00".repeat(32)}|-1"),
         txB to arrayOf("${"ee".repeat(32)}|3"),
+        // Spends output 0 of the second transaction.
+        txC to arrayOf("$idB|0"),
+        txD to arrayOf("${"dd".repeat(32)}|1"),
     )
 
     private val outputsA = listOf(DigiDollarHolding.Output(0, 5_000_000_000L, "76a914${"11".repeat(20)}88ac"))
@@ -193,5 +205,93 @@ class LocatorRawFetchBindingTest {
         )
         assertEquals(listOf(DigiDollarScan.Holding(address, idB, 0, "5120$xq")), r.holdings)
         assertEquals(0L, r.unlocatableCents)
+    }
+
+    @Test fun `inputs answered with another transaction prove nothing spent`() = runBlocking {
+        // Outputs come from a server that answers each request with its own transaction. The
+        // inputs request for the first listed transaction is answered with a transaction that
+        // spends the outpoint located in the second: not the one asked for, so it is unreadable.
+        val outputs = source(mapOf(idA to answer(txA), idB to answer(txB)))
+        val inputs = source(mapOf(idA to answer(txC), idB to answer(txB)))
+        val r = DigiDollarScan.assemble(
+            addresses = listOf(address),
+            holdingFor = { DigiDollarHoldingResult(100, 1, listOf(idA, idB)) },
+            outputsFor = { outputs.fetchOutputs(it) },
+            inputsFor = { inputs.fetchInputs(it) },
+            versionFor = { outputs.fetchVersion(it) },
+        )
+        assertEquals(listOf(DigiDollarScan.Holding(address, idB, 0, "5120$xq")), r.holdings)
+        assertEquals(0L, r.unlocatableCents)
+    }
+
+    @Test fun `a version answered with another transaction does not change the family decision`() = runBlocking {
+        // The listed transaction is not marked DigiDollar by its own nVersion. Its version request
+        // is answered with a transaction whose nVersion carries the marker: unreadable, so unknown.
+        val outputs = source(mapOf(idD to answer(txD)))
+        val versions = source(mapOf(idD to answer(txB)))
+        assertEquals("the swapped answer would carry the marker", 0x0770, source(mapOf(idB to answer(txB))).fetchVersion(idB))
+        val r = DigiDollarScan.assemble(
+            addresses = listOf(address),
+            holdingFor = { DigiDollarHoldingResult(100, 1, listOf(idD)) },
+            outputsFor = { outputs.fetchOutputs(it) },
+            inputsFor = { outputs.fetchInputs(it) },
+            versionFor = { versions.fetchVersion(it) },
+        )
+        assertEquals(listOf(DigiDollarScan.Holding(address, idD, 0, "5120$xq")), r.holdings)
+        assertEquals(0L, r.unlocatableCents)
+    }
+
+    // ---- one spelling of a listed txid ------------------------------------------------------
+
+    @Test fun `a receive listed in upper case whose output a listed transaction spends locates nothing`() = runBlocking {
+        val s = source(mapOf(idB to answer(txB), idC to answer(txC)))
+        val r = DigiDollarScan.assemble(
+            addresses = listOf(address),
+            holdingFor = { DigiDollarHoldingResult(100, 0, listOf(idB.uppercase(), idC)) },
+            outputsFor = { s.fetchOutputs(it) },
+            inputsFor = { s.fetchInputs(it) },
+            versionFor = { s.fetchVersion(it) },
+        )
+        assertEquals("the spent outpoint is not offered", emptyList<Any>(), r.holdings)
+        assertEquals(100L, r.cents)
+        assertEquals(100L, r.unlocatableCents)
+    }
+
+    @Test fun `a transaction listed in both letter cases is one transaction`() = runBlocking {
+        val s = source(mapOf(idB to answer(txB)))
+        val asked = mutableListOf<String>()
+        val r = DigiDollarScan.assemble(
+            addresses = listOf(address),
+            holdingFor = { DigiDollarHoldingResult(100, 0, listOf(idB, idB.uppercase())) },
+            outputsFor = { asked += it; s.fetchOutputs(it) },
+            inputsFor = { s.fetchInputs(it) },
+            versionFor = { s.fetchVersion(it) },
+        )
+        assertEquals("its outpoint is located once", listOf(DigiDollarScan.Holding(address, idB, 0, "5120$xq")), r.holdings)
+        assertEquals("and read once, by its lower-case id", listOf(idB), asked)
+    }
+
+    @Test fun `a transaction listed in both letter cases does not make up the unspent count`() = runBlocking {
+        val s = source(mapOf(idB to answer(txB)))
+        val r = DigiDollarScan.assemble(
+            addresses = listOf(address),
+            holdingFor = { DigiDollarHoldingResult(200, 2, listOf(idB, idB.uppercase())) },
+            outputsFor = { s.fetchOutputs(it) },
+            inputsFor = { s.fetchInputs(it) },
+            versionFor = { s.fetchVersion(it) },
+        )
+        assertEquals(emptyList<Any>(), r.holdings)
+        assertEquals(200L, r.unlocatableCents)
+    }
+
+    @Test fun `an input reported in upper case still marks its outpoint spent`() = runBlocking {
+        val r = DigiDollarScan.assemble(
+            addresses = listOf(address),
+            holdingFor = { DigiDollarHoldingResult(100, 0, listOf(idB, idC)) },
+            outputsFor = { if (it == idB) listOf(DigiDollarHolding.Output(0, 0, "5120$xq")) else emptyList() },
+            inputsFor = { if (it == idC) listOf(DigiDollarHolding.PrevOut(idB.uppercase(), 0)) else emptyList() },
+        )
+        assertEquals(emptyList<Any>(), r.holdings)
+        assertEquals(100L, r.unlocatableCents)
     }
 }

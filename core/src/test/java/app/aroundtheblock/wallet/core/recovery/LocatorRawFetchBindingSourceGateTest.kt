@@ -114,4 +114,58 @@ class LocatorRawFetchBindingSourceGateTest {
             callers,
         )
     }
+
+    // ---- a raw fetch under a new name -------------------------------------------------------
+    //
+    // The tests above find a raw fetch by the names it has today. These three pin the whole of
+    // what the source declares and asks the node client for, and the whole of what the node client
+    // can hand back as a transaction, so a fetch under another name has to be listed here, after
+    // it is bound.
+
+    @Test fun `the locator source declares these functions and no others`() {
+        val declared = Regex("""\bfun\s+(?:<[^>]*>\s*)?(?:[\w.<>?, ]+\.)?(\w+)\s*\(""").findAll(backend)
+            .map { it.groupValues[1] }.toList()
+        assertEquals(
+            listOf("fetchUtxos", "fetchDigiDollar", "boundRawTransaction", "fetchOutputs", "fetchVersion", "fetchInputs"),
+            declared,
+        )
+        assertEquals("every declaration was read by name", Regex("""\bfun\b""").findAll(backend).count(), declared.size)
+        assertEquals(
+            "ReconcileBackendUtxoSource is the only class in UtxoSource.kt",
+            1, Regex("""\b(class|object)\s+\w""").findAll(source).count(),
+        )
+    }
+
+    @Test fun `the locator source asks the node client for these three things and no others`() {
+        val calls = Regex("""\bnodeClient\s*\??\.\s*(\w+)\s*\(""").findAll(backend).map { it.groupValues[1] }.toList()
+        assertEquals(listOf("reconcileAddresses", "digiDollarHolding", "fetchRawTransaction"), calls)
+        // The property, the production constructor's parameter and its hand-over (twice on one
+        // line) are the only other mentions: the client is not passed on or reached another way.
+        assertEquals(
+            "mentions of nodeClient outside those calls",
+            4, Regex("""\bnodeClient\b""").findAll(backend).count() - calls.size,
+        )
+        assertTrue(Regex("""private val nodeClient:\s*DgbNodeClient\s*,""").containsMatchIn(backend))
+        assertEquals("the client is named once as a type in the class header", 2, Regex("""\bDgbNodeClient\b""").findAll(backend).count())
+    }
+
+    @Test fun `the node client hands back a transaction through these functions and no others`() {
+        val client = code(File("$root/reconcile/DgbNodeClient.kt"))
+        // Declared as returning transaction bytes or a raw-transaction entry.
+        val returning = Regex("""\bfun\s+(\w+)\s*\([^)]*\)\s*:\s*(?:ByteArray|RawTxEntry)\b""").findAll(client)
+            .map { it.groupValues[1] }.toList()
+        assertEquals(listOf("fetchRawTx", "fetchRawTransaction", "parseRawTxResponse"), returning)
+        // Each is mentioned where it is declared, and the parser once more by the fetch that uses
+        // it: none is wrapped by a function under another name.
+        fun mentions(name: String) = Regex("""\b$name\b""").findAll(client).count()
+        assertEquals(1, mentions("fetchRawTransaction"))
+        assertEquals(1, mentions("fetchRawTx"))
+        assertEquals(2, mentions("parseRawTxResponse"))
+        // A transaction's hex is read out of an answer in these places: the two fetches above
+        // (one through the parser) and the reconcile answer's parent transactions.
+        assertEquals(3, Regex("""\.(?:optString|getString)\(\s*"hex"""").findAll(client).count())
+        assertEquals(1, Regex("""\.(?:optString|getString)\(\s*"rawtx"""").findAll(client).count())
+        assertEquals("raw-transaction entries are built in two places", 2, Regex("""\bRawTxEntry\(""").findAll(client).count() - 1)
+        assertEquals("transaction bytes are built in one place", 1, Regex("""\bByteArray\(""").findAll(client).count())
+    }
 }
