@@ -77,6 +77,20 @@ class TorRoutesFlowTest {
         assertReported(TorRoute.Direct)
     }
 
+    /** Off from an announced fallback is Direct to Direct: no route in between is ever in force. */
+    @Test fun `switching Tor off from an announced fallback reports no route that was never in force`() {
+        tor.isEnabled = true
+        torState().value = TorState.Failed("gone")
+        tor.announceClearnetFallback()
+        assertReported(TorRoute.Direct)
+        val before = seen.size
+
+        tor.isEnabled = false
+
+        assertEquals("routes reported for a change that left the route Direct", emptyList<TorRoute>(), seen.drop(before))
+        assertReported(TorRoute.Direct)
+    }
+
     @Test fun `GUARD a change that leaves the route alone is not reported`() {
         torState().value = TorState.Starting
         torState().value = TorState.Connecting

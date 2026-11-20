@@ -155,10 +155,12 @@ class TorManager(private val context: Context) {
         get() = prefs.getBoolean(KEY_ENABLED, false)
         set(value) {
             prefs.edit().putBoolean(KEY_ENABLED, value).apply()
+            // The setting first, then the fallback: [routes] reads both, and "on, no fallback" in
+            // between would report a Blocked route that was never in force (HUB-WS-TOR).
+            _enabled.value = value
             // Off: nothing waits for Tor, so an announced fallback is over. Turning Tor back on
             // starts again from "wait for Tor" until it connects or a new banner is raised.
             if (!value) _clearnetFallbackAnnounced.value = false
-            _enabled.value = value
             publishPeersRequireTor()
         }
 
