@@ -48,6 +48,7 @@ class HubRouteChangeTest {
     private val listeners = mutableListOf<WebSocketListener>()
 
     private val client = mockk<OkHttpClient>().also { client ->
+        client.derivesItselfWithoutRedirects()
         every { client.newWebSocket(any(), any()) } answers {
             val socket = RecordingSocket(sockets.size + 1)
             events += "open ${socket.n}"

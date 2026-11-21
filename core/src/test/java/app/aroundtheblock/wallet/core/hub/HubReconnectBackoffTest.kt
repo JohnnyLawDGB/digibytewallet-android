@@ -47,6 +47,7 @@ class HubReconnectBackoffTest {
         every { Log.e(any(), any()) } returns 0
         val listener = slot<WebSocketListener>()
         val client = mockk<OkHttpClient>()
+        client.derivesItselfWithoutRedirects()
         every { client.newWebSocket(any(), capture(listener)) } answers {
             listeners += listener.captured
             RecordingSocket().also { sockets += it }

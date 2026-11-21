@@ -140,6 +140,7 @@ class HubSocketFrameCapTest {
         val listener = slot<WebSocketListener>()
         val socket = RecordingSocket()
         val client = mockk<OkHttpClient>()
+        client.derivesItselfWithoutRedirects()
         every { client.newWebSocket(any(), capture(listener)) } returns socket
         val digiScope = mockk<DigiScopeClient>()
         every { digiScope.getToken() } returns "token"
