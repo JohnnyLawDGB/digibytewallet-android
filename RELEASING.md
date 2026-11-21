@@ -115,7 +115,8 @@ proves nothing about this one.
    install over it; saved data loads, sync completes, balance and history are unchanged, the
    missing-funds scan is clean.
 6. **Pre-publish UI suite:** `scripts/pre-publish-test.sh`: eight scenarios on emulators at
-   API 28, 33, 34 and 35; `Overall: PASS`, and read every SKIP's reason. It drives the real UI
+   API 28, 33, 34 and 35; `Overall: PASS`, with `PREPUB_ALLOW_SKIP` unset. A skipped scenario
+   makes the run `Overall: INCOMPLETE` (exit 2), which is not a pass. It drives the real UI
    and each scenario can fail (first run, wallet creation with and without a screen lock,
    the wallet key tied to the lock, upgrade, restore to a pinned address, peers and height,
    the insufficient-funds refusal, a 60 s soak); the script header lists the assertions.
@@ -239,7 +240,7 @@ one signer, and the wrong package. Output, under `dist/vX.Y.Z/`:
 [ ] 1  RELEASE-X.Y.Z-SCOPE.md complete; frozen at cut
 [ ] 2  release/digibyte-mobile-X.Y.Z cut; version + versionCode bumped; checkpoints refreshed
 [ ] 3  core landed by merge; check-submodule-pin.sh OK
-[ ] 4  KATs all green · unit tests ×3 · JNI registry · upgrade test PASS · pre-publish suite PASS (no unexplained SKIP) — at the release commit
+[ ] 4  KATs all green · unit tests ×3 · JNI registry · upgrade test PASS · pre-publish suite `Overall: PASS` (no SKIP; INCOMPLETE is not a pass) — at the release commit
 [ ] 5  build-release.sh in the owner's terminal
 [ ] 6  signer = release cert on both artifacts · SHA256SUMS from disk
 [ ] 7  source commit tagged · releases repo (hashes in notes, re-hash the live APK) · Play · digiscope.me link (latest.json untouched)

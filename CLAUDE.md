@@ -333,6 +333,7 @@ C bodies are named `NativeBridge_<methodName>` and bound with `RegisterNatives` 
 - What it is NOT: it runs the **debug** build on **emulators**, it **sends no coins** (G asserts the insufficient-funds refusal on an empty wallet), and C upgrades an empty wallet from one fixture version. Release-signed builds, physical devices and a real spend are outside it, and the funded upgrade test is its own gate (`RELEASING.md` §4).
 - Emulators only: every adb call goes through `scripts/test-helpers/device.sh`, which carries `-s emulator-<port>` and a `timeout`, and refuses any other serial.
 - Scenario C needs `test-fixtures/previous-release.apk` (not in git; the script header says how to build it). Without it C is SKIP, not PASS.
+- A SKIP is not a pass in the summary either: a run with a skipped scenario ends `Overall: INCOMPLETE` and exits 2 (FAIL exits 1), unless the caller accepted that scenario by name in `PREPUB_ALLOW_SKIP`. A release run sets nothing and needs `Overall: PASS`.
 - Must pass before any release. Results in `test-results/<timestamp>.txt`; failure evidence (screen + logcat, recovery phrase redacted) in `test-results/<timestamp>/`.
 
 ## Testing Notes

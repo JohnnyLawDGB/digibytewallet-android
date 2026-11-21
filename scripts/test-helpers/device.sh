@@ -18,7 +18,10 @@ UIDUMP="$HELPERS_DIR/uidump.py"
 
 ADB_TIMEOUT="${ADB_TIMEOUT:-30}"          # one ordinary adb call
 ADB_INSTALL_TIMEOUT="${ADB_INSTALL_TIMEOUT:-180}"
-UI_DUMP_FILE="${UI_DUMP_FILE:-/tmp/prepub-ui-$$.xml}"
+# The raw UI dump can hold a recovery phrase (the seed screen is readable by uiautomator), so
+# it has no default location: the caller points UI_DUMP_FILE into `ui_dump_dir_create`'s
+# directory before the first dump.
+UI_DUMP_FILE="${UI_DUMP_FILE:-}"
 SUITE_LOG="${SUITE_LOG:-/dev/null}"
 
 log() { printf '%s %s\n' "$(date +%H:%M:%S)" "$*" >> "$SUITE_LOG"; }
@@ -85,22 +88,50 @@ app_has_focus() { [[ "$(focused_window)" == "$PACKAGE/"* ]]; }
 
 # ── UI: read ──────────────────────────────────────────────────────────────────
 
+# ui_dump_dir_create — prints a new directory only this user can enter, in memory where the
+# machine has a tmpfs (the user's runtime directory, else /dev/shm), for the raw dump. A raw
+# dump of the seed screen holds the phrase, so it must not land on a disk or be readable by
+# anyone else. With no tmpfs it falls back to the temp directory and says so on stderr.
+ui_dump_dir_create() {
+    local base
+    for base in "${XDG_RUNTIME_DIR:-}" /dev/shm; do
+        if [[ -n "$base" && -d "$base" && -w "$base" ]]; then
+            (umask 077; mktemp -d "$base/prepub-ui-XXXXXX") && return 0
+        fi
+    done
+    echo "WARNING: no tmpfs (XDG_RUNTIME_DIR, /dev/shm); the raw UI dump goes to ${TMPDIR:-/tmp}, mode 600" >&2
+    (umask 077; mktemp -d -t prepub-ui-XXXXXX)
+}
+
 # ui_dump — refresh $UI_DUMP_FILE from the device. uiautomator waits for the UI to go idle and
 # gives up while something animates (the sync indicator does, forever), so it gets a few tries.
+# The file is written under umask 077 whatever the caller's umask is: the redirection creates
+# it, and `mv` carries that mode onto $UI_DUMP_FILE.
 ui_dump() {
     local attempt
+    [[ -n "$UI_DUMP_FILE" ]] || { log "ui_dump: UI_DUMP_FILE is not set"; return 1; }
     for attempt in 1 2 3 4; do
-        if adbt 20 exec-out uiautomator dump /dev/tty 2>/dev/null \
-            | sed 's/UI hierchary dumped to: \/dev\/tty$//' > "$UI_DUMP_FILE.tmp" \
+        if (umask 077
+            adbt 20 exec-out uiautomator dump /dev/tty 2>/dev/null \
+                | sed 's/UI hierchary dumped to: \/dev\/tty$//' > "$UI_DUMP_FILE.tmp") \
             && grep -q '<hierarchy' "$UI_DUMP_FILE.tmp"; then
-            mv "$UI_DUMP_FILE.tmp" "$UI_DUMP_FILE"
+            mv -f "$UI_DUMP_FILE.tmp" "$UI_DUMP_FILE"
             return 0
         fi
         sleep 1
     done
     rm -f "$UI_DUMP_FILE.tmp"
-    : > "$UI_DUMP_FILE"
+    ui_dump_scrub
     return 1
+}
+
+# Empty the last dump (kept mode 600). Called as soon as a screen that showed the phrase has
+# been read, so the words do not sit in the file until the next dump.
+ui_dump_scrub() {
+    [[ -n "$UI_DUMP_FILE" ]] || return 0
+    (umask 077; : > "$UI_DUMP_FILE")
+    chmod 600 "$UI_DUMP_FILE" 2>/dev/null
+    return 0
 }
 
 # Pure readers of the last dump. `--contains` / `--prefix` may precede the text.
@@ -115,6 +146,20 @@ ui_wait() {
     local deadline=$(( $(date +%s) + $1 )); shift
     while :; do
         ui_dump && ui_has "$@" && return 0
+        [[ $(date +%s) -ge $deadline ]] && return 1
+        sleep 1
+    done
+}
+
+# ui_wait_for <seconds> <predicate> [args...] — poll until a screen predicate (screen_is_…)
+# holds on a fresh dump. A screen is drawn in steps: a title can be in one dump and the buttons
+# under it only in the next, so "wait for the title, then test the whole screen once on that
+# same dump" fails on a screen that is merely not finished. This tests the WHOLE predicate on
+# every poll.
+ui_wait_for() {
+    local deadline=$(( $(date +%s) + $1 )); shift
+    while :; do
+        ui_dump && "$@" && return 0
         [[ $(date +%s) -ge $deadline ]] && return 1
         sleep 1
     done

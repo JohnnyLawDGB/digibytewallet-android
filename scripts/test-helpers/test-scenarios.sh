@@ -8,9 +8,11 @@
 # The screen predicates in the first section are pure readers of the last UI dump, so
 # `pre-publish-test.sh --self-test` runs them against canned dumps with no emulator.
 #
-# Nothing here writes a recovery phrase to disk. The phrase scenario D reads from the screen
-# lives in a shell variable; saved UI dumps go through `uidump.py redact` and saved logcat
-# through `uidump.py redact-log`.
+# Nothing here writes a recovery phrase to disk. The phrase a create flow reads from the screen
+# lives in a shell variable that is NOT exported (an exported one is in the environment of
+# every adb, python and timeout the suite starts); the raw dump it is read from is mode 600 in
+# a private tmpfs directory and is emptied as soon as the phrase screen is left; saved UI dumps
+# go through `uidump.py redact` and saved logcat through `uidump.py redact-log`.
 
 # The public BIP39 test phrase. It is in every wallet's test vectors; it protects nothing.
 TEST_MNEMONIC="abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
@@ -108,6 +110,7 @@ screen_is_unlock()     { ui_has "$T_UNLOCK_TITLE" && ui_has "$T_UNLOCK_SUB"; }
 screen_is_wallet() {
     ui_has "$T_WALLET_ACTIVITY" && ui_has "$T_WALLET_SEND" && ui_has "$T_WALLET_RECEIVE" && ui_has "$T_NAV_SETTINGS"
 }
+screen_is_wallet_or_unlock() { screen_is_wallet || screen_is_unlock; }
 screen_verify_passed() { ui_has "$T_VERIFY_OK" && ui_has "$T_VERIFY_SETUP_PIN"; }
 
 # Prints the receive address on the Receive screen; fails unless it is a DigiByte bech32 address.
@@ -168,8 +171,8 @@ app_unhealthy() {
 # ── Install / launch ──────────────────────────────────────────────────────────
 
 WALLET_STATE="none"      # none | created | restored — the wallet on the current install
-GENERATED_WORDS=""       # the phrase read from the screen in a create flow; never written out
-export GENERATED_WORDS
+GENERATED_WORDS=""       # the phrase read from the screen in a create flow; never written out,
+                         # never exported
 
 clear_logs() { adbx logcat -b all -c > /dev/null 2>&1 || adbx logcat -c > /dev/null 2>&1 || true; }
 
@@ -321,11 +324,15 @@ create_wallet() {
     ui_tap "$T_ONB_CREATE"
     ui_wait 30 "$T_SEED_TITLE" || { FLOW_ERROR="the recovery-phrase screen ('$T_SEED_TITLE') did not appear"; return 1; }
     GENERATED_WORDS="$(python3 "$UIDUMP" seed-words "$UI_DUMP_FILE")" || {
+        ui_dump_scrub
         FLOW_ERROR="could not read 12 numbered words from the recovery-phrase screen"; return 1; }
-    read -r -a words <<< "$GENERATED_WORDS"
-    [[ ${#words[@]} -eq 12 ]] || { FLOW_ERROR="the phrase screen showed ${#words[@]} words, expected 12"; return 1; }
-    ui_scroll_to 3 "$T_SEED_WRITTEN" || { FLOW_ERROR="'$T_SEED_WRITTEN' is not on the phrase screen"; return 1; }
+    # Plain word splitting, not a here-string: bash may back a here-string with a temp file.
+    # shellcheck disable=SC2206
+    words=($GENERATED_WORDS)
+    [[ ${#words[@]} -eq 12 ]] || { ui_dump_scrub; FLOW_ERROR="the phrase screen showed ${#words[@]} words, expected 12"; return 1; }
+    ui_scroll_to 3 "$T_SEED_WRITTEN" || { ui_dump_scrub; FLOW_ERROR="'$T_SEED_WRITTEN' is not on the phrase screen"; return 1; }
     ui_tap "$T_SEED_WRITTEN"
+    ui_dump_scrub   # the phrase screen's dump is not kept until the next one replaces it
 
     for q in 1 2 3; do
         ui_wait 15 --prefix "Verification $q of 3" || { FLOW_ERROR="verification question $q did not appear"; return 1; }
@@ -492,11 +499,20 @@ read_wallet_key_status() {
     printf '%s\n' "$status"
 }
 
-# A wallet for the scenarios that only need one (F, H): reuse this run's, or create one.
+# A wallet for the scenarios that only need one (F, H): this run's, or, when there is none
+# (`--test F`, `--test H`, or the scenario before it never got a wallet), a new one.
+# A wallet that exists and cannot be brought to its home screen is a FAILURE, never replaced:
+# an app that wedges or keeps dying on the wallet the previous scenario left (E's restore scan,
+# for F) is what these scenarios are there to catch, and a fresh wallet would hide it.
 ensure_wallet() {
+    local why
     if [[ "$WALLET_STATE" != "none" ]]; then
         goto_wallet_home && return 0
-        log "ensure_wallet: existing $WALLET_STATE wallet unreachable ($FLOW_ERROR); starting over"
+        why="$FLOW_ERROR"
+        app_unhealthy && why+="; $HEALTH_REASON"
+        log "ensure_wallet: the $WALLET_STATE wallet is unreachable ($why); NOT replacing it"
+        FLOW_ERROR="the $WALLET_STATE wallet from the previous scenario could not be reached (${why:-no detail})"
+        return 1
     fi
     fresh_install "$APK_PATH" || { FLOW_ERROR="install failed: ${INSTALL_ERROR:-timeout}"; return 1; }
     launch_app
@@ -531,7 +547,7 @@ test_A() {
     fresh_install "$APK_PATH" || { fail "install failed: ${INSTALL_ERROR:-timeout}"; return; }
     launch_app
     if sabotaged A; then sleep 3; adbx shell am crash "$PACKAGE" > /dev/null 2>&1; sleep 2; fi
-    if ! ui_wait 60 "$T_ONB_TITLE" || ! screen_is_onboarding; then
+    if ! ui_wait_for 60 screen_is_onboarding; then
         app_unhealthy && { fail "no onboarding screen; $HEALTH_REASON"; return; }
         fail "the first onboarding screen ('$T_ONB_TITLE' with '$T_ONB_CREATE' / '$T_ONB_RECOVER') did not appear"
         return
@@ -606,7 +622,7 @@ test_C() {
     launch_app
     create_wallet || { fail "creating a wallet on the previous release: $FLOW_ERROR"; return; }
     before="$(read_receive_address)" || { fail "the previous release shows no receive address"; return; }
-    ui_dump; screen_is_wallet || { fail "the previous release is not on the wallet screen before the upgrade"; return; }
+    ui_wait_for 15 screen_is_wallet || { fail "the previous release is not on the wallet screen before the upgrade"; return; }
 
     adbx shell am force-stop "$PACKAGE" > /dev/null 2>&1
     if sabotaged C; then adbt 60 uninstall "$PACKAGE" > /dev/null 2>&1; fi
@@ -640,7 +656,8 @@ test_D() {
     launch_app
     create_wallet "$answers" || { fail "$FLOW_ERROR"; return; }
     addr="$(read_receive_address)" || { fail "the Receive screen shows no DigiByte address under '$T_RECEIVE_ADDR'"; return; }
-    read -r -a w <<< "$GENERATED_WORDS"
+    # shellcheck disable=SC2206
+    w=($GENERATED_WORDS)
     logcat_all="$(adbx logcat -d 2>/dev/null)"
     if grep -q -F "${w[0]} ${w[1]} ${w[2]}" <<< "$logcat_all"; then
         fail "the generated recovery phrase appears in logcat"
@@ -814,7 +831,7 @@ test_G() {
 test_H() {
     local pid0 pid1 t0 focus
     ensure_wallet || { fail "no wallet to soak: $FLOW_ERROR"; return; }
-    ui_dump; screen_is_wallet || { fail "not on the wallet screen at the start of the soak"; return; }
+    ui_wait_for 15 screen_is_wallet || { fail "not on the wallet screen at the start of the soak"; return; }
     pid0="$(app_pid)"
     [[ -n "$pid0" ]] || { fail "the app has no process at the start of the soak"; return; }
     t0=$(date +%s)
@@ -831,8 +848,7 @@ test_H() {
     done
     pid1="$(app_pid)"
     [[ "$pid1" == "$pid0" ]] || { fail "the app's process changed during the soak (pid $pid0 -> ${pid1:-none}): it died and restarted"; return; }
-    ui_dump
-    screen_is_wallet || screen_is_unlock || { fail "after the soak the app shows neither the wallet nor its lock screen: $(ui_texts | head -4 | tr '\n' '/')"; return; }
+    ui_wait_for 15 screen_is_wallet_or_unlock || { fail "after the soak the app shows neither the wallet nor its lock screen: $(ui_texts | head -4 | tr '\n' '/')"; return; }
     pass
 }
 

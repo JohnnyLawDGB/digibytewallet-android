@@ -95,7 +95,16 @@ kill_emulator() {
             kill -0 "$EMULATOR_PID" 2>/dev/null || break
             sleep 1
         done
-        kill "$EMULATOR_PID" 2>/dev/null || true
+        # Still there: ask, give it a few seconds, then do not ask. An emulator that ignores
+        # SIGTERM must not hold the suite between API levels or in its exit trap.
+        if kill -0 "$EMULATOR_PID" 2>/dev/null; then
+            kill "$EMULATOR_PID" 2>/dev/null || true
+            for i in 1 2 3 4 5; do
+                kill -0 "$EMULATOR_PID" 2>/dev/null || break
+                sleep 1
+            done
+            kill -9 "$EMULATOR_PID" 2>/dev/null || true
+        fi
         wait "$EMULATOR_PID" 2>/dev/null || true
         EMULATOR_PID=""
         sleep 2

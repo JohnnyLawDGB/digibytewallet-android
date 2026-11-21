@@ -18,9 +18,15 @@ trap 'rm -rf "$WORK"' EXIT
 SERIAL="emulator-5554"
 PACKAGE="app.aroundtheblock.wallet.debug"
 SUITE_LOG="$WORK/suite.log"
-UI_DUMP_FILE="$WORK/ui.xml"
+# The self-test runs under an OPEN umask on purpose: the helpers that must keep a file private
+# have to do so themselves, not lean on the caller's umask.
+umask 022
 source "$HERE/device.sh"
+source "$HERE/emulator-setup.sh"
 source "$HERE/report.sh"
+UI_DUMP_DIR="$(ui_dump_dir_create)" || { echo "cannot create the UI dump directory"; exit 1; }
+UI_DUMP_FILE="$UI_DUMP_DIR/ui.xml"
+trap 'rm -rf "$WORK" "$UI_DUMP_DIR"' EXIT
 source "$HERE/test-scenarios.sh"
 
 CHECKS=0; FAILED=0
@@ -136,8 +142,14 @@ no "a screen with no phrase yields none" python3 "$UIDUMP" seed-words "$DUMPS/wa
 python3 "$UIDUMP" redact "$SEED_XML" "$WORK/seed-redacted.xml"
 if grep -q -E 'abandon|about' "$WORK/seed-redacted.xml"; then bad "a redacted dump still holds phrase words"; else ok "a redacted dump holds no phrase word (grid cells and the text field)"; fi
 if grep -q 'Your Recovery Phrase' "$WORK/seed-redacted.xml"; then ok "redaction keeps the screen's other text"; else bad "redaction removed ordinary text"; fi
-OUT="$(GENERATED_WORDS="zebra quantum ladder" python3 "$UIDUMP" redact-log GENERATED_WORDS <<< "D Foo: saved zebra and quantum, not zebras")"
-if [[ "$OUT" == "D Foo: saved [redacted] and [redacted], not zebras" ]]; then ok "saved logcat has the run's phrase words removed"; else bad "logcat redaction: '$OUT'"; fi
+OUT="$(python3 "$UIDUMP" redact-log 3 3< <(printf '%s' "zebra quantum ladder") <<< "D Foo: saved zebra and quantum, not zebras")"
+if [[ "$OUT" == "D Foo: saved [redacted] and [redacted], not zebras" ]]; then ok "saved logcat has the run's phrase words removed (words passed on a pipe)"; else bad "logcat redaction: '$OUT'"; fi
+OUT="$(GENERATED_WORDS="zebra quantum" python3 "$UIDUMP" redact-log GENERATED_WORDS <<< "x" 2>/dev/null)"; rc=$?
+if [[ $rc -ne 0 ]]; then ok "redact-log no longer reads the words from the environment"; else bad "redact-log accepted an environment variable name"; fi
+GENERATED_WORDS="zebra quantum ladder"
+if env | grep -q '^GENERATED_WORDS='; then bad "the phrase variable is exported: every child process has it in its environment"; else ok "the phrase variable is not in the environment of child processes"; fi
+GENERATED_WORDS=""
+if grep -n -E '<<< *"?\$\{?GENERATED_WORDS' "$HERE"/*.sh | grep -v -F 'self-test.sh' | grep -q .; then bad "a helper feeds the phrase through a here-string (bash may back it with a temp file)"; else ok "no helper feeds the phrase through a here-string"; fi
 for f in "$DUMPS"/*.xml; do
     if python3 "$UIDUMP" texts "$f" | grep -q -x -E '[a-z]{3,8}'; then bad "committed dump $(basename "$f") holds a bare lowercase word"; fi
 done
@@ -155,9 +167,16 @@ cat > "$WORK/bin/adb" <<EOF
 echo "\$*" >> "$WORK/adb-calls"
 case "\$*" in
     *install*|*hang*) sleep 30 ;;
+    # The screen as a sequence: dump 1 is seq/1.xml, dump 2 is seq/2.xml ...; the last repeats.
+    *uiautomator*)
+        n=\$(( \$(cat "$WORK/seq-n" 2>/dev/null || echo 0) + 1 )); echo \$n > "$WORK/seq-n"
+        [[ -f "$WORK/seq/\$n.xml" ]] || n=\$(ls "$WORK/seq" | wc -l)
+        cat "$WORK/seq/\$n.xml" ;;
     *) echo stub ;;
 esac
 EOF
+# screens <dump file>... — what the stub device shows, one file per successive dump.
+screens() { rm -rf "$WORK/seq" "$WORK/seq-n"; mkdir -p "$WORK/seq"; local i=0 f; for f in "$@"; do i=$((i + 1)); cp "$f" "$WORK/seq/$i.xml"; done; }
 chmod +x "$WORK/bin/adb"
 OLD_PATH="$PATH"; PATH="$WORK/bin:$PATH"
 : > "$WORK/adb-calls"
@@ -171,7 +190,118 @@ if [[ $rc -eq 124 && $dt -lt 10 ]]; then ok "a call that does not return is cut 
 t0=$(date +%s); ADB_INSTALL_TIMEOUT=2 adb_install /nonexistent.apk > /dev/null 2>&1; rc=$?; dt=$(( $(date +%s) - t0 ))
 n="$(grep -c install "$WORK/adb-calls")"
 if [[ $rc -ne 0 && $n -eq 2 && $dt -lt 20 ]]; then ok "a hung install fails after exactly one retry (${dt}s), it does not hang"; else bad "install: rc=$rc attempts=$n after ${dt}s"; fi
+
+echo "The raw UI dump is private (it can hold a recovery phrase)"
+screens "$SEED_XML"
+ui_dump
+MODE="$(stat -c '%a' "$UI_DUMP_FILE")"
+if [[ "$MODE" == "600" ]]; then ok "a dump written under umask 022 is mode 600"; else bad "the dump file is mode $MODE under umask 022: readable by others"; fi
+MODE="$(stat -c '%a' "$UI_DUMP_DIR")"
+if [[ "$MODE" == "700" ]]; then ok "the dump directory is mode 700"; else bad "the dump directory is mode $MODE"; fi
+if [[ -d "${XDG_RUNTIME_DIR:-/nonexistent}" || -d /dev/shm ]]; then
+    FS="$(stat -f -c '%T' "$UI_DUMP_DIR")"
+    if [[ "$FS" == "tmpfs" || "$FS" == "ramfs" ]]; then ok "the dump directory is in memory ($FS), not on a disk"; else bad "the dump directory is on $FS although a tmpfs is available"; fi
+fi
+if python3 "$UIDUMP" seed-words "$UI_DUMP_FILE" > /dev/null; then ok "(the dump under test does hold a phrase)"; else bad "the seed dump did not reach the dump file"; fi
+ui_dump_scrub
+if [[ ! -s "$UI_DUMP_FILE" && "$(stat -c '%a' "$UI_DUMP_FILE")" == "600" ]]; then ok "ui_dump_scrub leaves the file empty and private"; else bad "ui_dump_scrub left $(wc -c < "$UI_DUMP_FILE") bytes"; fi
+if ls "$UI_DUMP_DIR" | grep -q -v -x 'ui.xml'; then bad "ui_dump left another file behind: $(ls "$UI_DUMP_DIR" | tr '\n' ' ')"; else ok "ui_dump leaves no second copy (.tmp) behind"; fi
+( UI_DUMP_FILE=""; ui_dump ) > /dev/null 2>&1 && bad "ui_dump wrote somewhere with no dump file set" || ok "ui_dump refuses to run with no dump file set (there is no default location)"
+
+echo "Waiting for a whole screen, not for its title"
+HALF="$WORK/onboarding-half.xml"
+sed 's/text="Create New Wallet"/text=""/; s/text="Recover Existing Wallet"/text=""/' "$DUMPS/onboarding.xml" > "$HALF"
+cp "$HALF" "$UI_DUMP_FILE"
+yes "(the half-drawn screen has the title)" ui_has "$T_ONB_TITLE"
+no  "a screen with its title but not yet its buttons is not onboarding" screen_is_onboarding
+screens "$HALF" "$HALF" "$DUMPS/onboarding.xml"
+yes "ui_wait_for keeps polling past a half-drawn screen until the whole predicate holds" ui_wait_for 10 screen_is_onboarding
+screens "$HALF"
+t0=$(date +%s); ui_wait_for 3 screen_is_onboarding > /dev/null 2>&1; rc=$?; dt=$(( $(date +%s) - t0 ))
+if [[ $rc -ne 0 && $dt -le 8 ]]; then ok "ui_wait_for FAILS at its deadline on a screen that never completes (${dt}s)"; else bad "ui_wait_for on a screen that never completes: rc=$rc after ${dt}s"; fi
+screens "$DUMPS/unlock.xml"
+no  "ui_wait_for fails on the wrong screen" ui_wait_for 2 screen_is_onboarding
+if grep -n -E 'ui_dump; *screen_is_|ui_wait [0-9]+ "\$T_ONB_TITLE" *\|\| *! *screen_is' "$HERE/test-scenarios.sh" | grep -q .; then bad "a scenario still tests a screen on a single snapshot"; else ok "no scenario tests a whole screen on a single snapshot"; fi
+
+echo "F and H: a wallet that cannot be reached is a failure, not replaced"
+OUT="$(
+    goto_wallet_home() { FLOW_ERROR="could not get back to the wallet screen"; return 1; }
+    app_unhealthy() { return 1; }
+    fresh_install() { echo REINSTALLED; }; launch_app() { :; }; create_wallet() { echo CREATED; WALLET_STATE=created; }
+    WALLET_STATE=restored; APK_PATH=x
+    ensure_wallet; echo "rc=$? state=$WALLET_STATE err=$FLOW_ERROR"
+)"
+if [[ "$OUT" == "rc=1 state=restored err=the restored wallet from the previous scenario could not be reached"* ]]; then ok "an unreachable restored wallet fails ensure_wallet and is left in place"; else bad "ensure_wallet replaced or accepted an unreachable wallet: $OUT"; fi
+OUT="$(
+    goto_wallet_home() { FLOW_ERROR="could not get back to the wallet screen"; return 1; }
+    app_unhealthy() { HEALTH_REASON="crash: java.lang.IllegalStateException"; return 0; }
+    fresh_install() { echo REINSTALLED; }; launch_app() { :; }; create_wallet() { echo CREATED; }
+    WALLET_STATE=restored; APK_PATH=x
+    ensure_wallet; echo "$FLOW_ERROR"
+)"
+if [[ "$OUT" == *"crash: java.lang.IllegalStateException"* && "$OUT" != *REINSTALLED* ]]; then ok "the failure names the crash that made the wallet unreachable"; else bad "ensure_wallet lost the crash: $OUT"; fi
+OUT="$(
+    goto_wallet_home() { echo SHOULD-NOT-BE-ASKED; return 1; }
+    fresh_install() { echo REINSTALLED; }; launch_app() { :; }; create_wallet() { echo CREATED; WALLET_STATE=created; }
+    WALLET_STATE=none; APK_PATH=x
+    ensure_wallet; echo "rc=$?"
+)"
+if [[ "$OUT" == $'REINSTALLED\nCREATED\nrc=0' ]]; then ok "with no wallet yet (--test F / --test H) one is created"; else bad "ensure_wallet with no wallet: $OUT"; fi
+OUT="$(
+    goto_wallet_home() { return 0; }
+    fresh_install() { echo REINSTALLED; }; create_wallet() { echo CREATED; }
+    WALLET_STATE=restored; ensure_wallet; echo "rc=$?"
+)"
+if [[ "$OUT" == "rc=0" ]]; then ok "a reachable wallet is reused as it is"; else bad "ensure_wallet with a reachable wallet: $OUT"; fi
+
+echo "kill_emulator is bounded"
+( trap '' TERM; exec sleep 300 ) &
+EMULATOR_PID=$!; STUBBORN=$EMULATOR_PID
+( sleep 45; kill -9 "$STUBBORN" 2>/dev/null ) & WATCHDOG=$!
+t0=$(date +%s); kill_emulator > /dev/null 2>&1; dt=$(( $(date +%s) - t0 ))
+kill "$WATCHDOG" 2>/dev/null; wait "$WATCHDOG" 2>/dev/null
+if [[ $dt -lt 30 ]] && ! kill -0 "$STUBBORN" 2>/dev/null; then ok "an emulator that ignores SIGTERM is killed and kill_emulator returns (${dt}s)"; else bad "kill_emulator took ${dt}s on a process that ignores SIGTERM (the watchdog fires at 45 s)"; fi
+if [[ -z "$EMULATOR_PID" ]]; then ok "kill_emulator forgets the pid it killed"; else bad "EMULATOR_PID still set"; fi
 PATH="$OLD_PATH"
+
+echo "A SKIP is not a pass"
+prints "all passed, none skipped: PASS" "PASS (8/8)" level_summary 8 8 0 "" ""
+prints "a skipped scenario makes the level INCOMPLETE" "INCOMPLETE (7/8, 1 SKIP: C)" level_summary 7 8 0 "C" ""
+prints "the only scenario skipped (--test C, no fixture) is INCOMPLETE, not PASS (0/1)" "INCOMPLETE (0/1, 1 SKIP: C)" level_summary 0 1 0 "C" ""
+prints "a skip the caller accepted by name passes, and says so" "PASS (7/8, 1 SKIP accepted: C)" level_summary 7 8 0 "C" "C"
+prints "accepting C does not accept F" "INCOMPLETE (5/8, 3 SKIP: C F G)" level_summary 5 8 0 "C F G" "C"
+prints "PREPUB_ALLOW_SKIP takes commas" "PASS (5/8, 3 SKIP accepted: C F G)" level_summary 5 8 0 "C F G" "C,F,G"
+prints "a failure is a FAIL whatever was skipped" "FAIL (1 failures)" level_summary 6 8 1 "C" "C"
+prints "overall: all levels PASS" "PASS" overall_verdict "PASS (8/8)" "PASS (8/8)"
+prints "overall: one INCOMPLETE level makes the run INCOMPLETE" "INCOMPLETE" overall_verdict "PASS (8/8)" "INCOMPLETE (7/8, 1 SKIP: C)"
+prints "overall: accepted skips still pass" "PASS" overall_verdict "PASS (7/8, 1 SKIP accepted: C)"
+prints "overall: a FAIL outranks INCOMPLETE" "FAIL" overall_verdict "INCOMPLETE (7/8, 1 SKIP: C)" "FAIL (1 failures)"
+prints "overall: a level that did not boot is a FAIL" "FAIL" overall_verdict "PASS (8/8)" "BOOT FAILED"
+prints "overall: a level that did not run is a FAIL" "FAIL" overall_verdict "NOT RUN"
+prints "overall: no level at all is a FAIL" "FAIL" overall_verdict
+
+echo "Run names"
+RES="$WORK/results"
+for i in 1 2 3 4 5 6; do ( claim_run_name "$RES" "2026-01-01-000000" > "$WORK/claim-$i" ) & done; wait
+N="$(cat "$WORK"/claim-* | sort -u | wc -l)"; D="$(find "$RES" -mindepth 1 -maxdepth 1 -type d | wc -l)"
+if [[ $N -eq 6 && $D -eq 6 ]]; then ok "six runs started in the same second get six different result names"; else bad "six runs in one second got $N names and $D directories"; fi
+if grep -q -x "2026-01-01-000000" "$WORK"/claim-*; then ok "the first of them keeps the plain timestamp"; else bad "no run kept the plain timestamp"; fi
+
+echo "Command line"
+MAIN="$PROJECT_DIR/scripts/pre-publish-test.sh"
+timeout 10 "$MAIN" --test > /dev/null 2>&1; rc=$?
+if [[ $rc -eq 1 ]]; then ok "--test with no letter is refused"; else bad "--test with no letter: status $rc (124 = it hung)"; fi
+# (The message is checked, not only the status: with no APK built the script exits 1 anyway.)
+for arg in 29 33x 5554; do
+    OUT="$(timeout 10 "$MAIN" "$arg" --skip-build 2>&1)"; rc=$?
+    if [[ $rc -eq 1 && "$OUT" == "Unknown API level: $arg"* ]]; then ok "API level '$arg' is refused before anything is started"; else bad "API level '$arg': status $rc, said '${OUT%%$'\n'*}'"; fi
+done
+OUT="$(PREPUB_ALLOW_SKIP="Z" timeout 10 "$MAIN" 33 --skip-build 2>&1)"; rc=$?
+if [[ $rc -eq 1 && "$OUT" == "PREPUB_ALLOW_SKIP must be"* ]]; then ok "PREPUB_ALLOW_SKIP with something that is not a scenario letter is refused"; else bad "PREPUB_ALLOW_SKIP=Z: status $rc, said '${OUT%%$'\n'*}'"; fi
+for v in "C" "C,F" "C F G"; do
+    OUT="$(PREPUB_ALLOW_SKIP="$v" timeout 10 "$MAIN" 29 --skip-build 2>&1)"
+    if [[ "$OUT" == "Unknown API level: 29"* ]]; then ok "PREPUB_ALLOW_SKIP='$v' is accepted"; else bad "PREPUB_ALLOW_SKIP='$v' was refused: '${OUT%%$'\n'*}'"; fi
+done
 
 echo "Result lines"
 LINE="$(result_line D "Wallet creation flow" FAIL 12 "(seed verification rejected the answers)")"

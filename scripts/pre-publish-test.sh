@@ -36,7 +36,20 @@
 #
 # Result: test-results/<timestamp>.txt (one line per scenario: PASS, FAIL or SKIP, with the
 # reason), and for each FAIL the screen and the app's last 300 logcat lines, redacted, under
-# test-results/<timestamp>/. Exit status 1 if anything failed or an emulator did not boot.
+# test-results/<timestamp>/.
+#
+# A SKIP is not a pass. A scenario that did not run proves nothing, so:
+#   Overall: PASS        every scenario ran and passed                      exit 0
+#   Overall: INCOMPLETE  nothing failed, but a scenario was skipped         exit 2
+#   Overall: FAIL        a scenario failed or an emulator did not boot      exit 1
+# PREPUB_ALLOW_SKIP names the scenarios whose SKIP the caller accepts ("C" or "C,F"): those
+# are then listed as "SKIP accepted" and do not make the run INCOMPLETE. A release run sets
+# nothing (RELEASING.md).
+#
+# The raw UI dumps the suite reads are mode 600 in a private directory on tmpfs
+# ($XDG_RUNTIME_DIR, else /dev/shm) and removed on exit: the seed screen is readable by
+# uiautomator, so a raw dump can hold a recovery phrase. Everything the suite creates is
+# private to the user (umask 077).
 #
 # Devices: emulators only. The serial is emulator-$PREPUB_EMULATOR_PORT (default 5554), on a
 # port this script starts the emulator on itself; it refuses a port that is already in use and
@@ -56,22 +69,19 @@
 # different phrase, the app's network cut, an invalid address, the app sent to the background)
 # and the scenario must then report FAIL. Run it with --test <letter> on one API level.
 #
-# Tunables: PREPUB_EMULATOR_PORT, PREPUB_BOOT_TIMEOUT (300 s), PREPUB_SYNC_TIMEOUT (1500 s, the
+# Tunables: PREPUB_ALLOW_SKIP, PREPUB_EMULATOR_PORT, PREPUB_BOOT_TIMEOUT (300 s), PREPUB_SYNC_TIMEOUT (1500 s, the
 # wait in G for a new wallet to finish syncing), ADB_TIMEOUT (30 s), ADB_INSTALL_TIMEOUT (180 s).
 
 # No `set -e`: a failed step is a FAIL line, not an abort. No pipefail: see keyboard_shown.
 set -u
+umask 077
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 APK_PATH="$PROJECT_DIR/app/build/outputs/apk/mainnetSideload/debug/app-mainnet-sideload-debug.apk"
 PREVIOUS_APK="$PROJECT_DIR/test-fixtures/previous-release.apk"
 RESULTS_DIR="$PROJECT_DIR/test-results"
-TIMESTAMP="$(date +%Y-%m-%d-%H%M%S)"
-# Two runs started in the same second (one per API level, on different ports) must not share a file.
-[[ -e "$RESULTS_DIR/$TIMESTAMP.txt" || -e "$RESULTS_DIR/$TIMESTAMP" ]] && TIMESTAMP="$TIMESTAMP-$$"
-RESULT_FILE="$RESULTS_DIR/$TIMESTAMP.txt"
-RUN_DIR="$RESULTS_DIR/$TIMESTAMP"
+TIMESTAMP="$(date +%Y-%m-%d-%H%M%S)"   # the run's name is claimed below, once it will really run
 # The debug build carries the .debug suffix, but its classes stay in the namespace, so the
 # activity must be named in full ("$PACKAGE/.MainActivity" would look in ...debug.MainActivity).
 PACKAGE="app.aroundtheblock.wallet.debug"
@@ -91,11 +101,21 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --skip-build) SKIP_BUILD=true; shift ;;
         --self-test) SELF_TEST=true; shift ;;
-        --test) ONLY_TEST="${2:-}"; shift 2 ;;
+        # `shift 2` with one argument left shifts nothing, and this loop would never end.
+        --test) [[ $# -ge 2 ]] || { echo "--test needs a letter (A to H)"; exit 1; }
+                ONLY_TEST="$2"; shift 2 ;;
         [0-9]*) ONLY_API="$1"; shift ;;
         *) echo "Unknown arg: $1"; exit 1 ;;
     esac
 done
+
+# An API level outside the list would go on to download a system image and create an AVD.
+if [[ -n "$ONLY_API" && " ${ALL_API_LEVELS[*]} " != *" $ONLY_API "* ]]; then
+    echo "Unknown API level: $ONLY_API (one of: ${ALL_API_LEVELS[*]})"; exit 1
+fi
+if [[ -n "${PREPUB_ALLOW_SKIP:-}" && ! "$PREPUB_ALLOW_SKIP" =~ ^[A-H]([\ ,]+[A-H])*$ ]]; then
+    echo "PREPUB_ALLOW_SKIP must be scenario letters (A to H) separated by commas or spaces, got '$PREPUB_ALLOW_SKIP'"; exit 1
+fi
 
 if [[ -n "$ONLY_TEST" && ! "$ONLY_TEST" =~ ^[A-H]$ ]]; then
     echo "Unknown test: $ONLY_TEST (A to H)"; exit 1
@@ -128,15 +148,21 @@ if [[ ! -f "$APK_PATH" ]]; then
     exit 1
 fi
 
-mkdir -p "$RESULTS_DIR" "$RUN_DIR"
+# Runs started in the same second (one per API level, on different ports) must not share a
+# result file: the name is claimed by creating its directory.
+TIMESTAMP="$(claim_run_name "$RESULTS_DIR" "$TIMESTAMP")" || { echo "ERROR: cannot create a run directory under $RESULTS_DIR"; exit 1; }
+RESULT_FILE="$RESULTS_DIR/$TIMESTAMP.txt"
+RUN_DIR="$RESULTS_DIR/$TIMESTAMP"
 SUITE_LOG="$RUN_DIR/suite.log"
-UI_DUMP_FILE="$(mktemp -t prepub-ui-XXXXXX.xml)"   # the raw dump stays out of test-results
+# The raw dump stays out of test-results, off the disk and private (see ui_dump_dir_create).
+UI_DUMP_DIR="$(ui_dump_dir_create)" || { echo "ERROR: cannot create a private directory for the UI dump"; exit 1; }
+UI_DUMP_FILE="$UI_DUMP_DIR/ui.xml"
 
 cleanup() {
     # Never leave a screen lock this suite set, nor its emulator, nor a raw UI dump.
     device_lock_clear > /dev/null 2>&1 || true
     kill_emulator > /dev/null 2>&1 || true
-    rm -f "$UI_DUMP_FILE" "$UI_DUMP_FILE.tmp"
+    [[ -n "${UI_DUMP_DIR:-}" ]] && rm -rf "$UI_DUMP_DIR"
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
@@ -190,7 +216,7 @@ for api in "${API_LEVELS[@]}"; do
     prepare_emulator
     WALLET_STATE="none"
 
-    PASS=0; FAIL=0; SKIP=0; TOTAL=0
+    PASS=0; FAIL=0; SKIP=0; TOTAL=0; SKIPPED_IDS=""
     declare -A LINES=()
 
     for test_id in "${RUN_ORDER[@]}"; do
@@ -208,7 +234,7 @@ for api in "${API_LEVELS[@]}"; do
 
         case "$RESULT" in
             PASS) PASS=$((PASS + 1)); detail="${NOTE:+($NOTE)}" ;;
-            SKIP) SKIP=$((SKIP + 1)); detail="(${REASON:-no reason given})" ;;
+            SKIP) SKIP=$((SKIP + 1)); SKIPPED_IDS+="${SKIPPED_IDS:+ }$test_id"; detail="(${REASON:-no reason given})" ;;
             *)    RESULT="FAIL"; FAIL=$((FAIL + 1)); detail="(${REASON:-no reason given})" ;;
         esac
         LINES[$test_id]="$(result_line "$test_id" "$name" "$RESULT" "$ELAPSED" "$detail")"
@@ -222,11 +248,9 @@ for api in "${API_LEVELS[@]}"; do
     echo "  Result: $PASS/$TOTAL PASS, $FAIL FAIL, $SKIP SKIP" | tee -a "$RESULT_FILE"
     echo "" | tee -a "$RESULT_FILE"
 
-    if [[ $FAIL -gt 0 ]]; then
-        SUMMARY[$api]="FAIL ($FAIL failures)"
-    else
-        SUMMARY[$api]="PASS ($PASS/$TOTAL)"
-    fi
+    # Listed A to H, like the result lines.
+    SKIPPED_IDS="$(tr ' ' '\n' <<< "$SKIPPED_IDS" | sort | tr '\n' ' ')"; SKIPPED_IDS="${SKIPPED_IDS% }"
+    SUMMARY[$api]="$(level_summary "$PASS" "$TOTAL" "$FAIL" "$SKIPPED_IDS" "${PREPUB_ALLOW_SKIP:-}")"
 
     uninstall_app
     kill_emulator
@@ -235,20 +259,24 @@ done
 # ── Summary ───────────────────────────────────────────────────────────────────
 
 echo "=== SUMMARY ===" | tee -a "$RESULT_FILE"
-OVERALL="PASS"
+STATUSES=()
 for api in "${API_LEVELS[@]}"; do
     status="${SUMMARY[$api]:-NOT RUN}"
+    STATUSES+=("$status")
     echo "API $api: $status" | tee -a "$RESULT_FILE"
-    if [[ "$status" != PASS* ]]; then
-        OVERALL="FAIL"
-    fi
 done
-echo "Overall: $OVERALL" | tee -a "$RESULT_FILE"
+OVERALL="$(overall_verdict "${STATUSES[@]}")"
+case "$OVERALL" in
+    INCOMPLETE) echo "Overall: INCOMPLETE (a skipped scenario was not tested; a SKIP is not a pass)" | tee -a "$RESULT_FILE" ;;
+    *)          echo "Overall: $OVERALL" | tee -a "$RESULT_FILE" ;;
+esac
 echo "Wall time: $(( ($(date +%s) - SUITE_START) / 60 )) min $(( ($(date +%s) - SUITE_START) % 60 )) s" | tee -a "$RESULT_FILE"
 echo ""
 echo "Results saved to: $RESULT_FILE"
 [[ -n "$(ls -A "$RUN_DIR" 2>/dev/null | grep -v -E 'suite.log|emulator.log')" ]] && echo "Failure evidence:  $RUN_DIR/"
 
-if [[ "$OVERALL" == "FAIL" ]]; then
-    exit 1
-fi
+case "$OVERALL" in
+    PASS) exit 0 ;;
+    INCOMPLETE) exit 2 ;;
+    *) exit 1 ;;
+esac

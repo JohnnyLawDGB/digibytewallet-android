@@ -12,7 +12,9 @@ feed it canned dumps without an emulator.
   uidump.py fields FILE                                               -> "x y" of each EditText
   uidump.py seed-words FILE                                           -> the numbered phrase words
   uidump.py redact FILE OUT                                           -> a copy safe to keep on disk
-  uidump.py redact-log WORDS_ENV                                      -> stdin to stdout, words removed
+  uidump.py redact-log FD                                             -> stdin to stdout, with the
+                                                                         words read from file
+                                                                         descriptor FD removed
 
 A node matches on its `text` or its `content-desc`. Exit status 1 means "not on this screen";
 2 means the dump itself could not be read.
@@ -119,7 +121,14 @@ def main():
     cmd, args = sys.argv[1], sys.argv[2:]
 
     if cmd == "redact-log":
-        words = [w for w in os.environ.get(args[0], "").split() if w]
+        # The words come in on a pipe, not in the environment or argv: either would show the
+        # phrase to every process that can read /proc.
+        try:
+            with os.fdopen(int(args[0])) as f:
+                words = [w for w in f.read().split() if w]
+        except (OSError, ValueError, IndexError):
+            print("uidump: redact-log needs a readable file descriptor number", file=sys.stderr)
+            return 2
         pattern = re.compile(r"\b(" + "|".join(map(re.escape, set(words))) + r")\b") if words else None
         for line in sys.stdin:
             sys.stdout.write(pattern.sub(REDACTED, line) if pattern else line)
