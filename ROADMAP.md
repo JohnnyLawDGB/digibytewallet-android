@@ -1,5 +1,34 @@
 # DigiByte Wallet — Roadmap
 
+> ## Current checkpoint — 2026-11-19 (develop `afad7ab`; released version 4.1.4)
+>
+> This checkpoint supersedes older status claims below, not the agreed phase order.
+> Source version remains **4.1.4 / 40104**; work merged after its release is not thereby shipped.
+>
+> - **Checkpoint refresh landed** in [#259](https://github.com/JohnnyLawDGB/digibytewallet-android/pull/259).
+>   At `afad7ab`, [CI](https://github.com/JohnnyLawDGB/digibytewallet-android/actions/runs/44523575268)
+>   reports the build, app and eight KAT shards successful; the weekly native-KAT job was skipped.
+>   CodeQL and the secret scan also succeeded on that SHA. The 2026-11-15 red-checkpoint statement
+>   is historical, not the current branch's result. Recheck CI on the head being reviewed.
+> - **Multi-wallet step 1 is merged**, [#264](https://github.com/JohnnyLawDGB/digibytewallet-android/pull/264):
+>   hold, name and switch DGB wallets under one PIN. The [device/emulator record](test-results/multi-wallet-step1/2026-11-16-SM-N950U.md)
+>   includes partial Hub/DigiStamp checks and a literal wipe-file check failure; it is not an
+>   all-pass release certificate. Step 2's design/plan is open in [#273](https://github.com/JohnnyLawDGB/digibytewallet-android/pull/273),
+>   not implemented by that documentation PR.
+> - **Digi-ID Q4 A is merged**, [#268](https://github.com/JohnnyLawDGB/digibytewallet-android/pull/268):
+>   only the exact `digiscope.me` and `api.digiscope.me` hosts use the shared identity;
+>   other hosts use per-site identities. This narrowing is on develop, not in the 4.1.4 release.
+>   Coinomi step 1's core pin/KAT is merged in [#271](https://github.com/JohnnyLawDGB/digibytewallet-android/pull/271);
+>   the app/bridge adoption and UI remain pending. The additional core identity-choice companion,
+>   [#274](https://github.com/JohnnyLawDGB/digibytewallet-android/pull/274), is open and does not yet
+>   change app calls. See Phase 2 item 6 and the [handoff](docs/handoffs/2026-11-17-digiid-site-key-root.md).
+> - **Release control is unchanged:** [RELEASING.md](RELEASING.md) is the procedure.
+>   The owner builds/signs locally; no release key in CI. A green development head is not a
+>   signed release, a tag, or approval for Play/sideload distribution.
+>
+> **Next target remains 4.1.5 as previously recorded.** This true-up changes no release scope,
+> security decision, phase order or owner-controlled process. Older banners retain their dates.
+
 > ## Update — 2026-11-15 (HoldFast Wallet 4.1.4 shipped; NEXT = 4.1.5)
 >
 > **4.1.4 shipped 2026-11-15** as a signed APK ([release](https://github.com/JohnnyLawDGB/aroundtheblock-wallet-releases/releases/tag/v4.1.4),
@@ -229,7 +258,8 @@
 >   `cfcheckpt` graduates from observe-and-log to active rejection — while the
 >   oracle-operator CF checklist runs in parallel (ops-paced). Then Phase 2.
 
-Current version: **v4.0.35** (August 2026). The revision below supersedes the
+Historical baseline: **v4.0.35** (August 2026); use the current checkpoint above
+for present status. The revision below superseded the
 June 2026 roadmap, which had fallen behind the code in the good
 direction: BIP 157/158 is no longer the goal of Phase 1 — it is the
 *only* sync path, bloom having been excised from the wire entirely in
@@ -545,14 +575,12 @@ not — but the coupling ran through the duress PIN, which was cancelled
      not *invisible* — a distinguishable output shape, documented in a
      public repo. Do not resurrect it under another name.
 
-3. **Keystore user-auth binding, per-API.** Partial (2026-08-30):
-   hardware backing is now verified and logged at key creation
-   (`KeyInfo.isInsideSecureHardware`), and every spend-class action is
-   gated by the in-app PIN/biometric — but the key itself is still not
-   auth-bound, so a compromised app process can decrypt the seed. Revisit
-   `setUserAuthenticationRequired` with per-API probing; enable on
-   modern APIs if stable, keep the app-PIN as sole gate on older ones.
-   `core/…/security/KeyStoreManager.kt:37`.
+3. **Keystore user-auth binding, per-API.** Shipped, including binding
+   from creation in 4.1.4. The per-API and no-secure-lock-screen behavior
+   is specified in [the key-binding spec](docs/specs/keystore-auth-binding.md)
+   and summarized in `CLAUDE.md`; do not restore the obsolete proposal
+   to add binding as if it were absent. Removing the device lock can
+   invalidate the bound key; this does not remove the app's PIN gate.
 4. **Digi-ID key isolation.** Distinct subtree (dedicated purpose code
    or account) so one identity address is not reused across every site;
    a per-site index derived from the callback URI, as BitID does, is the
@@ -575,9 +603,9 @@ not — but the coupling ran through the duress PIN, which was cancelled
    in to Digi-ID sites, DigiScope included, as the account Coinomi
    signed in to. Approved 2026-11-17, in four steps:
    `docs/superpowers/specs/2026-11-17-coinomi-digiid-design.md`, as
-   PR #267 amends it with the owner's OK of the same day (among other
-   changes, decision 3 is reversed). Until #267 merges, the amended
-   text is only in that PR, and steps 2 to 4 read it there.
+   merged PR #267 amended it with the owner's OK of the same day (among
+   other changes, decision 3 is reversed). Steps 2 to 4 read the amended
+   design in this repository.
    Step 1, the core, is **done**: each per-site call in `BRDigiId.h`
    takes the wallet's master-key root, `DIGIBYTE` ("DigiByte seed",
    every per-site identity so far) or `STANDARD` ("Bitcoin seed",
@@ -733,13 +761,13 @@ Baseline against a modern self-custodial wallet. Status reflects
 | QR scanning | Shipped | |
 | PIN lock | Shipped | Argon2id; **rate-limit shipped v3.10.35** (exponential backoff) |
 | Duress / decoy PIN | ⛔ Cancelled | Decision 2026-08-16 (`docs/specs/HANDOFF_2026-08-16.md`); design kept as a record only |
-| Biometric unlock | Shipped | UI-gate only; Keystore binding — Phase 2 |
+| Biometric unlock | Shipped | App PIN/biometric gate plus per-API seed-key auth binding; binding from creation shipped in 4.1.4 (Phase 2 item 3) |
 | Seed backup / verify | Shipped | |
 | Seed recovery | Shipped | Universal Restore + foreign-seed sweep (v3.9.0) |
 | Self-healing startup | Shipped | v3.10.23 |
 | Tx history / detail | Shipped | |
 | Multi-network | Shipped | mainnet / testnet26 flavors, network toggle |
-| Digi-ID | Shipped | One-tap DigiScope login; **key isolation pending — Phase 2 item 4** |
+| Digi-ID | Shipped; further narrowing on develop | Per-site identities exist; #268 limits shared identity to two exact DigiScope hosts. Coinomi core step 1 merged; app/bridge adoption and UI pending (Phase 2 item 6) |
 | DigiAsset send/receive | **Shipped** | v3.5.21–3.5.28 (June appendix was stale) |
 | DigiDollar send/receive | **Shipped** | Live on **mainnet** since the softfork activated 2026-07-18 (send/receive/balance); vault lifecycle is Phase 3 |
 | DigiDollar vault lifecycle | Not started | Phase 3 item 3 — the flagship |
@@ -753,7 +781,7 @@ Baseline against a modern self-custodial wallet. Status reflects
 | Multisig | Not started | Phase 3, last — post-PSBT/vaults |
 | Hardware wallet (Coldcard QR) | Not started | Phase 4 |
 | Hardware wallet (USB) | Out of scope | QR preferred |
-| Multiple accounts | Not started | Phase 4 |
+| Multiple wallets | Merged on develop; not in 4.1.4 | Step 1 (#264); device evidence and remaining limits linked in the current checkpoint. Step 2 design/plan remains open (#273) |
 | BIP 157/158 compact filters | **Shipped — only sync path** | Bloom wire path removed v3.10.5–3.10.15; checkpoint cross-check (observe) v3.10.25 |
 | BIP 37 bloom | **Removed** | Not fallback — removed |
 | Dandelion++ | Shipped v3.7.0 | Opt-in stem submission |
