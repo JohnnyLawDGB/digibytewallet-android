@@ -114,6 +114,21 @@ proves nothing about this one.
 5. **Upgrade test on an emulator** holding the previous release with a funded test wallet:
    install over it; saved data loads, sync completes, balance and history are unchanged, the
    missing-funds scan is clean.
+6. **Pre-publish UI suite:** `scripts/pre-publish-test.sh`: eight scenarios on emulators at
+   API 28, 33, 34 and 35; `Overall: PASS`, and read every SKIP's reason. It drives the real UI
+   and each scenario can fail (first run, wallet creation with and without a screen lock,
+   the wallet key tied to the lock, upgrade, restore to a pinned address, peers and height,
+   the insufficient-funds refusal, a 60 s soak); the script header lists the assertions.
+   Know what it does not cover: it runs the **debug** build, on **emulators**, and **sends no
+   coins**. Its upgrade scenario installs over a wallet that is empty, so it does not replace
+   gate 5, and nothing here exercises the release-signed build, a physical device or a
+   real spend.
+   The upgrade scenario needs the previous release as a debug APK of the same package at
+   `test-fixtures/previous-release.apk`. It is not in git; build it at the previous
+   release's tag with the same debug key and copy it there:
+   `./gradlew :native:assembleMainnetDebug :app:assembleMainnetSideloadDebug`, output
+   `app/build/outputs/apk/mainnetSideload/debug/app-mainnet-sideload-debug.apk`. Without the
+   fixture the scenario reports SKIP, which is not a pass: a release needs it run.
 
 ## 5. Build — on the owner's machine, never in CI
 
@@ -224,7 +239,7 @@ one signer, and the wrong package. Output, under `dist/vX.Y.Z/`:
 [ ] 1  RELEASE-X.Y.Z-SCOPE.md complete; frozen at cut
 [ ] 2  release/digibyte-mobile-X.Y.Z cut; version + versionCode bumped; checkpoints refreshed
 [ ] 3  core landed by merge; check-submodule-pin.sh OK
-[ ] 4  KATs all green · unit tests ×3 · JNI registry · upgrade test PASS — at the release commit
+[ ] 4  KATs all green · unit tests ×3 · JNI registry · upgrade test PASS · pre-publish suite PASS (no unexplained SKIP) — at the release commit
 [ ] 5  build-release.sh in the owner's terminal
 [ ] 6  signer = release cert on both artifacts · SHA256SUMS from disk
 [ ] 7  source commit tagged · releases repo (hashes in notes, re-hash the live APK) · Play · digiscope.me link (latest.json untouched)

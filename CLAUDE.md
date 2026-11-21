@@ -327,10 +327,13 @@ C bodies are named `NativeBridge_<methodName>` and bound with `RegisterNatives` 
 - CRITICAL-4: Resolved (Digi-ID callback domain validation). RESIDUAL (ROADMAP Phase 2): the shared `m/0'/0/0` identity. **Corrected 2026-08-19 — the old text here was wrong twice.** The path is `m/0'/0/0` (the legacy bread-wallet tree), not `m/44'/20'/0'/0/0`: `signMessage`'s second arg is the address FORMAT, and the JNI hardcodes `seed_derive_key(&key, 0, 0)`. And the residual is **linkability, not key exposure** — signing emits a signature not a key, the `\x19DigiByte Signed Message:\n` prefix blocks sighash confusion, `m/0'` is hardened so it cannot be correlated to the BIP84/BIP86 trees, and `m/0'` is only watched for bread-wallet compat (`BRWalletReceiveAddress` hands out BIP84/86 only), so for an app-created wallet that address holds nothing. What remains (updated 2026-11-19): per-site identities shipped, and on `develop` since Q4 A (#268; not in 4.1.4) only `digiscope.me` and `api.digiscope.me` are signed with the shared address, so the linkability is limited to those two hosts, which one operator runs. A restored bread-wallet seed could still have funded that address.
 
 ## Pre-Publish Test Suite
-- `./scripts/pre-publish-test.sh` — 8 scenarios across API 28/33/34/35
-- Tests: fresh install (no lock screen + with lock screen), upgrade, wallet creation, recovery, sync, send, stability soak
-- Must pass before any version tag
-- Results saved to `test-results/`
+- `./scripts/pre-publish-test.sh [API] [--skip-build] [--test X]`: 8 scenarios (A to H) on emulators, API 28/33/34/35. The script header is the one description of what each scenario asserts; do not restate it here.
+- It drives the real UI: controls are found by their text in a `uiautomator dump` and pressed with `input swipe X Y X Y 120` (the Compose UI ignores `input tap`). Each scenario ends in PASS, FAIL (reason) or SKIP (reason); a scenario cannot pass on "no crash" alone.
+- `--self-test` (no emulator) feeds the assertion helpers canned screens and must see each one say FAIL on the wrong screen. `PREPUB_SABOTAGE=<letter>` breaks one scenario's subject on a real emulator, and that scenario must then FAIL. Run both after changing the suite.
+- What it is NOT: it runs the **debug** build on **emulators**, it **sends no coins** (G asserts the insufficient-funds refusal on an empty wallet), and C upgrades an empty wallet from one fixture version. Release-signed builds, physical devices and a real spend are outside it, and the funded upgrade test is its own gate (`RELEASING.md` §4).
+- Emulators only: every adb call goes through `scripts/test-helpers/device.sh`, which carries `-s emulator-<port>` and a `timeout`, and refuses any other serial.
+- Scenario C needs `test-fixtures/previous-release.apk` (not in git; the script header says how to build it). Without it C is SKIP, not PASS.
+- Must pass before any release. Results in `test-results/<timestamp>.txt`; failure evidence (screen + logcat, recovery phrase redacted) in `test-results/<timestamp>/`.
 
 ## Testing Notes
 - `./gradlew :game:compileMainnetDebugKotlin` — fast check for game-only changes
