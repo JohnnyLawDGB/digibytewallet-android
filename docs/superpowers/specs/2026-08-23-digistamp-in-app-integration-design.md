@@ -2,6 +2,14 @@
 
 **Date:** 2026-08-23
 **Status:** Design, approved in conversation. Not implemented.
+
+> **2026-11-21 (MARKET-SIGNIN-ID-HOST):** the sign-in half of this design is superseded. DigiStamp
+> moved Digi-ID sign-in to `id.digistamp.co`; the challenge endpoint on `assets.digistamp.co`
+> described below now refuses, and a challenge is bound to the browser that asked for it. The
+> wallet no longer fetches a challenge itself: the sign-in pages of `id.digistamp.co` load in the
+> Market's view (exact host, listed paths), and the page's `digiid:` link reaches the wallet as a
+> navigation. The no-bridge rule and the origin lock are unchanged. Current rules:
+> `core/digistamp/DigistampUris.kt`, `ui/digistamp/DigistampNavigationPolicy.kt`.
 **Goal:** house `assets.digistamp.co` inside the wallet — Digi-ID login, and mint / list /
 transfer without leaving the app.
 

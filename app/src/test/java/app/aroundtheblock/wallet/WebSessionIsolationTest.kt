@@ -103,4 +103,20 @@ class WebSessionIsolationTest {
         io.mockk.every { editor.commit() } returns false
         assertFalse("a write that did not land was reported", WebSessionIsolation.markWiped(ctx))
     }
+
+    /**
+     * MARKET-SIGNIN-ID-HOST: the Market now holds cookies of two hosts (assets.digistamp.co and
+     * id.digistamp.co). The isolation removes the profile directory whole, so there is no per-host
+     * step for a second host to be missing from: every file under it goes, whatever it holds.
+     */
+    @Test fun `the clear takes the whole profile, whichever hosts its cookies are for`() {
+        val dir = tmp.newFolder("app_webview")
+        val jar = File(dir, "Default").apply { mkdirs() }
+        val files = listOf(File(jar, "Cookies"), File(jar, "Cookies-journal"), File(dir, "Default/Local Storage/leveldb/000003.log"))
+        files.forEach { it.parentFile!!.mkdirs(); it.writeText("assets.digistamp.co id.digistamp.co") }
+        var owner: String? = "A"
+        assertTrue(WebSessionIsolation({ owner }, { owner = it; true }, { listOf(dir) }, "B").run())
+        files.forEach { assertFalse("${it.name} survived", it.exists()) }
+        assertFalse(dir.exists())
+    }
 }

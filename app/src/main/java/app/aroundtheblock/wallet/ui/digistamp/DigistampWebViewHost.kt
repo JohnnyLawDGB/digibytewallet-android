@@ -8,18 +8,18 @@ import android.webkit.WebView
 /**
  * Keeps ONE digistamp WebView alive for the whole app session.
  *
- * WHY THIS EXISTS. Digi-ID sign-in is a two-sided handshake: the page polls
- * `/api/auth/digiid/poll` while the wallet signs and POSTs to the callback. The server marks the
- * nonce authenticated, and **the polling request is what receives the session cookie**.
+ * WHY THIS EXISTS. Digi-ID sign-in is a two-sided handshake. The sign-in page (on
+ * `id.digistamp.co` since MARKET-SIGNIN-ID-HOST) asks its server for a request, which the server
+ * binds to this view's cookie jar, and offers it as a `digiid:` link. The wallet signs and POSTs
+ * the answer; the page, still holding the request in memory, then claims the session and redirects
+ * to the marketplace. **The page that asked is the only one that can finish.**
  *
  * When the Digi-ID confirmation was a navigation, Compose disposed the Market screen and took the
- * WebView with it — killing the poll mid-handshake. Measured on an emulator 2026-08-24: the
- * wallet logged `Digi-ID response: 200`, a real success, and coming back showed the page freshly
- * reloaded at the home URL still offering "Sign in". The server had a session; the browser half
- * had been destroyed before it could claim it.
+ * WebView with it. Measured on an emulator 2026-08-24: the wallet logged `Digi-ID response: 200`, a
+ * real success, and coming back showed the page freshly reloaded at the home URL still offering
+ * "Sign in". The server had a session; the browser half had been destroyed before it could claim it.
  *
- * Retaining the view keeps the poll in flight across that round trip. It is also why signing in
- * lands you back where you were rather than at the top of the site.
+ * Retaining the view keeps the page, and the request it holds, across that round trip.
  *
  * Built with the APPLICATION context deliberately — a retained View holding an Activity would
  * leak it on every rotation.
@@ -77,12 +77,11 @@ object DigistampWebViewHost {
     }
 
     /**
-     * Set when a wallet action was dispatched, so the next visit knows to re-check with the site.
-     *
-     * Digi-ID completes out-of-band: the wallet POSTs the signature and the SERVER marks the
-     * nonce authenticated. The page only learns of it through its own poll, which is unreliable
-     * across a detach — a detached WebView has its timers throttled. Reloading on return asks the
-     * site directly instead of hoping the poll survived.
+     * Set when a wallet action was dispatched, so the next visit knows the user is coming back from
+     * a wallet screen. What that visit then does depends on the page shown
+     * ([DigistampNavigationPolicy.reloadsOnReturn]): a marketplace page is reloaded, to ask the site
+     * what it thinks now; a sign-in page is left alone, because a reload would discard the request it
+     * is waiting on.
      */
     @Volatile
     var reloadOnReturn: Boolean = false
@@ -97,13 +96,15 @@ object DigistampWebViewHost {
     @Volatile
     var pendingUrl: String? = null
 
-    /** What the site currently thinks of us, for diagnosing a sign-in that reports success and
-     *  leaves the page logged out. Names only — never the values, which ARE the session. */
+    /** What each DigiStamp host currently thinks of us, for diagnosing a sign-in that reports
+     *  success and leaves the page logged out. Names only — never the values, which ARE the session. */
     fun logSessionCookieNames() {
-        val cookie = android.webkit.CookieManager.getInstance()
-            .getCookie(app.aroundtheblock.wallet.core.digistamp.DigistampUris.BASE_URL)
-        val names = cookie?.split(";")?.map { it.substringBefore("=").trim() }?.filter { it.isNotEmpty() }
-        android.util.Log.i("Digistamp", "session cookies present: ${names ?: "none"}")
+        val uris = app.aroundtheblock.wallet.core.digistamp.DigistampUris
+        for (host in listOf(uris.HOST, uris.SIGN_IN_HOST)) {
+            val cookie = android.webkit.CookieManager.getInstance().getCookie("https://$host")
+            val names = cookie?.split(";")?.map { it.substringBefore("=").trim() }?.filter { it.isNotEmpty() }
+            android.util.Log.i("Digistamp", "$host session cookies present: ${names ?: "none"}")
+        }
     }
 
     /** Detach from whatever parent held it, so it can be re-attached on the next visit. */

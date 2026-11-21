@@ -1,14 +1,5 @@
 package app.aroundtheblock.wallet.core.digistamp
 
-import org.json.JSONObject
-
-/** A Digi-ID challenge issued by digistamp, already checked to be about digistamp. */
-data class DigistampChallenge(
-    val digiIdUri: String,
-    val nonce: String,
-    val callbackUrl: String,
-)
-
 /**
  * Origin rules for the in-app digistamp section.
  *
@@ -17,55 +8,84 @@ data class DigistampChallenge(
  * [isInAppOrigin] decides which navigations stay inside the app next to an unlocked wallet and
  * which are handed to the system browser, where the user gets a URL bar and a sandbox.
  *
- * It is an allowlist, matched exactly. See DigistampUrisTest.
+ * It is an allowlist of two hosts, each matched exactly: the marketplace ([HOST]) and DigiStamp's
+ * Digi-ID sign-in host ([SIGN_IN_HOST], MARKET-SIGNIN-ID-HOST). See DigistampUrisTest.
+ *
+ * The wallet makes no sign-in request of its own to either host. Until 2026-11 it fetched a Digi-ID
+ * challenge from the marketplace host; DigiStamp moved sign-in to [SIGN_IN_HOST], where the
+ * challenge is bound to the browser that asked for it, so only the page can ask. The page offers
+ * the challenge as a `digiid:` link and the view's client turns that navigation into the wallet's
+ * own approval screen (DigistampNavigationPolicy).
  */
 object DigistampUris {
     const val HOST = "assets.digistamp.co"
 
+    /**
+     * DigiStamp's Digi-ID sign-in host. The marketplace's "Sign in" answers with a redirect to
+     * `https://id.digistamp.co/id/signin?...`; the page there shows the Digi-ID request, waits for
+     * the wallet's approval and then redirects back to [HOST], which is where the marketplace
+     * session cookie is set. Outside the view that last step lands in the browser, never in the app.
+     */
+    const val SIGN_IN_HOST = "id.digistamp.co"
+
     const val BASE_URL = "https://$HOST"
-    const val CHALLENGE_URL = "$BASE_URL/api/auth/digiid/challenge"
-    const val SESSION_URL = "$BASE_URL/api/auth/session"
-    const val LOGOUT_URL = "$BASE_URL/api/auth/logout"
 
     /**
-     * True only for `https://assets.digistamp.co` exactly.
+     * True for `https://assets.digistamp.co` (any path), and for the sign-in pages of
+     * `https://id.digistamp.co` ([isSignInPage]). Nothing else.
      *
      * Exact host, never a suffix: `assets.digistamp.co.evil.com` ends with the host and belongs
-     * to someone else. Subdomains are excluded too — they are a different origin, and nothing
+     * to someone else. Other subdomains are excluded too — they are different origins, and nothing
      * needs them. HTTPS only, since a cleartext page would carry the session in the clear.
      */
     fun isInAppOrigin(url: String): Boolean {
-        val uri = runCatching { java.net.URI(url) }.getOrNull() ?: return false
-        if (!uri.scheme.equals("https", ignoreCase = true)) return false
-        // URI puts anything before an '@' in userInfo, so "https://good.host@evil.com" has
-        // host == evil.com and is correctly refused here.
-        val host = uri.host ?: return false
-        if (!host.equals(HOST, ignoreCase = true)) return false
-        return uri.port == -1 || uri.port == 443
+        val uri = httpsDefaultPort(url) ?: return false
+        return when (uri.host.lowercase()) {
+            HOST -> true
+            SIGN_IN_HOST -> isSignInPath(uri.rawPath.orEmpty())
+            else -> false
+        }
     }
 
     /**
-     * Reads a challenge and refuses one that is not about digistamp.
+     * True for a page of the sign-in host that the view shows: `https://id.digistamp.co` exactly
+     * (default port), and only these paths, read from the live pages on 2026-11-21:
      *
-     * The wallet signs the URI this returns, so a challenge naming another domain's callback
-     * would have it sign an authentication for a site the user never visited. DigiIdManager
-     * checks the callback host too; this is the earlier of two independent checks, not a
-     * duplicate of one.
+     *  - `/id` and anything under `/id/` — the sign-in page, the step after it and its help page;
+     *  - anything under `/auth/` — the host's own redirect into and out of sign-in;
+     *  - `/` and `/account` — the Digi-ID account page, where sign-in continues for an account
+     *    that existed before the move.
+     *
+     * Every other path of that host opens in the browser. The paths are a limit on what the app
+     * displays, not a second security boundary: the boundary is the origin, which the host, scheme
+     * and port decide. A path with a `%`, a backslash or a `.`/`..` segment is refused rather than
+     * normalised, so the path that was checked is the path that loads.
      */
-    fun parseChallenge(json: JSONObject): DigistampChallenge? {
-        if (json.has("error")) return null
-
-        val uri = json.optString("uri").takeIf { it.isNotEmpty() } ?: return null
-        if (!uri.startsWith("digiid://")) return null
-        if (digiIdHost(uri) != HOST) return null
-
-        val nonce = json.optString("nonce").takeIf { it.isNotEmpty() } ?: return null
-
-        val callback = json.optString("callbackUrl").takeIf { it.isNotEmpty() } ?: return null
-        if (!isInAppOrigin(callback)) return null
-
-        return DigistampChallenge(digiIdUri = uri, nonce = nonce, callbackUrl = callback)
+    fun isSignInPage(url: String): Boolean {
+        val uri = httpsDefaultPort(url) ?: return false
+        return uri.host.equals(SIGN_IN_HOST, ignoreCase = true) && isSignInPath(uri.rawPath.orEmpty())
     }
+
+    /** [url] parsed, when it is HTTPS on the default port with a host; null otherwise. */
+    private fun httpsDefaultPort(url: String): java.net.URI? {
+        val uri = runCatching { java.net.URI(url) }.getOrNull() ?: return null
+        if (!uri.scheme.equals("https", ignoreCase = true)) return null
+        // URI puts anything before an '@' in userInfo, so "https://good.host@evil.com" has
+        // host == evil.com and is refused by the host comparison. Credentials in a URL are no part
+        // of either site, so a URL carrying any is refused on the right host too.
+        if (uri.host == null || uri.rawUserInfo != null) return null
+        if (uri.port != -1 && uri.port != 443) return null
+        return uri
+    }
+
+    private fun isSignInPath(rawPath: String): Boolean {
+        if (rawPath.isEmpty() || rawPath == "/" || rawPath == "/account") return true
+        if (!SIGN_IN_PATH.matches(rawPath)) return false
+        return rawPath.split('/').none { it == "." || it == ".." }
+    }
+
+    /** `/id`, `/id/...` or `/auth/...`, of unreserved characters only: no `%`, no backslash. */
+    private val SIGN_IN_PATH = Regex("""/(?:id(?:/[A-Za-z0-9._~-]*)*|auth(?:/[A-Za-z0-9._~-]*)+)""")
 
     /**
      * The in-app explorer page for [assetId], or null if that id could escape the URL path.
@@ -86,8 +106,4 @@ object DigistampUris {
         if (!id.all { it.isLetterOrDigit() }) return null
         return "$BASE_URL/explorer/$id"
     }
-
-    /** Host of a `digiid://host/path?x=nonce` URI, matching DigiIdRequest's own reading. */
-    private fun digiIdHost(uri: String): String =
-        uri.removePrefix("digiid://").substringBefore('?').substringBefore('/').substringBefore(':')
 }
