@@ -29,15 +29,40 @@ import org.json.JSONObject
  * again, should that have been missed, when the socket opens and before any frame is sent on it.
  * Nothing is opened while the route is [TorRoute.Blocked] (Tor on and not connected yet): the
  * caller's ordinary retry opens the next socket once there is a route, which is then Tor's.
+ *
+ * The socket never follows a redirect on its upgrade request (HUB-WS-NO-REDIRECT): it is opened on
+ * a client derived from the shared one with both redirect switches off, so an answer other than the
+ * upgrade itself is a failed connect, the ordinary retry applies, and no socket is ever opened at
+ * a Location. The derived client keeps everything else the shared one sets: its routing, name
+ * lookups, certificate pins, Tor wait and connection pool.
  */
-class HubWebSocket(
-    private val httpClient: OkHttpClient,
+class HubWebSocket internal constructor(
+    /** The shared client; the socket is opened on [httpClient], derived from it. */
+    sharedClient: OkHttpClient,
     private val digiScopeClient: DigiScopeClient,
     /** Where a connection made now would go; the app passes the Tor state holder's answer. */
     private val route: () -> TorRoute,
     /** Milliseconds on a clock that only moves forward; a parameter so tests can move it. */
     private val nowMs: () -> Long = { System.nanoTime() / 1_000_000 },
+    /**
+     * Where the socket is opened; a parameter so this module's tests can serve it on the loopback
+     * interface. Only the internal constructor takes it: the app's socket is always at [WS_URL].
+     */
+    private val url: String = WS_URL,
 ) {
+    /**
+     * The constructor the app uses. It takes no address: the socket carries the session token, so
+     * it is opened at [WS_URL], the host the shared client's pins cover, and nowhere else.
+     */
+    constructor(sharedClient: OkHttpClient, digiScopeClient: DigiScopeClient, route: () -> TorRoute) :
+        this(sharedClient, digiScopeClient, route, url = WS_URL)
+
+    /** The client the socket is opened on: the shared one, following no redirect (HUB-WS-NO-REDIRECT). */
+    private val httpClient: OkHttpClient = sharedClient.newBuilder()
+        .followRedirects(false)
+        .followSslRedirects(false)
+        .build()
+
     companion object {
         const val WS_URL = "wss://api.digiscope.me/api/hub/ws"
 
@@ -109,9 +134,9 @@ class HubWebSocket(
                 _connectionState.value = ConnectionState.DISCONNECTED
                 return@synchronized false
             }
-            android.util.Log.i("HubWS", "connect: attempting WebSocket to $WS_URL")
+            android.util.Log.i("HubWS", "connect: attempting WebSocket to $url")
             val request = Request.Builder()
-                .url(WS_URL)
+                .url(url)
                 .header("Authorization", "Bearer $token")
                 .build()
 

@@ -73,14 +73,17 @@ class PinnedBuilderNoRedirectGateTest {
             "the trusted gateway, whose answer is accepted on its pinned identity (IPFS-NO-REDIRECT) -- IpfsNoRedirectTest"),
         "$core/PriceProvider.kt" to (Redirects.FOLLOWS to "public price sources; none is pinned"),
         "$core/UpdateChecker.kt" to (Redirects.FOLLOWS to "the public release listing; not pinned"),
-        "$core/hub/HubWebSocket.kt" to (Redirects.OPEN to
-            "a WebSocket to the pinned host, opened on the shared client; to be decided in its own row (HUB-WS-NO-REDIRECT)"),
+        "$core/hub/HubWebSocket.kt" to (Redirects.NEVER to
+            "a WebSocket to the pinned host: a 3xx on its upgrade is a failed connect (HUB-WS-NO-REDIRECT) -- HubSocketNoRedirectTest"),
         "$app/DigiByteApp.kt" to (Redirects.FOLLOWS to
             "Coil's client: AssetImageResolver hands Coil ipfs:// only, which IpfsFetcher reads through IpfsClient"),
     )
 
-    /** The senders not yet reviewed. Nothing joins this set: a new sender is NEVER or FOLLOWS with a reason. */
-    private val openItems = setOf("$core/hub/HubWebSocket.kt")
+    /**
+     * The senders not yet reviewed: none. Nothing joins this set: a new sender is NEVER or FOLLOWS with a
+     * reason. The Hub socket was the last one here, and HUB-WS-NO-REDIRECT made it NEVER.
+     */
+    private val openItems = emptySet<String>()
 
     /** A send, however the member is reached: called (`.newCall(`) or taken as a reference (`::newCall`). */
     private val sends = Regex("""(?:\.|::)\s*newCall\b|(?:\.|::)\s*newWebSocket\b|\.okHttpClient\s*\(\s*\w""")
