@@ -136,6 +136,12 @@ class MultiEndpointAssetClient(
                     return result
                 }
                 if (answeredWithoutResult()) {
+                    // The endpoint answered, so a run of failures ends here: only consecutive
+                    // failures open the circuit.
+                    mutex.withLock {
+                        state.failures = 0
+                        state.openedAt = 0L
+                    }
                     Log.d(TAG, "$label: ${endpoint.endpointLabel} answered without a result (refused, or its index is syncing); trying the next endpoint")
                     continue
                 }

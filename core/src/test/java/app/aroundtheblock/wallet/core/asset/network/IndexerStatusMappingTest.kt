@@ -353,6 +353,26 @@ class IndexerStatusMappingTest {
     }
 
     /** Refused at one endpoint, the next is still asked, and its answer is the result. */
+    /** An answer, even one without a result, ends a run of failures: only CONSECUTIVE failures open the circuit. */
+    @Test fun an_answer_without_a_result_ends_a_run_of_failures() = runBlocking {
+        val raw = "00".repeat(60)
+        val routes = java.util.concurrent.ConcurrentHashMap<String, Pair<String, String>>()
+        routes["/digiassets/asset/$assetId"] = "400 Bad Request" to refusal
+        serve(routes)
+        val multi = MultiEndpointAssetClient(
+            endpoints = listOf(digiscope()),
+            failureThreshold = 3,
+            transactionIdOf = { txid },
+        )
+        // Two failures, then the endpoint answers (a refusal), then one more failure.
+        repeat(2) { assertNull(multi.getRawTransaction(txid)) }
+        assertEquals(AssetDataLookup.Refused, multi.lookupAssetData(assetId))
+        assertNull(multi.getRawTransaction(txid))
+        // Three failures in all, never three in a row: the endpoint is still asked.
+        routes["/tx/raw/$txid"] = "200 OK" to """{"hex":"$raw"}"""
+        assertTrue("the circuit opened on failures an answer had come between", multi.getRawTransaction(txid) != null)
+    }
+
     @Test fun a_refusal_at_one_endpoint_passes_to_the_next() = runBlocking {
         serve(mapOf("/digiassets/asset/$assetId" to ("400 Bad Request" to refusal)))
         val answer = AssetDataResponse(assetId, cid = null, issuer = null, count = 7, decimals = 0, ipfs = null)
