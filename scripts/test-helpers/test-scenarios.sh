@@ -670,6 +670,9 @@ test_E() {
 # ── F: Sync without ANR ───────────────────────────────────────────────────────
 # With a wallet open the app holds at least one peer and the block height it shows moves
 # forward within a bounded time. No network on the emulator is a SKIP, not a pass.
+# The height is the assertion that carries the weight: the app's peer count includes sockets
+# that are still connecting, so with the app's network cut (PREPUB_SABOTAGE=F) the status line
+# can go on saying "7 peers" while every connection fails. The height then stands still.
 test_F() {
     local deadline peers="" first="" now="" t0 uid
     ensure_wallet || { fail "no wallet to sync: $FLOW_ERROR"; return; }
