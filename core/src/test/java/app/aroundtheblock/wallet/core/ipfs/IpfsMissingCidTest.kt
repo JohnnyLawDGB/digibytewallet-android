@@ -142,6 +142,30 @@ class IpfsMissingCidTest {
         assertEquals("https://second.example/ipfs/$cid?format=raw", IpfsClient.gatewayUrl(second, cid))
     }
 
+    /**
+     * A CID is short: the longest form this app can verify (sha2-512, base16) is 137 characters. A
+     * longer value is refused before any decoding, so an answer padded to megabytes costs nothing.
+     */
+    @Test fun `a value longer than any CID is refused before it is decoded`() {
+        fun hex(bytes: ByteArray) = bytes.joinToString("") { "%02x".format(it) }
+        val sha512 = "f" + hex(byteArrayOf(0x01, 0x55, 0x13, 0x40) + ByteArray(64) { 0x5a })
+        assertEquals(137, sha512.length)
+        assertTrue("the longest verifiable CID must stay accepted", CidVerifier().isWellFormed(sha512))
+        assertEquals(sha512, IpfsClient.normalizeCid(sha512))
+        assertTrue(sha512.length <= CidVerifier.MAX_CID_CHARS)
+
+        // The same well-formed start with bytes after the digest: decodes, but is no CID's length.
+        val padded = "f" + hex(byteArrayOf(0x01, 0x55, 0x12, 0x20) + ByteArray(32) { 0x5a } + ByteArray(200))
+        assertTrue(padded.length > CidVerifier.MAX_CID_CHARS)
+        assertFalse("a padded value passed as a CID", CidVerifier().isWellFormed(padded))
+        assertNull(IpfsClient.normalizeCid(padded))
+        assertFalse(CidVerifier().verify(padded, content))
+
+        val huge = "Qm" + "z".repeat(900_000)
+        assertFalse(CidVerifier().isWellFormed(huge))
+        assertNull(IpfsClient.normalizeCid(huge))
+    }
+
     @Test fun `a declared digest length past the bytes present is not a CID, and does not throw`() {
         fun hexCid(vararg length: Int) = "f" + (byteArrayOf(0x01, 0x55, 0x12) + length.map { it.toByte() } + byteArrayOf(0x7f))
             .joinToString("") { "%02x".format(it) }

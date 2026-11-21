@@ -21,6 +21,14 @@ import java.security.MessageDigest
  */
 class CidVerifier {
 
+    companion object {
+        /**
+         * No value longer than this is a CID. The longest form [verify] can check, sha2-512 in
+         * base16, is 137 characters; the rest is headroom for a two-byte codec.
+         */
+        const val MAX_CID_CHARS = 160
+    }
+
     // -------------------------------------------------------------------------
     // Public API
     // -------------------------------------------------------------------------
@@ -80,6 +88,8 @@ class CidVerifier {
 
     private fun cidToMultihash(cid: String): ByteArray? {
         if (cid.isBlank()) return null
+        // Bounded before any decoding: the decoders' work grows with the input, and no CID is long.
+        if (cid.length > MAX_CID_CHARS) return null
 
         // CIDv0: starts with "Qm", always Base58-encoded multihash directly
         if (cid.startsWith("Qm")) {
