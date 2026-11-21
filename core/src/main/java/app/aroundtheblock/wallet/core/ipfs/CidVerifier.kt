@@ -36,6 +36,17 @@ class CidVerifier {
         return expectedDigest.contentEquals(actualDigest)
     }
 
+    /**
+     * Whether [cid] has the shape of a CID at all: a CIDv0 (`Qm…`) or a CIDv1 in a multibase this
+     * class reads, decoding to a multihash that carries a digest. Says nothing about whether the
+     * hash function is one [verify] can check. Used to refuse a value that is not a CID (the text
+     * "null", a word, a truncated id) before any request is made for it.
+     */
+    fun isWellFormed(cid: String): Boolean {
+        val multihash = cidToMultihash(cid) ?: return false
+        return parseMultihashDigest(multihash) != null
+    }
+
     // -------------------------------------------------------------------------
     // Internal helpers (internal so tests can reach them directly)
     // -------------------------------------------------------------------------
@@ -104,8 +115,9 @@ class CidVerifier {
     private fun parseMultihashDigest(multihash: ByteArray): ByteArray? {
         val (_, afterFn) = readVarint(multihash, 0) ?: return null
         val (digestLen, afterLen) = readVarint(multihash, afterFn) ?: return null
+        // Compared as Long, before any narrowing: a declared length past Int range would wrap.
+        if (digestLen <= 0 || digestLen > (multihash.size - afterLen).toLong()) return null
         val end = afterLen + digestLen.toInt()
-        if (end > multihash.size || digestLen <= 0) return null
         return multihash.copyOfRange(afterLen, end)
     }
 

@@ -36,7 +36,8 @@ class IpfsCidNormalizeTest {
     }
 
     @Test fun `surrounding whitespace is trimmed`() {
-        assertEquals("bafkreiexample", IpfsClient.normalizeCid("  ipfs://bafkreiexample \n"))
+        assertEquals("bafkreif6jztw2ph4rjcu7tbyzffrsk4o7elpxpepbeb4kwcwrmq4v7jkmi",
+            IpfsClient.normalizeCid("  ipfs://bafkreif6jztw2ph4rjcu7tbyzffrsk4o7elpxpepbeb4kwcwrmq4v7jkmi \n"))
     }
 
     /**

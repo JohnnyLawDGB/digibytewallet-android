@@ -88,6 +88,25 @@ class AssetImageResolverTest {
         assertEquals("QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG", result.host)
     }
 
+    /**
+     * IPFS-NO-NULL: an `ipfs://` value that names no CID never becomes a model, so the image loader
+     * is never started for it and no gateway is asked for `/api/ipfs/null`. The letter is shown.
+     */
+    @Test
+    fun `an ipfs uri or path that names no cid is not loaded`() {
+        for (v in listOf(
+            "ipfs://null", "ipfs://NULL", "ipfs://", "ipfs://undefined", "ipfs://null/logo.png", "ipfs:///logo.png",
+            "/ipfs/null", "/ipfs/", "/ipfs/undefined/logo.png", "ipfs://not-a-cid", "ipfs://QmAB", "null",
+        )) assertNull("'$v'", AssetImageResolver.resolve(v))
+    }
+
+    @Test
+    fun `an ipfs uri with a path keeps its path`() {
+        val cid = "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG"
+        assertEquals("ipfs://$cid/logo.png", AssetImageResolver.resolve("ipfs://$cid/logo.png").toString())
+        assertEquals("ipfs://$cid/logo.png", AssetImageResolver.resolve("/ipfs/$cid/logo.png").toString())
+    }
+
     @Test
     fun `slash ipfs path is rewritten to ipfs scheme`() {
         val result = AssetImageResolver.resolve("/ipfs/QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG")
