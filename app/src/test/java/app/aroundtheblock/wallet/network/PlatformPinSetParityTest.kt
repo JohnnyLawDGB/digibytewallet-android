@@ -67,6 +67,33 @@ class PlatformPinSetParityTest {
         }
     }
 
+    /**
+     * The OkHttp pinner pins each host by exact name (SharedClientPinsTest holds a subdomain
+     * unpinned there), so the platform pin-set must cover the same names and no others: with
+     * includeSubdomains the two layers would pin different sets of hosts.
+     */
+    @Test
+    fun `every pinned domain is an exact host, never its subdomains`() {
+        val configs = doc.getElementsByTagName("domain-config")
+        val checked = mutableListOf<String>()
+        for (i in 0 until configs.length) {
+            val config = configs.item(i) as Element
+            if (config.getElementsByTagName("pin").length == 0) continue
+            val domains = config.getElementsByTagName("domain")
+            for (d in 0 until domains.length) {
+                val domain = domains.item(d) as Element
+                val host = domain.textContent.trim()
+                // Stated, not defaulted: the attribute's absence means false today, and a reader
+                // of the XML should not have to know that.
+                assertEquals("$host: includeSubdomains must be stated as false", "false", domain.getAttribute("includeSubdomains"))
+                assertTrue("$host: a pinned domain is a plain host name", Regex("[a-z0-9-]+(\\.[a-z0-9-]+)+").matches(host))
+                checked += host
+            }
+        }
+        assertTrue("both DigiStamp hosts are checked: $checked", DigistampPins.HOST in checked && DigistampIdPins.HOST in checked)
+        assertEquals("a host is declared twice", checked.distinct(), checked)
+    }
+
     @Test
     fun `no retired pin is listed anywhere`() {
         for ((host, listed) in xmlPins) {

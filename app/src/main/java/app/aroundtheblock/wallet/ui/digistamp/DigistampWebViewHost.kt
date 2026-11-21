@@ -87,6 +87,24 @@ object DigistampWebViewHost {
     var reloadOnReturn: Boolean = false
 
     /**
+     * The return step, run when the Market is shown again: if the user is coming back from a wallet
+     * screen, clear that mark and reload [view] unless the page it shows is a sign-in page.
+     *
+     * The page is read from the view's history, the page it has COMMITTED, not from `getUrl()`,
+     * which reports a load still pending. Kept here, not in the Composable, so the rule and its
+     * wiring are one function under test (DigistampWebViewHostReturnTest): an unconditional reload
+     * here is the failure MARKET-SIGNIN-ID-HOST exists to fix.
+     */
+    fun onReturnFromWalletScreen(view: WebView?) {
+        if (!reloadOnReturn) return
+        reloadOnReturn = false
+        // Not a sign-in page: it holds the pending Digi-ID request and finishes by itself once it
+        // is visible again (DigistampNavigationPolicy.reloadsOnReturn).
+        val shown = view?.copyBackForwardList()?.currentItem?.url
+        if (DigistampNavigationPolicy.reloadsOnReturn(shown)) view?.reload()
+    }
+
+    /**
      * A URL the next visit should load.
      *
      * The view is RETAINED, so `startUrl` only applies the first time it is built — passing a

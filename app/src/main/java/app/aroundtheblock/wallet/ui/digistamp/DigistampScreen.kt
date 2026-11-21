@@ -154,13 +154,9 @@ private fun DigistampWebContent(
             android.util.Log.w("Digistamp", "refusing off-origin pending url")
         }
 
-        if (DigistampWebViewHost.reloadOnReturn) {
-            DigistampWebViewHost.reloadOnReturn = false
-            // Not on a sign-in page: it holds the pending Digi-ID request and finishes by itself
-            // once it is visible again (DigistampNavigationPolicy.reloadsOnReturn).
-            val shown = webView?.copyBackForwardList()?.currentItem?.url
-            if (DigistampNavigationPolicy.reloadsOnReturn(shown)) webView?.reload()
-        }
+        // The whole return step lives in the host, where a test can hold it
+        // (DigistampWebViewHostReturnTest): this screen must not decide the reload itself.
+        DigistampWebViewHost.onReturnFromWalletScreen(webView)
     }
 
     // In-site navigation should feel like the app's own, so Back walks the page history first

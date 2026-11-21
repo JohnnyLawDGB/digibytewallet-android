@@ -125,7 +125,17 @@ class DigistampUrisTest {
             "https://id.digistamp.co/id\\signin",
             "https://id.digistamp.co/id/sign in",
             "https://id.digistamp.co/id;x=1/signin",
-        ).forEach { assertFalse(it, DigistampUris.isInAppOrigin(it)) }
+            // A path parameter or a `=` INSIDE an allowed prefix: refused by the character rule
+            // alone, which the case above (refused as a wrong prefix) does not reach.
+            "https://id.digistamp.co/id/signin;x=1",
+            "https://id.digistamp.co/id/signin;",
+            "https://id.digistamp.co/auth/login;jsessionid=1",
+            "https://id.digistamp.co/id/a=b",
+            "https://id.digistamp.co/auth/a=b",
+        ).forEach {
+            assertFalse(it, DigistampUris.isInAppOrigin(it))
+            assertFalse(it, DigistampUris.isSignInPage(it))
+        }
     }
 
     /** Every trick refused for the marketplace host is refused for the sign-in host too. */
