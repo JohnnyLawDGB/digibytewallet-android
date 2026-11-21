@@ -121,6 +121,29 @@ class DigiDollarTransferServiceTest {
         assertTrue("the fee input", r.spentInputs.contains("fee:0"))
     }
 
+    /**
+     * DD-FEE-CEIL: the plan the signer is handed states the rate the move was asked for and the fee
+     * its own inputs and change leave. DigiDollarSignerFeeSourceGateTest holds the native call to
+     * passing exactly these two.
+     */
+    @Test fun `the signer is handed a plan with the rate of the move and the fee it pays`() {
+        for (rate in listOf(DigiDollarTransferService.DEFAULT_FEE_PER_KB, 250_000L)) {
+            var seen: DigiDollarTransferPlan.Plan? = null
+            val svc = service(sign = { plan, _, _ -> seen = plan; "00ff" })
+            runBlocking {
+                svc.move(ByteArray(64) { 7 }, scanOf(100L), listOf(feeInput()), listOf(profile), recipient,
+                    changeAddr, feePerKb = rate)
+            }
+            val plan = seen!!
+            assertEquals(rate, plan.feePerKb)
+            assertEquals(DigiDollarTransferPlan.DD_MIN_FEE_SATS, plan.feeSat)
+            assertEquals(26_000_000L - plan.changeAmountSat, plan.feeSat)
+        }
+        var byDefault: DigiDollarTransferPlan.Plan? = null
+        run(service(sign = { plan, _, _ -> byDefault = plan; "00ff" }), scanOf(100L))
+        assertEquals("a move that names no rate is sized at the default", 100_000L, byDefault!!.feePerKb)
+    }
+
     // ---- moved and left behind are separate figures -------------------------------------------
 
     /**

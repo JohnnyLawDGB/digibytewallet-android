@@ -43,6 +43,7 @@
 #include "BRNetwork.h"
 #include "digidollar_transfer_layout.h"
 #include "digidollar_fee_keys.h"   /* each fee input's key, from its own derivation (dd_fee_profiles_kat) */
+#include "digidollar_transfer_guard.h"   /* distinct inputs and the fee on both sides, before signing (dd_transfer_guard_kat) */
 
 #define LOG_TAG "DGB-Derive"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -1013,6 +1014,18 @@ NativeBridge_buildAndSignForeignAssetTransfer(
  * derived in digidollar_fee_keys.h. One derivation for all of them would sign a coin of another
  * profile with the wrong key and produce a transaction that is not signed in full.
  *
+ * ## Checked before signing (DD-FEE-CEIL)
+ *
+ * Before anything is signed dd_transfer_check (digidollar_transfer_guard.h) must hold on the
+ * assembled transfer: feePerKb is within the native bound, every input names a different outpoint,
+ * and the fee is not below the required fee (the 0.1 DGB floor, or what the size needs at feePerKb),
+ * not above approvedMaxFeeSats, and not above the band over the required fee whatever was approved.
+ * A call with no rate or no approved fee (either not above zero) is refused before any input is
+ * read. A refused transfer is not signed and claims no coin.
+ *
+ * @param feePerKb            the rate the caller sized the transfer at; above zero and not above
+ *                            DD_TRANSFER_MAX_FEE_PER_KB.
+ * @param approvedMaxFeeSats  the most the transfer may pay: the fee of the plan being signed; above zero.
  * @return signed transaction hex, or NULL on any refusal (each logged with its reason).
  */
 jstring JNICALL
@@ -1026,12 +1039,17 @@ NativeBridge_buildAndSignForeignDigiDollarTransfer(
     jobjectArray feeScriptsHex, jintArray feeChains, jintArray feeIndices,
     jstring recipientKeyHex,
     jstring changeAddress, jlong changeAmount,
-    jlong cents)
+    jlong cents,
+    jlong feePerKb, jlong approvedMaxFeeSats)
 {
     (void)thiz;
     if (!seedBytes || !ddTxidsHex || !ddVouts || !ddScriptsHex || !ddChains || !ddIndices ||
         !feeHmacKeys || !feePrefixPaths || !feeTxidsHex || !feeVouts || !feeAmounts ||
         !feeScriptsHex || !feeChains || !feeIndices || !recipientKeyHex) return NULL;
+    if (feePerKb <= 0 || approvedMaxFeeSats <= 0) {
+        LOGW("foreignDD: no fee rate or no approved fee (DD-FEE-CEIL)");
+        return NULL;
+    }
 
     const jsize ddCount  = (*env)->GetArrayLength(env, ddTxidsHex);
     const jsize feeCount = (*env)->GetArrayLength(env, feeTxidsHex);
@@ -1077,21 +1095,19 @@ NativeBridge_buildAndSignForeignDigiDollarTransfer(
     if (!keys) { BRTransactionFree(tx); seed_buffer_release(&seed); return NULL; }
 
     int ok = 1;
-    uint64_t totalIn = 0;
 
     /* ── outputs FIRST: their order is consensus-significant and must not depend on inputs ── */
     uint8_t rspk[34];
     size_t rspkLen = dd_recipient_script(recipientKey, rspk);
     BRTransactionAddOutput(tx, 0, rspk, rspkLen);           /* vout0 recipient, value 0 */
 
-    uint64_t totalOut = 0;
     if (changeAddress && changeAmount > 0) {
         const char *ca = (*env)->GetStringUTFChars(env, changeAddress, NULL);
         uint8_t cspk[42];
         size_t cl = ca ? BRAddressScriptPubKey(cspk, sizeof(cspk), ca) : 0;
         if (ca) (*env)->ReleaseStringUTFChars(env, changeAddress, ca);
         if (cl == 0) { LOGW("foreignDD: change address did not encode"); ok = 0; }
-        else { BRTransactionAddOutput(tx, (uint64_t)changeAmount, cspk, cl); totalOut += (uint64_t)changeAmount; }
+        else BRTransactionAddOutput(tx, (uint64_t)changeAmount, cspk, cl);
     }
 
     if (ok) {   /* OP_RETURN LAST — recovery moves the whole balance, so no DD change push */
@@ -1189,7 +1205,6 @@ NativeBridge_buildAndSignForeignDigiDollarTransfer(
         UInt256 h; for (int b = 0; b < 32; b++) h.u8[b] = txid[31 - b];
         BRTransactionAddInput(tx, h, (uint32_t)fV[i], (uint64_t)fA[i], spk, sl,
                               NULL, 0, NULL, 0, TXIN_SEQUENCE);
-        totalIn += (uint64_t)fA[i];
     }
 
     /* Every fee input's key, each from its own derivation, so coins found under two profiles can pay
@@ -1206,15 +1221,20 @@ NativeBridge_buildAndSignForeignDigiDollarTransfer(
     if (fC) (*env)->ReleaseIntArrayElements(env, feeChains, fC, JNI_ABORT);
     if (fI) (*env)->ReleaseIntArrayElements(env, feeIndices, fI, JNI_ABORT);
 
-    /* The 0.1 DGB DigiDollar fee floor is this wallet's policy, copied from DigiByte Core's own
-     * DigiDollar builder (it is not a consensus rule): below it the transfer is refused here. */
-    if (ok && totalOut > totalIn) {
-        LOGW("foreignDD: change exceeds fee inputs");
-        ok = 0;
-    }
-    if (ok && (totalIn - totalOut) < DD_MIN_FEE_SATS) {
-        LOGW("foreignDD: implied fee is below the DigiDollar floor");
-        ok = 0;
+    /* DD-FEE-CEIL, before signing: every input a different outpoint, and the fee on both sides. The
+     * 0.1 DGB DigiDollar fee floor is this wallet's policy, copied from DigiByte Core's own DigiDollar
+     * builder (it is not a consensus rule); the ceiling is the fee the caller approved, held inside
+     * the band over the required fee. The sums are read from the assembled transaction. */
+    if (ok) {
+        const DdTransferVerdict ddVerdict = dd_transfer_check(tx, (uint64_t)feePerKb,
+                                                              (uint64_t)approvedMaxFeeSats, NULL);
+        if (ddVerdict != DD_TRANSFER_OK) {
+            LOGW("foreignDD: not signed (DD-FEE-CEIL verdict %d: 2 duplicate input, 3 change over the fee "
+                 "inputs, 4 fee below the required fee, 5 fee above the approved fee, 6 fee above the band, "
+                 "7 rate out of range)",
+                 (int)ddVerdict);
+            ok = 0;
+        }
     }
 
     int signOk = 0;

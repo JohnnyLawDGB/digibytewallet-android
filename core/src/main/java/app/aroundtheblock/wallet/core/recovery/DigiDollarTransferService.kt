@@ -272,6 +272,10 @@ class DigiDollarTransferService(
                 changeAddress = plan.changeAddress.takeIf { plan.changeAmountSat > 0 },
                 changeAmount = plan.changeAmountSat,
                 cents = plan.cents,
+                // DD-FEE-CEIL: the signer holds the fee the transaction pays to the plan's own fee,
+                // and to its own required fee at this rate, before it signs.
+                feePerKb = plan.feePerKb,
+                approvedMaxFeeSats = plan.feeSat,
             )
         }
 

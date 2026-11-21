@@ -996,7 +996,15 @@ object NativeBridge {
      * change. The fee is at least 0.1 DGB, this wallet's policy (copied from DigiByte Core's
      * DigiDollar builder); below that the transfer is refused here.
      *
+     * Before signing (DD-FEE-CEIL) the assembled transfer must name every input outpoint once and
+     * pay a fee that is not below the required fee (that floor, or what its size needs at
+     * [feePerKb]), not above [approvedMaxFeeSats], and not above three times the required fee
+     * whatever was approved. Otherwise nothing is signed and no coin is claimed.
+     *
      * @param recipientKeyHex the destination's 32-byte taproot output key, hex. Used verbatim.
+     * @param feePerKb the rate the transfer was sized at, satoshis per 1000 bytes: above zero and at
+     *   most 1,000,000 (ten times the rate the wallet sizes at), or nothing is signed.
+     * @param approvedMaxFeeSats the most the transfer may pay: the fee of the plan being signed.
      * @return signed transaction hex, or null on any refusal — reasons are logged natively.
      */
     external fun buildAndSignForeignDigiDollarTransfer(
@@ -1018,6 +1026,8 @@ object NativeBridge {
         changeAddress: String?,
         changeAmount: Long,
         cents: Long,
+        feePerKb: Long,
+        approvedMaxFeeSats: Long,
     ): String?
     // --- /pkg 4.3 ---
 
