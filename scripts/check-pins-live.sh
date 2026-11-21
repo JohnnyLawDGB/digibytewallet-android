@@ -23,7 +23,7 @@ served_pins() {   # host -> one sha256/... per served certificate
     rm -rf "$dir"
 }
 
-for f in DigistampPins.kt DigiScopePins.kt; do
+for f in DigistampPins.kt DigistampIdPins.kt DigiScopePins.kt; do
     file="$PINDIR/$f"
     host="$(grep -m1 -oE 'HOST = "[^"]+"' "$file" | cut -d'"' -f2)"
     [ -n "$host" ] || { echo "GATE FAILURE: no HOST in $f"; exit 1; }

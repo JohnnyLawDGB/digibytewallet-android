@@ -37,8 +37,8 @@ import app.aroundtheblock.wallet.ui.util.openExternalUrl
  *
  * ## Origin lock
  *
- * Only `https://assets.digistamp.co` renders here ([DigistampUris.isInAppOrigin]), and
- * [DigistampNavigationPolicy] decides every navigation: a frame inside the page decides nothing; an
+ * Only `https://assets.digistamp.co` and the sign-in pages of `https://id.digistamp.co` render
+ * here ([DigistampUris.isInAppOrigin]), and [DigistampNavigationPolicy] decides every navigation: a frame inside the page decides nothing; an
  * HTTPS link elsewhere opens in the browser, through openExternalUrl, where the user gets a URL bar
  * and the browser's sandbox; anything else is dropped. A main-frame page outside the origin that
  * commits anyway — a form POST, which the platform never asks the client about — is stopped and
@@ -133,9 +133,8 @@ private fun DigistampWebContent(
     }
     DigistampWebViewHost.openInBrowser = { url -> openExternalUrl(context, url) }
 
-    // Returning from a wallet action: ask the site what it thinks now rather than trusting a poll
-    // to have survived the detach. Digi-ID is completed by the SERVER, so a reload is how the
-    // page finds out.
+    // Returning from a wallet action on a marketplace page: ask the site what it thinks now, by a
+    // reload. Returning to a sign-in page: leave it alone, it claims the approval itself.
     androidx.compose.runtime.LaunchedEffect(Unit) {
         DigistampWebViewHost.logSessionCookieNames()
 
@@ -155,10 +154,9 @@ private fun DigistampWebContent(
             android.util.Log.w("Digistamp", "refusing off-origin pending url")
         }
 
-        if (DigistampWebViewHost.reloadOnReturn) {
-            DigistampWebViewHost.reloadOnReturn = false
-            webView?.reload()
-        }
+        // The whole return step lives in the host, where a test can hold it
+        // (DigistampWebViewHostReturnTest): this screen must not decide the reload itself.
+        DigistampWebViewHost.onReturnFromWalletScreen(webView)
     }
 
     // In-site navigation should feel like the app's own, so Back walks the page history first
@@ -170,8 +168,8 @@ private fun DigistampWebContent(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
                 // Retained, NOT created per visit. Digi-ID sign-in is a two-sided handshake and
-                // the page's poll is what collects the session cookie — disposing this view
-                // mid-navigation killed it. See DigistampWebViewHost.
+                // the sign-in page is what collects the session — disposing this view while the
+                // approval screen is open would discard the pending request. See DigistampWebViewHost.
                 DigistampWebViewHost.obtain(ctx) { view ->
                     view.webViewClient = DigistampWebViewClient(
                         // A wallet action: the page asked for a native screen. It supplies a

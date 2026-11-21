@@ -65,8 +65,7 @@ class PinnedBuilderNoRedirectGateTest {
         "$core/asset/network/DigiScopeAssetClient.kt" to (Redirects.NEVER to "pinned (4.1.2 row 30)"),
         "$core/asset/network/DigistampAssetClient.kt" to (Redirects.NEVER to "pinned (4.1.2 row 30)"),
         "$core/digiscope/DigiScopeClient.kt" to (Redirects.NEVER to "pinned (4.1.2 row 30)"),
-        "$core/digistamp/DigistampClient.kt" to (Redirects.NEVER to "pinned (4.1.2 row 30)"),
-        "$core/digiid/DigiIdManager.kt" to (Redirects.NEVER to "the callback is posted to the host that was approved"),
+        "$core/digiid/DigiIdManager.kt" to (Redirects.NEVER to "the callback is posted to the host that was approved; pinned for the DigiStamp hosts"),
         "$core/reconcile/DgbNodeClient.kt" to (Redirects.NEVER to "pinned default endpoint (4.1.2 row 30, R4); the user's own node is theirs"),
         "$app/service/SeederClient.kt" to (Redirects.NEVER to "pinned (4.1.2 row 30)"),
         "$core/ipfs/IpfsClient.kt" to (Redirects.NEVER to

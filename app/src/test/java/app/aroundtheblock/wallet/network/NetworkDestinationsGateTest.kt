@@ -109,7 +109,7 @@ class NetworkDestinationsGateTest {
     @Test
     fun theScanFindsTheKnownDestinations() {
         val s = scan()
-        for (h in listOf("api.digiscope.me", "seed.digibyte.io", "134.199.198.90", "api.coingecko.com", "assets.digistamp.co")) {
+        for (h in listOf("api.digiscope.me", "seed.digibyte.io", "134.199.198.90", "api.coingecko.com", "assets.digistamp.co", "id.digistamp.co")) {
             assertTrue("the scan no longer finds $h: the gate is not reading the sources it should", h in s.hosts)
         }
         assertTrue("the scan read too few files", s.fileCount > 200)

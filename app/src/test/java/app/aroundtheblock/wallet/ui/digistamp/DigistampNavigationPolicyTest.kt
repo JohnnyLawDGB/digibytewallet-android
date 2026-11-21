@@ -14,7 +14,8 @@ import org.junit.Test
  * The Market's web view stays inside the DigiStamp origin, and one pure policy decides every
  * navigation it is asked about:
  *
- *  - a main-frame page of the origin loads in the view;
+ *  - a main-frame page of the origin loads in the view (the marketplace, and the sign-in pages of
+ *    DigiStamp's Digi-ID host);
  *  - a wallet link opens the wallet screen it names, and an approved HTTPS link opens in the
  *    browser — both only when the page asking is a DigiStamp page;
  *  - everything else is blocked: every sub-frame navigation, and any other main-frame target.
@@ -82,6 +83,72 @@ class DigistampNavigationPolicyTest {
             "",
             "not a url",
         ).forEach { assertEquals(it.take(64), BLOCK, mainFrame(it)) }
+    }
+
+    // ---- sign-in on DigiStamp's Digi-ID host (MARKET-SIGNIN-ID-HOST) --------------------------
+
+    private val signInPage = "https://id.digistamp.co/id/signin?site=assets&state=nbbRyVZiCa_FHnuXzphjfE3JGrbgkEu5X9C3hZWyaj8&next=%2F"
+    private val idRequest = "digiid://id.digistamp.co/api/auth/digiid/callback?x=f327de4fb2dbf5c1a98d796f5535dd4a"
+
+    /** The marketplace's "Sign in" is a redirect to the sign-in host: it loads here, not in the browser. */
+    @Test fun `the redirect from the marketplace to the sign-in page loads in the view`() {
+        assertEquals(LOAD_HERE, mainFrame(signInPage, shown = page))
+        assertEquals(LOAD_HERE, mainFrame("https://id.digistamp.co/auth/login?next=%2Fid%2Fsignin", shown = page))
+    }
+
+    /** The page offers the request as a plain link; tapping it is a navigation, and that is the whole channel. */
+    @Test fun `the Digi-ID link on the sign-in page opens the wallet's approval screen`() {
+        assertEquals(WALLET_SCREEN, mainFrame(idRequest, shown = signInPage))
+        assertEquals(BLOCK, subFrame(idRequest, shown = signInPage))
+    }
+
+    /** After the approval the page continues by itself, through its own host and back to the marketplace. */
+    @Test fun `the way back from sign-in to the marketplace loads in the view`() {
+        listOf(
+            "https://id.digistamp.co/id/welcome?then=%2Fid%2Fcontinue%3Fsite%3Dassets%26next%3D%252F%26state%3Dabc",
+            "https://id.digistamp.co/id/continue?site=assets&next=%2F&state=abc",
+            "https://assets.digistamp.co/",
+            "https://assets.digistamp.co/auth/anything?code=abc",
+        ).forEach { assertEquals(it, LOAD_HERE, mainFrame(it, shown = signInPage)) }
+    }
+
+    /** The sign-in page links to DigiStamp's other products; those, and its own other paths, open in the browser. */
+    @Test fun `any other link on the sign-in page opens in the browser`() {
+        listOf(
+            "https://proof.digistamp.co/",
+            "https://digistamp.co/",
+            "https://t.me/DigiStampCo",
+            "https://id.digistamp.co/explorer",
+            "https://id.digistamp.co:8443/id/signin",
+            "https://id.digistamp.co.other.example/id/signin",
+        ).forEach { assertEquals(it, OPEN_IN_BROWSER, mainFrame(it, shown = signInPage)) }
+        assertEquals(BLOCK, mainFrame("http://id.digistamp.co/id/signin", shown = signInPage))
+    }
+
+    @Test fun `a committed sign-in page stays, and a committed page elsewhere on that host goes home`() {
+        assertFalse(DigistampNavigationPolicy.mustReturnHome(signInPage))
+        assertFalse(DigistampNavigationPolicy.mustReturnHome("https://id.digistamp.co/id/continue?site=assets"))
+        assertTrue(DigistampNavigationPolicy.mustReturnHome("https://id.digistamp.co/explorer"))
+        assertTrue(DigistampNavigationPolicy.mustReturnHome("https://proof.digistamp.co/id/signin"))
+        assertTrue(DigistampNavigationPolicy.mustReturnHome("http://id.digistamp.co/id/signin"))
+    }
+
+    // ---- coming back from a wallet screen ---------------------------------------------------
+
+    /**
+     * The sign-in page holds its pending request in memory and claims the approval itself when it is
+     * visible again. Reloading it would throw the request away and leave the user at "Sign in".
+     */
+    @Test fun `a sign-in page is not reloaded on return`() {
+        assertFalse(DigistampNavigationPolicy.reloadsOnReturn(signInPage))
+        assertFalse(DigistampNavigationPolicy.reloadsOnReturn("https://id.digistamp.co/id/signin"))
+        assertFalse(DigistampNavigationPolicy.reloadsOnReturn("https://id.digistamp.co/"))
+    }
+
+    /** The guard for the test above: every other page keeps the reload it had. */
+    @Test fun `a marketplace page is still reloaded on return`() {
+        listOf(page, "https://assets.digistamp.co/", "https://assets.digistamp.co/id/signin", null)
+            .forEach { assertTrue("$it", DigistampNavigationPolicy.reloadsOnReturn(it)) }
     }
 
     // ---- sub-frames -------------------------------------------------------------------------

@@ -9,7 +9,6 @@ import app.aroundtheblock.wallet.core.asset.network.DigistampAssetClient
 import app.aroundtheblock.wallet.core.asset.send.StackEntry
 import app.aroundtheblock.wallet.core.asset.send.StackLookup
 import app.aroundtheblock.wallet.core.digiscope.DigiScopeClient
-import app.aroundtheblock.wallet.core.digistamp.DigistampClient
 import app.aroundtheblock.wallet.core.ipfs.CidVerifier
 import app.aroundtheblock.wallet.core.ipfs.IpfsClient
 import app.aroundtheblock.wallet.core.okHttpFetcher
@@ -71,7 +70,6 @@ class BoundedEndpointsTest {
         const val ASSET_HISTORY = 4 * MiB    // asset indexers: an address's asset history
         const val ASSET_SYNC = 64 * KiB      // asset indexers: sync state
         const val ASSET_STACK = 64 * KiB     // our indexer: the assets on one output
-        const val DIGISTAMP_AUTH = 64 * KiB  // digistamp: challenge, session
         const val RECONCILE = 32 * MiB       // reconcile backend: a 500-address UTXO batch with parents
         const val HISTORY = 16 * MiB         // reconcile backend: address history
         const val EXPLORER = 8 * MiB         // reconcile backend: explorer transaction, block, address
@@ -132,9 +130,6 @@ class BoundedEndpointsTest {
         Case("digistamp raw transaction", ASSET_TX, null) { DigistampAssetClient(baseClient = it).getRawTransaction(TXID) },
         Case("digistamp asset history", ASSET_HISTORY, null) { DigistampAssetClient(baseClient = it).getAddressHistory(ADDR, null) },
         Case("digistamp asset sync state", ASSET_SYNC, null) { DigistampAssetClient(baseClient = it).getSyncState() },
-        // digistamp sign-in
-        Case("digistamp challenge", DIGISTAMP_AUTH, null) { DigistampClient(it).challenge() },
-        Case("digistamp session", DIGISTAMP_AUTH, false) { DigistampClient(it).isAuthenticated() },
         // Reconcile backend (DigiScope, or the user's own endpoint)
         Case("reconcile UTXO batch", RECONCILE, null) { node(it).reconcileAddresses(listOf(ADDR)) },
         Case("reconcile address history batch", HISTORY, null) { node(it).addressHistoryBatch(listOf(ADDR)) },
@@ -240,15 +235,6 @@ class BoundedEndpointsTest {
         assertEquals(listOf(StackEntry(ASSET, 5)), (found as StackLookup.Found).entries)
         assertEquals(StackLookup.Unavailable,
             runBlocking { DigiScopeAssetClient(baseClient = client(ASSET_STACK + 1)).stackOf(TXID, 0) })
-    }
-
-    @Test fun `digistamp sign-in - an answer of exactly the cap is read, one byte more is refused`() {
-        val json = """{"authenticated":true,"note":"PAD"}"""
-        val client = { length: Long -> clientServing(Served { textSource(padded(json, length)) }) }
-
-        assertTrue(runBlocking { DigistampClient(client(DIGISTAMP_AUTH)).isAuthenticated() })
-        assertTrue("an answer one byte over the cap was read",
-            !runBlocking { DigistampClient(client(DIGISTAMP_AUTH + 1)).isAuthenticated() })
     }
 
     @Test fun `reconcile - a UTXO batch of exactly the cap is read, one byte more is refused`() {
