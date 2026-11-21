@@ -55,19 +55,52 @@ class DigiScopeAssetClient(
 
     /**
      * The DigiAsset stack on one unspent output, straight from the indexer
-     * (`GET /digiassets/txout/:txid/:vout`). 404 is the indexer saying the output is not unspent;
-     * every other failure is "no answer".
+     * (`GET /digiassets/txout/:txid/:vout`). How each status reads:
+     *  - 200: the stack ([StackLookup.Found]; an empty one is "no assets here");
+     *  - 404 `{"unspent": false}`: [StackLookup.NotUnspent];
+     *  - 503 `{"syncing": true, ...}` or with `confirmations`: [StackLookup.NotYet], the index has
+     *    not read this far. Never an empty stack and never "not unspent";
+     *  - 400 `{"error"}`: [StackLookup.Refused]. An outpoint that is not a 64-digit hex id and a
+     *    non-negative index is refused here, without a request;
+     *  - anything else, a redirect and a malformed body included: [StackLookup.Unavailable].
      */
     override suspend fun stackOf(txid: String, vout: Int): app.aroundtheblock.wallet.core.asset.send.StackLookup =
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { readStack(txid, vout) }
 
     /** Blocking; [stackOf] runs it on the IO dispatcher (its callers include the main thread). */
     private fun readStack(txid: String, vout: Int): app.aroundtheblock.wallet.core.asset.send.StackLookup = try {
+        if (vout < 0 || !TXID_HEX.matches(txid.lowercase())) {
+            android.util.Log.w("DigiScopeAssetClient", "txout: not an outpoint, not asked")
+            return app.aroundtheblock.wallet.core.asset.send.StackLookup.Refused
+        }
         val req = Request.Builder().url("$baseUrl/digiassets/txout/${txid.lowercase()}/$vout").get().build()
         stackClient.newCall(req).execute().use { resp ->
             when {
                 resp.code == 404 -> DigiScopeAssetParsing.notFound(BoundedBody.text(resp.body, AssetAnswerCaps.OUTPUT_STACK))
-                !resp.isSuccessful -> app.aroundtheblock.wallet.core.asset.send.StackLookup.Unavailable
+                resp.code == 503 -> DigiScopeAssetParsing.notReady(BoundedBody.text(resp.body, AssetAnswerCaps.OUTPUT_STACK)).also {
+                    // Named in the log: a holding that does not appear needs its reason on record.
+                    if (it is app.aroundtheblock.wallet.core.asset.send.StackLookup.NotYet) {
+                        android.util.Log.w(
+                            "DigiScopeAssetClient",
+                            "txout ${LogTag.tx(txid)}:$vout: index cannot say yet " +
+                                "(syncing=${LogSafe.text(it.indexSyncing)} " +
+                                "blocksBehind=${LogSafe.text(it.blocksBehind)} " +
+                                "confirmations=${LogSafe.text(it.confirmations)})",
+                        )
+                    } else {
+                        android.util.Log.w("DigiScopeAssetClient", "txout ${LogTag.tx(txid)}:$vout returned HTTP 503")
+                    }
+                }
+                resp.code == 400 -> {
+                    android.util.Log.w("DigiScopeAssetClient", "txout ${LogTag.tx(txid)}:$vout returned HTTP 400")
+                    if (DigiScopeAssetParsing.isRefusal(BoundedBody.text(resp.body, AssetAnswerCaps.OUTPUT_STACK))) {
+                        app.aroundtheblock.wallet.core.asset.send.StackLookup.Refused
+                    } else app.aroundtheblock.wallet.core.asset.send.StackLookup.Unavailable
+                }
+                !resp.isSuccessful -> {
+                    android.util.Log.w("DigiScopeAssetClient", "txout ${LogTag.tx(txid)}:$vout returned HTTP ${resp.code}")
+                    app.aroundtheblock.wallet.core.asset.send.StackLookup.Unavailable
+                }
                 else -> {
                     val body = BoundedBody.text(resp.body, AssetAnswerCaps.OUTPUT_STACK)
                     if (body.isNullOrEmpty()) app.aroundtheblock.wallet.core.asset.send.StackLookup.Unavailable
@@ -80,12 +113,33 @@ class DigiScopeAssetClient(
         app.aroundtheblock.wallet.core.asset.send.StackLookup.Unavailable
     }
 
-    override suspend fun getAssetData(assetId: String): AssetDataResponse? {
-        val json = getJson("$baseUrl/digiassets/asset/$assetId", AssetAnswerCaps.ASSET_DATA) as? JSONObject ?: return null
-        val parsed = DigiScopeAssetParsing.assetData(json, fallbackAssetId = assetId)
-            ?: return null
+    override suspend fun getAssetData(assetId: String): AssetDataResponse? =
+        (lookupAssetData(assetId) as? AssetDataLookup.Found)?.data
+
+    /**
+     * `GET /digiassets/asset/:ref`. A reference the route does not take ([DigiScopeAssetRef]) is
+     * [AssetDataLookup.Refused] without a request; the route's own 400 reads the same. Either way
+     * that is one request at most: nothing here asks twice. The route's own 503 `syncing` (it
+     * answers it while the index is far behind, as the txout route does) is [AssetDataLookup.NotYet];
+     * any other 503 is [AssetDataLookup.NoAnswer].
+     */
+    override suspend fun lookupAssetData(assetId: String): AssetDataLookup {
+        if (!DigiScopeAssetRef.isValid(assetId)) {
+            android.util.Log.w("DigiScopeAssetClient", "asset: not an asset index or id, not asked")
+            return AssetDataLookup.Refused
+        }
+        var refused = false
+        var notYet = false
+        val json = getJson("$baseUrl/digiassets/asset/$assetId", AssetAnswerCaps.ASSET_DATA) { code, body ->
+            refused = code == 400 && DigiScopeAssetParsing.isRefusal(body)
+            notYet = code == 503 && DigiScopeAssetParsing.indexSyncing(body)
+        } as? JSONObject
+        if (refused) return AssetDataLookup.Refused
+        if (notYet) return AssetDataLookup.NotYet
+        val parsed = json?.let { DigiScopeAssetParsing.assetData(it, fallbackAssetId = assetId) }
+            ?: return AssetDataLookup.NoAnswer
         // The ipfs blob, when the backend inlines one, is richer than the parser's remit.
-        return parsed.copy(ipfs = json.optJSONObject("ipfs")?.let { ipfsJsonToMap(it) })
+        return AssetDataLookup.Found(parsed.copy(ipfs = json.optJSONObject("ipfs")?.let { ipfsJsonToMap(it) }))
     }
 
     /**
@@ -136,8 +190,9 @@ class DigiScopeAssetClient(
         return ByteArray(length / 2) { substring(it * 2, it * 2 + 2).toInt(16).toByte() }
     }
 
-    /** GET [url] as JSON (an object, or an array), reading at most [cap] bytes of the answer. */
-    private fun getJson(url: String, cap: Long): Any? = try {
+    /** GET [url] as JSON (an object, or an array), reading at most [cap] bytes of the answer.
+     *  [onStatus] is handed a non-2xx status and its (capped) body. */
+    private fun getJson(url: String, cap: Long, onStatus: ((Int, String?) -> Unit)? = null): Any? = try {
         val req = Request.Builder().url(url).get().build()
         client.newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) {
@@ -145,6 +200,7 @@ class DigiScopeAssetClient(
                     "DigiScopeAssetClient",
                     "GET ${endpointOf(url)} returned HTTP ${resp.code} ${LogSafe.text(resp.message)}"
                 )
+                onStatus?.invoke(resp.code, BoundedBody.text(resp.body, ERROR_BODY_CAP))
                 return null
             }
             val body = BoundedBody.text(resp.body, cap)
@@ -176,5 +232,8 @@ class DigiScopeAssetClient(
 
     companion object {
         const val DEFAULT_BASE_URL = "https://api.digiscope.me/api"
+        private val TXID_HEX = Regex("^[0-9a-f]{64}$")
+        /** An error body is a short message; more than this is not read. */
+        private const val ERROR_BODY_CAP = 16L * 1024
     }
 }

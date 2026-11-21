@@ -340,6 +340,7 @@
     <string name="al_create">Gumawa ng DigiAsset sa digiscope.me</string>
     <string name="al_count">%1$d na asset ang nakita</string>
     <string name="al_artifacts"> · %1$d na artifact</string>
+    <string name="al_index_catching_up">Humahabol pa ang index ng DigiAsset. Ang mga asset na ipinapakita rito ay ang huling nalalaman; lilitaw ang mga bagong natanggap kapag tapos na ito.</string>
 
     <string name="rf_title">Bawiin ang pondo mula sa ibang wallet</string>
     <string name="rf_checking_paths">Sinusuri ang mga lumang derivation path…</string>

@@ -57,6 +57,36 @@ class AssetSendSelectionTest {
         assertEquals(AssetInputCheck.Verdict.UNAVAILABLE, j(StackLookup.Unavailable, 5))
     }
 
+    /** An index that cannot say yet, or that refused the request, has vouched for nothing. */
+    @Test fun a_syncing_index_verifies_no_input() {
+        for (l in listOf(
+            StackLookup.NotYet(indexSyncing = true, blocksBehind = 23_871),
+            StackLookup.NotYet(indexSyncing = true, blocksBehind = 1, confirmations = 1),
+            StackLookup.NotYet(indexSyncing = false, confirmations = 0),
+            StackLookup.Refused,
+        )) {
+            assertEquals("$l", AssetInputCheck.Verdict.UNAVAILABLE, AssetInputCheck.judge(l, asset, 5))
+        }
+    }
+
+    /** Nothing is planned on it, and the coin is not written off either: it is neither set aside
+     *  (which is for a coin the index reports holding something else) nor read as spent. */
+    @Test fun a_send_stops_while_the_index_cannot_say_yet() {
+        for (l in listOf(StackLookup.NotYet(indexSyncing = true, blocksBehind = 23_871), StackLookup.Refused)) {
+            val answers = HashMap<String, StackLookup>().apply { put("a", l) }
+            val selection = AssetSendSelection(
+                AssetStackSource { t, _ -> answers[t] ?: StackLookup.Unavailable }, { false }, { _, _ -> false },
+            )
+            val first = runBlocking { selection.choose(asset, listOf(row("a", 5)), listOf(fee("f")), 3, 100_000L) }
+            assertEquals("$l", AssetSendSelection.Outcome.Unverified, first)
+            assertEquals("$l", emptySet<String>(), selection.setAsideOutpoints())
+            // The same coin is planned once the index answers.
+            answers["a"] = found(asset to 5)
+            val later = runBlocking { selection.choose(asset, listOf(row("a", 5)), listOf(fee("f")), 3, 100_000L) }
+            assertTrue("$l", later is AssetSendSelection.Outcome.Planned)
+        }
+    }
+
     // ── AssetSendSelection ───────────────────────────────────────────────────────────────────
 
     @Test fun confirmed_inputs_are_planned() {

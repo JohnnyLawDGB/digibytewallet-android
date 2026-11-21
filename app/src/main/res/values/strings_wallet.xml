@@ -420,6 +420,7 @@
     <string name="al_create">Create DigiAsset on digiscope.me</string>
     <string name="al_count">%1$d assets found</string>
     <string name="al_artifacts"> · %1$d artifacts</string>
+    <string name="al_index_catching_up">The DigiAsset index is catching up. The assets shown here are the last known; newly received ones appear once it is done.</string>
 
     <!-- ── Legacy recovery / sweep ──────────────────────────────────────────────────
          This flow moves someone\'s coins out of a wallet they may be abandoning. Several of these

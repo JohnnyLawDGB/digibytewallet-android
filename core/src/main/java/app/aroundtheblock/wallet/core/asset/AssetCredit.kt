@@ -143,5 +143,7 @@ object AssetCreditRules {
             }
         }
         StackLookup.NotUnspent, StackLookup.Unavailable -> null
+        // The index has not read this far, or could not be asked: no answer, never "holds nothing".
+        is StackLookup.NotYet, StackLookup.Refused -> null
     }
 }

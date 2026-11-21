@@ -340,6 +340,7 @@
     <string name="al_create">digiscope.me üzerinde DigiAsset oluştur</string>
     <string name="al_count">%1$d varlık bulundu</string>
     <string name="al_artifacts"> · %1$d yapıt</string>
+    <string name="al_index_catching_up">DigiAsset dizini güncel duruma yetişiyor. Burada gösterilen varlıklar bilinen son durumdur; yeni alınanlar işlem bitince görünür.</string>
 
     <string name="rf_title">Başka bir cüzdandan bakiye kurtar</string>
     <string name="rf_checking_paths">Eski türetme yolları kontrol ediliyor…</string>

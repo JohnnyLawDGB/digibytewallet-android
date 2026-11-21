@@ -345,6 +345,7 @@
     <string name="al_create">Crear DigiAsset en digiscope.me</string>
     <string name="al_count">%1$d activos encontrados</string>
     <string name="al_artifacts"> · %1$d artefactos</string>
+    <string name="al_index_catching_up">El índice de DigiAssets se está poniendo al día. Los activos que se muestran aquí son los últimos conocidos; los recibidos recientemente aparecerán cuando termine.</string>
 
     <string name="rf_title">Recuperar fondos de otra billetera</string>
     <string name="rf_checking_paths">Comprobando rutas de derivación antiguas…</string>

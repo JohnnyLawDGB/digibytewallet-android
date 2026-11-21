@@ -29,6 +29,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -642,9 +643,9 @@ class AssetManager(
 
     /** Chooses and confirms an asset send's inputs. One per manager, so what it confirms or sets
      *  aside is remembered for the life of the process. */
-    private val sendSelection: app.aroundtheblock.wallet.core.asset.send.AssetSendSelection by lazy {
+    internal val sendSelection: app.aroundtheblock.wallet.core.asset.send.AssetSendSelection by lazy {
         app.aroundtheblock.wallet.core.asset.send.AssetSendSelection(
-            stackSource = assetStackSource,
+            stackSource = observedStackSource,
             parentHasDataOutput = parentHasDataOutput ?: ::nativeParentHasDataOutput,
             outpointOtherFamily = outpointOtherFamily ?: ::nativeOutpointOtherFamily,
         )
@@ -663,7 +664,44 @@ class AssetManager(
 
     /** What the DigiAsset indexer says [txid]:[vout] holds; "no answer" when there is no source. */
     suspend fun assetStackOf(txid: String, vout: Int): app.aroundtheblock.wallet.core.asset.send.StackLookup =
-        assetStackSource?.stackOf(txid, vout) ?: app.aroundtheblock.wallet.core.asset.send.StackLookup.Unavailable
+        observedStackSource?.stackOf(txid, vout) ?: app.aroundtheblock.wallet.core.asset.send.StackLookup.Unavailable
+
+    private val _assetIndexStatus = kotlinx.coroutines.flow.MutableStateFlow<AssetIndexStatus>(AssetIndexStatus.Current)
+
+    /**
+     * Whether the DigiAsset index's latest answer was that it is still catching up
+     * ([AssetIndexStatusRule]). While it is, holdings are shown as last known: nothing is removed
+     * or zeroed, and an output it has not reached simply waits. Process lifetime.
+     */
+    val assetIndexStatus: kotlinx.coroutines.flow.StateFlow<AssetIndexStatus> get() = _assetIndexStatus
+
+    /** [assetStackSource], with every answer folded into [assetIndexStatus]. Every stack lookup
+     *  the manager makes (a receipt, a send's inputs, a recovery move) goes through this one. */
+    private val observedStackSource: app.aroundtheblock.wallet.core.asset.send.AssetStackSource? =
+        assetStackSource?.let { source ->
+            app.aroundtheblock.wallet.core.asset.send.AssetStackSource { txid, vout ->
+                source.stackOf(txid, vout).also { answer ->
+                    _assetIndexStatus.update { AssetIndexStatusRule.next(it, answer) }
+                }
+            }
+        }
+
+    /** Outputs seen waiting on the indexer since the current [indexerWaitPass] began. */
+    private val waitingOnIndexer = java.util.concurrent.atomic.AtomicInteger(0)
+
+    /**
+     * Runs [pass], one whole pass over the wallet's transactions, counting the outputs it finds
+     * waiting for the indexer. When it finishes having found none, a "catching up" answer is no
+     * longer the reason anything is missing, and nothing will ask again to clear it (a syncing
+     * answer met by a send or a recovery lookup has no receipt behind it), so it is cleared here.
+     * A pass that does not finish clears nothing: it did not look at everything.
+     */
+    internal suspend fun <T> indexerWaitPass(pass: suspend () -> T): T {
+        waitingOnIndexer.set(0)
+        val result = pass()
+        if (waitingOnIndexer.get() == 0) _assetIndexStatus.value = AssetIndexStatus.Current
+        return result
+    }
 
     /** Whether the wallet's copy of [txid] has an OP_RETURN output; null when it cannot be read. */
     private fun nativeParentHasDataOutput(txid: String): Boolean? {
@@ -1788,6 +1826,13 @@ class AssetManager(
         }
     }
 
+    /** Whether the indexer is asked about an output in this native [AssetSpentState]: not one the
+     *  wallet knows is spent, was never created (its transaction was replaced), or is DigiDollar's. */
+    internal fun indexerMayBeAsked(nativeSpentState: Int): Boolean = when (nativeSpentState) {
+        AssetSpentState.SPENT, AssetSpentState.CONFLICTED, AssetSpentState.OTHER_FAMILY -> false
+        else -> true
+    }
+
     /** The row values a decided [OutputCredit] settles to; null for [OutputCredit.Unknown]. An
      *  output holding nothing keeps the transaction's one moved asset as its label (or the
      *  placeholder), with a zero quantity; a mixed output keeps the placeholder. */
@@ -1820,11 +1865,20 @@ class AssetManager(
         /** [AssetCreditRules.maxDeliverable] for this output; null for no bound. */
         maxUnits: Long?,
         nowMs: Long = System.currentTimeMillis(),
+        /** The native wallet's [AssetSpentState] for the output. */
+        spentState: (String, Int) -> Int = ::nativeSpentState,
     ): OutputCredit? {
-        val source = assetStackSource ?: return null
+        val source = observedStackSource ?: return null
         val row = utxoDao.getAssetUtxoAt(txHashHex, vout) ?: return null
         if (row.spent || AssetCredit.isSettled(row.assetCredit)) return null
         val key = "${txHashHex.lowercase()}:$vout"
+        if (key in receiptRefused) return null
+        // The indexer is asked only about an output the wallet may still hold. The row's spent flag
+        // follows the native wallet a pass later, and never follows it for an output of a
+        // transaction that was replaced; the indexer answers 404 for both, every time it is asked.
+        // An output native cannot place (not yet seen, or the probe failed) is still asked.
+        if (!indexerMayBeAsked(spentState(txHashHex, vout))) return null
+        waitingOnIndexer.incrementAndGet()
         val last = receiptCheckAt[key]
         if (last != null && nowMs - last < RECEIPT_RECHECK_MS) return null
         receiptCheckAt[key] = nowMs
@@ -1835,6 +1889,11 @@ class AssetManager(
             throw e
         } catch (e: Exception) {
             app.aroundtheblock.wallet.core.asset.send.StackLookup.Unavailable
+        }
+        if (lookup == app.aroundtheblock.wallet.core.asset.send.StackLookup.Refused) {
+            // Not an outpoint the indexer takes: the same request is not made again.
+            receiptRefused.add(key)
+            return null
         }
         val credit = AssetCreditRules.fromIndexer(lookup) ?: return null
         val reported = (credit as? OutputCredit.Holds)?.units?.count ?: 0L
@@ -2143,16 +2202,18 @@ class AssetManager(
         // calls × every known tx, every 30s.
         val owned = buildOwnedScriptHexes()
         var detected = 0
-        for (txHash in hashes) {
-            if (txHash.isBlank()) continue
-            val isOutgoingUnconfirmed = outgoingUnconfirmed[txHash] ?: false
-            val info = runCatching {
-                processIncomingAssetTx(txHash, blockHeight = 0L, ownedScriptHexes = owned,
-                    isOutgoingUnconfirmed = isOutgoingUnconfirmed)
-            }.onFailure {
-                android.util.Log.d("AssetManager", "sweep: processIncoming failed for ${LogTag.tx(txHash)}", it)
-            }.getOrNull()
-            if (info != null) detected++
+        indexerWaitPass {
+            for (txHash in hashes) {
+                if (txHash.isBlank()) continue
+                val isOutgoingUnconfirmed = outgoingUnconfirmed[txHash] ?: false
+                val info = runCatching {
+                    processIncomingAssetTx(txHash, blockHeight = 0L, ownedScriptHexes = owned,
+                        isOutgoingUnconfirmed = isOutgoingUnconfirmed)
+                }.onFailure {
+                    android.util.Log.d("AssetManager", "sweep: processIncoming failed for ${LogTag.tx(txHash)}", it)
+                }.getOrNull()
+                if (info != null) detected++
+            }
         }
         android.util.Log.i("AssetManager",
             "sweepKnownTransactions: ${hashes.size} txs scanned, $detected asset txs found")
@@ -3274,6 +3335,9 @@ class AssetManager(
     /** When [settleFromIndexer] last asked about an outpoint the indexer has not yet answered
      *  for. Process lifetime. */
     private val receiptCheckAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /** Outpoints the indexer refused to be asked about (its 400). Process lifetime. */
+    private val receiptRefused = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     /** Transactions [holdAssetOutputsBeforeSpend] has shown to carry no asset payload — a fact
      *  about their bytes, so it outlives rows, rescans and a rebuilt native wallet. Touched only

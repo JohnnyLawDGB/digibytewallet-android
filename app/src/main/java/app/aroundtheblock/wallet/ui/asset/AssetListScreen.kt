@@ -40,6 +40,7 @@ fun AssetListScreen(
     viewModel: AssetViewModel = hiltViewModel()
 ) {
     val assets by viewModel.ownedAssets.collectAsStateWithLifecycle()
+    val indexStatus by viewModel.assetIndexStatus.collectAsStateWithLifecycle()
 
     Column(
         modifier = Modifier
@@ -72,6 +73,17 @@ fun AssetListScreen(
                     modifier = Modifier.weight(1f)
                 )
             }
+        }
+
+        // A state line, not an error: the index said it is behind, so what is listed below is the
+        // last known and stays; an output it has not reached appears when it has.
+        if (indexStatus is app.aroundtheblock.wallet.core.asset.AssetIndexStatus.CatchingUp) {
+            Text(
+                text = stringResource(R.string.al_index_catching_up),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp)
+            )
         }
 
         if (assets.isEmpty()) {
