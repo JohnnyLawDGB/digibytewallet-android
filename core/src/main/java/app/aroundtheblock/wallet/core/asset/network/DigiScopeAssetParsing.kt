@@ -2,6 +2,8 @@ package app.aroundtheblock.wallet.core.asset.network
 
 import app.aroundtheblock.wallet.core.asset.send.StackEntry
 import app.aroundtheblock.wallet.core.asset.send.StackLookup
+import app.aroundtheblock.wallet.core.ipfs.IpfsClient
+import app.aroundtheblock.wallet.core.network.textOrNull
 import org.json.JSONObject
 
 /**
@@ -23,7 +25,10 @@ internal object DigiScopeAssetParsing {
         if (json.has("error")) return null
         return AssetDataResponse(
             assetId = json.optString("assetId", fallbackAssetId),
-            cid = json.optString("cid").takeIf { it.isNotEmpty() },
+            // Only a CID is a CID (IPFS-NO-NULL). digistamp answers `"cid": null` for an asset whose
+            // issuance carried no metadata; Android's optString reads that as the text "null", which
+            // was then fetched from every IPFS gateway. An answer that is not a CID is "no CID".
+            cid = json.textOrNull("cid")?.takeIf { IpfsClient.normalizeCid(it) != null },
             issuer = json.optString("issuer").takeIf { it.isNotEmpty() },
             count = json.optLong("count", 0L),
             decimals = json.optInt("decimals", 0),

@@ -3,6 +3,7 @@ package app.aroundtheblock.wallet.core.ipfs
 import app.aroundtheblock.wallet.core.db.dao.AssetMetadataDao
 import app.aroundtheblock.wallet.core.db.entity.AssetMetadataEntity
 import app.aroundtheblock.wallet.core.model.AssetMetadata
+import app.aroundtheblock.wallet.core.network.textOrNull
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -215,7 +216,9 @@ class AssetMetadataService(
         if (cached != null && cached.name != null) return cached.toModel()
 
         // The CID is the issuance's: the caller's, or the one the parent walk recorded with the chain facts.
-        val cid = metadataCid ?: cached?.metadataCid
+        // A value that is not a CID is no CID (IPFS-NO-NULL): a row written before this rule could hold
+        // a provider's "null". An issuance's own CID is computed from its hash and is always one.
+        val cid = sequenceOf(metadataCid, cached?.metadataCid).firstOrNull { IpfsClient.normalizeCid(it) != null }
         // The provider answers only for an issuance the chain shows carried no metadata hash (4.1.2 row 29):
         // a chain-facts row with no CID. Supply is the marker: only AssetManager.applyChainFacts writes it (an
         // issued asset never has 0), and the same write records the issuance's CID (updateChainFacts). Without that row it is not
@@ -326,10 +329,13 @@ class AssetMetadataService(
         // present so downstream code only sees the asset-level shape.
         val json = jsonRaw.optJSONObject("data") ?: jsonRaw
 
+        // Every text below is read with textOrNull, never optString: on Android a JSON null read with
+        // optString is the text "null", which would be stored as the asset's name, symbol or image.
+
         // Name field — canonical schema uses "assetName", older tools use "name".
         val name = sanitizeShortText(
-            json.optString("assetName").takeIf { it.isNotEmpty() }
-                ?: json.optString("name").takeIf { it.isNotEmpty() }
+            json.textOrNull("assetName")
+                ?: json.textOrNull("name")
         )
 
         // Issuer — deliberately NOT read from this document.
@@ -353,20 +359,20 @@ class AssetMetadataService(
         //   "imageUrl" / "image_url" — common web-tool variants
         //   "icon" — Neblio-style
         //   "urls"[…]{"name":"icon",…} — DA3 urls array (take first icon entry)
-        val imageUrl = json.optString("image").takeIf { it.isNotEmpty() }
-            ?: json.optString("imageUrl").takeIf { it.isNotEmpty() }
-            ?: json.optString("image_url").takeIf { it.isNotEmpty() }
-            ?: json.optString("icon").takeIf { it.isNotEmpty() }
+        val imageUrl = json.textOrNull("image")
+            ?: json.textOrNull("imageUrl")
+            ?: json.textOrNull("image_url")
+            ?: json.textOrNull("icon")
             ?: run {
                 val urls = json.optJSONArray("urls") ?: return@run null
                 var out: String? = null
                 for (i in 0 until urls.length()) {
                     val u = urls.optJSONObject(i) ?: continue
-                    val name = u.optString("name").lowercase()
+                    val name = u.textOrNull("name")?.lowercase() ?: continue
                     if (name == "icon" || name == "image" || name.endsWith(".png") ||
                         name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".gif") ||
                         name.endsWith(".svg") || name.endsWith(".webp")) {
-                        out = u.optString("url").takeIf { it.isNotEmpty() }
+                        out = u.textOrNull("url")
                         if (out != null) break
                     }
                 }
@@ -377,11 +383,11 @@ class AssetMetadataService(
             assetId = assetId,
             name = name,
             symbol = sanitizeShortText(
-                json.optString("symbol").takeIf { it.isNotEmpty() }
-                    ?: json.optString("ticker").takeIf { it.isNotEmpty() }
+                json.textOrNull("symbol")
+                    ?: json.textOrNull("ticker")
             ),
             description = sanitizeLongText(
-                json.optString("description").takeIf { it.isNotEmpty() }
+                json.textOrNull("description")
             ),
             // decimals and totalSupply are DELIBERATELY LEFT AT THEIR DEFAULTS here.
             //

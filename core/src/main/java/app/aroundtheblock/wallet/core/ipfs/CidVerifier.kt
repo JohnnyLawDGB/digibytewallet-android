@@ -21,6 +21,14 @@ import java.security.MessageDigest
  */
 class CidVerifier {
 
+    companion object {
+        /**
+         * No value longer than this is a CID. The longest form [verify] can check, sha2-512 in
+         * base16, is 137 characters; the rest is headroom for a two-byte codec.
+         */
+        const val MAX_CID_CHARS = 160
+    }
+
     // -------------------------------------------------------------------------
     // Public API
     // -------------------------------------------------------------------------
@@ -34,6 +42,17 @@ class CidVerifier {
         val algorithm = extractHashAlgorithm(cid) ?: return false
         val actualDigest = hash(content, algorithm)
         return expectedDigest.contentEquals(actualDigest)
+    }
+
+    /**
+     * Whether [cid] has the shape of a CID at all: a CIDv0 (`Qm…`) or a CIDv1 in a multibase this
+     * class reads, decoding to a multihash that carries a digest. Says nothing about whether the
+     * hash function is one [verify] can check. Used to refuse a value that is not a CID (the text
+     * "null", a word, a truncated id) before any request is made for it.
+     */
+    fun isWellFormed(cid: String): Boolean {
+        val multihash = cidToMultihash(cid) ?: return false
+        return parseMultihashDigest(multihash) != null
     }
 
     // -------------------------------------------------------------------------
@@ -69,6 +88,8 @@ class CidVerifier {
 
     private fun cidToMultihash(cid: String): ByteArray? {
         if (cid.isBlank()) return null
+        // Bounded before any decoding: the decoders' work grows with the input, and no CID is long.
+        if (cid.length > MAX_CID_CHARS) return null
 
         // CIDv0: starts with "Qm", always Base58-encoded multihash directly
         if (cid.startsWith("Qm")) {
@@ -104,8 +125,9 @@ class CidVerifier {
     private fun parseMultihashDigest(multihash: ByteArray): ByteArray? {
         val (_, afterFn) = readVarint(multihash, 0) ?: return null
         val (digestLen, afterLen) = readVarint(multihash, afterFn) ?: return null
+        // Compared as Long, before any narrowing: a declared length past Int range would wrap.
+        if (digestLen <= 0 || digestLen > (multihash.size - afterLen).toLong()) return null
         val end = afterLen + digestLen.toInt()
-        if (end > multihash.size || digestLen <= 0) return null
         return multihash.copyOfRange(afterLen, end)
     }
 
