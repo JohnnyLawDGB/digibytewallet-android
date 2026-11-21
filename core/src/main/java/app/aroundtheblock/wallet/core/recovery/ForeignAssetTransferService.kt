@@ -344,7 +344,9 @@ class ForeignAssetTransferService(
                 when (val l = stackOf?.invoke(coin.txid, coin.vout) ?: app.aroundtheblock.wallet.core.asset.send.StackLookup.Unavailable) {
                     is app.aroundtheblock.wallet.core.asset.send.StackLookup.Found -> if (l.entries.isEmpty()) feePool += coin
                     is app.aroundtheblock.wallet.core.asset.send.StackLookup.NotUnspent -> Unit
-                    is app.aroundtheblock.wallet.core.asset.send.StackLookup.Unavailable -> { feeUnverified = true; break }
+                    is app.aroundtheblock.wallet.core.asset.send.StackLookup.Unavailable,
+                    is app.aroundtheblock.wallet.core.asset.send.StackLookup.NotYet,
+                    is app.aroundtheblock.wallet.core.asset.send.StackLookup.Refused -> { feeUnverified = true; break }
                 }
             }
             if (feeUnverified) {
@@ -429,7 +431,9 @@ class ForeignAssetTransferService(
     private suspend fun holdingRefusal(txid: String, vout: Int): MoveRefusal? {
         val lookup = stackOf?.invoke(txid, vout) ?: return MoveRefusal.HOLDING_UNVERIFIED
         val entry = when (lookup) {
-            is app.aroundtheblock.wallet.core.asset.send.StackLookup.Unavailable -> return MoveRefusal.HOLDING_UNVERIFIED
+            is app.aroundtheblock.wallet.core.asset.send.StackLookup.Unavailable,
+            is app.aroundtheblock.wallet.core.asset.send.StackLookup.NotYet,
+            is app.aroundtheblock.wallet.core.asset.send.StackLookup.Refused -> return MoveRefusal.HOLDING_UNVERIFIED
             is app.aroundtheblock.wallet.core.asset.send.StackLookup.NotUnspent -> return MoveRefusal.HOLDING_MISMATCH
             is app.aroundtheblock.wallet.core.asset.send.StackLookup.Found ->
                 lookup.entries.singleOrNull() ?: return MoveRefusal.HOLDING_MISMATCH

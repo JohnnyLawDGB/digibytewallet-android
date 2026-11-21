@@ -17,6 +17,13 @@ interface AssetNetworkClient {
      *  @param assetId the DigiAsset identifier, e.g. `La2ih1bm2u4d…`. */
     suspend fun getAssetData(assetId: String): AssetDataResponse?
 
+    /**
+     * [getAssetData], telling "this endpoint refused the reference" apart from "no answer". An
+     * endpoint that does not make the distinction answers [AssetDataLookup.NoAnswer] for both.
+     */
+    suspend fun lookupAssetData(assetId: String): AssetDataLookup =
+        getAssetData(assetId)?.let { AssetDataLookup.Found(it) } ?: AssetDataLookup.NoAnswer
+
     // getAddressHoldings was REMOVED, deliberately, rather than left unused.
     //
     // It sent one of the wallet's addresses to a third party to ask what it holds — exactly
@@ -54,6 +61,30 @@ interface AssetNetworkClient {
     suspend fun getRawTransaction(txHashHex: String): ByteArray?
 }
 
+
+/** What one endpoint says when asked for an asset's data. */
+sealed interface AssetDataLookup {
+    data class Found(val data: AssetDataResponse) : AssetDataLookup
+    /** The endpoint answered that the reference is not one it takes (its 400), or the wallet could
+     *  tell it would and did not ask. The endpoint is working; this request is simply not valid
+     *  there. Nothing shown changes, and the same request is not repeated. */
+    data object Refused : AssetDataLookup
+    /** No usable answer: unreachable, an error status, a body that could not be read. */
+    data object NoAnswer : AssetDataLookup
+}
+
+/**
+ * The references `GET /digiassets/asset/:ref` (and `/holders/:ref`) on digiscope takes: an asset
+ * index of 1 to 10 digits, or a 38-character base58 DigiAsset id (they start with L or U).
+ * Anything else is answered 400, so the wallet does not send it. In particular a row's
+ * `unresolved:<txid>` placeholder is not a reference.
+ */
+object DigiScopeAssetRef {
+    private val INDEX = Regex("^[0-9]{1,10}$")
+    private val ASSET_ID = Regex("^[LU][1-9A-HJ-NP-Za-km-z]{37}$")
+
+    fun isValid(ref: String): Boolean = INDEX.matches(ref) || ASSET_ID.matches(ref)
+}
 
 /** Minimal projection of the `getassetdata` response — richer fields can be
  *  added lazily as the UI exposes them. */

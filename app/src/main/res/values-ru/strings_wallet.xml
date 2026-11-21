@@ -346,6 +346,7 @@
     <string name="al_create">Создать DigiAsset на digiscope.me</string>
     <string name="al_count">Найдено активов: %1$d</string>
     <string name="al_artifacts"> · артефактов: %1$d</string>
+    <string name="al_index_catching_up">Индекс DigiAsset ещё догоняет сеть. Здесь показаны последние известные активы; недавно полученные появятся, когда он закончит.</string>
 
     <string name="rf_title">Восстановить средства из другого кошелька</string>
     <string name="rf_checking_paths">Проверяются старые пути деривации…</string>

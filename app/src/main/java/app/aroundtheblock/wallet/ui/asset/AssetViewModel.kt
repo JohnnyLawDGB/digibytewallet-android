@@ -140,6 +140,11 @@ class AssetViewModel @Inject constructor(
     val ownedAssets: StateFlow<List<OwnedAsset>> = assetManager.getOwnedAssets()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    /** Whether the DigiAsset index last said it is still catching up. The list keeps showing what
+     *  it has; this is the one note beside it. */
+    val assetIndexStatus: StateFlow<app.aroundtheblock.wallet.core.asset.AssetIndexStatus> =
+        assetManager.assetIndexStatus
+
     private val _selectedAssetId = MutableStateFlow<String?>(null)
 
     val selectedAsset: StateFlow<OwnedAsset?> = _selectedAssetId

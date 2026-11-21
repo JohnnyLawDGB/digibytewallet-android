@@ -68,6 +68,42 @@ internal object DigiScopeAssetParsing {
         return if (json.has("unspent") && json.opt("unspent") == false) StackLookup.NotUnspent else StackLookup.Unavailable
     }
 
+    /**
+     * A 503 from `GET /digiassets/txout/...`: "cannot say yet" only when the body is the endpoint's
+     * own, which carries `syncing: true` (the whole index is behind) or the output's
+     * `confirmations` (the output is newer than the index's tip). Any other 503, such as a proxy's
+     * page or an error body, is no answer. Neither is ever an empty stack.
+     */
+    fun notReady(body: String?): StackLookup {
+        if (body.isNullOrBlank()) return StackLookup.Unavailable
+        val json = runCatching { JSONObject(body) }.getOrNull() ?: return StackLookup.Unavailable
+        if (json.has("error")) return StackLookup.Unavailable
+        val syncing = json.opt("syncing") == true
+        val confirmations = wholeNonNegative(json.opt("confirmations"))
+        if (!syncing && confirmations == null) return StackLookup.Unavailable
+        return StackLookup.NotYet(
+            indexSyncing = syncing,
+            blocksBehind = wholeNonNegative(json.opt("blocksBehind")),
+            confirmations = confirmations,
+        )
+    }
+
+    private fun wholeNonNegative(raw: Any?): Long? = when (raw) {
+        is Int -> raw.toLong()
+        is Long -> raw
+        else -> null
+    }?.takeIf { it >= 0L }
+
+    /**
+     * A 400 from `GET /digiassets/txout/...` or `/digiassets/asset/...`: the endpoint's own refusal
+     * carries an `error`. Any other 400 (a proxy's page) is not known to be about the reference.
+     */
+    fun isRefusal(body: String?): Boolean {
+        if (body.isNullOrBlank()) return false
+        val json = runCatching { JSONObject(body) }.getOrNull() ?: return false
+        return json.has("error")
+    }
+
     private fun toMap(obj: JSONObject): Map<String, Any?> {
         val out = mutableMapOf<String, Any?>()
         val keys = obj.keys()
