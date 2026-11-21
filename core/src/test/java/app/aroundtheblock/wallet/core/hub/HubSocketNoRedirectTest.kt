@@ -35,6 +35,10 @@ import kotlin.concurrent.thread
  * `ws://`, so the DigiScope pins, which name only DigiScope hosts, do not apply). Every server
  * here can complete a WebSocket upgrade, so a socket that did go to a Location would open there and
  * be seen; the test never depends on how long something took.
+ *
+ * Not a duplicate of PinnedBuilderNoRedirectGateTest or SharedClientPinsTest. Those read the source
+ * and the derived client's settings; only the tests here show WHICH client the socket is opened on,
+ * so the gate depends on them. They run over `ws://`, so the SSL switch is held by those two.
  */
 class HubSocketNoRedirectTest {
 

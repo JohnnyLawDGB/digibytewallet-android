@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import app.aroundtheblock.wallet.core.UpdateChecker
 import app.aroundtheblock.wallet.core.asset.network.MultiEndpointAssetClient
 import app.aroundtheblock.wallet.core.digistamp.DigistampClient
+import app.aroundtheblock.wallet.core.hub.HubWebSocket
 import app.aroundtheblock.wallet.core.ipfs.IpfsClient
 import app.aroundtheblock.wallet.core.network.DigiScopePins
 import app.aroundtheblock.wallet.core.reconcile.DgbNodeClient
@@ -101,6 +102,19 @@ class SharedClientPinsTest {
         assertEquals(shared.callTimeoutMillis, client.callTimeoutMillis)
 
         assertTrue("the shared client's own redirect behaviour changed", shared.followRedirects && shared.followSslRedirects)
+    }
+
+    /**
+     * The Hub socket carries the session token, and the pins cover only the DigiScope host, so the
+     * socket the app provides is opened at that host's address and at no other.
+     */
+    @Test fun `the Hub WebSocket the app provides is opened at the pinned host`() {
+        val hub = AppModule.provideHubWebSocket(shared, mockk(relaxed = true), TorManager(context()))
+        val url = privateFieldOf(hub, "url") as String
+        assertEquals("the provided Hub socket is opened somewhere else", HubWebSocket.WS_URL, url)
+        val parsed = url.replaceFirst("wss://", "https://").toHttpUrlOrNull()
+        assertTrue("$url is not a wss address", url.startsWith("wss://") && parsed != null)
+        assertEquals("the Hub socket's host is not the pinned one", DigiScopePins.HOST, parsed!!.host)
     }
 
     @Test fun `the IPFS gateway fetch is made on a pinned client`() {

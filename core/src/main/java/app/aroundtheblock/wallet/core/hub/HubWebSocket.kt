@@ -36,7 +36,7 @@ import org.json.JSONObject
  * a Location. The derived client keeps everything else the shared one sets: its routing, name
  * lookups, certificate pins, Tor wait and connection pool.
  */
-class HubWebSocket(
+class HubWebSocket internal constructor(
     /** The shared client; the socket is opened on [httpClient], derived from it. */
     sharedClient: OkHttpClient,
     private val digiScopeClient: DigiScopeClient,
@@ -44,9 +44,19 @@ class HubWebSocket(
     private val route: () -> TorRoute,
     /** Milliseconds on a clock that only moves forward; a parameter so tests can move it. */
     private val nowMs: () -> Long = { System.nanoTime() / 1_000_000 },
-    /** Where the socket is opened; a parameter so tests can serve it on the loopback interface. */
+    /**
+     * Where the socket is opened; a parameter so this module's tests can serve it on the loopback
+     * interface. Only the internal constructor takes it: the app's socket is always at [WS_URL].
+     */
     private val url: String = WS_URL,
 ) {
+    /**
+     * The constructor the app uses. It takes no address: the socket carries the session token, so
+     * it is opened at [WS_URL], the host the shared client's pins cover, and nowhere else.
+     */
+    constructor(sharedClient: OkHttpClient, digiScopeClient: DigiScopeClient, route: () -> TorRoute) :
+        this(sharedClient, digiScopeClient, route, url = WS_URL)
+
     /** The client the socket is opened on: the shared one, following no redirect (HUB-WS-NO-REDIRECT). */
     private val httpClient: OkHttpClient = sharedClient.newBuilder()
         .followRedirects(false)
