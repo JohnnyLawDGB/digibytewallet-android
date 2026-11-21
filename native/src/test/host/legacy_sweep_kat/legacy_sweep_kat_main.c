@@ -19,6 +19,10 @@
 // The Android caller passes 100,000 sat/kB and amounts of proven coins, so it never reaches it
 // (android_default_rate).
 //
+// WHAT IS COMPARED (FOREIGN-ASSET-DISTINCT). The two sides are compared on sweeps of distinct outpoints: every
+// scenario lists each outpoint once and the fuzz draws every txid afresh. signer_distinct_inputs_kat holds the
+// bridge's refusal of a sweep that lists one twice.
+//
 // SCENARIOS
 //   pinned_*      the Android device tests, case for case: LegacySweepSignedTxKatTest (P2PKH, its pinned hex),
 //                 LegacySweepSegwitKatTest (P2WPKH, its pinned hex), LegacySweepAmountGuardTest (three cases),

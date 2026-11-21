@@ -13,6 +13,7 @@
 #include "coin_reservation.h"
 #include "jni_bridge.h"
 #include "one_family_gate.h"
+#include "asset_tx_checks.h"   /* tx_inputs_distinct: no outpoint listed twice (FOREIGN-ASSET-DISTINCT) */
 #include "BRDigiDollar.h"
 #include "BRNetwork.h"   /* BRNetworkIsTestnet() — runtime network for DD decode */
 #include "prepared_send.h"   /* the quote and the checks of a prepared DGB send (fee_quote_kat) */
@@ -276,6 +277,14 @@ NativeBridge_signTransaction(JNIEnv *env, jobject thiz,
         return NULL;
     }
 
+    /* FOREIGN-ASSET-DISTINCT: the bytes are the caller's, so their inputs are the caller's list. Every
+     * input names a different outpoint, or nothing is signed and no coin is claimed. */
+    if (!tx_inputs_distinct(tx)) {
+        LOGW("signTransaction: an outpoint is listed twice among the inputs; not signed");
+        BRTransactionFree(tx);
+        return NULL;
+    }
+
     /* ONE-FAMILY: this generic signer never signs a DigiDollar output, an output of a dual-family
      * transaction, or an input whose funding transaction the wallet does not hold. DigiDollar is
      * sent only through sendApprovedDigiDollar. */
@@ -444,6 +453,15 @@ NativeBridge_signPreparedTransaction(JNIEnv *env, jobject thiz, jbyteArray unsig
     (*env)->ReleaseByteArrayElements(env, unsignedTx, txBytes, JNI_ABORT);
     if (!tx) {
         LOGE("signPreparedTransaction: failed to parse the prepared transaction");
+        return NULL;
+    }
+
+    /* FOREIGN-ASSET-DISTINCT: the prepared bytes come back from the caller, so their inputs are the
+     * caller's list. Every input names a different outpoint, or nothing is signed and no coin is
+     * claimed. */
+    if (!tx_inputs_distinct(tx)) {
+        LOGW("signPreparedTransaction: an outpoint is listed twice among the inputs; not signed");
+        BRTransactionFree(tx);
         return NULL;
     }
 
