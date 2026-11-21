@@ -26,6 +26,8 @@ import org.junit.Test
 class MetadataCidNotShadowedTest {
 
     private val assetId = "La8JvCqENcANWZsFdjW5nfZki3EsnEzuycLJod"
+    /** A real CID, as an issuance header yields: a value that is not one is treated as no CID (IPFS-NO-NULL). */
+    private val ISSUANCE_CID = "bafkreif6jztw2ph4rjcu7tbyzffrsk4o7elpxpepbeb4kwcwrmq4v7jkmi"
     private val dao = mockk<AssetMetadataDao>(relaxed = true)
     private val ipfs = mockk<IpfsClient>()
     private val provider = mockk<AssetNetworkClient>()
@@ -48,7 +50,7 @@ class MetadataCidNotShadowedTest {
     private fun service() = AssetMetadataService(ipfsClient = ipfs, assetMetadataDao = dao, assetNetworkClient = provider)
 
     @Test fun `with a CID on the issuance, a provider's document is never stored in its place`() = runBlocking {
-        assertNull(service().getMetadata(assetId, metadataCid = "bafyissuance"))
+        assertNull(service().getMetadata(assetId, metadataCid = ISSUANCE_CID))
         coVerify(exactly = 0) { dao.updateIpfsFacts(any(), any(), any(), any(), any(), any(), any(), any()) }
         coVerify(exactly = 0) { provider.getAssetData(any()) }
     }
@@ -71,9 +73,9 @@ class MetadataCidNotShadowedTest {
     }
 
     @Test fun `a caller without the CID gets the issuance's CID from the chain facts, never the provider`() = runBlocking {
-        coEvery { dao.getMetadata(assetId) } returns chainFacts(cid = "bafyissuance")
+        coEvery { dao.getMetadata(assetId) } returns chainFacts(cid = ISSUANCE_CID)
         service().getMetadata(assetId, metadataCid = null)
-        coVerify { ipfs.fetchVerified("bafyissuance") }
+        coVerify { ipfs.fetchVerified(ISSUANCE_CID) }
         coVerify(exactly = 0) { provider.getAssetData(any()) }
     }
 }

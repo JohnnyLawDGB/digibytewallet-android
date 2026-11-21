@@ -348,6 +348,7 @@
     <string name="al_create">DigiAsset auf digiscope.me erstellen</string>
     <string name="al_count">%1$d Assets gefunden</string>
     <string name="al_artifacts"> · %1$d Artefakte</string>
+    <string name="al_index_catching_up">Der DigiAsset-Index holt gerade auf. Die hier gezeigten Assets sind der letzte bekannte Stand; neu empfangene erscheinen, sobald er fertig ist.</string>
 
     <string name="rf_title">Guthaben aus einer anderen Wallet wiederherstellen</string>
     <string name="rf_checking_paths">Ältere Ableitungspfade werden geprüft…</string>

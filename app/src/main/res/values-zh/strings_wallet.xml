@@ -337,6 +337,7 @@
     <string name="al_create">在 digiscope.me 上创建 DigiAsset</string>
     <string name="al_count">找到 %1$d 个资产</string>
     <string name="al_artifacts"> · %1$d 个工件</string>
+    <string name="al_index_catching_up">DigiAsset 索引正在追赶进度。此处显示的是最后已知的资产；新收到的资产会在索引完成后显示。</string>
 
     <string name="rf_title">从其他钱包恢复资金</string>
     <string name="rf_checking_paths">正在检查较旧的派生路径…</string>

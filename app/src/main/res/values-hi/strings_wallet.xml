@@ -340,6 +340,7 @@
     <string name="al_create">digiscope.me पर DigiAsset बनाएँ</string>
     <string name="al_count">%1$d एसेट मिले</string>
     <string name="al_artifacts"> · %1$d आर्टिफ़ैक्ट</string>
+    <string name="al_index_catching_up">DigiAsset इंडेक्स अभी अपडेट हो रहा है। यहाँ दिखाए गए एसेट आख़िरी ज्ञात स्थिति के हैं; हाल में मिले एसेट इसके पूरा होने पर दिखेंगे।</string>
 
     <string name="rf_title">दूसरे वॉलेट से फंड पुनर्प्राप्त करें</string>
     <string name="rf_checking_paths">पुराने डेरिवेशन पाथ जाँचे जा रहे हैं…</string>

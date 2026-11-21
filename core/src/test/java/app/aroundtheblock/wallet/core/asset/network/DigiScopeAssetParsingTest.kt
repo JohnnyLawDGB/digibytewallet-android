@@ -28,14 +28,14 @@ class DigiScopeAssetParsingTest {
     @Test
     fun `asset data parses the fields the wallet actually consumes`() {
         val json = JSONObject(
-            """{"assetId":"La3t7Jdvjhf5XGGRBqVdny36VWPJ4gJcWMpAxp","cid":"bafybeigqaz",
+            """{"assetId":"La3t7Jdvjhf5XGGRBqVdny36VWPJ4gJcWMpAxp","cid":"bafybeigqazrxezd42nhv6mqhnq6qrljmzdev55y7kzcc2fxyrvzlkgjwne",
                 "issuer":"dgb1qissuer","count":10,"decimals":0}"""
         )
 
         val data = DigiScopeAssetParsing.assetData(json, fallbackAssetId = "ignored")
 
         assertEquals("La3t7Jdvjhf5XGGRBqVdny36VWPJ4gJcWMpAxp", data!!.assetId)
-        assertEquals("bafybeigqaz", data.cid)
+        assertEquals("bafybeigqazrxezd42nhv6mqhnq6qrljmzdev55y7kzcc2fxyrvzlkgjwne", data.cid)
         assertEquals(10L, data.count)
         assertEquals(0, data.decimals)
     }

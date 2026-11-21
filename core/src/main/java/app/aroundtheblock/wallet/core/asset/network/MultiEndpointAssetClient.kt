@@ -52,7 +52,36 @@ class MultiEndpointAssetClient(
     private val mutex = Mutex()
 
     override suspend fun getAssetData(assetId: String): AssetDataResponse? =
-        tryEach("getAssetData") { it.getAssetData(assetId) }
+        (lookupAssetData(assetId) as? AssetDataLookup.Found)?.data
+
+    /**
+     * The first endpoint with the data wins. An endpoint that refuses the reference
+     * ([AssetDataLookup.Refused]) or says its index is still syncing ([AssetDataLookup.NotYet]) is
+     * working and has answered: it is not a failure, does not count toward that endpoint's circuit
+     * breaker (which would also stop raw transactions being asked of it), and the next endpoint is
+     * asked. With no data from any endpoint the result is NotYet when one said so (the lookup can
+     * succeed later), else Refused when one refused, else NoAnswer. None of the three is data.
+     */
+    override suspend fun lookupAssetData(assetId: String): AssetDataLookup {
+        var answeredNow = false
+        var anyRefused = false
+        var anyNotYet = false
+        val found = tryEach("getAssetData", answeredWithoutResult = { answeredNow }) { endpoint ->
+            answeredNow = false
+            when (val l = endpoint.lookupAssetData(assetId)) {
+                is AssetDataLookup.Found -> l.data
+                AssetDataLookup.Refused -> { answeredNow = true; anyRefused = true; null }
+                AssetDataLookup.NotYet -> { answeredNow = true; anyNotYet = true; null }
+                AssetDataLookup.NoAnswer -> null
+            }
+        }
+        return when {
+            found != null -> AssetDataLookup.Found(found)
+            anyNotYet -> AssetDataLookup.NotYet
+            anyRefused -> AssetDataLookup.Refused
+            else -> AssetDataLookup.NoAnswer
+        }
+    }
 
     override suspend fun getAddressHistory(address: String, limit: Int?): List<String>? =
         tryEach("getAddressHistory") { it.getAddressHistory(address, limit) }
@@ -79,7 +108,14 @@ class MultiEndpointAssetClient(
         }
     }
 
-    private suspend fun <T> tryEach(label: String, block: suspend (AssetNetworkClient) -> T?): T? {
+    /** [answeredWithoutResult]: asked after [block] returned null; true when the endpoint did answer
+     *  (it refused the request, or said its index is syncing), so the null is not a failure of the
+     *  endpoint. */
+    private suspend fun <T> tryEach(
+        label: String,
+        answeredWithoutResult: () -> Boolean = { false },
+        block: suspend (AssetNetworkClient) -> T?,
+    ): T? {
         require(endpoints.isNotEmpty()) { "MultiEndpointAssetClient requires at least one endpoint" }
         val now = System.currentTimeMillis()
         for (i in endpoints.indices) {
@@ -98,6 +134,16 @@ class MultiEndpointAssetClient(
                         state.openedAt = 0L
                     }
                     return result
+                }
+                if (answeredWithoutResult()) {
+                    // The endpoint answered, so a run of failures ends here: only consecutive
+                    // failures open the circuit.
+                    mutex.withLock {
+                        state.failures = 0
+                        state.openedAt = 0L
+                    }
+                    Log.d(TAG, "$label: ${endpoint.endpointLabel} answered without a result (refused, or its index is syncing); trying the next endpoint")
+                    continue
                 }
                 mutex.withLock { recordFailure(state, now, endpoint.endpointLabel, label) }
             } catch (t: Throwable) {

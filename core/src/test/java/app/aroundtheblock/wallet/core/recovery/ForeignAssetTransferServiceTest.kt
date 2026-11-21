@@ -201,6 +201,62 @@ class ForeignAssetTransferServiceTest {
         assertEquals(MoveRefusal.HOLDING_UNVERIFIED, unanswered.moves.single().refusal)
     }
 
+    /** Answers that vouch for nothing: the index cannot say yet (syncing, or the output is newer
+     *  than its tip), or it refused the request. None is "holds no asset", none is "spent". */
+    private val notVouched: List<app.aroundtheblock.wallet.core.asset.send.StackLookup> = listOf(
+        app.aroundtheblock.wallet.core.asset.send.StackLookup.NotYet(indexSyncing = true, blocksBehind = 5_000),
+        app.aroundtheblock.wallet.core.asset.send.StackLookup.NotYet(indexSyncing = true, blocksBehind = 0, confirmations = 0),
+        app.aroundtheblock.wallet.core.asset.send.StackLookup.NotYet(indexSyncing = false, confirmations = 1),
+        app.aroundtheblock.wallet.core.asset.send.StackLookup.Refused,
+    )
+
+    /** A coin the index cannot vouch for could carry an asset: spent as fee, its units would be
+     *  destroyed or delivered from the wrong address. So it pays for nothing, and it is not
+     *  skipped like a spent coin either: every move on the profile stops, unverified. */
+    @Test fun `a fee coin the index cannot say about yet, or refuses, stops the move`() {
+        for (answer in notVouched) {
+            var signed = 0
+            var broadcasts = 0
+            val r = run(
+                service(
+                    stackOf = { txid, _ -> if (txid == "a55e7") stack("La-test" to 10L) else answer },
+                    sign = { _, _, _, _ -> signed++; "00ff" },
+                    broadcast = { broadcasts++; "txid-moved" },
+                ),
+                listOf(profileResult()),
+            )
+            val move = r.moves.single()
+            assertEquals("$answer", MoveRefusal.HOLDING_UNVERIFIED, move.refusal)
+            assertFalse("$answer", move.moved)
+            assertNull("$answer", move.txid)
+            assertEquals("$answer: nothing signed", 0, signed)
+            assertEquals("$answer: nothing broadcast", 0, broadcasts)
+            assertTrue("$answer: nothing recorded as sent", recorded.isEmpty())
+        }
+    }
+
+    /** The same answers about the asset's own output: unverified, which is asked again later, and
+     *  not a mismatch, which says the output holds something else. */
+    @Test fun `a holding the index cannot say about yet, or refuses, is unverified, not a mismatch`() {
+        for (answer in notVouched) {
+            var signed = 0
+            var broadcasts = 0
+            val r = run(
+                service(
+                    stackOf = { txid, _ -> if (txid == "a55e7") answer else stack() },
+                    sign = { _, _, _, _ -> signed++; "00ff" },
+                    broadcast = { broadcasts++; "txid-moved" },
+                ),
+                listOf(profileResult()),
+            )
+            val move = r.moves.single()
+            assertEquals("$answer", MoveRefusal.HOLDING_UNVERIFIED, move.refusal)
+            assertFalse("$answer", move.moved)
+            assertEquals("$answer: nothing signed", 0, signed)
+            assertEquals("$answer: nothing broadcast", 0, broadcasts)
+        }
+    }
+
     /** The asset input must be spent, and every output must belong to the destination. */
     @Test fun `the signed plan spends the asset and pays everything to the destination`() {
         var seen: ForeignAssetTransferPlan.Plan? = null

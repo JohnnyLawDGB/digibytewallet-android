@@ -2,6 +2,8 @@ package app.aroundtheblock.wallet.core.asset.network
 
 import app.aroundtheblock.wallet.core.asset.send.StackEntry
 import app.aroundtheblock.wallet.core.asset.send.StackLookup
+import app.aroundtheblock.wallet.core.ipfs.IpfsClient
+import app.aroundtheblock.wallet.core.network.textOrNull
 import org.json.JSONObject
 
 /**
@@ -23,7 +25,10 @@ internal object DigiScopeAssetParsing {
         if (json.has("error")) return null
         return AssetDataResponse(
             assetId = json.optString("assetId", fallbackAssetId),
-            cid = json.optString("cid").takeIf { it.isNotEmpty() },
+            // Only a CID is a CID (IPFS-NO-NULL). digistamp answers `"cid": null` for an asset whose
+            // issuance carried no metadata; Android's optString reads that as the text "null", which
+            // was then fetched from every IPFS gateway. An answer that is not a CID is "no CID".
+            cid = json.textOrNull("cid")?.takeIf { IpfsClient.normalizeCid(it) != null },
             issuer = json.optString("issuer").takeIf { it.isNotEmpty() },
             count = json.optLong("count", 0L),
             decimals = json.optInt("decimals", 0),
@@ -66,6 +71,46 @@ internal object DigiScopeAssetParsing {
         if (body.isNullOrBlank()) return StackLookup.Unavailable
         val json = runCatching { JSONObject(body) }.getOrNull() ?: return StackLookup.Unavailable
         return if (json.has("unspent") && json.opt("unspent") == false) StackLookup.NotUnspent else StackLookup.Unavailable
+    }
+
+    /**
+     * A 503 from `GET /digiassets/txout/...`: "cannot say yet" only when the body is the endpoint's
+     * own, which carries `syncing: true` (the whole index is behind) or the output's
+     * `confirmations` (the output is newer than the index's tip). Any other 503, such as a proxy's
+     * page or an error body, is no answer. Neither is ever an empty stack.
+     */
+    fun notReady(body: String?): StackLookup {
+        if (body.isNullOrBlank()) return StackLookup.Unavailable
+        val json = runCatching { JSONObject(body) }.getOrNull() ?: return StackLookup.Unavailable
+        if (json.has("error")) return StackLookup.Unavailable
+        val syncing = json.opt("syncing") == true
+        val confirmations = wholeNonNegative(json.opt("confirmations"))
+        if (!syncing && confirmations == null) return StackLookup.Unavailable
+        return StackLookup.NotYet(
+            indexSyncing = syncing,
+            blocksBehind = wholeNonNegative(json.opt("blocksBehind")),
+            confirmations = confirmations,
+        )
+    }
+
+    /** A 503 from `GET /digiassets/asset/...`: true only for the endpoint's own "the whole index is
+     *  behind" body, by the same test as [notReady]. */
+    fun indexSyncing(body: String?): Boolean = (notReady(body) as? StackLookup.NotYet)?.indexSyncing == true
+
+    private fun wholeNonNegative(raw: Any?): Long? = when (raw) {
+        is Int -> raw.toLong()
+        is Long -> raw
+        else -> null
+    }?.takeIf { it >= 0L }
+
+    /**
+     * A 400 from `GET /digiassets/txout/...` or `/digiassets/asset/...`: the endpoint's own refusal
+     * carries an `error`. Any other 400 (a proxy's page) is not known to be about the reference.
+     */
+    fun isRefusal(body: String?): Boolean {
+        if (body.isNullOrBlank()) return false
+        val json = runCatching { JSONObject(body) }.getOrNull() ?: return false
+        return json.has("error")
     }
 
     private fun toMap(obj: JSONObject): Map<String, Any?> {
