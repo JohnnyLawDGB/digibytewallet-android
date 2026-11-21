@@ -659,7 +659,9 @@ test_D() {
     # shellcheck disable=SC2206
     w=($GENERATED_WORDS)
     logcat_all="$(adbx logcat -d 2>/dev/null)"
-    if grep -q -F "${w[0]} ${w[1]} ${w[2]}" <<< "$logcat_all"; then
+    # Any three phrase words in a row, whatever separates them (a list, one per line, separate
+    # log calls): the words go in on a pipe, never in argv or the environment.
+    if python3 "$UIDUMP" phrase-in-log 3 3< <(printf '%s' "${w[*]}") <<< "$logcat_all"; then
         fail "the generated recovery phrase appears in logcat"
         return
     fi

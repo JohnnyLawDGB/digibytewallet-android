@@ -12,6 +12,9 @@ feed it canned dumps without an emulator.
   uidump.py fields FILE                                               -> "x y" of each EditText
   uidump.py seed-words FILE                                           -> the numbered phrase words
   uidump.py redact FILE OUT                                           -> a copy safe to keep on disk
+  uidump.py phrase-in-log FD                                          -> exit 0 if three words in
+                                                                         a row from FD follow one
+                                                                         another in the log on stdin
   uidump.py redact-log FD                                             -> stdin to stdout, with the
                                                                          words read from file
                                                                          descriptor FD removed
@@ -133,6 +136,30 @@ def main():
         for line in sys.stdin:
             sys.stdout.write(pattern.sub(REDACTED, line) if pattern else line)
         return 0
+
+    if cmd == "phrase-in-log":
+        # Exit 0 when three consecutive phrase words follow one another in the log on stdin,
+        # whatever stands between them: spaces, commas, brackets, quotes, line ends, or the
+        # prefix of a separate log call. Words come in on a pipe, as for redact-log.
+        try:
+            with os.fdopen(int(args[0])) as f:
+                words = [w.lower() for w in f.read().split() if w]
+        except (OSError, ValueError, IndexError):
+            print("uidump: phrase-in-log needs a readable file descriptor number", file=sys.stderr)
+            return 2
+        if len(words) < 3:
+            return 2
+        tokens = []
+        for line in sys.stdin:
+            # threadtime: "MM-DD HH:MM:SS.mmm PID TID L Tag: message"; keep the message only, so
+            # a tag between two log calls is not a token between two words.
+            m = re.match(r"^\d\d-\d\d \d\d:\d\d:\d\d\.\d+\s+\d+\s+\d+\s+\w\s+[^:]*: ?(.*)$", line)
+            tokens.extend(re.findall(r"[a-z]+", (m.group(1) if m else line).lower()))
+        triples = {tuple(words[i:i + 3]) for i in range(len(words) - 2)}
+        for i in range(len(tokens) - 2):
+            if (tokens[i], tokens[i + 1], tokens[i + 2]) in triples:
+                return 0
+        return 1
 
     path, args = args[0], args[1:]
 

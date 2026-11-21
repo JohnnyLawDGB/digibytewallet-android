@@ -144,6 +144,16 @@ if grep -q -E 'abandon|about' "$WORK/seed-redacted.xml"; then bad "a redacted du
 if grep -q 'Your Recovery Phrase' "$WORK/seed-redacted.xml"; then ok "redaction keeps the screen's other text"; else bad "redaction removed ordinary text"; fi
 OUT="$(python3 "$UIDUMP" redact-log 3 3< <(printf '%s' "zebra quantum ladder") <<< "D Foo: saved zebra and quantum, not zebras")"
 if [[ "$OUT" == "D Foo: saved [redacted] and [redacted], not zebras" ]]; then ok "saved logcat has the run's phrase words removed (words passed on a pipe)"; else bad "logcat redaction: '$OUT'"; fi
+PW="zebra quantum ladder mango"
+pil() { python3 "$UIDUMP" phrase-in-log 3 3< <(printf '%s' "$PW"); }
+P='11-21 10:00:00.000  100  200 I Tag     : '
+yes "a phrase logged as plain words is found" pil <<< "${P}words: zebra quantum ladder mango"
+yes "a phrase logged as a list is found" pil <<< "${P}[zebra, quantum, ladder]"
+yes "a phrase logged with quotes and other case is found" pil <<< "${P}\"Quantum\",\"LADDER\",\"mango\""
+yes "a phrase logged one word per log call is found" pil <<< "${P}zebra"$'\n'"${P}quantum"$'\n'"${P}ladder"
+no "two phrase words in a row are not a phrase" pil <<< "${P}zebra quantum and then a mango ladder"
+no "the same words out of order are not a phrase" pil <<< "${P}ladder quantum zebra"
+no "a log with none of the words is clean" pil <<< "${P}Connected to 8 peers"
 OUT="$(GENERATED_WORDS="zebra quantum" python3 "$UIDUMP" redact-log GENERATED_WORDS <<< "x" 2>/dev/null)"; rc=$?
 if [[ $rc -ne 0 ]]; then ok "redact-log no longer reads the words from the environment"; else bad "redact-log accepted an environment variable name"; fi
 GENERATED_WORDS="zebra quantum ladder"
