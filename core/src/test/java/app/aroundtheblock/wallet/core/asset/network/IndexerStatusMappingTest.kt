@@ -101,6 +101,9 @@ class IndexerStatusMappingTest {
             DigiScopeAssetParsing.notReady("""{"confirmations":0}"""))
         assertEquals(StackLookup.NotYet(indexSyncing = false, confirmations = 2),
             DigiScopeAssetParsing.notReady("""{"syncing":false,"confirmations":2}"""))
+        // The route's body when it has no sync state to read at all.
+        assertEquals(StackLookup.NotYet(indexSyncing = true, blocksBehind = null, confirmations = null),
+            DigiScopeAssetParsing.notReady("""{"syncing":true,"blocksBehind":null}"""))
         // Figures that are not whole and non-negative are dropped, not guessed.
         assertEquals(StackLookup.NotYet(indexSyncing = true),
             DigiScopeAssetParsing.notReady("""{"syncing":true,"blocksBehind":-4,"confirmations":"7"}"""))
@@ -142,6 +145,8 @@ class IndexerStatusMappingTest {
             txout("503 Service Unavailable", """{"syncing":true,"blocksBehind":23871}"""))
         assertEquals(StackLookup.NotYet(true, 2, 1),
             txout("503 Service Unavailable", """{"syncing":true,"blocksBehind":2,"confirmations":1}"""))
+        assertEquals(StackLookup.NotYet(true, null, null),
+            txout("503 Service Unavailable", """{"syncing":true,"blocksBehind":null}"""))
         // 400 { error }
         assertEquals(StackLookup.Refused, txout("400 Bad Request", """{"error":"invalid txid or vout"}"""))
         // Failures.
@@ -259,6 +264,92 @@ class IndexerStatusMappingTest {
         repeat(5) { assertEquals(AssetDataLookup.Refused, multi.lookupAssetData(assetId)) }
         assertEquals("one request per call: no retry", 5, requested.size)
         assertTrue("the endpoint is still asked for a raw transaction", multi.getRawTransaction(txid) != null)
+    }
+
+    // ── asset/:ref while the index is syncing ────────────────────────────────────────────────
+
+    private val syncingBody = """{"syncing":true,"blocksBehind":23871}"""
+
+    /** The asset route answers the same 503 as txout while the index is far behind. */
+    @Test fun a_syncing_503_on_an_asset_reference_is_not_yet_and_one_request() = runBlocking {
+        serve(mapOf(
+            "/digiassets/asset/$assetId" to ("503 Service Unavailable" to syncingBody),
+            "/digiassets/asset/5263" to ("503 Service Unavailable" to """{"syncing":true,"blocksBehind":null}"""),
+            "/digiassets/asset/77" to ("503 Service Unavailable" to "<html>503 Service Temporarily Unavailable</html>"),
+            "/digiassets/asset/78" to ("503 Service Unavailable" to """{"error":"busy","syncing":true}"""),
+            "/digiassets/asset/79" to ("503 Service Unavailable" to """{"confirmations":0}"""),
+            "/digiassets/asset/80" to ("500 Internal Server Error" to syncingBody),
+        ))
+        val client = digiscope()
+        assertEquals(AssetDataLookup.NotYet, client.lookupAssetData(assetId))
+        assertEquals("asked once", listOf("/digiassets/asset/$assetId"), requested.toList())
+        assertEquals(AssetDataLookup.NotYet, client.lookupAssetData("5263"))
+        // It is never data: the older entry point reads nothing, not an asset with no rules.
+        assertNull(client.getAssetData(assetId))
+        // Any 503 that is not the route's own "syncing", and the body under another status, is no answer.
+        for (ref in listOf("77", "78", "79", "80")) {
+            assertEquals(ref, AssetDataLookup.NoAnswer, client.lookupAssetData(ref))
+        }
+    }
+
+    /**
+     * A syncing index is an answer from a working endpoint, like a refusal. Counted as a failure,
+     * three asset lookups during a freeze of the index opened the endpoint's circuit breaker, and
+     * for a minute it was not asked for raw transactions either.
+     */
+    @Test fun a_syncing_asset_route_does_not_open_the_endpoints_circuit_breaker() = runBlocking {
+        val raw = "00".repeat(60)
+        serve(mapOf(
+            "/digiassets/asset/$assetId" to ("503 Service Unavailable" to syncingBody),
+            "/tx/raw/$txid" to ("200 OK" to """{"hex":"$raw"}"""),
+        ))
+        val multi = MultiEndpointAssetClient(
+            endpoints = listOf(digiscope()),
+            failureThreshold = 3,
+            transactionIdOf = { txid },
+        )
+        repeat(5) { assertNull("syncing is never data", multi.getAssetData(assetId)) }
+        assertEquals("one request per call: no retry", 5, requested.size)
+        assertTrue("the endpoint is still asked for a raw transaction", multi.getRawTransaction(txid) != null)
+        assertEquals(AssetDataLookup.NotYet, multi.lookupAssetData(assetId))
+    }
+
+    /** The other direction: a 503 that is not the route's own still counts, and the breaker opens. */
+    @Test fun a_failing_asset_route_still_opens_the_circuit_breaker() = runBlocking {
+        val raw = "00".repeat(60)
+        serve(mapOf(
+            "/digiassets/asset/$assetId" to ("503 Service Unavailable" to "<html>upstream</html>"),
+            "/tx/raw/$txid" to ("200 OK" to """{"hex":"$raw"}"""),
+        ))
+        val multi = MultiEndpointAssetClient(
+            endpoints = listOf(digiscope()),
+            failureThreshold = 3,
+            transactionIdOf = { txid },
+        )
+        repeat(3) { assertEquals(AssetDataLookup.NoAnswer, multi.lookupAssetData(assetId)) }
+        assertNull("circuit open: not asked", multi.getRawTransaction(txid))
+        assertEquals("no request reached the raw route", 3, requested.size)
+    }
+
+    /** Syncing at one endpoint, the next is still asked; with no data anywhere, "not yet" is the
+     *  result even beside a refusal, because the lookup can succeed later. */
+    @Test fun a_syncing_endpoint_passes_to_the_next() = runBlocking {
+        serve(mapOf("/digiassets/asset/$assetId" to ("503 Service Unavailable" to syncingBody)))
+        val answer = AssetDataResponse(assetId, cid = null, issuer = null, count = 7, decimals = 0, ipfs = null)
+        var reply: AssetDataLookup = AssetDataLookup.Found(answer)
+        val second = object : AssetNetworkClient {
+            override val endpointLabel = "second"
+            override suspend fun getAssetData(assetId: String): AssetDataResponse? = (reply as? AssetDataLookup.Found)?.data
+            override suspend fun lookupAssetData(assetId: String): AssetDataLookup = reply
+            override suspend fun getAddressHistory(address: String, limit: Int?): List<String>? = null
+            override suspend fun getSyncState(): SyncStateResponse? = null
+            override suspend fun getRawTransaction(txHashHex: String): ByteArray? = null
+        }
+        val multi = MultiEndpointAssetClient(listOf(digiscope(), second), transactionIdOf = { null })
+        assertEquals(AssetDataLookup.Found(answer), multi.lookupAssetData(assetId))
+        reply = AssetDataLookup.Refused
+        assertEquals(AssetDataLookup.NotYet, multi.lookupAssetData(assetId))
+        assertNull(multi.getAssetData(assetId))
     }
 
     /** Refused at one endpoint, the next is still asked, and its answer is the result. */

@@ -643,7 +643,7 @@ class AssetManager(
 
     /** Chooses and confirms an asset send's inputs. One per manager, so what it confirms or sets
      *  aside is remembered for the life of the process. */
-    private val sendSelection: app.aroundtheblock.wallet.core.asset.send.AssetSendSelection by lazy {
+    internal val sendSelection: app.aroundtheblock.wallet.core.asset.send.AssetSendSelection by lazy {
         app.aroundtheblock.wallet.core.asset.send.AssetSendSelection(
             stackSource = observedStackSource,
             parentHasDataOutput = parentHasDataOutput ?: ::nativeParentHasDataOutput,
@@ -686,18 +686,21 @@ class AssetManager(
             }
         }
 
-    /** Outputs seen waiting on the indexer since [beginIndexerWaitCount]. */
+    /** Outputs seen waiting on the indexer since the current [indexerWaitPass] began. */
     private val waitingOnIndexer = java.util.concurrent.atomic.AtomicInteger(0)
 
-    internal fun beginIndexerWaitCount() = waitingOnIndexer.set(0)
-
     /**
-     * After a whole pass over the wallet's transactions: when no output is waiting for the
-     * indexer any more, a "catching up" answer is no longer the reason anything is missing, and
-     * nothing will ask again to clear it. So it is cleared here.
+     * Runs [pass], one whole pass over the wallet's transactions, counting the outputs it finds
+     * waiting for the indexer. When it finishes having found none, a "catching up" answer is no
+     * longer the reason anything is missing, and nothing will ask again to clear it (a syncing
+     * answer met by a send or a recovery lookup has no receipt behind it), so it is cleared here.
+     * A pass that does not finish clears nothing: it did not look at everything.
      */
-    internal fun endIndexerWaitCount() {
+    internal suspend fun <T> indexerWaitPass(pass: suspend () -> T): T {
+        waitingOnIndexer.set(0)
+        val result = pass()
         if (waitingOnIndexer.get() == 0) _assetIndexStatus.value = AssetIndexStatus.Current
+        return result
     }
 
     /** Whether the wallet's copy of [txid] has an OP_RETURN output; null when it cannot be read. */
@@ -2199,19 +2202,19 @@ class AssetManager(
         // calls × every known tx, every 30s.
         val owned = buildOwnedScriptHexes()
         var detected = 0
-        beginIndexerWaitCount()
-        for (txHash in hashes) {
-            if (txHash.isBlank()) continue
-            val isOutgoingUnconfirmed = outgoingUnconfirmed[txHash] ?: false
-            val info = runCatching {
-                processIncomingAssetTx(txHash, blockHeight = 0L, ownedScriptHexes = owned,
-                    isOutgoingUnconfirmed = isOutgoingUnconfirmed)
-            }.onFailure {
-                android.util.Log.d("AssetManager", "sweep: processIncoming failed for ${LogTag.tx(txHash)}", it)
-            }.getOrNull()
-            if (info != null) detected++
+        indexerWaitPass {
+            for (txHash in hashes) {
+                if (txHash.isBlank()) continue
+                val isOutgoingUnconfirmed = outgoingUnconfirmed[txHash] ?: false
+                val info = runCatching {
+                    processIncomingAssetTx(txHash, blockHeight = 0L, ownedScriptHexes = owned,
+                        isOutgoingUnconfirmed = isOutgoingUnconfirmed)
+                }.onFailure {
+                    android.util.Log.d("AssetManager", "sweep: processIncoming failed for ${LogTag.tx(txHash)}", it)
+                }.getOrNull()
+                if (info != null) detected++
+            }
         }
-        endIndexerWaitCount()
         android.util.Log.i("AssetManager",
             "sweepKnownTransactions: ${hashes.size} txs scanned, $detected asset txs found")
 

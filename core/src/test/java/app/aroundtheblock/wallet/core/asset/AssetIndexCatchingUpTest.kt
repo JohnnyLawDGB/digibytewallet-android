@@ -63,6 +63,9 @@ class AssetIndexCatchingUpTest {
     private fun manager() = AssetManager(
         utxoDao, mockk<TransactionDao>(relaxed = true), mockk(relaxed = true), mockk(relaxed = true),
         assetStackSource = indexer,
+        // What a send's selection asks natively, answered here: no data output, not DigiDollar's.
+        parentHasDataOutput = { false },
+        outpointOtherFamily = { _, _ -> false },
     )
 
     private fun row(txid: String, assetId: String, qty: Long, credit: String, spent: Boolean = false) = UtxoEntity(
@@ -203,24 +206,94 @@ class AssetIndexCatchingUpTest {
     @Test fun the_state_is_dropped_when_a_pass_finds_no_output_waiting() = runTest {
         val mgr = manager()
         answers[key(waiting, 0)] = syncing
-        mgr.beginIndexerWaitCount()
-        ask(mgr, 0)
-        mgr.endIndexerWaitCount()
+        mgr.indexerWaitPass { ask(mgr, 0) }
         assertEquals("an output is waiting: the state stays", AssetIndexStatus.CatchingUp(23_871), mgr.assetIndexStatus.value)
 
         // Waiting but inside the recheck interval (not asked this pass): still waiting.
-        mgr.beginIndexerWaitCount()
-        ask(mgr, 1)
-        mgr.endIndexerWaitCount()
+        mgr.indexerWaitPass { ask(mgr, 1) }
         assertEquals(1, asked.size)
         assertEquals(AssetIndexStatus.CatchingUp(23_871), mgr.assetIndexStatus.value)
 
         // The output was spent meanwhile: nothing waits any more.
         rows[key(waiting, 0)] = rows.getValue(key(waiting, 0)).copy(spent = true)
-        mgr.beginIndexerWaitCount()
-        ask(mgr, 2 * minute)
-        mgr.endIndexerWaitCount()
+        mgr.indexerWaitPass { ask(mgr, 2 * minute) }
         assertEquals(AssetIndexStatus.Current, mgr.assetIndexStatus.value)
+    }
+
+    /** Each pass counts for itself: an output that waited in an earlier pass, or was asked about
+     *  outside any pass, does not keep the state alive once a whole pass finds nothing waiting. */
+    @Test fun a_pass_counts_only_what_it_saw_itself() = runTest {
+        val mgr = manager()
+        answers[key(waiting, 0)] = syncing
+        ask(mgr, 0)                                  // outside any pass
+        mgr.indexerWaitPass { ask(mgr, minute) }     // and inside one
+        assertEquals(AssetIndexStatus.CatchingUp(23_871), mgr.assetIndexStatus.value)
+
+        assertEquals("the pass's own result is returned", 7, mgr.indexerWaitPass { 7 })
+        assertEquals(AssetIndexStatus.Current, mgr.assetIndexStatus.value)
+    }
+
+    /** A pass that did not finish did not look at everything, so it clears nothing. */
+    @Test fun a_pass_that_does_not_finish_clears_nothing() = runTest {
+        val mgr = manager()
+        answers[key(waiting, 0)] = syncing
+        ask(mgr, 0)
+        val thrown = runCatching { mgr.indexerWaitPass<Unit> { throw IllegalStateException("stopped") } }
+        assertTrue(thrown.exceptionOrNull() is IllegalStateException)
+        assertEquals(AssetIndexStatus.CatchingUp(23_871), mgr.assetIndexStatus.value)
+    }
+
+    /**
+     * A syncing answer met by a send has no receipt waiting behind it, so only the periodic pass
+     * over the wallet's transactions can clear the note. That pass cannot run on the JVM (it
+     * lists transactions through the native bridge), so its wiring is read from the source: the
+     * whole loop runs inside [AssetManager.indexerWaitPass], and nothing else touches the counter.
+     */
+    @Test fun the_periodic_sweep_runs_its_loop_inside_the_wait_pass() {
+        val file = java.io.File("..").canonicalFile
+            .resolve("core/src/main/java/app/aroundtheblock/wallet/core/asset/AssetManager.kt")
+        assertTrue("${file.path} is missing: this gate is watching a file that moved", file.exists())
+        val code = file.readLines()
+            .map { it.substringBefore("//") }
+            .filterNot { it.trimStart().startsWith("*") || it.trimStart().startsWith("/*") }
+            .joinToString("\n")
+        val start = code.indexOf("suspend fun sweepKnownTransactionsForAssets(")
+        assertTrue("cannot find the sweep: the gate is blind, not clean", start >= 0)
+        val end = code.indexOf("retryMissingAssetMetadata()", start)
+        assertTrue("cannot find the end of the sweep: the gate is blind, not clean", end > start)
+        val sweep = code.substring(start, end)
+
+        val pass = sweep.indexOf("indexerWaitPass {")
+        val loop = sweep.indexOf("for (txHash in hashes)")
+        val step = sweep.indexOf("processIncomingAssetTx(")
+        assertTrue("the sweep does not run a wait pass", pass >= 0)
+        assertTrue("cannot find the sweep's loop: the gate is blind, not clean", loop >= 0 && step > loop)
+        assertTrue("the loop starts before the wait pass", pass < loop)
+        // The pass's block closes after the loop's last statement, at the block's own indentation.
+        val closes = sweep.indexOf("\n        }\n", pass)
+        assertTrue("the wait pass closes before the loop's work", closes > step)
+        assertEquals("one loop over the wallet's transactions", loop, sweep.lastIndexOf("for (txHash in hashes)"))
+
+        assertEquals("the counter is reset in one place", 1, Regex("""waitingOnIndexer\.set\(""").findAll(code).count())
+        assertEquals("and counted in one place", 1, Regex("""waitingOnIndexer\.incrementAndGet\(""").findAll(code).count())
+    }
+
+    /** A send's own lookups feed the same state: a send stopped by a syncing index says why. */
+    @Test fun a_send_selection_lookup_answered_syncing_sets_catching_up() = runTest {
+        val mgr = manager()
+        val coin = UtxoEntity(
+            txid = held, vout = 0, scriptPubKey = byteArrayOf(1, 1), satoshis = 600, blockHeight = 1,
+            isAsset = true, assetId = X, assetQuantity = 40,
+        )
+        val fee = UtxoEntity(txid = "f".repeat(64), vout = 0, scriptPubKey = byteArrayOf(1, 1), satoshis = 1_000_000, blockHeight = 1)
+        answers[key(held, 0)] = StackLookup.NotYet(indexSyncing = true, blocksBehind = 400)
+
+        val outcome = mgr.sendSelection.choose(X, listOf(coin), listOf(fee), quantity = 3, feePerKb = 100_000)
+
+        assertEquals("nothing is planned on a coin the index cannot vouch for",
+            app.aroundtheblock.wallet.core.asset.send.AssetSendSelection.Outcome.Unverified, outcome)
+        assertEquals(listOf(key(held, 0)), asked)
+        assertEquals(AssetIndexStatus.CatchingUp(400), mgr.assetIndexStatus.value)
     }
 
     // ── what is not asked ────────────────────────────────────────────────────────────────────

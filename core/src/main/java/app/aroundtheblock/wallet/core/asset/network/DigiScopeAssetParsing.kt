@@ -88,6 +88,10 @@ internal object DigiScopeAssetParsing {
         )
     }
 
+    /** A 503 from `GET /digiassets/asset/...`: true only for the endpoint's own "the whole index is
+     *  behind" body, by the same test as [notReady]. */
+    fun indexSyncing(body: String?): Boolean = (notReady(body) as? StackLookup.NotYet)?.indexSyncing == true
+
     private fun wholeNonNegative(raw: Any?): Long? = when (raw) {
         is Int -> raw.toLong()
         is Long -> raw

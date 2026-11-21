@@ -56,24 +56,28 @@ class MultiEndpointAssetClient(
 
     /**
      * The first endpoint with the data wins. An endpoint that refuses the reference
-     * ([AssetDataLookup.Refused]) is working and has answered: it is not a failure, does not count
-     * toward that endpoint's circuit breaker (which would also stop raw transactions being asked
-     * of it), and the next endpoint is asked. Refused is the result only when every endpoint that
-     * answered refused.
+     * ([AssetDataLookup.Refused]) or says its index is still syncing ([AssetDataLookup.NotYet]) is
+     * working and has answered: it is not a failure, does not count toward that endpoint's circuit
+     * breaker (which would also stop raw transactions being asked of it), and the next endpoint is
+     * asked. With no data from any endpoint the result is NotYet when one said so (the lookup can
+     * succeed later), else Refused when one refused, else NoAnswer. None of the three is data.
      */
     override suspend fun lookupAssetData(assetId: String): AssetDataLookup {
-        var refusedNow = false
+        var answeredNow = false
         var anyRefused = false
-        val found = tryEach("getAssetData", answeredWithoutResult = { refusedNow }) { endpoint ->
-            refusedNow = false
+        var anyNotYet = false
+        val found = tryEach("getAssetData", answeredWithoutResult = { answeredNow }) { endpoint ->
+            answeredNow = false
             when (val l = endpoint.lookupAssetData(assetId)) {
                 is AssetDataLookup.Found -> l.data
-                AssetDataLookup.Refused -> { refusedNow = true; anyRefused = true; null }
+                AssetDataLookup.Refused -> { answeredNow = true; anyRefused = true; null }
+                AssetDataLookup.NotYet -> { answeredNow = true; anyNotYet = true; null }
                 AssetDataLookup.NoAnswer -> null
             }
         }
         return when {
             found != null -> AssetDataLookup.Found(found)
+            anyNotYet -> AssetDataLookup.NotYet
             anyRefused -> AssetDataLookup.Refused
             else -> AssetDataLookup.NoAnswer
         }
@@ -105,7 +109,8 @@ class MultiEndpointAssetClient(
     }
 
     /** [answeredWithoutResult]: asked after [block] returned null; true when the endpoint did answer
-     *  (it refused the request), so the null is not a failure of the endpoint. */
+     *  (it refused the request, or said its index is syncing), so the null is not a failure of the
+     *  endpoint. */
     private suspend fun <T> tryEach(
         label: String,
         answeredWithoutResult: () -> Boolean = { false },
@@ -131,7 +136,7 @@ class MultiEndpointAssetClient(
                     return result
                 }
                 if (answeredWithoutResult()) {
-                    Log.d(TAG, "$label: ${endpoint.endpointLabel} refused the reference; trying the next endpoint")
+                    Log.d(TAG, "$label: ${endpoint.endpointLabel} answered without a result (refused, or its index is syncing); trying the next endpoint")
                     continue
                 }
                 mutex.withLock { recordFailure(state, now, endpoint.endpointLabel, label) }

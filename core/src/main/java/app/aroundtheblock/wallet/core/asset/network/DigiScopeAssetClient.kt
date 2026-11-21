@@ -119,7 +119,9 @@ class DigiScopeAssetClient(
     /**
      * `GET /digiassets/asset/:ref`. A reference the route does not take ([DigiScopeAssetRef]) is
      * [AssetDataLookup.Refused] without a request; the route's own 400 reads the same. Either way
-     * that is one request at most: nothing here asks twice.
+     * that is one request at most: nothing here asks twice. The route's own 503 `syncing` (it
+     * answers it while the index is far behind, as the txout route does) is [AssetDataLookup.NotYet];
+     * any other 503 is [AssetDataLookup.NoAnswer].
      */
     override suspend fun lookupAssetData(assetId: String): AssetDataLookup {
         if (!DigiScopeAssetRef.isValid(assetId)) {
@@ -127,10 +129,13 @@ class DigiScopeAssetClient(
             return AssetDataLookup.Refused
         }
         var refused = false
+        var notYet = false
         val json = getJson("$baseUrl/digiassets/asset/$assetId", AssetAnswerCaps.ASSET_DATA) { code, body ->
             refused = code == 400 && DigiScopeAssetParsing.isRefusal(body)
+            notYet = code == 503 && DigiScopeAssetParsing.indexSyncing(body)
         } as? JSONObject
         if (refused) return AssetDataLookup.Refused
+        if (notYet) return AssetDataLookup.NotYet
         val parsed = json?.let { DigiScopeAssetParsing.assetData(it, fallbackAssetId = assetId) }
             ?: return AssetDataLookup.NoAnswer
         // The ipfs blob, when the backend inlines one, is richer than the parser's remit.

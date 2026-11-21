@@ -69,6 +69,10 @@ sealed interface AssetDataLookup {
      *  tell it would and did not ask. The endpoint is working; this request is simply not valid
      *  there. Nothing shown changes, and the same request is not repeated. */
     data object Refused : AssetDataLookup
+    /** The endpoint answered that its index is too far behind to say (its 503 `syncing`). It is
+     *  working and has answered, so this is not a failure of the endpoint; and it has said nothing
+     *  about the asset: never "no such asset", never "no rules". Asked again on a later lookup. */
+    data object NotYet : AssetDataLookup
     /** No usable answer: unreachable, an error status, a body that could not be read. */
     data object NoAnswer : AssetDataLookup
 }
