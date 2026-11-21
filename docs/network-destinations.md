@@ -78,7 +78,8 @@ unless it is a DigiByte P2P node.
 | `testnetseed.digibyte.io` `testnetseed.digibyte.link` `testnetseed.digibyte.services` | core `BRChainParams.h` `BRTestNetDNSSeeds` | Testnet DNS seeds | No | As above |
 | `api.digiscope.me` | `SyncService` / `SyncWorker` `SEEDER_URL` through `SeederClient`; `core/network/DigiScopePins.kt`; core `BRDigiScopePins.h` | **Seeder:** `/api/peers?capability=filter` (and `=dandelion` when Dandelion is on), hourly, certificate-pinned | No | The cached list is used; with no cache, the canon and the DNS seeds. **Gap G1:** a stale cache makes the sync start wait for the fetch (below; fix in #187) |
 | `api.digiscope.me` | `DigiScopeAssetClient`, `MultiEndpointAssetClient` | DigiAsset indexer: metadata, address history, the stack on an output | No (assets only) | Metadata reads "offline". An asset **send** refuses (`Outcome.Unverified`) and a received asset stays unchecked (not credited) until the indexer answers. Fails closed; DGB is not affected. **Gap G2** |
-| `assets.digistamp.co` | `DigistampAssetClient`, `DigistampClient`, `DigistampUris`, `DigistampPins`, `network_security_config.xml` | Second asset indexer; the DigiStamp section (WebView) and its Digi-ID sign-in | No | The DigiScope indexer answers alone; the DigiStamp page does not load |
+| `assets.digistamp.co` | `DigistampAssetClient`, `DigistampUris`, `DigistampPins`, `network_security_config.xml` | Second asset indexer; the DigiStamp section (WebView) | No | The DigiScope indexer answers alone; the DigiStamp page does not load |
+| `id.digistamp.co` | `DigistampUris.SIGN_IN_HOST`, `DigistampIdPins`, `network_security_config.xml`; `DigiIdManager` posts the approved answer | DigiStamp's Digi-ID sign-in host: its sign-in pages load in the DigiStamp section (WebView) when the user taps "Sign in" there, and the wallet posts the signed Digi-ID answer to it after the user approves. Certificate-pinned in both. Never contacted unless the user opens sign-in | No | Sign-in to the Market does not complete; browsing it signed out still works |
 | `api.digiscope.me` | `core/ipfs/IpfsClient.kt` `DEFAULT_GATEWAYS[0]` | IPFS pin proxy for asset images and metadata | No | The next gateway |
 | `trustless-gateway.link` `dweb.link` `ipfs.io` | `IpfsClient.DEFAULT_GATEWAYS` | Public IPFS gateways (content checked against the CID) | No | The next gateway; after the last, a placeholder image |
 | `api.digiscope.me` | `DigiScopeClient`, `HubWebSocket` (`wss://…/api/hub/ws`) | Community Hub: Digi-ID login, profile, chat, DigiRunner scores | No (Hub only) | The Hub tab shows its error state; the socket retries with backoff. Nothing in the wallet waits on it |
@@ -122,15 +123,14 @@ user turns Tor on. The Play flavor makes no Play-services calls.
 | `app/src/main/java/app/aroundtheblock/wallet/ui/asset/AssetMediaViewer.kt` | Coil `AsyncImage` | IPFS gateways |
 | `app/src/main/java/app/aroundtheblock/wallet/ui/asset/IpfsFetcher.kt` | Coil fetcher for `ipfs://` (through `IpfsClient`) | IPFS gateways |
 | `app/src/main/java/app/aroundtheblock/wallet/ui/components/RootDetector.kt` | `Socket` to loopback | The device only |
-| `app/src/main/java/app/aroundtheblock/wallet/ui/digistamp/DigistampScreen.kt` | WebView | `assets.digistamp.co` |
-| `app/src/main/java/app/aroundtheblock/wallet/ui/digistamp/DigistampWebViewClient.kt` | WebView | `assets.digistamp.co` |
+| `app/src/main/java/app/aroundtheblock/wallet/ui/digistamp/DigistampScreen.kt` | WebView | `assets.digistamp.co`, `id.digistamp.co` (sign-in pages) |
+| `app/src/main/java/app/aroundtheblock/wallet/ui/digistamp/DigistampWebViewClient.kt` | WebView | `assets.digistamp.co`, `id.digistamp.co` (sign-in pages) |
 | `core/src/main/java/app/aroundtheblock/wallet/core/PriceProvider.kt` | OkHttp | CoinGecko, Binance |
 | `core/src/main/java/app/aroundtheblock/wallet/core/UpdateChecker.kt` | OkHttp | `api.github.com` |
 | `core/src/main/java/app/aroundtheblock/wallet/core/asset/network/DigiScopeAssetClient.kt` | OkHttp | `api.digiscope.me` |
 | `core/src/main/java/app/aroundtheblock/wallet/core/asset/network/DigistampAssetClient.kt` | OkHttp | `assets.digistamp.co` |
 | `core/src/main/java/app/aroundtheblock/wallet/core/digiid/DigiIdManager.kt` | OkHttp | Digi-ID callbacks |
 | `core/src/main/java/app/aroundtheblock/wallet/core/digiscope/DigiScopeClient.kt` | OkHttp | `api.digiscope.me` Hub |
-| `core/src/main/java/app/aroundtheblock/wallet/core/digistamp/DigistampClient.kt` | OkHttp | `assets.digistamp.co` |
 | `core/src/main/java/app/aroundtheblock/wallet/core/hub/HubWebSocket.kt` | OkHttp WebSocket | `api.digiscope.me` Hub |
 | `core/src/main/java/app/aroundtheblock/wallet/core/ipfs/IpfsClient.kt` | OkHttp | IPFS gateways |
 | `core/src/main/java/app/aroundtheblock/wallet/core/reconcile/DgbNodeClient.kt` | OkHttp | `api.digiscope.me` reconcile |

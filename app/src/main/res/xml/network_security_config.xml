@@ -26,4 +26,24 @@
             <pin digest="SHA-256">C5+lpZ7tcVwmwQIMcRtPbsQtWLABXhQzejna0wHFr8M=</pin>
         </pin-set>
     </domain-config>
+    <!--
+      id.digistamp.co is DigiStamp's Digi-ID sign-in host (MARKET-SIGNIN-ID-HOST): its sign-in pages
+      render in the Market's view and the wallet posts the signed Digi-ID answer to it. Pinned here
+      for the same reason as the host above: the platform pin-set is what covers the WebView.
+
+      The same pins as app.aroundtheblock.wallet.core.network.DigistampIdPins.PINS (leaf, Let's
+      Encrypt YE2, and the ISRG Root YE / X2 / X1 backups), in the same order; PlatformPinSetParityTest
+      holds them equal. This host has its own certificate and key, and its intermediate (YE2) is not
+      the one above (YE1). No expiration attribute, as above. Captured 2026-11-21 from the live chain.
+    -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="false">id.digistamp.co</domain>
+        <pin-set>
+            <pin digest="SHA-256">4dpnWZ66VWKWEIqNBMK+Q1c+aROvD560F9yvVxr6+H4=</pin>
+            <pin digest="SHA-256">s/tdAOmUzd8syaTuqfgGvFcn6DzA5Cmb+Vby1ST+U3Y=</pin>
+            <pin digest="SHA-256">sCkq5UWXjg+7mKu9lMhhYF5bGLsy7VI/UNW3tccdR7w=</pin>
+            <pin digest="SHA-256">diGVwiVYbubAI3RW4hB9xU8e/CH2GnkuvVFZE8zmgzI=</pin>
+            <pin digest="SHA-256">C5+lpZ7tcVwmwQIMcRtPbsQtWLABXhQzejna0wHFr8M=</pin>
+        </pin-set>
+    </domain-config>
 </network-security-config>

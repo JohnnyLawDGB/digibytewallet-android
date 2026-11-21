@@ -472,9 +472,10 @@ fun AppNavigation(
                     // user sees which domain they are authenticating to and approves it — the
                     // page supplies a destination, never a decision.
                     //
-                    // Digistamp's sign-in offers "Or tap here on mobile" beside its QR code,
-                    // which is a digiid:// link. In-app that is the only usable option: you
-                    // cannot scan your own screen.
+                    // DigiStamp's sign-in page (id.digistamp.co) offers "Open my DigiByte wallet"
+                    // beside its QR code, which is a digiid:// link. In-app that is the only
+                    // usable option: you cannot scan your own screen. The confirmation shows the
+                    // host the link names, and Back from it returns here with the page intact.
                     onWalletAction = { uri ->
                         val raw = uri.toString()
                         if (uri.scheme == "digiid") {

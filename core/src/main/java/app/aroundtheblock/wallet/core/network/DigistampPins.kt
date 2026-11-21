@@ -21,6 +21,9 @@ import okhttp3.CertificatePinner
  * NOTE this host is operated by a third party, so a chain change can arrive without warning.
  * That is a standing coordination dependency, not a one-time setup step.
  *
+ * DigiStamp's sign-in host, `id.digistamp.co`, has its own certificate and its own list:
+ * [DigistampIdPins]. A value retired here can be live there (YE2 is), so retirement is per host.
+ *
  * Extract current pins with:
  *   openssl s_client -connect assets.digistamp.co:443 -servername assets.digistamp.co \
  *     -showcerts </dev/null 2>/dev/null | \
@@ -51,15 +54,17 @@ object DigistampPins {
     )
 
     /**
-     * The pinner for a client made to reach this host: these pins AND the DigiScope pins
-     * ([DigiScopePins]). A pinner set on a client derived from the shared one replaces the shared
-     * pinner, so one holding only these pins would let that client reach the DigiScope host — by a
-     * redirect, say — with no pin check. OkHttp checks a pinner only for the hosts it holds pins
-     * for, so the DigiScope pins change nothing for this host.
+     * The pinner for a client made to reach DigiStamp: these pins, the sign-in host's
+     * ([DigistampIdPins], MARKET-SIGNIN-ID-HOST) AND the DigiScope pins ([DigiScopePins]). A pinner
+     * set on a client derived from the shared one replaces the shared pinner, so one holding only
+     * these pins would let that client reach the DigiScope host — by a redirect, say — with no pin
+     * check. OkHttp checks a pinner only for the hosts it holds pins for, so each host's pins change
+     * nothing for the others.
      */
     fun certificatePinner(): CertificatePinner =
         CertificatePinner.Builder()
             .apply { PINS.forEach { add(HOST, it) } }
+            .apply { DigistampIdPins.PINS.forEach { add(DigistampIdPins.HOST, it) } }
             .apply { DigiScopePins.PINS.forEach { add(DigiScopePins.HOST, it) } }
             .build()
 }
