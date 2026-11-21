@@ -114,6 +114,12 @@ Any user-facing string ships in **every language in `AppLocale.SUPPORTED` in the
 - **Which key signs (Q4 A, 2026-11-10; #268):** the shared `m/0'/0/0` identity only for `digiscope.me` and `api.digiscope.me`, matched exactly; every other host gets its per-site SLIP-0013 identity. This phone's login history decides nothing and there is no identity choice. One copy of the rule: `IdentityKeyPolicy`.
 - **Coinomi-compatible sign-in:** designed in `docs/superpowers/specs/2026-11-17-coinomi-digiid-design.md`. Step 1 is merged in the core (`BRDigiIdRoot`: the per-site master key is a per-call argument); the app does not use it yet, and the bridge still derives per-site keys with `"DigiByte seed"`.
 
+### Market (DigiStamp, in a retained WebView)
+- **No JavaScript bridge, ever** (`scripts/check-no-js-bridge.sh`, CI). The only channel from a page to the wallet is a navigation, decided by `DigistampNavigationPolicy` and turned into a native screen.
+- **In-app origin = two exact hosts** (`DigistampUris.isInAppOrigin`): `assets.digistamp.co` (any path) and the sign-in pages of `id.digistamp.co` (`/`, `/account`, `/id…`, `/auth/…` only). HTTPS, default port, no user info; everything else opens in the browser. Both pinned in OkHttp (`DigistampPins`, `DigistampIdPins`) and in `network_security_config.xml`; they have separate certificates, so a pin retired for one can be live for the other.
+- **Sign-in happens on `id.digistamp.co` (MARKET-SIGNIN-ID-HOST, 2026-11-21).** The page asks its own server for the Digi-ID request (bound to the view's cookie jar) and offers it as a `digiid:` link; the wallet's approval screen names `id.digistamp.co`, and the page then redirects back to the marketplace, where the session cookie is set. The wallet fetches no challenge itself. **A sign-in page is never reloaded on return** (`reloadsOnReturn`): its pending request lives in the page's memory.
+- The per-site Digi-ID key is derived from the callback URL, so a wallet's identity at `id.digistamp.co` is not the one it had at `assets.digistamp.co`.
+
 ### Community Hub
 - Backend: `/opt/digiscope-backend/` on `digiscope.me` (PM2 id=5, port 3001)
 - REST at `/api/hub/*`, WebSocket at `/api/hub/ws`

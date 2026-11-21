@@ -135,4 +135,21 @@ class IdentitySessionEraserTest {
         // A main thread that never ran the block within the wait: not confirmed.
         assertFalse(IdentitySessionEraser({ true }, { true }, { false }).eraseIdentitySessions())
     }
+
+    /**
+     * MARKET-SIGNIN-ID-HOST: the Market's session spans two hosts. The wipe and the wallet switch end
+     * it by emptying the whole cookie jar and all web storage; nothing here is done per host, so a
+     * second host cannot be left behind. A per-host removal would be a list to keep in step.
+     */
+    @Test fun `the web session is ended for every host at once, never host by host`() {
+        val src = java.io.File("src/main/java/app/aroundtheblock/wallet/IdentitySessionEraser.kt").readText()
+            .replace(Regex("/\\*.*?\\*/", RegexOption.DOT_MATCHES_ALL), "")
+            .lines().joinToString("\n") { it.substringBefore("//") }
+        assertTrue("the whole jar is no longer emptied", src.contains("CookieManager.getInstance().removeAllCookies"))
+        assertTrue("web storage is no longer emptied whole", src.contains("WebStorage.getInstance().deleteAllData()"))
+        for (perHost in listOf(".setCookie(", ".getCookie(", "deleteOrigin(", "digistamp.co")) {
+            assertTrue("the web session is ended per host ($perHost)", !src.contains(perHost))
+        }
+    }
 }
+

@@ -42,5 +42,8 @@ class DigistampPinsTest {
         val pins = DigistampPins.certificatePinner().pins
         assertEquals(DigistampPins.PINS.size, pins.count { it.pattern == DigistampPins.HOST })
         assertEquals(DigiScopePins.PINS.size, pins.count { it.pattern == DigiScopePins.HOST })
+        assertEquals(DigistampIdPins.PINS.size, pins.count { it.pattern == DigistampIdPins.HOST })
+        assertEquals("the pinner holds pins for a host that is not one of the three",
+            DigistampPins.PINS.size + DigistampIdPins.PINS.size + DigiScopePins.PINS.size, pins.size)
     }
 }

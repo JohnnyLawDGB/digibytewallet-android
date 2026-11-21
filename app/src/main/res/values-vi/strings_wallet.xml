@@ -337,6 +337,7 @@
     <string name="al_create">Tạo DigiAsset trên digiscope.me</string>
     <string name="al_count">Tìm thấy %1$d tài sản</string>
     <string name="al_artifacts"> · %1$d hiện vật</string>
+    <string name="al_index_catching_up">Chỉ mục DigiAsset đang cập nhật cho kịp. Các tài sản hiển thị ở đây là dữ liệu đã biết gần nhất; tài sản mới nhận sẽ xuất hiện khi hoàn tất.</string>
 
     <string name="rf_title">Khôi phục tiền từ ví khác</string>
     <string name="rf_checking_paths">Đang kiểm tra các đường dẫn dẫn xuất cũ…</string>

@@ -333,6 +333,7 @@
     <string name="al_create">Créer un DigiAsset sur digiscope.me</string>
     <string name="al_count">%1$d actifs trouvés</string>
     <string name="al_artifacts"> · %1$d artefacts</string>
+    <string name="al_index_catching_up">L\'index DigiAsset est en cours de rattrapage. Les actifs affichés ici sont les derniers connus ; ceux reçus récemment apparaîtront une fois qu\'il aura terminé.</string>
     <string name="rf_title">Récupérer les fonds d\'un autre portefeuille</string>
     <string name="rf_checking_paths">Vérification des anciens chemins de dérivation…</string>
     <string name="rf_scanning_phrase">Analyse de la phrase saisie…</string>

@@ -85,6 +85,30 @@ class DigistampWebViewClientTest {
         assertEquals(listOf(signIn), walletScreens)
     }
 
+    /**
+     * MARKET-SIGNIN-ID-HOST: the sign-in page (on DigiStamp's Digi-ID host) is a page of the view,
+     * its request reaches the wallet as the link the user taps, unchanged, and the page it then
+     * goes to (back on the marketplace) loads in place. Nothing is handed to the browser.
+     */
+    @Test fun `sign-in on the Digi-ID host stays in the view and its link opens the wallet screen`() {
+        val signInPage = "https://id.digistamp.co/id/signin?site=assets&state=abc&next=%2F"
+        val request = "digiid://id.digistamp.co/api/auth/digiid/callback?x=f327de4fb2dbf5c1a98d796f5535dd4a"
+
+        assertEquals("the redirect to the sign-in page", false, ask(signInPage, mainFrame = true, view = view(page)))
+        assertEquals(true, ask(request, mainFrame = true, view = view(signInPage)))
+        assertEquals(listOf(request), walletScreens)
+        assertEquals("the way back to the marketplace", false,
+            ask("https://assets.digistamp.co/", mainFrame = true, view = view(signInPage)))
+        assertTrue(browser.isEmpty())
+
+        // And a committed sign-in page is not sent home by the commit-time backstop.
+        val shown = view(signInPage)
+        client.onPageStarted(shown, signInPage, null)
+        client.doUpdateVisitedHistory(shown, signInPage, false)
+        verify(exactly = 0) { shown.stopLoading() }
+        verify(exactly = 0) { shown.loadUrl(any()) }
+    }
+
     @Test fun `an https link to another site goes to the browser`() {
         assertEquals(true, ask("https://digibyte.org/", mainFrame = true))
         assertEquals(listOf("https://digibyte.org/"), browser)

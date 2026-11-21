@@ -4,7 +4,6 @@ import android.content.Context
 import app.aroundtheblock.wallet.core.asset.network.DigiScopeAssetClient
 import app.aroundtheblock.wallet.core.asset.network.DigistampAssetClient
 import app.aroundtheblock.wallet.core.digiscope.DigiScopeClient
-import app.aroundtheblock.wallet.core.digistamp.DigistampClient
 import io.mockk.every
 import io.mockk.mockk
 import okhttp3.OkHttpClient
@@ -31,7 +30,6 @@ class PinnedClientsNoRedirectTest {
         every { ctx.getSharedPreferences(any(), any()) } returns app.aroundtheblock.wallet.core.InMemoryPrefs()
         val clients = mapOf(
             "DigistampAssetClient" to clientOf(DigistampAssetClient(base)),
-            "DigistampClient" to clientOf(DigistampClient(base)),
             "DigiScopeAssetClient" to clientOf(DigiScopeAssetClient(base)),
             "DigiScopeClient" to clientOf(DigiScopeClient(base, ctx)),
         )

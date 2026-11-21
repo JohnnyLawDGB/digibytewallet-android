@@ -337,6 +337,7 @@
     <string name="al_create">Buat DigiAsset di digiscope.me</string>
     <string name="al_count">%1$d aset ditemukan</string>
     <string name="al_artifacts"> · %1$d artefak</string>
+    <string name="al_index_catching_up">Indeks DigiAsset sedang mengejar ketertinggalan. Aset yang ditampilkan di sini adalah yang terakhir diketahui; aset yang baru diterima akan muncul setelah selesai.</string>
 
     <string name="rf_title">Pulihkan dana dari dompet lain</string>
     <string name="rf_checking_paths">Memeriksa jalur derivasi lama…</string>

@@ -4,10 +4,11 @@ import android.content.Context
 import android.content.SharedPreferences
 import app.aroundtheblock.wallet.core.UpdateChecker
 import app.aroundtheblock.wallet.core.asset.network.MultiEndpointAssetClient
-import app.aroundtheblock.wallet.core.digistamp.DigistampClient
 import app.aroundtheblock.wallet.core.hub.HubWebSocket
 import app.aroundtheblock.wallet.core.ipfs.IpfsClient
 import app.aroundtheblock.wallet.core.network.DigiScopePins
+import app.aroundtheblock.wallet.core.network.DigistampIdPins
+import app.aroundtheblock.wallet.core.network.DigistampPins
 import app.aroundtheblock.wallet.core.reconcile.DgbNodeClient
 import app.aroundtheblock.wallet.core.tor.TorManager
 import io.mockk.every
@@ -59,7 +60,7 @@ class SharedClientPinsTest {
     /** GUARD: OkHttp applies a pinner only to the hosts it holds pins for. */
     @Test fun `the shared client holds no pins for any other host`() {
         for (host in listOf(
-            "api.coingecko.com", "api.binance.com", "api.github.com", "assets.digistamp.co",
+            "api.coingecko.com", "api.binance.com", "api.github.com", "assets.digistamp.co", "id.digistamp.co",
             "trustless-gateway.link", "dweb.link", "ipfs.io", "digiassets.net", "digiscope.me",
         )) {
             assertTrue("the shared client pins $host", shared.certificatePinner.findMatchingPins(host).isEmpty())
@@ -158,6 +159,24 @@ class SharedClientPinsTest {
         assertPinsDigiScope("the Digi-ID manager's client", clientOf(manager, "httpClient"))
     }
 
+    /**
+     * MARKET-SIGNIN-ID-HOST: the Market signs in at DigiStamp's Digi-ID host, so the signed answer the
+     * wallet posts there goes out on a client that holds that host's pins, all of them and no others.
+     * The shared client holds none for it (the guard above), so this is the manager's own pinner.
+     */
+    @Test fun `the Digi-ID callback to DigiStamp's sign-in host is pinned`() {
+        val manager = AppModule.provideDigiIdManager(shared, mockk(relaxed = true), mockk(relaxed = true))
+        val pinner = clientOf(manager, "httpClient").certificatePinner
+        for ((host, pins) in listOf(DigistampIdPins.HOST to DigistampIdPins.PINS, DigistampPins.HOST to DigistampPins.PINS)) {
+            assertEquals("the Digi-ID manager's pins for $host",
+                pins.toSet(), pinner.findMatchingPins(host).map { "sha256/" + it.hash.base64() }.toSet())
+        }
+        // A site that is neither DigiStamp nor DigiScope is not pinned: ordinary TLS validation.
+        assertTrue(pinner.findMatchingPins("example.org").isEmpty())
+        assertTrue("a subdomain of the sign-in host is pinned as if it were the host",
+            pinner.findMatchingPins("x.id.digistamp.co").isEmpty())
+    }
+
     @Test fun `the reconcile client derives its clients from a pinned one`() {
         val node = AppModule.provideDgbNodeClient(context(), shared)
         assertPinsDigiScope("the reconcile client (default endpoint)", clientOf(node, "pinnedClient"))
@@ -182,10 +201,6 @@ class SharedClientPinsTest {
     @Test fun `the asset stack lookup reaches the DigiScope host only through its pins`() {
         val source = app.aroundtheblock.wallet.core.asset.network.DigiScopeAssetClient(baseClient = shared)
         assertPinsDigiScope("the asset stack lookup", clientOf(source, "stackClient"))
-    }
-
-    @Test fun `digistamp's sign-in client reaches the DigiScope host only through its pins`() {
-        assertPinsDigiScope("digistamp's sign-in client", clientOf(DigistampClient(shared), "client"))
     }
 
     /** GUARD: the update check is made on the shared client itself. */

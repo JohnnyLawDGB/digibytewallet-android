@@ -28,9 +28,13 @@ class DigiIdManager(
      */
     private val sign: (DigiIdRequest, IdentityKeyKind) -> String? = ::signNatively,
 ) {
-    // Derived from the shared client, so its Tor proxy, pins and timeouts carry over. Redirects
-    // are not followed: the signed login goes to the host the user approved, or nowhere.
+    // Derived from the shared client, so its Tor proxy and timeouts carry over. Redirects are not
+    // followed: the signed login goes to the host the user approved, or nowhere. The pinner is the
+    // shared client's DigiScope pins plus DigiStamp's two hosts (MARKET-SIGNIN-ID-HOST): the Market
+    // signs in at id.digistamp.co, so the signed answer posted there is pinned. A site with no
+    // pins here gets ordinary TLS validation, as before.
     private val httpClient: OkHttpClient = baseClient.newBuilder()
+        .certificatePinner(app.aroundtheblock.wallet.core.network.DigistampPins.certificatePinner())
         .followRedirects(false)
         .followSslRedirects(false)
         .build()

@@ -2,6 +2,7 @@ package app.aroundtheblock.wallet.ui.asset
 
 import android.net.Uri
 import app.aroundtheblock.wallet.core.LogSafe
+import app.aroundtheblock.wallet.core.ipfs.IpfsClient
 
 /**
  * Normalises the `AssetMetadata.imageUrl` field — which IPFS-hosted asset
@@ -14,7 +15,7 @@ import app.aroundtheblock.wallet.core.LogSafe
  *    (`https://<any host>/ipfs/<cid>[/path]`, or the subdomain form `https://<cid>.ipfs.<host>/path`)
  *    is read for its CID and fetched as `ipfs://<cid>[/path]` through the wallet's own gateways; any
  *    other `https://` or `http://` URL is not loaded (the placeholder is shown).
- *  - `ipfs://<cid>[/path]` → returned as Android Uri with scheme `ipfs`.
+ *  - `ipfs://<cid>[/path]` → returned as Android Uri with scheme `ipfs`, when `<cid>` is a CID.
  *    [IpfsFetcher] recognises the scheme and routes through our
  *    hash-verifying `IpfsClient`.
  *  - `/ipfs/<cid>` → stripped and wrapped to `ipfs://<cid>`.
@@ -46,8 +47,10 @@ object AssetImageResolver {
                 gatewayCid(trimmed)?.let { Uri.parse("ipfs://$it") }
             // Inline data: URIs are not loaded (see the class doc): no fetcher reads them.
             trimmed.startsWith("data:", ignoreCase = true) -> null
-            trimmed.startsWith("ipfs://") -> Uri.parse(trimmed)
-            trimmed.startsWith("/ipfs/") -> Uri.parse("ipfs://${trimmed.removePrefix("/ipfs/")}")
+            // Only a real CID becomes a model (IPFS-NO-NULL): `ipfs://null`, or any other word after
+            // the scheme, used to reach the loader and be asked of every gateway on every draw.
+            trimmed.startsWith("ipfs://") -> ipfsUri(trimmed.removePrefix("ipfs://"))
+            trimmed.startsWith("/ipfs/") -> ipfsUri(trimmed.removePrefix("/ipfs/"))
             isCid(trimmed) -> Uri.parse("ipfs://$trimmed")
             else -> {
                 // ASSET-LOG-CRLF: the value is the issuer's; it reaches the log only escaped and cut short.
@@ -56,6 +59,18 @@ object AssetImageResolver {
                 null
             }
         }
+    }
+
+    /** `ipfs://<cid>[/path]` for [rest] = `<cid>[/path]`, or null (the placeholder) when it names no CID. */
+    private fun ipfsUri(rest: String): Uri? {
+        // The CID ends where android.net.Uri ends the host: at a path, a query or a fragment.
+        val cid = rest.substringBefore('/').substringBefore('?').substringBefore('#')
+        if (IpfsClient.normalizeCid(cid) == null) {
+            android.util.Log.w("AssetImageResolver",
+                "imageUrl names no IPFS CID (${rest.length} chars): ${LogSafe.text(rest, 48)}")
+            return null
+        }
+        return Uri.parse("ipfs://$rest")
     }
 
     /** The `<cid>[/path]` an IPFS gateway URL names, or null when the URL is not one. */

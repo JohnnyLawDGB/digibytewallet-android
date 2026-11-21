@@ -337,6 +337,7 @@
     <string name="al_create">digiscope.me で DigiAsset を作成</string>
     <string name="al_count">%1$d 件のアセットが見つかりました</string>
     <string name="al_artifacts"> · アーティファクト %1$d 件</string>
+    <string name="al_index_catching_up">DigiAsset インデックスが追いついている途中です。ここに表示されているアセットは最後に確認できた内容です。新しく受け取ったアセットは完了後に表示されます。</string>
 
     <string name="rf_title">別のウォレットから資金を復元</string>
     <string name="rf_checking_paths">古い導出パスを確認しています…</string>

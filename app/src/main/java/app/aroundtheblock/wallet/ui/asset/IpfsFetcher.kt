@@ -9,6 +9,7 @@ import coil.fetch.Fetcher
 import coil.fetch.SourceResult
 import coil.key.Keyer
 import coil.request.Options
+import app.aroundtheblock.wallet.core.LogSafe
 import app.aroundtheblock.wallet.core.ipfs.IpfsClient
 import okio.Buffer
 
@@ -21,6 +22,10 @@ import okio.Buffer
  * We don't double-verify inside Coil's pipeline; the bytes are already
  * authenticated. Logging a CID verification failure at ERROR is the
  * exception because it's a potential security signal, not cosmetic.
+ * That line is for a gateway that was asked and gave nothing usable. A
+ * draw for which no gateway was asked (the value is not a CID, or each
+ * gateway said recently that it does not have it) is routine, happens on
+ * every draw of such an icon, and is logged at INFO in other words.
  */
 class IpfsFetcher(
     private val uri: Uri,
@@ -30,12 +35,21 @@ class IpfsFetcher(
 
     override suspend fun fetch(): FetchResult? {
         val cid = extractCid(uri) ?: return null
-        val bytes = ipfsClient.fetchVerified(cid)
+        val fetched = ipfsClient.fetch(cid)
+        val bytes = fetched.bytes
         if (bytes == null) {
-            android.util.Log.e(
-                "IpfsFetcher",
-                "CID verification or fetch failed for $cid — possible gateway tampering or unreachable"
-            )
+            if (fetched.gatewaysFailed > 0) {
+                android.util.Log.e(
+                    "IpfsFetcher",
+                    "CID verification or fetch failed for ${LogSafe.text(cid, 80)} — possible gateway tampering or unreachable"
+                )
+            } else {
+                // The value is the issuer's and may be anything; it reaches the log escaped and cut short.
+                android.util.Log.i(
+                    "IpfsFetcher",
+                    "Not fetched, no gateway asked for ${LogSafe.text(cid, 80)}: not a CID, or not there when last asked"
+                )
+            }
             return null
         }
         val buffer = Buffer().write(bytes)

@@ -5,7 +5,8 @@ import app.aroundtheblock.wallet.ui.util.isSafeExternalUrl
 
 /** What the Market's web view does with one navigation. */
 internal enum class DigistampNavigation {
-    /** Load it in the web view: a main-frame page of the DigiStamp origin. */
+    /** Load it in the web view: a main-frame page of the DigiStamp origin (the marketplace, or a
+     *  sign-in page of DigiStamp's Digi-ID host). */
     LOAD_HERE,
 
     /** Open the wallet screen a `digibyte:` or `digiid:` link names, for the user to read before acting. */
@@ -22,7 +23,11 @@ internal enum class DigistampNavigation {
  * Decides every navigation of the Market's web view (DigistampScreen). Pure — no Android types —
  * so each rule is a unit test (DigistampNavigationPolicyTest).
  *
- * The view stays inside the DigiStamp origin, [DigistampUris.isInAppOrigin]. The platform asks the
+ * The view stays inside the DigiStamp origin, [DigistampUris.isInAppOrigin]: the marketplace host
+ * and the sign-in pages of DigiStamp's Digi-ID host (MARKET-SIGNIN-ID-HOST). Sign-in is a redirect
+ * from the first to the second and back, so both must load here for the marketplace's session
+ * cookie to land in the app; the Digi-ID request itself leaves the page as a `digiid:` navigation,
+ * which [decide] turns into the wallet's approval screen. The platform asks the
  * view's client about the GET navigations a page starts, and about redirects; [decide] answers
  * those. It never asks about a POST, a load the app starts, or Back and Forward, so every
  * main-frame page that commits is checked again with [mustReturnHome].
@@ -53,4 +58,16 @@ internal object DigistampNavigationPolicy {
     /** True when a main-frame page that committed at [committedUrl] is not a DigiStamp page. */
     fun mustReturnHome(committedUrl: String?): Boolean =
         committedUrl == null || !DigistampUris.isInAppOrigin(committedUrl)
+
+    /**
+     * Whether the view reloads the page at [shownUrl] when the user comes back from a wallet screen.
+     *
+     * A marketplace page is reloaded: what the wallet did is known to the server, and a reload asks
+     * it. A sign-in page is NOT. Its pending Digi-ID request lives in the page's memory: the page
+     * checks it on a timer and again the moment it becomes visible, then redirects to the
+     * marketplace by itself. A reload would discard that request and show "Sign in" again, with the
+     * approval the user just gave left unclaimed.
+     */
+    fun reloadsOnReturn(shownUrl: String?): Boolean =
+        shownUrl == null || !DigistampUris.isSignInPage(shownUrl)
 }
