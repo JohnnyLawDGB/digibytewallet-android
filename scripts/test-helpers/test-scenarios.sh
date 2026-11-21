@@ -175,7 +175,9 @@ clear_logs() { adbx logcat -b all -c > /dev/null 2>&1 || adbx logcat -c > /dev/n
 
 uninstall_app() {
     adbx shell am force-stop "$PACKAGE" > /dev/null 2>&1
-    adbt 60 uninstall "$PACKAGE" > /dev/null 2>&1
+    if adbt 60 uninstall "$PACKAGE" > /dev/null 2>&1; then
+        sleep 3   # let the system finish removing the old install's task before the next one starts
+    fi
     WALLET_STATE="none"
 }
 
@@ -186,7 +188,23 @@ fresh_install() {
     clear_logs
 }
 
-launch_app() { adbt 30 shell am start -n "$ACTIVITY" > /dev/null 2>&1; }
+# launch_app — start the activity. One case gets a second start: right after an uninstall and
+# reinstall, ActivityManager can still be removing the PREVIOUS install's task, and kills the
+# new process with it ("Killing <pid>:<package> … remove task"). That is the system, not the
+# app, and it is named in the system log; anything else that leaves no process is left for
+# the scenario to report.
+launch_app() {
+    local am
+    adbt 30 shell am start -n "$ACTIVITY" > /dev/null 2>&1
+    sleep 3
+    [[ -n "$(app_pid)" ]] && return 0
+    am="$(adbx logcat -d -s ActivityManager:I 2>/dev/null)"
+    if grep -q -E "Killing [0-9]+:$PACKAGE.*remove task" <<< "$am"; then
+        log "launch: the system killed the new process while removing the previous install's task; starting again"
+        adbt 30 shell am start -n "$ACTIVITY" > /dev/null 2>&1
+        sleep 2
+    fi
+}
 
 relaunch_app() {
     adbx shell am force-stop "$PACKAGE" > /dev/null 2>&1
