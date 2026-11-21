@@ -7,6 +7,7 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkStatic
 import io.mockk.unmockkStatic
+import io.mockk.verify
 import kotlinx.coroutines.runBlocking
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -62,12 +63,17 @@ class IpfsFetcherMissingCidTest {
         status = 200
         for (host in listOf(null, "", " ", "null", "NULL", "undefined", "QmAB", "logo.png")) assertNull("'$host'", fetch(host))
         assertEquals("requests made: $requested", 0, requested.size)
+        // Nothing was asked, so nothing failed: no ERROR line that reads as a security signal.
+        verify(exactly = 0) { Log.e(any(), any<String>()) }
     }
 
     @Test fun `a picture no gateway has is asked for once, however often its icon is drawn`() {
         val cid = "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG"
         repeat(40) { assertNull(fetch(cid)) }                  // the list scrolled, the screen reopened
         assertEquals(gateways.map { it.replace("{cid}", cid) }, requested)
+        // Review round 1: the one draw that asked and was refused says so at ERROR; the 39 that asked
+        // nobody do not repeat "possible gateway tampering" for a request that was never made.
+        verify(exactly = 1) { Log.e(any(), any<String>()) }
     }
 
     @Test fun `a picture the gateways failed to serve is asked for on each draw, as before`() {
@@ -75,5 +81,6 @@ class IpfsFetcherMissingCidTest {
         val cid = "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG"
         repeat(3) { assertNull(fetch(cid)) }
         assertEquals(6, requested.size)
+        verify(exactly = 3) { Log.e(any(), any<String>()) }    // asked and failed: the signal stays
     }
 }

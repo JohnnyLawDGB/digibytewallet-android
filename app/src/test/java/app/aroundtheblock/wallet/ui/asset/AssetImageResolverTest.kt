@@ -28,7 +28,9 @@ class AssetImageResolverTest {
         every { Uri.parse(any()) } answers {
             val raw = firstArg<String>()
             val scheme = raw.substringBefore("://", missingDelimiterValue = "")
-            val host = raw.substringAfter("://", missingDelimiterValue = raw).substringBefore("/")
+            // android.net.Uri ends the authority at the first '/', '?' or '#'.
+            val host = raw.substringAfter("://", missingDelimiterValue = raw)
+                .substringBefore("/").substringBefore("?").substringBefore("#")
             val mock = mockk<Uri>(relaxed = true)
             every { mock.scheme } returns scheme.ifEmpty { null }
             every { mock.host } returns host.ifEmpty { null }
@@ -105,6 +107,32 @@ class AssetImageResolverTest {
         val cid = "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG"
         assertEquals("ipfs://$cid/logo.png", AssetImageResolver.resolve("ipfs://$cid/logo.png").toString())
         assertEquals("ipfs://$cid/logo.png", AssetImageResolver.resolve("/ipfs/$cid/logo.png").toString())
+    }
+
+    /**
+     * Review round 1: a query or fragment after the CID is not part of it. `android.net.Uri` ends the
+     * host there, so the loader was always handed the bare CID; refusing the value lost the picture.
+     */
+    @Test
+    fun `an ipfs uri or path with a query or fragment after its cid is still loaded by that cid`() {
+        val cid = "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG"
+        for (v in listOf(
+            "ipfs://$cid?filename=logo.png", "ipfs://$cid#x", "/ipfs/$cid?filename=logo.png", "/ipfs/$cid#x",
+            "ipfs://$cid/logo.png?v=2",
+        )) {
+            val result = AssetImageResolver.resolve(v)
+            assertTrue("'$v'", result is Uri)
+            assertEquals("'$v'", "ipfs", (result as Uri).scheme)
+            assertEquals("'$v'", cid, result.host)
+        }
+    }
+
+    @Test
+    fun `a query or fragment does not make a cid of a value that names none`() {
+        for (v in listOf(
+            "ipfs://null?x", "ipfs://null#x", "ipfs://?filename=logo.png", "ipfs://#x", "/ipfs/null?x",
+            "/ipfs/?x", "ipfs://undefined?filename=logo.png", "ipfs://QmAB?x",
+        )) assertNull("'$v'", AssetImageResolver.resolve(v))
     }
 
     @Test

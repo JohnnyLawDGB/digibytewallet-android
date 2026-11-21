@@ -63,7 +63,9 @@ object AssetImageResolver {
 
     /** `ipfs://<cid>[/path]` for [rest] = `<cid>[/path]`, or null (the placeholder) when it names no CID. */
     private fun ipfsUri(rest: String): Uri? {
-        if (IpfsClient.normalizeCid(rest.substringBefore('/')) == null) {
+        // The CID ends where android.net.Uri ends the host: at a path, a query or a fragment.
+        val cid = rest.substringBefore('/').substringBefore('?').substringBefore('#')
+        if (IpfsClient.normalizeCid(cid) == null) {
             android.util.Log.w("AssetImageResolver",
                 "imageUrl names no IPFS CID (${rest.length} chars): ${LogSafe.text(rest, 48)}")
             return null

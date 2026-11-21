@@ -42,7 +42,8 @@ import java.io.IOException
  *     `null`, which Android's `optString` reads as the text "null" (the org.json these tests run
  *     on does not, so the parser is tested with the text a phone produced, and a source gate keeps
  *     `optString` out of the two places it did the damage).
- *  B. A gateway's 404 or 400 for a CID is remembered for [IpfsClient.MISS_TTL_MS]; that gateway is
+ *  B. A gateway's 404 or 400 for a CID is remembered for [IpfsClient.MISS_FIRST_MS], doubling with
+ *     each further miss up to [IpfsClient.MISS_TTL_MS]; that gateway is
  *     not asked for that CID again inside it, the others still are, and it is asked again after.
  *     Every other failure is retried as before.
  *
@@ -257,22 +258,84 @@ class IpfsMissingCidTest {
         assertEquals(1, askedOf("first.example"))
         assertEquals(1, askedOf("second.example"))
 
-        // Every refresh inside the hour: the first gateway is left alone, the fall-through still happens.
-        for (minutes in listOf(0L, 1L, 10L, 59L)) {
+        // Every refresh inside the first window: the first gateway is left alone, the fall-through still happens.
+        for (minutes in listOf(0L, 1L, 5L, 9L)) {
             now = 1_000_000L + minutes * 60_000L
             assertArrayEquals(content, client.fetchVerified(cid))
         }
-        now = 1_000_000L + IpfsClient.MISS_TTL_MS - 1
+        now = 1_000_000L + IpfsClient.MISS_FIRST_MS - 1
         assertArrayEquals(content, client.fetchVerified(cid))
         assertEquals("the gateway that said 404 was asked again inside the window", 1, askedOf("first.example"))
         assertEquals(6, askedOf("second.example"))
 
         // The window is over: it is asked again (and, pinned by now, it answers).
         answers["first.example"] = { 200 to content }
-        now = 1_000_000L + IpfsClient.MISS_TTL_MS
+        now = 1_000_000L + IpfsClient.MISS_FIRST_MS
         assertArrayEquals(content, client.fetchVerified(cid))
         assertEquals(2, askedOf("first.example"))
         assertEquals("the first gateway answered, so the second was not needed", 6, askedOf("second.example"))
+    }
+
+    /**
+     * Review round 1. A just-issued asset's first answer is normally 404 (the document is pinned
+     * after the issuance is seen), so the first wait is the ten minutes the wallet waited before
+     * this change; a CID that stays missing is asked less and less often, down to once an hour.
+     */
+    @Test fun `each further miss doubles the wait, from ten minutes to an hour and no further`() = runBlocking {
+        val client = client(listOf(first))                     // 404 every time
+        val start = now
+        assertNull(client.fetchVerified(cid))
+        val askedAtMinute = ArrayList<Long>().apply { add(0) }
+        var seen = 1
+        // A sweep every 30 seconds for a day, as the asset refresh does.
+        for (tick in 1..(24 * 60 * 2)) {
+            now = start + tick * 30_000L
+            assertNull(client.fetchVerified(cid))
+            if (askedOf("first.example") != seen) { seen = askedOf("first.example"); askedAtMinute += tick / 2L }
+        }
+        assertEquals(listOf(0L, 10L, 30L, 70L, 130L, 190L, 250L), askedAtMinute.take(7))
+        assertEquals("every later wait is the hour", setOf(60L), askedAtMinute.drop(4).zipWithNext { a, b -> b - a }.toSet())
+        assertEquals("requests in a day for a CID that is never pinned", 26, askedAtMinute.size)
+    }
+
+    @Test fun `no wait is ever longer than the hour, however long a CID stays missing`() {
+        val memory = GatewayMissMemory(IpfsClient.MISS_FIRST_MS, IpfsClient.MISS_TTL_MS, 8, clock = { now })
+        repeat(200) {
+            memory.remember("g", "c")
+            now += IpfsClient.MISS_TTL_MS - 1
+            if (it >= 3) assertTrue("miss ${it + 1}", memory.isRemembered("g", "c"))
+            now += 1
+            assertFalse("miss ${it + 1} outlived the hour", memory.isRemembered("g", "c"))
+        }
+    }
+
+    @Test fun `a gateway that serves the CID is asked at once the next time it says not here`() = runBlocking {
+        val client = client(listOf(first))
+        repeat(4) {                                            // 10, 20, 40 minutes: the wait has grown
+            assertNull(client.fetchVerified(cid))
+            now += IpfsClient.MISS_TTL_MS
+        }
+        answers["first.example"] = { 200 to content }          // pinned
+        assertArrayEquals(content, client.fetchVerified(cid))
+        answers["first.example"] = { 404 to ByteArray(0) }     // unpinned again
+        assertNull(client.fetchVerified(cid))
+        val before = askedOf("first.example")
+        now += IpfsClient.MISS_FIRST_MS - 1
+        assertNull(client.fetchVerified(cid))
+        assertEquals(before, askedOf("first.example"))
+        now += 1
+        assertNull(client.fetchVerified(cid))
+        assertEquals("the wait started again at ten minutes", before + 1, askedOf("first.example"))
+    }
+
+    @Test fun `a miss reported twice inside its window does not double the wait twice`() {
+        val memory = GatewayMissMemory(1_000, 8_000, 8, clock = { now })
+        memory.remember("g", "c")
+        memory.remember("g", "c")                              // two fetches raced: one answer, not two
+        now += 999
+        assertTrue(memory.isRemembered("g", "c"))
+        now += 1
+        assertFalse(memory.isRemembered("g", "c"))
     }
 
     @Test fun `a 400 is remembered like a 404`() = runBlocking {
@@ -348,7 +411,7 @@ class IpfsMissingCidTest {
     }
 
     @Test fun `the memory is bounded, and the oldest answer goes first`() {
-        val memory = GatewayMissMemory(ttlMs = 1_000, maxEntries = 3, clock = { now })
+        val memory = GatewayMissMemory(firstMs = 1_000, maxMs = 1_000, maxEntries = 3, clock = { now })
         for (i in 1..5) memory.remember("g", "cid$i")
         assertEquals(3, memory.size())
         assertFalse(memory.isRemembered("g", "cid1"))
@@ -358,16 +421,48 @@ class IpfsMissingCidTest {
         assertFalse("another gateway's answer", memory.isRemembered("h", "cid5"))
         now += 1_000
         assertFalse(memory.isRemembered("g", "cid5"))
-        assertEquals("an expired answer is dropped when it is read", 2, memory.size())
+        // An expired answer stays only as "how long to wait next time"; it still counts to the bound.
+        assertEquals(3, memory.size())
+        for (i in 6..9) memory.remember("g", "cid$i")
+        assertEquals("expired answers are dropped like any other, oldest first", 3, memory.size())
+        // An answer nobody has renewed for longer than the longest wait is dropped when it is read.
+        now += 2_000
+        assertFalse(memory.isRemembered("g", "cid9"))
+        assertEquals(2, memory.size())
+    }
+
+    /**
+     * Review round 1: the image loader reports a failed fetch at ERROR as possible tampering, so it
+     * has to be told whether any gateway was asked and failed, or nothing was asked at all.
+     */
+    @Test fun `fetch says how many gateways were asked and failed, and none when nothing was asked`() = runBlocking {
+        val client = client()                                  // both hosts: 404
+        for (v in listOf("null", "", "QmAB")) client.fetch(v).let { assertNull(it.bytes); assertEquals("'$v'", 0, it.gatewaysFailed) }
+        client.fetch(cid).let { assertNull(it.bytes); assertEquals(2, it.gatewaysFailed) }
+        client.fetch(cid).let { assertNull(it.bytes); assertEquals("both inside their window: none asked", 0, it.gatewaysFailed) }
+        answers["second.example"] = { 200 to content }
+        client.fetch(otherCid).let { assertNull(it.bytes); assertEquals("served, but not the content", 2, it.gatewaysFailed) }
+        now += IpfsClient.MISS_TTL_MS
+        client.fetch(cid).let { assertArrayEquals(content, it.bytes); assertEquals(1, it.gatewaysFailed) }
+    }
+
+    @Test fun `waiting for Tor is not a gateway that failed`() = runBlocking {
+        answers["first.example"] = { throw app.aroundtheblock.wallet.core.tor.TorNotReadyException("tor") }
+        client().fetch(cid).let { assertNull(it.bytes); assertEquals(0, it.gatewaysFailed) }
+        assertEquals("the next gateway is not tried while Tor is not connected", 0, askedOf("second.example"))
+        answers["first.example"] = { 503 to ByteArray(0) }
+        answers["second.example"] = { throw app.aroundtheblock.wallet.core.tor.TorNotReadyException("tor") }
+        client().fetch(cid).let { assertNull(it.bytes); assertEquals(1, it.gatewaysFailed) }
     }
 
     @Test fun `only 404 and 400 are a miss`() {
         assertEquals(listOf(400, 404), (100..599).filter { IpfsClient.isMiss(it) })
     }
 
-    /** The shipped numbers, stated: an hour, in memory, at most 512 answers. */
+    /** The shipped numbers, stated: ten minutes growing to an hour, in memory, at most 512 answers. */
     @Test fun `the window is one hour`() {
         assertEquals(3_600_000L, IpfsClient.MISS_TTL_MS)
+        assertEquals(600_000L, IpfsClient.MISS_FIRST_MS)
         assertEquals(512, IpfsClient.MISS_MAX_ENTRIES)
     }
 }

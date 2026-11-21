@@ -27,8 +27,9 @@ import okhttp3.Request
  *    [gatewayUrl], the one place a gateway URL is built, refuses it again. A provider's JSON `null`
  *    read as the text "null" was asked of every gateway, every ten minutes, for as long as the app ran.
  *  - A gateway's "this CID is not here" (HTTP 404) or "bad request" (400) is remembered for
- *    [MISS_TTL_MS] and that gateway is not asked for that CID again inside it ([GatewayMissMemory]),
- *    whichever caller asks: the metadata sweep and the image loader share this one client.
+ *    [MISS_FIRST_MS], growing to [MISS_TTL_MS] while it keeps saying so, and that gateway is not
+ *    asked for that CID again inside it ([GatewayMissMemory]), whichever caller asks: the metadata
+ *    sweep and the image loader share this one client.
  *
  * No IPFS daemon or libp2p dependency is required.
  */
@@ -63,7 +64,7 @@ class IpfsClient internal constructor(
     }
 
     /** Which gateway said, and when, that it does not have which CID. Held in memory only. */
-    private val misses = GatewayMissMemory(MISS_TTL_MS, MISS_MAX_ENTRIES, clock)
+    private val misses = GatewayMissMemory(MISS_FIRST_MS, MISS_TTL_MS, MISS_MAX_ENTRIES, clock)
 
     companion object {
         /**
@@ -107,19 +108,29 @@ class IpfsClient internal constructor(
         private val CID_SYNTAX = CidVerifier()
 
         /**
-         * How long a gateway's 404 or 400 for a CID is remembered: one hour.
+         * The longest a gateway's 404 or 400 for a CID is remembered: one hour. The first miss is
+         * remembered for [MISS_FIRST_MS], and each further one for twice as long, up to this.
          *
          * Decided from how the wallet refreshes. The asset sweep runs every 30 seconds and
          * [AssetMetadataService] holds an all-gateways failure for ten minutes, so an unpinned CID
          * was asked of the first gateway about 144 times a day; the image loader held nothing at
-         * all and asked on every draw of the icon. One hour makes that at most 24 a day per CID and
-         * gateway. It is not longer because "not here" stops being true: the first gateway serves
-         * pinned files only, and a CID is pinned after the asset is issued, so the hour is the
-         * longest a newly pinned name or picture waits. The memory is in this object only, so it
-         * also ends with the process: restarting the app asks again at once. No refresh bypasses
-         * it, automatic or by hand: the repeats came from refreshes.
+         * all and asked on every draw of the icon. Ten minutes growing to an hour makes that 26 on
+         * the first day and 24 on each day after, per CID and gateway. It is not longer because
+         * "not here" stops being true: the first gateway serves pinned files only, and a CID is
+         * pinned after the asset is issued, so the hour is the longest a newly pinned name or
+         * picture waits. The memory is in this object only, so it also ends with the process:
+         * restarting the app asks again at once. No refresh bypasses it, automatic or by hand: the
+         * repeats came from refreshes.
          */
         const val MISS_TTL_MS = 60L * 60_000L
+
+        /**
+         * How long the FIRST 404 or 400 for a CID is remembered: ten minutes, the time
+         * [AssetMetadataService] already waited after a failure, so a just-issued asset (whose
+         * first answer is normally 404, the document being pinned after the wallet has seen the
+         * issuance) shows its name and picture no later than it did before this memory existed.
+         */
+        const val MISS_FIRST_MS = 10L * 60_000L
 
         /** The most (gateway, CID) answers remembered; past it the oldest is dropped (and asked again). */
         const val MISS_MAX_ENTRIES = 512
@@ -170,13 +181,24 @@ class IpfsClient internal constructor(
      * the first gateway that returns a body whose hash matches the CID.
      * Returns `null` if all gateways fail or return unverifiable content.
      */
-    suspend fun fetchVerified(rawCid: String): ByteArray? = withContext(Dispatchers.IO) {
+    suspend fun fetchVerified(rawCid: String): ByteArray? = fetch(rawCid).bytes
+
+    /**
+     * What [fetch] came to: the verified [bytes], or null with [gatewaysFailed], the number of
+     * gateways that were asked and gave nothing usable. Null bytes with none failed means nothing
+     * was asked (not a CID, every gateway inside its remembered "not here", or Tor not connected):
+     * a routine outcome, and not one to report as a gateway failing or tampering.
+     */
+    class Fetched internal constructor(val bytes: ByteArray?, val gatewaysFailed: Int)
+
+    /** [fetchVerified], for a caller that reports a failure and so has to know whether one happened. */
+    suspend fun fetch(rawCid: String): Fetched = withContext(Dispatchers.IO) {
         // Providers disagree on shape: digistamp returns "ipfs://bafy…", the issuance header
         // gives a bare CID. The value is pasted into a gateway URL, so a prefix left in place
         // becomes a 404 that surfaces as "metadata offline".
         val cid = normalizeCid(rawCid) ?: run {
             android.util.Log.w(TAG, "fetchVerified: refusing malformed cid")
-            return@withContext null
+            return@withContext Fetched(null, 0)
         }
         android.util.Log.i(TAG, "fetchVerified: cid=$cid")
         var asked = 0
@@ -192,21 +214,23 @@ class IpfsClient internal constructor(
                 // Tor is on and not connected: every gateway would wait and be refused the same
                 // way, so stop here rather than wait out each one in turn.
                 android.util.Log.i(TAG, "fetchVerified: waiting for Tor; not fetched")
-                return@withContext null
+                return@withContext Fetched(null, asked - 1)
             }
             if (result != null) {
                 android.util.Log.i(TAG, "fetchVerified: OK via $gateway (${result.size}b)")
-                return@withContext result
+                // It has it now: a later "not here" from it starts at the short wait again.
+                misses.forget(gateway, cid)
+                return@withContext Fetched(result, asked - 1)
             }
         }
         if (asked == 0) {
             // Not a failure of anything: said so, so a missing name or picture can be traced to it.
             android.util.Log.i(TAG, "fetchVerified: no gateway asked for $cid; each said within " +
-                "${MISS_TTL_MS / 60_000} min that it does not have it")
+                "the last ${MISS_TTL_MS / 60_000} min at most that it does not have it")
         } else {
             android.util.Log.w(TAG, "fetchVerified: all gateways failed for $cid")
         }
-        null
+        Fetched(null, asked)
     }
 
     // -------------------------------------------------------------------------
