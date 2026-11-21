@@ -75,6 +75,34 @@ class SharedClientPinsTest {
         assertPinsDigiScope("the WebSocket's copy of the client", socketCopy)
     }
 
+    /**
+     * HUB-WS-NO-REDIRECT: the Hub socket's client follows no redirect, and is the shared client in
+     * every other respect: the same route selection, name lookups, connection pool, pins and
+     * interceptors (the Tor wait among them). The shared client itself is unchanged, so no other
+     * request's redirect behaviour moved.
+     */
+    @Test fun `the Hub WebSocket's client follows no redirect and keeps the shared client's routing`() {
+        val hub = AppModule.provideHubWebSocket(shared, mockk(relaxed = true), TorManager(context()))
+        val client = clientOf(hub, "httpClient")
+        assertTrue("the Hub socket's client follows redirects", !client.followRedirects && !client.followSslRedirects)
+        // OkHttp opens the socket on a copy of that client; the switches are carried over.
+        val socketCopy = client.newBuilder().eventListener(EventListener.NONE).protocols(listOf(Protocol.HTTP_1_1)).build()
+        assertTrue("the WebSocket's copy follows redirects", !socketCopy.followRedirects && !socketCopy.followSslRedirects)
+
+        assertTrue("another proxy selector", client.proxySelector === shared.proxySelector)
+        assertTrue("another Dns", client.dns === shared.dns)
+        assertTrue("another connection pool", client.connectionPool === shared.connectionPool)
+        assertTrue("another dispatcher", client.dispatcher === shared.dispatcher)
+        assertEquals(shared.certificatePinner, client.certificatePinner)
+        assertEquals(shared.interceptors.size, client.interceptors.size)
+        assertTrue("another interceptor", shared.interceptors.zip(client.interceptors).all { (a, b) -> a === b })
+        assertTrue("the Tor wait is not on the Hub socket's client",
+            client.interceptors.any { it is NetworkModule.TorWaitInterceptor })
+        assertEquals(shared.callTimeoutMillis, client.callTimeoutMillis)
+
+        assertTrue("the shared client's own redirect behaviour changed", shared.followRedirects && shared.followSslRedirects)
+    }
+
     @Test fun `the IPFS gateway fetch is made on a pinned client`() {
         val ipfs = AppModule.provideIpfsClient(shared)
         assertPinsDigiScope("the IPFS client", clientOf(ipfs, "httpClient"))

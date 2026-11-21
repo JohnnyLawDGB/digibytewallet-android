@@ -60,6 +60,13 @@ class HubSocketRouteChangeTest {
 
     private val sockets = mutableListOf<RecordingSocket>()
     private val client = mockk<OkHttpClient>().also { client ->
+        // HubWebSocket opens its socket on a client derived from the one it is given, with both
+        // redirect switches off (HUB-WS-NO-REDIRECT); here that derivation answers this mock.
+        val builder = mockk<OkHttpClient.Builder>()
+        every { builder.followRedirects(false) } returns builder
+        every { builder.followSslRedirects(false) } returns builder
+        every { builder.build() } returns client
+        every { client.newBuilder() } returns builder
         every { client.newWebSocket(any(), any()) } answers {
             RecordingSocket().also { sockets += it }
         }
