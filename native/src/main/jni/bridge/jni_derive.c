@@ -38,6 +38,7 @@
 #include "jni_seed_buffer.h"
 #include "wallet_spend_gate.h"  /* the one wallet question these signers ask */
 #include "foreign_tx_fee_guard.h"
+#include "asset_tx_checks.h"       /* tx_inputs_distinct: no outpoint listed twice (FOREIGN-ASSET-DISTINCT) */
 #include "sweep_fee_guard.h"
 #include "BRDigiDollar.h"
 #include "BRNetwork.h"
@@ -573,6 +574,14 @@ NativeBridge_buildAndSignLegacySweep(
     if (fullPath) { secure_zero(fullPath, ((size_t)prefixLen + 2) * sizeof(uint32_t)); free(fullPath); }
     (*env)->ReleaseIntArrayElements(env, prefixPath, prefixJ, JNI_ABORT);
 
+    /* FOREIGN-ASSET-DISTINCT: every input names a different outpoint. Asked of the inputs as
+     * assembled, before anything is signed and before the signed-spend gate claims a coin: a sweep
+     * that lists an outpoint twice signs nothing. */
+    if (ok && !tx_inputs_distinct(tx)) {
+        LOGW("buildAndSignLegacySweep: an outpoint is listed twice among the inputs; not signed");
+        ok = 0;
+    }
+
     if (!ok) {
         for (jsize i = 0; i < inputCount; i++) BRKeyClean(&keys[i]);
         free(keys);
@@ -898,6 +907,14 @@ NativeBridge_buildAndSignForeignAssetTransfer(
     (*env)->ReleaseLongArrayElements(env, outputAmounts, outAmtJ, JNI_ABORT);
     if (fullPath) { secure_zero(fullPath, ((size_t)prefixLen + 2) * sizeof(uint32_t)); free(fullPath); }
     (*env)->ReleaseIntArrayElements(env, prefixPath, prefixJ, JNI_ABORT);
+
+    /* FOREIGN-ASSET-DISTINCT: every input names a different outpoint. Asked of the inputs as
+     * assembled, before anything is signed and before the signed-spend gate claims a coin: a
+     * transfer that lists an outpoint twice signs nothing. */
+    if (ok && !tx_inputs_distinct(tx)) {
+        LOGW("buildAndSignForeignAssetTransfer: an outpoint is listed twice among the inputs; not signed");
+        ok = 0;
+    }
 
     if (!ok || totalOut > totalIn) {
         if (totalOut > totalIn) {

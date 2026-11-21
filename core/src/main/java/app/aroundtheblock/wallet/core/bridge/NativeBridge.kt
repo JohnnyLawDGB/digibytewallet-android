@@ -87,7 +87,8 @@ object NativeBridge {
     /** Create an unsigned transaction. Returns serialized tx bytes or null on failure. */
     external fun createTransaction(toAddress: String, amountSatoshis: Long, feePerKb: Long): ByteArray?
 
-    /** Sign a transaction. Returns signed tx bytes or null on failure. */
+    /** Sign a transaction. Returns signed tx bytes or null on failure. Bytes whose inputs name one
+     *  outpoint twice are refused before anything is signed (FOREIGN-ASSET-DISTINCT). */
     external fun signTransaction(unsignedTx: ByteArray): ByteArray?
 
     /** Publish (broadcast) a signed transaction. Returns txid hex string or null on failure. */
@@ -107,7 +108,8 @@ object NativeBridge {
      *  signing, bytes whose outputs are not [amountSats] to [toAddress] plus change to a wallet
      *  address, that do not pay exactly [approvedFeeSats], or that spend a coin which is no longer
      *  one of the wallet's spendable plain coins; and refuses to hand back a signed transaction that
-     *  fails the same check. */
+     *  fails the same check. Bytes whose inputs name one outpoint twice are refused first, before
+     *  anything is signed (FOREIGN-ASSET-DISTINCT). */
     external fun signPreparedTransaction(unsignedTx: ByteArray, toAddress: String, amountSats: Long, approvedFeeSats: Long): ByteArray?
 
     /** True when the network has refused [txid] on evidence no single peer can supply: peers in at
@@ -941,6 +943,9 @@ object NativeBridge {
      * transaction's size needs (it would never relay) AND one far above it (value being lost
      * silently), so a missing change output fails loudly instead of costing the user coins.
      *
+     * Every input must name a different outpoint (FOREIGN-ASSET-DISTINCT): a list that names one
+     * twice is refused before anything is signed and before a coin is claimed.
+     *
      * @return signed transaction hex, or null on any refusal — reasons are logged natively.
      */
     external fun buildAndSignForeignAssetTransfer(
@@ -1031,6 +1036,9 @@ object NativeBridge {
     ): String?
     // --- /pkg 4.3 ---
 
+    /** Build and sign a sweep of the listed outpoints to [destAddress], or null on any refusal. Every
+     *  input must name a different outpoint (FOREIGN-ASSET-DISTINCT): a list that names one twice is
+     *  refused before anything is signed and before a coin is claimed. */
     external fun buildAndSignLegacySweep(
         seedBytes: ByteArray,
         hmacKey: String,
