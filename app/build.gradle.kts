@@ -82,8 +82,8 @@ android {
         applicationId = "app.aroundtheblock.wallet"
         minSdk = 26
         targetSdk = 36
-        versionCode = 40104 // x-release-please-version-code
-        versionName = "4.1.4" // x-release-please-version
+        versionCode = 40105 // x-release-please-version-code
+        versionName = "4.1.5" // x-release-please-version
 
         // Package only the ABIs the C core is built for (gradle.properties wallet.nativeAbis).
         // Without this the APK also carried lib/x86/ from dependencies, with no libcore-lib.so in
