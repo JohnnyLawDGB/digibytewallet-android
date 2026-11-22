@@ -85,11 +85,19 @@ class AssetPictureByMediaTypeTest {
                 assertNull("$name declared $mime", store(urls(entry(name, MP4, mime))).imageUrl)
             }
         }
-        // A declared type that is neither image, audio nor video is still no picture under a file's
-        // own name. (Under the name "icon" or "image" it is judged by its bytes: review F2, below.)
-        for (name in listOf("cover.png", "art.jpg", "x.gif", "logo.webp", "file", null)) {
+        // A declared type that is neither image, audio nor video is no picture under a name that
+        // says nothing...
+        for (name in listOf("file", null)) {
             for (mime in listOf("application/pdf", "text/html")) {
                 assertNull("$name declared $mime", store(urls(entry(name, PNG, mime))).imageUrl)
+            }
+        }
+        // ...but under a name 4.1.5 picked by (an image file's name, like "icon" and "image": review
+        // F2 below, and R1 of the second review) it is judged by its bytes. REVERSED on the second
+        // review: this loop asserted null. Only audio and video may rule such an entry out unseen.
+        for (name in listOf("cover.png", "art.jpg", "x.gif", "logo.webp")) {
+            for (mime in listOf("application/pdf", "text/html")) {
+                assertEquals("$name declared $mime", PNG, store(urls(entry(name, PNG, mime))).imageUrl)
             }
         }
     }

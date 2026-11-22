@@ -9,7 +9,9 @@ import kotlinx.coroutines.launch
 import app.aroundtheblock.wallet.core.network.BoundedBody
 import app.aroundtheblock.wallet.core.tor.TorNotReadyException
 import okhttp3.OkHttpClient
+import okhttp3.Protocol
 import okhttp3.Request
+import okhttp3.Response
 
 /**
  * Fetches IPFS content from public gateways and verifies the payload against the CID.
@@ -36,7 +38,14 @@ import okhttp3.Request
  *  - A gateway whose answer was refused for size is remembered the same way, in the same memory
  *    (ASSET-MEDIA-FIXES): without a declared length the refusal costs a read up to the cap, and
  *    the answer will be as large a second later. [Fetched.refusedForSize] says that is what
- *    happened, so a caller does not report an oversized file as a gateway failing.
+ *    happened, so a caller does not report an oversized file as a gateway failing. When it is the
+ *    TRUSTED gateway that refused, that is the reason reported whatever the others then say
+ *    ([Fetched.trustedRefusedForSize]), and for a dag-pb CID, whose file only the trusted gateway
+ *    can serve, the public gateways are not asked at all, then or while the refusal is remembered.
+ *  - A trusted gateway's answer is taken on its pinned identity only when it is COMPLETE
+ *    ([endIsMarked]): an empty answer, one shorter than it declared, or one whose end nothing
+ *    marked is a failed fetch. Nothing checks those bytes against the CID, so a cut answer would
+ *    otherwise be returned, judged and measured as the file.
  *  - A file a caller found not to be a picture is remembered as that ([rememberNotAPicture]), in
  *    the same memory again, for [NOT_A_PICTURE_MS]. Only bytes that are the whole file may be
  *    judged ([Fetched.wholeFile]): a gateway that failed, or a public gateway's block of a dag-pb
@@ -166,6 +175,34 @@ class IpfsClient internal constructor(
          *  template goes. No gateway can have it: a template is a URL. */
         private const val PICTURE_VERDICT = "not-a-picture"
 
+        /** The name "the trusted gateway refused this dag-pb CID's file for size" is filed under in
+         *  [misses], beside that gateway's own entry and with the same growing wait, so the two end
+         *  together. It is what tells a remembered size refusal from a remembered 404: after a
+         *  404 the public gateways are still asked, after a size refusal they are not. */
+        private const val TOO_LARGE_VERDICT = "too-large-at-trusted"
+
+        /**
+         * True when [response]'s body has an end the server MARKED, so that reading it to that end
+         * without an error means every byte arrived ([declared] is the body's declared length, -1
+         * for none):
+         *
+         *  - a declared length: OkHttp fails a body that ends before it (`unexpected end of stream`);
+         *  - `Transfer-Encoding: chunked`: ended by the last-chunk marker, and failed the same way without it;
+         *  - HTTP/2: ended by the END_STREAM flag; a stream cut short is reset, which is an error;
+         *  - a compressed answer whose own framing was one of the above (OkHttp removes
+         *    `Content-Length` after inflating, so the network response is asked).
+         *
+         * False for the one remaining shape: HTTP/1 with neither, where the body simply runs until
+         * the connection closes and a connection that DROPPED looks exactly like one that finished.
+         */
+        internal fun endIsMarked(response: Response, declared: Long): Boolean {
+            if (declared >= 0) return true
+            val net = response.networkResponse ?: response
+            if (net.protocol == Protocol.HTTP_2 || net.protocol == Protocol.H2_PRIOR_KNOWLEDGE) return true
+            if (net.header("Transfer-Encoding").equals("chunked", ignoreCase = true)) return true
+            return (net.header("Content-Length")?.trim()?.toLongOrNull() ?: -1L) >= 0
+        }
+
         /** The answers that say the CID itself is the problem at this gateway: not here, or not acceptable.
          *  Everything else (5xx, a redirect refused, a timeout, no route) may be different a moment later. */
         internal fun isMiss(httpCode: Int): Boolean = httpCode == 404 || httpCode == 400
@@ -246,6 +283,21 @@ class IpfsClient internal constructor(
         /** How many of [gatewaysFailed] answered, in this fetch, that they do not have the CID
          *  (HTTP 404 or 400): an answer about the CID, where a 5xx, a timeout or no network is not. */
         val saidNotHere: Int = 0,
+        /**
+         * True when the TRUSTED gateway itself answered, in this fetch, that it does not have the
+         * CID (HTTP 404 or 400). The trusted gateway is the one that holds the wallet's documents,
+         * so this is the only "not here" that is evidence a document is gone: a public gateway's
+         * 404 while the trusted one is failing or was not asked says nothing about that.
+         */
+        val trustedSaidNotHere: Boolean = false,
+        /**
+         * True when nothing was fetched and the trusted gateway refused the file for its size
+         * (over [MAX_RESPONSE_SIZE]): in this fetch, or, for a dag-pb CID, in an earlier one that is
+         * still remembered (then no gateway was asked and [gatewaysFailed] is 0). The trusted
+         * gateway serves the file itself, so this is the reason there is no file, whatever the
+         * public gateways answered or failed to answer afterwards.
+         */
+        val trustedRefusedForSize: Boolean = false,
     )
 
     /**
@@ -335,11 +387,23 @@ class IpfsClient internal constructor(
         return mine.await()
     }
 
+    private fun isTrusted(gateway: String) = trustedGatewayPrefixes.any { gateway.startsWith(it) }
+
     private fun fetchFromGateways(cid: String): Fetched {
         android.util.Log.i(TAG, "fetchVerified: cid=$cid")
+        // Only the trusted gateway can serve a dag-pb CID's FILE (a public gateway's answer is its
+        // root block). Once it has refused the file for size there is nothing left to ask anyone,
+        // so nobody is asked, now or on any draw while that is remembered.
+        val onlyTrustedHasTheFile = cidVerifier.codec(cid) == CidVerifier.CODEC_DAG_PB
+        if (onlyTrustedHasTheFile && misses.isRemembered(TOO_LARGE_VERDICT, cid)) {
+            android.util.Log.d(TAG, "fetchVerified: $cid was refused for size by the trusted gateway; no gateway asked")
+            return Fetched(null, 0, trustedRefusedForSize = true)
+        }
         var asked = 0
         var tooLarge = 0
         var notHere = 0
+        var trustedNotHere = false
+        var trustedTooLarge = false
         for (gateway in gateways) {
             if (misses.isRemembered(gateway, cid)) {
                 android.util.Log.d(TAG, "fetchVerified: $gateway said recently it does not have $cid, or not in a size the wallet takes; not asked")
@@ -352,14 +416,26 @@ class IpfsClient internal constructor(
                 // Tor is on and not connected: every gateway would wait and be refused the same
                 // way, so stop here rather than wait out each one in turn.
                 android.util.Log.i(TAG, "fetchVerified: waiting for Tor; not fetched")
-                return Fetched(null, asked - 1, tooLarge, saidNotHere = notHere)
+                return Fetched(null, asked - 1, tooLarge, saidNotHere = notHere,
+                    trustedSaidNotHere = trustedNotHere, trustedRefusedForSize = trustedTooLarge)
             }
             if (result === TOO_LARGE) {
                 tooLarge++
+                if (isTrusted(gateway)) {
+                    trustedTooLarge = true
+                    if (onlyTrustedHasTheFile) {
+                        misses.remember(TOO_LARGE_VERDICT, cid)
+                        android.util.Log.i(TAG, "fetchVerified: $cid is over $MAX_RESPONSE_SIZE bytes at the trusted gateway, " +
+                            "the only one that serves the file; no other gateway asked")
+                        return Fetched(null, asked, tooLarge, saidNotHere = notHere,
+                            trustedSaidNotHere = trustedNotHere, trustedRefusedForSize = true)
+                    }
+                }
                 continue
             }
             if (result === NOT_HERE) {
                 notHere++
+                if (isTrusted(gateway)) trustedNotHere = true
                 continue
             }
             if (result != null) {
@@ -367,7 +443,8 @@ class IpfsClient internal constructor(
                     (if (result.wholeFile) ")" else "; a block, not known to be the whole file)"))
                 // It has it now: a later "not here" from it starts at the short wait again.
                 misses.forget(gateway, cid)
-                return Fetched(result.bytes, asked - 1, tooLarge, wholeFile = result.wholeFile, saidNotHere = notHere)
+                return Fetched(result.bytes, asked - 1, tooLarge, wholeFile = result.wholeFile, saidNotHere = notHere,
+                    trustedSaidNotHere = trustedNotHere)
             }
         }
         if (asked == 0) {
@@ -376,10 +453,13 @@ class IpfsClient internal constructor(
                 "the last ${MISS_TTL_MS / 60_000} min at most that it does not have it, or not in a size the wallet takes")
         } else if (tooLarge == asked) {
             android.util.Log.i(TAG, "fetchVerified: $cid is over $MAX_RESPONSE_SIZE bytes at every gateway asked; not fetched")
+        } else if (trustedTooLarge) {
+            android.util.Log.i(TAG, "fetchVerified: $cid is over $MAX_RESPONSE_SIZE bytes at the trusted gateway, and no other gateway gave it; not fetched")
         } else {
             android.util.Log.w(TAG, "fetchVerified: all gateways failed for $cid")
         }
-        return Fetched(null, asked, tooLarge, saidNotHere = notHere)
+        return Fetched(null, asked, tooLarge, saidNotHere = notHere,
+            trustedSaidNotHere = trustedNotHere, trustedRefusedForSize = trustedTooLarge)
     }
 
     /** One gateway's accepted answer, and whether it is the whole file ([Fetched.wholeFile]). */
@@ -408,7 +488,7 @@ class IpfsClient internal constructor(
 
             // Decided from the configured gateway, before the request: a trusted gateway is asked on
             // the client that follows no redirect, so the answer read below is that host's own.
-            val isTrustedGateway = trustedGatewayPrefixes.any { gateway.startsWith(it) }
+            val isTrustedGateway = isTrusted(gateway)
             val client = if (isTrustedGateway) trustedGatewayClient else httpClient
 
             client.newCall(request).execute().use { response ->
@@ -463,6 +543,24 @@ class IpfsClient internal constructor(
                 val codec = cidVerifier.codec(cid)
                 val isDagPbWrapped = codec == CidVerifier.CODEC_DAG_PB
                 val byPin = isDagPbWrapped && isTrustedGateway
+                if (byPin) {
+                    // Nothing checks these bytes against the CID: the pinned server is believed. So
+                    // they are taken only when they are ALL of its answer. An answer that is empty,
+                    // shorter than it declared, or whose end nothing marked (HTTP/1, no length, not
+                    // chunked: it ends when the connection does, and a dropped connection looks the
+                    // same) is a FAILED FETCH: not returned as the file, so never judged "not a
+                    // picture" and never measured. The next gateway is asked, as after any failure.
+                    val incomplete = when {
+                        bytes.isEmpty() -> "an empty answer"
+                        declared >= 0 && bytes.size.toLong() != declared -> "${bytes.size} of $declared declared bytes"
+                        !endIsMarked(response, declared) -> "no length and no end marker (${bytes.size} bytes before the connection closed)"
+                        else -> null
+                    }
+                    if (incomplete != null) {
+                        android.util.Log.w(TAG, "tryGateway: $gateway → HTTP ${response.code} for $cid is not a complete file: $incomplete; treated as a failed fetch")
+                        return null
+                    }
+                }
                 val accept = if (byPin) {
                     android.util.Log.i(TAG,
                         "tryGateway: $gateway → dag-pb trust-by-cert for $cid (${bytes.size}b)")

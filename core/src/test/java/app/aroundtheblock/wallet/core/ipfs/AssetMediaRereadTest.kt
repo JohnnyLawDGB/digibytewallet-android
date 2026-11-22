@@ -131,9 +131,14 @@ class AssetMediaRereadTest {
     // about once per gateway per hour for as long as the wallet was installed.
     // ---------------------------------------------------------------------------------------------
 
-    private val GONE = IpfsClient.Fetched(null, 4, saidNotHere = 1)
+    /** The trusted gateway itself said "not here". (Only that is counted: see AssetMediaRereadGiveUpTest.) */
+    private val GONE = IpfsClient.Fetched(null, 4, saidNotHere = 1, trustedSaidNotHere = true)
+    /** A public gateway said "not here" while the trusted one failed: no answer about the document. */
+    private val GONE_ONLY_AT_A_PUBLIC_GATEWAY = IpfsClient.Fetched(null, 4, saidNotHere = 3)
     private val UNREACHABLE = IpfsClient.Fetched(null, 4)
     private val HOUR = 60L * 60_000L
+    /** Two answers count as two only when a day apart (second review, R4; it was ten minutes). */
+    private val DAY = AssetMetadataService.MEDIA_REREAD_NOT_HERE_GAP_MS
 
     /** A new process: the ten-minute memory and the per-process count are the service's own. */
     private suspend fun launchAndAsk() = service().getMetadata(assetId, null)
@@ -147,9 +152,9 @@ class AssetMediaRereadTest {
     @Test fun `a document the gateway says is gone is asked for a fixed number of times, then never again`() = runBlocking {
         row = rowFrom415()
         coEvery { ipfs.fetch(CID) } returns GONE
-        repeat(40) {                                    // forty launches, an hour apart
+        repeat(40) {                                    // forty launches, a day apart
             assertEquals("the row stays on screen", "DigiKid", launchAndAsk()?.name)
-            age(HOUR)
+            age(DAY)
         }
         coVerify(exactly = AssetMetadataService.MEDIA_REREAD_NOT_HERE_LIMIT) { ipfs.fetch(any()) }
         org.junit.Assert.assertFalse(AssetMetadataService.needsMediaReread(row!!))
@@ -163,13 +168,17 @@ class AssetMediaRereadTest {
         coEvery { ipfs.fetch(CID) } returns GONE
         repeat(40) { launchAndAsk() }                   // forty launches in a row, no time between them
         assertEquals(1, MediaRereadMark.read(row!!.mediaJson)!!.notHere)
-        org.junit.Assert.assertTrue("not given up on one outage", AssetMetadataService.needsMediaReread(row!!))
+        // Not given up on one outage: asked again once the day has passed (and not before).
+        val nextDay = System.currentTimeMillis() + DAY
+        org.junit.Assert.assertTrue("not given up on one outage", AssetMetadataService.needsMediaReread(row!!, nextDay))
+        org.junit.Assert.assertFalse("left alone until then", AssetMetadataService.needsMediaReread(row!!))
+        coVerify(exactly = 1) { ipfs.fetch(any()) }
     }
 
     @Test fun `a document that comes back before the limit is read, and the count is gone`() = runBlocking {
         row = rowFrom415()
         coEvery { ipfs.fetch(CID) } returns GONE
-        repeat(AssetMetadataService.MEDIA_REREAD_NOT_HERE_LIMIT - 1) { launchAndAsk(); age(HOUR) }
+        repeat(AssetMetadataService.MEDIA_REREAD_NOT_HERE_LIMIT - 1) { launchAndAsk(); age(DAY) }
         org.junit.Assert.assertTrue(AssetMetadataService.needsMediaReread(row!!))
 
         coEvery { ipfs.fetch(CID) } returns IpfsClient.Fetched(DOCUMENT.toByteArray(), 0, wholeFile = true)
@@ -178,6 +187,28 @@ class AssetMediaRereadTest {
         assertEquals(listOf(AssetMediaKind.AUDIO), read.media.map { it.kind })
         assertNull("the row holds the files now, not a count", MediaRereadMark.read(row!!.mediaJson))
         org.junit.Assert.assertFalse(AssetMetadataService.needsMediaReread(row!!))
+    }
+
+    /** Launches an hour apart are inside one day: one answer, and one request, until the day has passed. */
+    @Test fun `launches hours apart within one day count as one answer and ask once`() = runBlocking {
+        row = rowFrom415()
+        coEvery { ipfs.fetch(CID) } returns GONE
+        repeat(23) { launchAndAsk(); age(HOUR) }
+        assertEquals(1, MediaRereadMark.read(row!!.mediaJson)!!.notHere)
+        coVerify(exactly = 1) { ipfs.fetch(any()) }
+        age(HOUR)                                       // the 24th hour
+        launchAndAsk()
+        assertEquals(2, MediaRereadMark.read(row!!.mediaJson)!!.notHere)
+        coVerify(exactly = 2) { ipfs.fetch(any()) }
+    }
+
+    /** Second review, R4: a public gateway's 404 during a trusted-gateway outage is not the document's. */
+    @Test fun `a not-here answer from a public gateway alone is never recorded with the row`() = runBlocking {
+        row = rowFrom415()
+        coEvery { ipfs.fetch(CID) } returns GONE_ONLY_AT_A_PUBLIC_GATEWAY
+        repeat(40) { launchAndAsk(); age(DAY) }
+        assertNull("nothing recorded", row!!.mediaJson)
+        org.junit.Assert.assertTrue(AssetMetadataService.needsMediaReread(row!!))
     }
 
     /** No network, a timeout, a 5xx: no evidence about the document, so nothing is written to the row. */

@@ -20,7 +20,7 @@ enum class AssetMediaKind {
          * DigiAsset tools name an audio-only asset's song "icon", and a file named `cover.png` that
          * declares `video/mp4` is a video. Only when no type is declared (or the declared one is
          * the catch-all `application/octet-stream`) does a file extension, of the name and then of
-         * the URL, give a hint.
+         * the URL's PATH (never its host: [pathOf]), give a hint.
          */
         fun of(mimeType: String?, name: String?, url: String?): AssetMediaKind {
             val type = mimeType?.trim()?.lowercase()?.substringBefore(';')?.trim().orEmpty()
@@ -30,9 +30,7 @@ enum class AssetMediaKind {
                 type.startsWith("video/") -> return VIDEO
                 type.isNotEmpty() && type != "application/octet-stream" -> return OTHER
             }
-            for (text in listOf(name, url)) {
-                val ext = text?.substringBefore('?')?.substringBefore('#')?.substringAfterLast('/')
-                    ?.substringAfterLast('.', missingDelimiterValue = "")?.lowercase().orEmpty()
+            for (ext in listOf(extension(name), extension(pathOf(url)))) {
                 when (ext) {
                     in IMAGE_EXT -> return IMAGE
                     in AUDIO_EXT -> return AUDIO
@@ -40,6 +38,26 @@ enum class AssetMediaKind {
                 }
             }
             return UNKNOWN
+        }
+
+        /** The file extension of [text]'s last segment, lower-cased; empty when it has none. A
+         *  query or a fragment is not part of the name. */
+        private fun extension(text: String?): String =
+            text?.substringBefore('?')?.substringBefore('#')?.substringAfterLast('/')
+                ?.substringAfterLast('.', missingDelimiterValue = "")?.lowercase().orEmpty()
+
+        /**
+         * The PATH of [url], which is the only part an extension is read from. In
+         * `scheme://authority/path` the authority is a host (or, for `ipfs://`, a CID) and is not a
+         * file name: `https://<cid>.ipfs.example.mov` is not a video, and `https://example.mp3`
+         * is not a song. Text with no `://` (a bare CID, `/ipfs/<cid>/a.png`, `<cid>/a.png`, a
+         * file name) is all path.
+         */
+        private fun pathOf(url: String?): String? {
+            if (url == null) return null
+            val noQuery = url.substringBefore('?').substringBefore('#')
+            if (!noQuery.contains("://")) return noQuery
+            return noQuery.substringAfter("://").substringAfter('/', missingDelimiterValue = "")
         }
     }
 }

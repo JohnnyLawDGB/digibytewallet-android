@@ -26,8 +26,10 @@ import okio.Buffer
  * draw for which no gateway was asked (the value is not a CID, or each
  * gateway said recently that it does not have it) is routine, happens on
  * every draw of such an icon, and is logged at INFO in other words. So is
- * a file that every gateway asked had, over the size limit: that is the
- * file's size, not a gateway failing.
+ * a file over the size limit: one the trusted gateway (which serves the
+ * file itself) refused for size, whatever the public gateways then said,
+ * or one every gateway asked refused for size. That is the file's size,
+ * not a gateway failing, and it is the reason reported.
  *
  * **A file that is not a picture is downloaded once (ASSET-MEDIA-FIXES).** Coil keeps no record of
  * a failed load and this loader has no disk cache, so a file that was fetched and did not decode
@@ -60,8 +62,20 @@ class IpfsFetcher(
         val fetched = ipfsClient.fetch(cid)
         val bytes = fetched.bytes
         if (bytes == null) {
-            if (fetched.gatewaysFailed > 0 && fetched.refusedForSize == fetched.gatewaysFailed) {
-                // Nothing failed but the size: not a line that should read as a security signal.
+            if (fetched.trustedRefusedForSize && fetched.gatewaysFailed == 0) {
+                // Refused for size before and still remembered: nothing was asked. Every draw of
+                // such an icon comes through here, so it is said quietly.
+                android.util.Log.d(
+                    "IpfsFetcher",
+                    "Not fetched: ${LogSafe.text(cid, 80)} is over the size limit for a picture, as the trusted gateway said before"
+                )
+            } else if (fetched.trustedRefusedForSize ||
+                (fetched.gatewaysFailed > 0 && fetched.refusedForSize == fetched.gatewaysFailed)
+            ) {
+                // The size is the reason: the gateway that serves the file itself refused it for
+                // size (whatever the public gateways then answered: unreachable, 504, 404, or a
+                // block that is not the file), or every gateway asked did. Not a line that should
+                // read as a security signal.
                 android.util.Log.i(
                     "IpfsFetcher",
                     "Not shown: ${LogSafe.text(cid, 80)} is over the size limit for a picture (${IpfsClient.MAX_RESPONSE_SIZE} bytes)"
