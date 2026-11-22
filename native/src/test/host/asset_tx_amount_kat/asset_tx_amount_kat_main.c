@@ -16,8 +16,10 @@
 //   - send: the units AssetTxQuantity.forOutput gives every output that is not OP_RETURN and whose script
 //     is not in the owned set (`owned.isNotEmpty() && hex in owned`), AssetSums.add over them; null when
 //     not above zero, when the transaction has no carrier or an unclassifiable one.
-//   - the asset: the first row with is_asset = 1, txid = :txid, asset_id NOT LIKE 'unresolved:%' (NULL is
-//     not, and LIKE ignores ASCII case) and asset_credit IN ('BACKED', 'VERIFIED').
+//   - the asset: of the rows with is_asset = 1, txid = :txid, asset_id NOT LIKE 'unresolved:%' (NULL is
+//     not, and LIKE ignores ASCII case) and asset_credit IN ('BACKED', 'VERIFIED'), the one with the lowest
+//     vout: the query has no ORDER BY, and SQLite reads txid = :txid through the table's only index, the
+//     (txid, vout) primary key (UtxoEntity; EXPLAIN QUERY PLAN: USING INDEX sqlite_autoindex_utxos_1).
 // Each vector's inputs are in the core's vectors/asset-tx-amount/corpus.txt (read by its read.h); the
 // expectations below are this file's. Case `vectors_file` holds the core's vectors.txt to them too.
 //
@@ -60,6 +62,7 @@ static const Want WANT[] = {
     { "recv_id_placeholder_only",         OK_,   3, NULL },          // an amount, no asset
     { "recv_id_absent",                   OK_,   2, NULL },          // a NULL asset_id is not NOT LIKE anything
     { "recv_no_rows",                     NONE_, 0, NULL },          // the carrier's claim is never read
+    { "recv_id_lowest_vout",              OK_,   3, X },             // given vout 3 (Y), then vout 1 (X): the lower vout names
     // send
     { "send_to_recipient",                OK_,   5, X },             // 5 to the recipient; the 3 of change not counted
     { "send_owned_empty",                 OK_,   8, X },             // no owned set: every output is someone else's

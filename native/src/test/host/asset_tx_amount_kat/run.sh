@@ -11,7 +11,8 @@
 #               send counts an OP_RETURN output; 64 a placeholder names the asset; 128 a row whose credit does not
 #               count names the asset; 256 a send reads the earlier quantity rule (a burn delivers nothing); 512 a
 #               placeholder is told by its case; 1024 a receive counts what the instructions assign the wallet's
-#               outputs; 2048 a row of another transaction counts and names. Each arm fails exactly the cases
+#               outputs; 2048 a row of another transaction counts and names; 4096 the
+#               first row given names the asset, not the lowest vout. Each arm fails exactly the cases
 #               CASES lists for its bit and passes every other.
 #   shipped     -DASSET_TX_AMOUNT_UNFIXED=0: every case passes, exit 0.
 # All arms under ASan + UBSan, 64-bit. The header is the unit under test; the core's transaction code and the one
@@ -69,6 +70,7 @@ CASES=(
     recv_id_placeholder_only:64,1024
     recv_id_absent:1024
     recv_no_rows:1024
+    recv_id_lowest_vout:1024,4096
     send_to_recipient:8
     send_owned_empty:16
     send_to_self:8
@@ -81,12 +83,13 @@ CASES=(
     send_undecided:-
     send_no_transaction:-
     send_unresolved_change:8
-    vectors_file:1,2,4,8,16,32,64,128,256,512,1024,2048
+    vectors_file:1,2,4,8,16,32,64,128,256,512,1024,2048,4096
     arguments:16,1024,2048
     second_unit:-
 )
 ARMS=(1:unbacked-counts 2:spent-skipped 4:sums-wrap 8:owned-sent 16:empty-owned-nothing 32:data-output-sent
-      64:placeholder-named 128:uncounted-named 256:burn-dropped 512:placeholder-case 1024:receive-claimed 2048:any-txid)
+      64:placeholder-named 128:uncounted-named 256:burn-dropped 512:placeholder-case 1024:receive-claimed 2048:any-txid
+      4096:first-given)
 
 # ---- the seam is real ----------------------------------------------------------------------
 if [ ! -f "$HEADER" ]; then
