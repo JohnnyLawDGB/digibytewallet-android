@@ -832,11 +832,14 @@ if "$CC" "${M32[@]}" "$BUILD_DIR/probe32.c" -o "$BUILD_DIR/probe32" >/dev/null 2
        "$CC" -w -std=c99 -include stdint.h "${M32[@]}" -DDIGIID_UNFIXED=0 -I "$CORE_DIR" -I "$CORE_DIR/secp256k1/include" -I "$BRIDGE_DIR" \
            "$SCRIPT_DIR/digiid_core_kat_main.c" "$BUILD_DIR/tu2.c" "$BRIDGE_DIR/slip13.c" "$BUILD_DIR"/core_32/*.o -lm -lpthread -o "$BUILD_DIR/green32" &&
        build_bridge "$BUILD_DIR/bridge32" "$BUILD_DIR/core_32" "${M32[@]}"; then
-        before=$FAIL
+        # The note is the 32-bit legs' own result: FAIL may already be 1 from an earlier leg, so they are
+        # counted from 0 and the earlier result is put back after.
+        before=$FAIL; FAIL=0
         run_shipped "$BUILD_DIR/green32" 32-bit
         run_bridge "$BUILD_DIR/bridge32" 32-bit
         run_golden "$BUILD_DIR/bridge32" 32-bit || golden_note="FAILED"
-        [ $FAIL -ne $before ] && bits_note="FAILED"
+        [ $FAIL -ne 0 ] && bits_note="FAILED"
+        [ $before -ne 0 ] && FAIL=1
     else
         echo "GATE FAILURE: the 32-bit build failed though a 32-bit link works (a build error is not evidence)."; FAIL=1; bits_note="FAILED"
     fi

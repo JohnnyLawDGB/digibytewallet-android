@@ -14,6 +14,16 @@
 # the same bytes with the same key changed: an existing wallet would sign in to a site as another account, or
 # be refused by it. Change a line only in the commit that means to move that identity, and say so there.
 # A wallet on the upgrade row (per-site root DigiByte, DigiScope identity shared) must keep every line.
+#
+# THE FIVE SWEEP LINES freeze more than the bridge's answers: each hash also depends on the driver's fixed
+# pseudo-random stream (the seed of RNG and the number and order of its draws in digiid_core_bridge_main.c's
+# sweep) and on the order in which the three current natives are called (signMessage, signIdentityMessage,
+# identityAddress; for the long messages signMessage, signIdentityMessage), so a changed SWEEP hash alone does
+# not show that an identity moved. A task that replaces those natives keeps the draws and the call order; if it
+# cannot, it re-derives the five lines first, in a commit of its own that changes no production file (bridge,
+# core pin): the changed driver still calling the 4.1.5 natives, every ADDRESS and SIGN line above unchanged,
+# `digiid_core_bridge sweep`'s new SWEEP lines the same on 64-bit and 32-bit, and the commit saying that the
+# stream moved and no identity did. Only then are the natives replaced, against the re-derived lines.
 ADDRESS https://example.com/callback DPeEMYki92jeUSDgjkrfrTMVpvGWCHYd68
 ADDRESS https://example.com:8443/callback D61WFJS2zyXYuKu8RD5YbCUq5uWorXKE3A
 ADDRESS https://example.com:443/callback DJU3pDBfF3ztr66tCELTaYKprGEhQueWiQ
