@@ -16,6 +16,15 @@
     <uses-permission android:name="android.permission.HIDE_OVERLAY_WINDOWS" />
 
     <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <!-- MainActivity is locked to portrait, which makes the build tools add
+         android.hardware.screen.portrait as a REQUIRED feature, and Google Play then hides the
+         app from every device that does not declare it. The lock is a layout choice, not a
+         hardware need: on such a device the system letterboxes the screen. The camera permission
+         implies camera and autofocus the same way; the scanner's library already marks those
+         (and flash, front camera, landscape, wifi) as not required.
+         scripts/check-play-device-reach.sh fails CI if a required feature appears that is not on
+         its list (PLAY-DEVICE-REACH, 4.1.6). -->
+    <uses-feature android:name="android.hardware.screen.portrait" android:required="false" />
 
     <application
         android:name=".DigiByteApp"

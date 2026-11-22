@@ -141,6 +141,13 @@ jobs:
       - name: Build Debug APKs (sideload + play)
         run: ./gradlew :app:assembleMainnetSideloadDebug :app:assembleMainnetPlayDebug
 
+      # Reads the APKs just built the way Google Play does (aapt2 dump badging). A permission or an
+      # activity attribute can make a hardware feature REQUIRED with no line in the manifest saying
+      # so, and a dependency can add an ABI directory that lacks our own native library; either
+      # one costs devices on Play, or offers the app to a device it cannot start on.
+      - name: Required features and ABIs are the listed ones
+        run: ./scripts/check-play-device-reach.sh
+
       - name: Upload Debug APK
         uses: actions/upload-artifact@v7
         with:
