@@ -9,7 +9,8 @@
 #          the core may refuse where the bridge signs is an amount or total above MAX_MONEY.
 #   RED    one arm per fee rule of SWEEP-ABS-CEIL (BRLegacySweepFee.h, the one copy the bridge's sweep_fee_guard.h
 #          also uses), one removing the whole SWEEP-ABS-CEIL guard (BR_LEGACY_SWEEP_RED_ABS_CEIL: the core guard is
-#          load-bearing), one per refusal (zero amount, MAX_MONEY, the fee product overflow), and one for the key wipe
+#          load-bearing), one per refusal (zero amount, MAX_MONEY, the fee product overflow, one outpoint listed twice:
+#          CORE-SWEEP-DISTINCT), and one for the key wipe
 #          (BR_LEGACY_SWEEP_RED_*=1, on the core's unit only). Each must fail exactly its scenarios and pass every
 #          other one, with no sanitizer report. The 1000-sat fee floor cannot bind at a rate of 100,000 or more and
 #          the 5% refusal of every sweep implies the dust bound, so no sweep reaches either rule; they are pinned on
@@ -36,6 +37,8 @@ trap 'rm -rf "$BUILD_DIR"' EXIT
 gate_fail() { echo "GATE FAILURE: $*"; exit 1; }
 
 [ -f "$CORE_DIR/BRLegacySweep.h" ] || gate_fail "$CORE_DIR has no BRLegacySweep.h (core pin too old? set CORE_DIR)"
+grep -q 'BR_LEGACY_SWEEP_DUPLICATE_INPUT' "$CORE_DIR/BRLegacySweep.h" \
+    || gate_fail "$CORE_DIR/BRLegacySweep.h has no DUPLICATE_INPUT refusal (CORE-SWEEP-DISTINCT; core pin too old? set CORE_DIR)"
 [ -f "$CORE_DIR/BRLegacySweepFee.h" ] || gate_fail "$CORE_DIR has no BRLegacySweepFee.h (core pin too old? set CORE_DIR)"
 # ONE COPY of the fee rule (SWEEP-ABS-CEIL): the bridge's backstop takes it from the core's BRLegacySweepFee.h and
 # defines none of its limits itself.
@@ -156,7 +159,7 @@ red() {
 }
 
 red BR_LEGACY_SWEEP_RED_SIZE \
-    "android_default_rate boundary_fee_ceiling boundary_fee_overflow boundary_fee_truncated boundary_rate_cap boundary_rate_floor boundary_ratio_above boundary_ratio_at boundary_ratio_rate_cap boundary_ratio_single_above boundary_ratio_single_at boundary_size fee_dust_masked fee_floor_masked fee_rate_large fuzz gate_refusal_is_bridge_side pinned_amount_guard_normal pinned_amount_guard_over_reported pinned_amount_guard_under_reported pinned_bip49_p2sh_p2wpkh pinned_foreign_taproot pinned_segwit_p2wpkh pinned_signedtx_p2pkh proof refuse_destination refuse_short_seed_signs"
+    "android_default_rate boundary_fee_ceiling boundary_fee_overflow boundary_fee_truncated boundary_rate_cap boundary_rate_floor boundary_ratio_above boundary_ratio_at boundary_ratio_rate_cap boundary_ratio_single_above boundary_ratio_single_at boundary_size fee_dust_masked fee_floor_masked fee_rate_large fuzz gate_refusal_is_bridge_side pinned_amount_guard_normal pinned_amount_guard_over_reported pinned_amount_guard_under_reported pinned_bip49_p2sh_p2wpkh pinned_foreign_taproot pinned_segwit_p2wpkh pinned_signedtx_p2pkh proof refuse_destination refuse_duplicate_input refuse_short_seed_signs"
 red BR_LEGACY_SWEEP_RED_RATIO \
     "boundary_ratio_at boundary_ratio_below boundary_ratio_rate_cap boundary_ratio_single_at boundary_ratio_single_below boundary_ratio_single_dust fuzz pinned_amount_guard_under_reported"
 red BR_LEGACY_SWEEP_RED_RATIO_STRICT \
@@ -177,6 +180,7 @@ red BR_LEGACY_SWEEP_RED_MAX_MONEY \
     "boundary_amount_max_money fuzz refuse_amount_max_money"
 red BR_LEGACY_SWEEP_RED_FEE_OVERFLOW \
     "boundary_fee_overflow fuzz refuse_fee_overflow"
+red BR_LEGACY_SWEEP_RED_DUPLICATE_INPUT "refuse_duplicate_input"
 
 # ── LEAKS (where LeakSanitizer exists: Linux CI; not on macOS) ───────────────────────────────────────────────────────
 printf 'int main(void){return 0;}\n' > "$BUILD_DIR/probe.c"
@@ -194,7 +198,7 @@ else
 fi
 
 if [ "$FAIL" -eq 0 ]; then
-    echo "PASS: legacy_sweep_kat (the core refuses what the bridge refuses and signs the same bytes on every scenario bar its MAX_MONEY refusal; fifteen comparison arms red on exactly theirs, SWEEP-ABS-CEIL and the masked fee floor and dust rules among them; ASan+UBSan)"
+    echo "PASS: legacy_sweep_kat (the core refuses what the bridge refuses and signs the same bytes on every scenario bar its MAX_MONEY refusal; sixteen comparison arms red on exactly theirs, SWEEP-ABS-CEIL and the masked fee floor and dust rules among them; ASan+UBSan)"
     exit 0
 fi
 echo "FAIL: legacy_sweep_kat"
