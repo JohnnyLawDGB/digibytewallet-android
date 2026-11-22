@@ -69,7 +69,8 @@ android {
             }
         }
         ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+            // One list for both modules: gradle.properties wallet.nativeAbis (:app packages the same).
+            abiFilters += providers.gradleProperty("wallet.nativeAbis").get().split(",")
         }
     }
 
