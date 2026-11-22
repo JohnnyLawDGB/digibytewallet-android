@@ -3,7 +3,8 @@
 **Effective:** 2026-05-03
 **Maximum reward:** 100,000 DGB
 **Bounty target:** **HoldFast Wallet 4.1.5** (`app.aroundtheblock.wallet`), released 2026-11-22 (UTC).
-4.1.4 stays in scope until the end of **2026-12-06 UTC** (14 days, under the overlap rule below). Before you
+4.1.4 stays in scope until the end of **2026-12-06 UTC** (14 days, under the overlap rule below), and 4.1.3
+until the end of **2026-11-29 UTC**, as announced on 2026-11-15. Before you
 start, read "Known issues being addressed after 4.1.5"
 below: those are already on our list.
 

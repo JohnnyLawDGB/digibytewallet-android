@@ -35,9 +35,10 @@
 > `docs/superpowers/plans/2026-11-17-multi-wallet-step2.md`), with step 4 of the Coinomi design
 > riding on it.
 >
-> **Recurring chore:** the block and filter checkpoint tables go stale by wall-clock time. They
-> were refreshed on 2026-11-21 (block 24,550,000); `checkpoint_staleness_kat` warns from
-> 2026-11-26 and fails CI from 2026-12-11, so 4.1.6 needs a refresh if it is cut after that.
+> **Recurring chore:** the block checkpoint table goes stale by wall-clock time. It was refreshed
+> on 2026-11-21 (block 24,550,000, where the filter table has stood since 2026-11-15);
+> `checkpoint_staleness_kat` warns from 2026-11-26 and fails CI from 2026-12-11, so 4.1.6 needs a
+> refresh if it is cut after that.
 >
 > **Unchanged:** the phase order below (sovereignty first). Choosing chains by accumulated work
 > is still the scheduled structural change under Phase 1.
@@ -76,7 +77,7 @@
 > **NEXT: 4.1.4, a security and reliability train.** Its scope stays private until the release
 > ships; until then a finding is named by ID, never by its mechanism. The public part:
 >
-> - The known issues listed for 4.1.4 in [`BUG-BOUNTY.md`](BUG-BOUNTY.md#known-issues-being-addressed-for-414),
+> - The known issues listed for 4.1.4 in [`BUG-BOUNTY.md`](BUG-BOUNTY.md#known-issues-being-addressed-after-415),
 >   including **seed-key binding from creation** (the Phase 2 Keystore item below).
 > - **Restore with a passphrase, verified end to end.** Host KATs already pin the 12+1 and 24+1
 >   derivations against the official BIP39 vectors and an independent generator. In 4.1.4 the
