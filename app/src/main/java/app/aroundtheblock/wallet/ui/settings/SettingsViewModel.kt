@@ -352,7 +352,8 @@ class SettingsViewModel @Inject constructor(
      */
     fun refreshNetworkStats() {
         viewModelScope.launch(Dispatchers.IO) {
-            _peerCount.value = runCatching { NativeBridge.getPeerCount() }.getOrDefault(0)
+            // Shown on Network Info: handshaken peers only (PEER-COUNT-HANDSHAKED).
+            _peerCount.value = runCatching { NativeBridge.getHandshakedPeerCount() }.getOrDefault(0)
             _lastBlockHeight.value = runCatching { NativeBridge.getLastBlockHeight() }.getOrDefault(0L)
             _estimatedHeight.value = runCatching { NativeBridge.getEstimatedBlockHeight() }.getOrDefault(0L)
             _cfTip.value = runCatching { NativeBridge.getCFChainTipHeight().toLong() }.getOrDefault(0L)

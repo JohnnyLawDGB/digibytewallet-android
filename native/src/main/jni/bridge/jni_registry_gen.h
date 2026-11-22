@@ -70,6 +70,7 @@ jstring JNICALL NativeBridge_getDigiDollarTaprootKeyHex(JNIEnv *env, jobject thi
 jlong JNICALL NativeBridge_getEstimatedBlockHeight(JNIEnv *env, jobject thiz);  /* jni_peer.c */
 jlong JNICALL NativeBridge_getEstimatedFee(JNIEnv *env, jobject thiz, jint priority);  /* jni_transaction.c */
 jstring JNICALL NativeBridge_getFilterElementStats(JNIEnv *env, jobject thiz);  /* jni_wallet.c */
+jint JNICALL NativeBridge_getHandshakedPeerCount(JNIEnv *env, jobject thiz);  /* jni_peer.c */
 jlong JNICALL NativeBridge_getLastBlockHeight(JNIEnv *env, jobject thiz);  /* jni_peer.c */
 jlong JNICALL NativeBridge_getLowestNeededHeight(JNIEnv *env, jobject thiz);  /* jni_peer.c */
 jint JNICALL NativeBridge_getPeerCount(JNIEnv *env, jobject thiz);  /* jni_peer.c */
@@ -246,6 +247,7 @@ jboolean JNICALL NativeBridge_walletContainsAddress(JNIEnv *env, jobject thiz, j
     { "getEstimatedBlockHeight", "()J", (void *) NativeBridge_getEstimatedBlockHeight }, \
     { "getEstimatedFee", "(I)J", (void *) NativeBridge_getEstimatedFee }, \
     { "getFilterElementStats", "()Ljava/lang/String;", (void *) NativeBridge_getFilterElementStats }, \
+    { "getHandshakedPeerCount", "()I", (void *) NativeBridge_getHandshakedPeerCount }, \
     { "getLastBlockHeight", "()J", (void *) NativeBridge_getLastBlockHeight }, \
     { "getLowestNeededHeight", "()J", (void *) NativeBridge_getLowestNeededHeight }, \
     { "getPeerCount", "()I", (void *) NativeBridge_getPeerCount }, \
@@ -358,6 +360,6 @@ jboolean JNICALL NativeBridge_walletContainsAddress(JNIEnv *env, jobject thiz, j
     { "takeUnprovableServerHeight", "()J", (void *) NativeBridge_takeUnprovableServerHeight }, \
     { "walletContainsAddress", "(Ljava/lang/String;)Z", (void *) NativeBridge_walletContainsAddress }, \
 
-#define DGB_JNI_NATIVEBRIDGE_METHOD_COUNT 174
+#define DGB_JNI_NATIVEBRIDGE_METHOD_COUNT 175
 
 #endif
