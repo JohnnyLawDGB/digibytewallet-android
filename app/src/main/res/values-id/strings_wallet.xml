@@ -316,6 +316,12 @@
     <string name="ad_balance">Saldo</string>
     <string name="ad_info">Info Aset</string>
     <string name="ad_description">Deskripsi</string>
+    <!-- Asset detail: the audio or video an asset declares. Named only; nothing is played. -->
+    <string name="ad_media">Media</string>
+    <string name="ad_media_audio">Audio</string>
+    <string name="ad_media_video">Video</string>
+    <!-- %1$s: "Audio" or "Video"; %2$s: a file size, already formatted, e.g. "4.1 MB". -->
+    <string name="ad_media_kind_size">%1$s · %2$s</string>
     <string name="ad_total_supply">Total Pasokan</string>
     <string name="ad_unknown">Tidak diketahui</string>
     <string name="ad_identical_metadata">Metadata identik</string>

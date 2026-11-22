@@ -51,6 +51,12 @@ interface AssetMetadataDao {
         cachedAt: Long,
     )
 
+    /** The files the metadata document declares, as JSON text; `"[]"` for a document read and found
+     *  to declare none, so a later reader can tell it from "never read" (NULL). Written by
+     *  AssetMetadataService.storeFromJson only, straight after [updateIpfsFacts]. */
+    @Query("UPDATE asset_metadata SET mediaJson = :mediaJson WHERE assetId = :assetId")
+    suspend fun updateMedia(assetId: String, mediaJson: String?)
+
     /** The proxy's rules object as JSON text; `"{}"` when the proxy answered without one, NULL
      *  when it was never learned. Written by AssetMetadataService.refreshRules only. */
     @Query("UPDATE asset_metadata SET rulesJson = :rulesJson WHERE assetId = :assetId")

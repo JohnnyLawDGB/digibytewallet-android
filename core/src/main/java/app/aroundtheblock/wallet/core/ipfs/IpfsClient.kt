@@ -1,8 +1,11 @@
 package app.aroundtheblock.wallet.core.ipfs
 
 import app.aroundtheblock.wallet.core.LogSafe
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import app.aroundtheblock.wallet.core.network.BoundedBody
 import app.aroundtheblock.wallet.core.tor.TorNotReadyException
 import okhttp3.OkHttpClient
@@ -30,6 +33,13 @@ import okhttp3.Request
  *    [MISS_FIRST_MS], growing to [MISS_TTL_MS] while it keeps saying so, and that gateway is not
  *    asked for that CID again inside it ([GatewayMissMemory]), whichever caller asks: the metadata
  *    sweep and the image loader share this one client.
+ *  - A gateway whose answer was refused for size is remembered the same way, in the same memory
+ *    (ASSET-MEDIA-FIXES): without a declared length the refusal costs a read up to the cap, and
+ *    the answer will be as large a second later. [Fetched.refusedForSize] says that is what
+ *    happened, so a caller does not report an oversized file as a gateway failing.
+ *  - A file a caller found not to be a picture is remembered as that ([rememberNotAPicture]), in
+ *    the same memory again, for [NOT_A_PICTURE_MS].
+ *  - Callers that ask for one CID at the same moment share one request ([fetch]).
  *
  * No IPFS daemon or libp2p dependency is required.
  */
@@ -135,6 +145,25 @@ class IpfsClient internal constructor(
         /** The most (gateway, CID) answers remembered; past it the oldest is dropped (and asked again). */
         const val MISS_MAX_ENTRIES = 512
 
+        /**
+         * How long "this file is not a picture" is remembered: a day (ASSET-MEDIA-FIXES).
+         *
+         * Longer than a gateway's "not here", because it is a different kind of answer. A gateway
+         * may pin a CID an hour from now; the bytes of a CID never change, so a file that did not
+         * decode as an image will not decode on the next draw either, and asking again costs the
+         * whole file (measured: a 4,265,952-byte MP3 named "icon", once per image instance per
+         * draw). It is still not for ever, and it lives in this object only: a new process, or a
+         * day, asks once more.
+         */
+        const val NOT_A_PICTURE_MS = 24L * 60 * 60_000L
+
+        /** The most file sizes remembered for [knownSize]; past it the oldest is dropped. */
+        const val SIZES_MAX_ENTRIES = 256
+
+        /** The name the "not a picture" answers are filed under in [misses], where a gateway's URL
+         *  template goes. No gateway can have it: a template is a URL. */
+        private const val PICTURE_VERDICT = "not-a-picture"
+
         /** The answers that say the CID itself is the problem at this gateway: not here, or not acceptable.
          *  Everything else (5xx, a redirect refused, a timeout, no route) may be different a moment later. */
         internal fun isMiss(httpCode: Int): Boolean = httpCode == 404 || httpCode == 400
@@ -189,22 +218,102 @@ class IpfsClient internal constructor(
      * was asked (not a CID, every gateway inside its remembered "not here", or Tor not connected):
      * a routine outcome, and not one to report as a gateway failing or tampering.
      */
-    class Fetched internal constructor(val bytes: ByteArray?, val gatewaysFailed: Int)
+    class Fetched internal constructor(
+        val bytes: ByteArray?,
+        val gatewaysFailed: Int,
+        /** How many of [gatewaysFailed] answered with a file over [MAX_RESPONSE_SIZE] and nothing
+         *  else wrong. When it equals [gatewaysFailed], nothing failed but the size. */
+        val refusedForSize: Int = 0,
+    )
 
-    /** [fetchVerified], for a caller that reports a failure and so has to know whether one happened. */
-    suspend fun fetch(rawCid: String): Fetched = withContext(Dispatchers.IO) {
+    /**
+     * A caller fetched [rawCid] to show it as a picture and its bytes are not one (an asset's
+     * "icon" can be a song). Remembered for [NOT_A_PICTURE_MS] so that no screen downloads it for
+     * that purpose again. It does not stop [fetch]: the file is still a file, for a document
+     * reader or a later player. A value that is not a CID is ignored.
+     */
+    fun rememberNotAPicture(rawCid: String) {
+        val cid = normalizeCid(rawCid) ?: return
+        misses.remember(PICTURE_VERDICT, cid, fixedWaitMs = NOT_A_PICTURE_MS)
+    }
+
+    /** True while [rawCid] is remembered as [not a picture][rememberNotAPicture]. Makes no request. */
+    fun isKnownNotAPicture(rawCid: String): Boolean {
+        val cid = normalizeCid(rawCid) ?: return false
+        return misses.isRemembered(PICTURE_VERDICT, cid)
+    }
+
+    /**
+     * The size in bytes of the file [rawCid] names, when an answer ALREADY MADE gave it; else
+     * null. Never makes a request: it exists so a screen can say "Audio · 4.1 MB" without paying a
+     * request to say it. Known after a fetch that returned the file (its length), or after the
+     * trusted gateway declared a length the wallet then refused as too large. A public gateway's
+     * answer for a dag-pb CID is that CID's root block, not the file, and is never recorded.
+     * Held in memory only, at most [SIZES_MAX_ENTRIES].
+     */
+    fun knownSize(rawCid: String?): Long? {
+        val cid = normalizeCid(rawCid) ?: return null
+        return synchronized(sizes) { sizes[cid] }
+    }
+
+    private val sizes = LinkedHashMap<String, Long>()
+
+    private fun recordSize(cid: String, size: Long) {
+        if (size <= 0) return
+        synchronized(sizes) {
+            sizes.remove(cid)
+            sizes[cid] = size
+            while (sizes.size > SIZES_MAX_ENTRIES) sizes.keys.iterator().let { it.next(); it.remove() }
+        }
+    }
+
+    /** The fetches under way, by CID. A caller that finds its CID here waits for that answer. */
+    private val inFlight = java.util.concurrent.ConcurrentHashMap<String, CompletableDeferred<Fetched>>()
+
+    /**
+     * Where a shared fetch runs: not in any caller's scope, so one caller leaving (an icon
+     * scrolled away) does not cancel the answer the others are waiting for. A fetch is bounded by
+     * the gateway list, the client's timeouts and [MAX_RESPONSE_SIZE], so it always ends.
+     */
+    private val fetchScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /**
+     * [fetchVerified], for a caller that reports a failure and so has to know whether one happened.
+     *
+     * Callers asking for the same CID at the same moment get one answer from one round of
+     * requests (ASSET-MEDIA-FIXES): an asset's picture is asked for by its list card, its detail
+     * hero and the full-screen viewer, and each used to download it separately. This is not a
+     * cache: the answer is shared only with callers that arrived while it was being fetched.
+     */
+    suspend fun fetch(rawCid: String): Fetched {
         // Providers disagree on shape: digistamp returns "ipfs://bafy…", the issuance header
         // gives a bare CID. The value is pasted into a gateway URL, so a prefix left in place
         // becomes a 404 that surfaces as "metadata offline".
         val cid = normalizeCid(rawCid) ?: run {
             android.util.Log.w(TAG, "fetchVerified: refusing malformed cid")
-            return@withContext Fetched(null, 0)
+            return Fetched(null, 0)
         }
+        val mine = CompletableDeferred<Fetched>()
+        val running = inFlight.putIfAbsent(cid, mine)
+        if (running != null) return running.await()
+        fetchScope.launch {
+            val result = runCatching { fetchFromGateways(cid) }
+            // Taken out BEFORE the answer is set: a caller that already found this entry holds it and
+            // gets the answer; one that arrives from now on starts a fetch of its own. The other
+            // order would hand a finished answer to a later caller, which is a cache nobody asked for.
+            inFlight.remove(cid, mine)
+            result.fold(mine::complete, mine::completeExceptionally)
+        }
+        return mine.await()
+    }
+
+    private fun fetchFromGateways(cid: String): Fetched {
         android.util.Log.i(TAG, "fetchVerified: cid=$cid")
         var asked = 0
+        var tooLarge = 0
         for (gateway in gateways) {
             if (misses.isRemembered(gateway, cid)) {
-                android.util.Log.d(TAG, "fetchVerified: $gateway said recently it does not have $cid; not asked")
+                android.util.Log.d(TAG, "fetchVerified: $gateway said recently it does not have $cid, or not in a size the wallet takes; not asked")
                 continue
             }
             asked++
@@ -214,24 +323,33 @@ class IpfsClient internal constructor(
                 // Tor is on and not connected: every gateway would wait and be refused the same
                 // way, so stop here rather than wait out each one in turn.
                 android.util.Log.i(TAG, "fetchVerified: waiting for Tor; not fetched")
-                return@withContext Fetched(null, asked - 1)
+                return Fetched(null, asked - 1, tooLarge)
+            }
+            if (result === TOO_LARGE) {
+                tooLarge++
+                continue
             }
             if (result != null) {
                 android.util.Log.i(TAG, "fetchVerified: OK via $gateway (${result.size}b)")
                 // It has it now: a later "not here" from it starts at the short wait again.
                 misses.forget(gateway, cid)
-                return@withContext Fetched(result, asked - 1)
+                return Fetched(result, asked - 1, tooLarge)
             }
         }
         if (asked == 0) {
             // Not a failure of anything: said so, so a missing name or picture can be traced to it.
             android.util.Log.i(TAG, "fetchVerified: no gateway asked for $cid; each said within " +
-                "the last ${MISS_TTL_MS / 60_000} min at most that it does not have it")
+                "the last ${MISS_TTL_MS / 60_000} min at most that it does not have it, or not in a size the wallet takes")
+        } else if (tooLarge == asked) {
+            android.util.Log.i(TAG, "fetchVerified: $cid is over $MAX_RESPONSE_SIZE bytes at every gateway asked; not fetched")
         } else {
             android.util.Log.w(TAG, "fetchVerified: all gateways failed for $cid")
         }
-        Fetched(null, asked)
+        return Fetched(null, asked, tooLarge)
     }
+
+    /** What [tryGateway] returns for an answer refused for size and nothing else. Compared by identity. */
+    private val TOO_LARGE = ByteArray(0)
 
     // -------------------------------------------------------------------------
     // Internal helpers
@@ -264,9 +382,21 @@ class IpfsClient internal constructor(
 
                 // Checked while the answer streams, not after it is held: a declared length over the
                 // limit is refused unread, and an answer with none stops one byte past the limit.
-                val bytes = BoundedBody.bytes(response.body, MAX_RESPONSE_SIZE) ?: run {
-                    android.util.Log.w(TAG, "tryGateway: $gateway → no body, or over $MAX_RESPONSE_SIZE bytes, for $cid")
+                val body = response.body ?: run {
+                    android.util.Log.w(TAG, "tryGateway: $gateway → no body for $cid")
                     return null
+                }
+                val declared = body.contentLength()
+                val bytes = BoundedBody.bytes(body, MAX_RESPONSE_SIZE) ?: run {
+                    // A 200 that BoundedBody refused is over the cap, declared or found while reading:
+                    // an answer about this file at this gateway, like "not here", and kept the same
+                    // way. Said in its own words: it is not a failed or tampered answer.
+                    android.util.Log.i(TAG, "tryGateway: $gateway → $cid is over the $MAX_RESPONSE_SIZE-byte limit" +
+                        (if (declared > MAX_RESPONSE_SIZE) " (declares $declared bytes; not read)" else " (no usable length declared; read stopped at the limit)"))
+                    misses.remember(gateway, cid)
+                    // The trusted gateway serves the file itself, so its declared length is the file's.
+                    if (declared > MAX_RESPONSE_SIZE && isTrustedGateway) recordSize(cid, declared)
+                    return TOO_LARGE
                 }
 
                 // CIDv0 (Qm…) carries the dag-pb / UnixFS wrapper hash,
@@ -292,6 +422,8 @@ class IpfsClient internal constructor(
                     cidVerifier.verify(cid, bytes)
                 }
                 if (accept) {
+                    // The file itself, unless this is a public gateway's root block for a dag-pb CID.
+                    if (isTrustedGateway || !isDagPbWrapped) recordSize(cid, bytes.size.toLong())
                     bytes
                 } else {
                     android.util.Log.w(TAG, "tryGateway: $gateway → hash MISMATCH for $cid (${bytes.size}b)")

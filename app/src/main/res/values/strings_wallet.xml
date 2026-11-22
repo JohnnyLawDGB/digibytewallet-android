@@ -395,6 +395,12 @@
     <string name="ad_balance">Balance</string>
     <string name="ad_info">Asset Info</string>
     <string name="ad_description">Description</string>
+    <!-- Asset detail: the audio or video an asset declares. Named only; nothing is played. -->
+    <string name="ad_media">Media</string>
+    <string name="ad_media_audio">Audio</string>
+    <string name="ad_media_video">Video</string>
+    <!-- %1$s: "Audio" or "Video"; %2$s: a file size, already formatted, e.g. "4.1 MB". -->
+    <string name="ad_media_kind_size">%1$s · %2$s</string>
     <string name="ad_total_supply">Total Supply</string>
     <string name="ad_unknown">Unknown</string>
     <string name="ad_identical_metadata">Identical metadata</string>

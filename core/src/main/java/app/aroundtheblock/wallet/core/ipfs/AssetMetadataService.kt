@@ -19,6 +19,8 @@ import org.json.JSONObject
  *    [IpfsClient] (which verifies the content hash against the CID before returning it),
  *    parsed, persisted to Room, and then returned.
  *  - If [metadataCid] is null, returns null (no metadata to fetch).
+ *  - One exception to "returned immediately": a named row that has never been read for the files
+ *    the document declares (written before schema 13) is fetched once more by its own CID.
  *
  * Expected JSON shape (all fields optional):
  * ```json
@@ -69,6 +71,15 @@ class AssetMetadataService(
         @Suppress("UNUSED_PARAMETER")
         internal fun provenIssuerOnly(proven: String?, claimed: String?): String? =
             proven?.takeIf { it.isNotBlank() }
+
+        /**
+         * True for a named row whose document has never been read for the files it declares
+         * (written before schema 13, so `mediaJson` is NULL) and that has a CID to read it by. One
+         * copy of the rule: [getMetadata] re-reads such a row, and [rereadForMedia], called from
+         * AssetManager's metadata retry pass, is what asks for it. A row with no CID has nothing to be read again from.
+         */
+        fun needsMediaReread(row: AssetMetadataEntity): Boolean =
+            row.name != null && row.mediaJson == null && IpfsClient.normalizeCid(row.metadataCid) != null
 
         /** 10 minutes. Long enough to stop hammering broken gateways;
          *  short enough that a proxy recovery is picked up naturally
@@ -213,7 +224,12 @@ class AssetMetadataService(
         // and leave the user staring at an anonymous colored-letter icon
         // forever. Refetch when we have a CID to actually fetch from.
         val cached = assetMetadataDao.getMetadata(assetId)
-        if (cached != null && cached.name != null) return cached.toModel()
+        // A named row is complete once it has also been read for media. A row written before schema
+        // 13 has not (mediaJson NULL), and its image may be an MP3 that happened to be named "icon"
+        // (ASSET-MEDIA-CLASSIFY): its document is fetched once more, below, when the row has a CID
+        // to fetch it by. Same gateways, same backoff. Until that lands the row is shown as it is.
+        val named = cached?.takeIf { it.name != null }
+        if (named != null && !needsMediaReread(named)) return named.toModel()
 
         // The CID is the issuance's: the caller's, or the one the parent walk recorded with the chain facts.
         // A value that is not a CID is no CID (IPFS-NO-NULL): a row written before this rule could hold
@@ -226,6 +242,7 @@ class AssetMetadataService(
         // would shadow that CID for good once the walk brings it (review R6). That waits for the walk.
         val providerAllowed = cid == null && cached != null && cached.totalSupply > 0
         if (cid == null && !providerAllowed) return cached?.toModel()
+        // (A re-read for media always has a CID, so it never reaches the provider pass below.)
 
         // Negative-cache short-circuit: if we tried this CID recently and every
         // gateway failed, don't hammer them again for NEGATIVE_CACHE_TTL_MS.
@@ -233,7 +250,7 @@ class AssetMetadataService(
         val negativeKey = cid ?: assetId
         val lastFail = recentlyFailed[negativeKey]
         if (lastFail != null && (now - lastFail) < NEGATIVE_CACHE_TTL_MS) {
-            return null
+            return named?.toModel()
         }
 
         return withContext(Dispatchers.IO) {
@@ -289,8 +306,18 @@ class AssetMetadataService(
 
             // Everything failed — mark for suppression until TTL expires.
             recentlyFailed[negativeKey] = System.currentTimeMillis()
-            null
+            // A row that was already named stays on screen: only its re-read for media failed.
+            named?.toModel()
         }
+    }
+
+    /**
+     * Read [assetId]'s document once more if its row was written before the declared files were
+     * kept ([needsMediaReread]); for a row already read, one cache read and no request. It is
+     * [getMetadata] with the row's own CID, under the name of what the caller wants from it.
+     */
+    suspend fun rereadForMedia(assetId: String) {
+        getMetadata(assetId, null)
     }
 
     /**
@@ -354,30 +381,11 @@ class AssetMetadataService(
         // field is ever wanted, it must be a SEPARATE field with its own label; it must never
         // flow into this one.
 
-        // Image may live under several keys depending on the issuer tool:
-        //   "image" — canonical, what our AssetImageResolver expects
-        //   "imageUrl" / "image_url" — common web-tool variants
-        //   "icon" — Neblio-style
-        //   "urls"[…]{"name":"icon",…} — DA3 urls array (take first icon entry)
-        val imageUrl = json.textOrNull("image")
-            ?: json.textOrNull("imageUrl")
-            ?: json.textOrNull("image_url")
-            ?: json.textOrNull("icon")
-            ?: run {
-                val urls = json.optJSONArray("urls") ?: return@run null
-                var out: String? = null
-                for (i in 0 until urls.length()) {
-                    val u = urls.optJSONObject(i) ?: continue
-                    val name = u.textOrNull("name")?.lowercase() ?: continue
-                    if (name == "icon" || name == "image" || name.endsWith(".png") ||
-                        name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".gif") ||
-                        name.endsWith(".svg") || name.endsWith(".webp")) {
-                        out = u.textOrNull("url")
-                        if (out != null) break
-                    }
-                }
-                out
-            }
+        // The picture and the declared files: one rule, in AssetMediaEntries (ASSET-MEDIA-CLASSIFY).
+        // The picture is chosen by media type; an entry named "icon" that declares audio is not one.
+        val files = AssetMediaEntries.parse(json)
+        val imageUrl = files.imageUrl
+        val mediaJson = AssetMediaEntries.encode(files.media)
 
         val entity = AssetMetadataEntity(
             assetId = assetId,
@@ -407,6 +415,7 @@ class AssetMetadataService(
             // (refuses non-http(s)/ipfs schemes) but cap length here too so
             // a 10MB string doesn't end up in the row.
             imageUrl = imageUrl?.takeIf { it.length <= MAX_IMAGE_URL_LEN },
+            mediaJson = mediaJson,
             cachedAt = System.currentTimeMillis(),
         )
         // Seed the row if this asset has none yet (IGNORE: never clobbers a richer one), then
@@ -422,6 +431,9 @@ class AssetMetadataService(
             imageUrl = entity.imageUrl,
             cachedAt = entity.cachedAt,
         )
+        // Second, so a write interrupted between the two leaves the row marked "not read for media"
+        // (NULL) and it is simply read again.
+        assetMetadataDao.updateMedia(entity.assetId, entity.mediaJson)
         // Re-read so the caller sees the merged row rather than this document's view of it — the
         // entity above deliberately carries no supply or divisibility, and returning it would
         // report 0 for an asset whose chain facts are already known.
@@ -445,5 +457,6 @@ class AssetMetadataService(
         issuerAddress = issuerAddress,
         imageUrl = imageUrl,
         metadataCid = metadataCid,
+        media = AssetMediaEntries.decode(mediaJson),
     ) }
 }

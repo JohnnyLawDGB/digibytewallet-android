@@ -9,6 +9,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -27,6 +28,11 @@ import coil.compose.AsyncImage
  * throughout the load — no "flash to letter then image" transition. On load
  * failure (including IPFS CID verification failure), `error = null` leaves
  * the image slot transparent so the letter remains visible.
+ *
+ * [onPictureShown] is told `true` when a picture is actually on screen and `false` while there is
+ * none (loading, failed, or nothing to load). A caller that offers something for the picture, the
+ * full-screen viewer, offers it on that and not on the string being a CID: an asset's "image" can
+ * be a file that is no image.
  */
 @Composable
 fun AssetIcon(
@@ -34,9 +40,13 @@ fun AssetIcon(
     firstLetter: Char,
     iconColor: Color,
     size: Dp,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onPictureShown: ((Boolean) -> Unit)? = null,
 ) {
     val model = remember(imageUrl) { AssetImageResolver.resolve(imageUrl) }
+    if (model == null && onPictureShown != null) {
+        LaunchedEffect(imageUrl) { onPictureShown(false) }
+    }
     Box(
         modifier = modifier
             .size(size)
@@ -61,6 +71,9 @@ fun AssetIcon(
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize().clip(CircleShape),
                 error = null,
+                onLoading = { onPictureShown?.invoke(false) },
+                onSuccess = { onPictureShown?.invoke(true) },
+                onError = { onPictureShown?.invoke(false) },
             )
         }
     }

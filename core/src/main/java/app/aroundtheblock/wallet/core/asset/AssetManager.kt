@@ -862,6 +862,7 @@ class AssetManager(
                             issuerAddress = it.issuerAddress,
                             imageUrl = it.imageUrl,
                             metadataCid = it.metadataCid,
+                            media = app.aroundtheblock.wallet.core.ipfs.AssetMediaEntries.decode(it.mediaJson),
                         )
                     },
                     utxoCount = utxoCount,
@@ -2426,6 +2427,18 @@ class AssetManager(
                 .mapNotNull { it.assetId }
                 .filter { it.isNotEmpty() && !it.startsWith("unresolved:") }
                 .distinct()
+                .also { shown ->
+                    // ASSET-MEDIA-CLASSIFY: a named row written before schema 13 was never read for
+                    // the files its document declares, and may hold an audio file as its image.
+                    // Nothing else asks for an asset that already has a name, so it is asked for
+                    // here. For a row already read this is one cache read and no request; a
+                    // failure is held for ten minutes by the service like any other. (For an
+                    // unnamed asset it is the same call the loop below makes, a moment earlier.)
+                    for (assetId in shown) {
+                        runCatching { metadataService.rereadForMedia(assetId) }
+                            .onFailure { android.util.Log.d("AssetManager", "media re-read failed for $assetId", it) }
+                    }
+                }
                 // "Unnamed" means what the UI means: no row, OR a row with no name. The
                 // parent-walk writes a row carrying the on-chain supply and divisibility with a
                 // NULL name, so a row-exists check matches everything and retries nothing —

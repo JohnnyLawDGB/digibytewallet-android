@@ -15,5 +15,10 @@ data class AssetMetadataEntity(
     val metadataCid: String? = null,
     val imageUrl: String? = null,
     val rulesJson: String? = null,
+    /** The metadata document's `urls` entries as JSON text
+     *  ([app.aroundtheblock.wallet.core.ipfs.AssetMediaEntries]); `"[]"` when the document was read
+     *  and declares none, NULL when it has not been read for them (every row written before
+     *  schema 13). */
+    val mediaJson: String? = null,
     val cachedAt: Long = 0
 )

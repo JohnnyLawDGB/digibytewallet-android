@@ -19,6 +19,11 @@ package app.aroundtheblock.wallet.core.ipfs
  *  - it is per gateway: the other gateways are still asked for the same CID;
  *  - a gateway that serves the CID is [forgotten][forget], so a later miss starts at [firstMs] again.
  *
+ * The same memory holds two more answers of the same kind (ASSET-MEDIA-FIXES), so that there is
+ * one mechanism and one bound: a gateway whose file was refused for size, filed exactly like a
+ * miss, and "this CID's bytes are not a picture", filed under a name no gateway has and with a
+ * wait of its own (see [remember]).
+ *
  * At most [maxEntries] answers are held; the oldest goes first. A dropped entry costs one request
  * (and its next wait is [firstMs] again).
  */
@@ -47,20 +52,27 @@ internal class GatewayMissMemory(
         return false
     }
 
-    /** [gateway] just said it does not have [cid]. */
+    /**
+     * [gateway] just said it does not have [cid].
+     *
+     * [fixedWaitMs], when given, is the wait itself, with no growth and no [maxMs] ceiling: for an
+     * answer about the CID's bytes rather than about where they are (ASSET-MEDIA-FIXES, "this file
+     * is not a picture"), which does not become less true with time the way "not pinned here" does.
+     */
     @Synchronized
-    fun remember(gateway: String, cid: String) {
+    fun remember(gateway: String, cid: String, fixedWaitMs: Long? = null) {
         val key = key(gateway, cid)
         val now = clock()
         val last = misses[key]
         // Two fetches that raced report one answer twice: it is one miss, and the wait is not doubled.
         if (last != null && now - last.at in 0 until last.waitMs) return
         val waitMs = when {
+            fixedWaitMs != null -> fixedWaitMs
             last == null || now < last.at -> firstMs
             else -> (last.waitMs * 2).coerceIn(firstMs, maxMs)
         }
         misses.remove(key) // re-inserted at the young end
-        misses[key] = Miss(now, waitMs.coerceAtMost(maxMs))
+        misses[key] = Miss(now, if (fixedWaitMs != null) waitMs else waitMs.coerceAtMost(maxMs))
         while (misses.size > maxEntries) {
             val oldest = misses.keys.iterator()
             oldest.next()

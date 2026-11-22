@@ -316,6 +316,12 @@
     <string name="ad_balance">残高</string>
     <string name="ad_info">アセット情報</string>
     <string name="ad_description">説明</string>
+    <!-- Asset detail: the audio or video an asset declares. Named only; nothing is played. -->
+    <string name="ad_media">メディア</string>
+    <string name="ad_media_audio">音声</string>
+    <string name="ad_media_video">動画</string>
+    <!-- %1$s: "Audio" or "Video"; %2$s: a file size, already formatted, e.g. "4.1 MB". -->
+    <string name="ad_media_kind_size">%1$s · %2$s</string>
     <string name="ad_total_supply">総供給量</string>
     <string name="ad_unknown">不明</string>
     <string name="ad_identical_metadata">同一のメタデータ</string>

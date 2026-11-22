@@ -325,6 +325,12 @@
     <string name="ad_balance">Баланс</string>
     <string name="ad_info">Информация об активе</string>
     <string name="ad_description">Описание</string>
+    <!-- Asset detail: the audio or video an asset declares. Named only; nothing is played. -->
+    <string name="ad_media">Медиа</string>
+    <string name="ad_media_audio">Аудио</string>
+    <string name="ad_media_video">Видео</string>
+    <!-- %1$s: "Audio" or "Video"; %2$s: a file size, already formatted, e.g. "4.1 MB". -->
+    <string name="ad_media_kind_size">%1$s · %2$s</string>
     <string name="ad_total_supply">Общее предложение</string>
     <string name="ad_unknown">Неизвестно</string>
     <string name="ad_identical_metadata">Идентичные метаданные</string>

@@ -103,7 +103,7 @@ Any user-facing string ships in **every language in `AppLocale.SUPPORTED` in the
 ### Defensive Startup
 - The database opens through `core/db/DatabaseKeyProvisioner` (`WalletDatabaseOpener`). **Nothing deletes a database or a key outside the user's wipe:** a database that cannot be opened is set aside (`wallet.db.aside-<reason>-<time>`, companions alongside), a missing key, a temporary Keystore error, a wrong password and a corrupt file are told apart, and the database password is re-wrapped and verified under its own key (`dgb_db_passphrase`) before any older key is deleted. A Keystore that cannot answer gives that session a temporary in-memory database. The wipe removes every database file of every network, set-aside copies included. Wallet seed always preserved.
 - Verbose logging at every init step: `adb logcat | grep AppModule`
-- `fallbackToDestructiveMigration()` is still set on Room: it drops data on a downgrade or a missing migration (all steps 1→12 are registered today) — never ship a schema change without its migration
+- `fallbackToDestructiveMigration()` is still set on Room: it drops data on a downgrade or a missing migration (all steps 1→13 are registered today) — never ship a schema change without its migration
 
 ### Digi-ID
 - Real BRKeyCompactSign signing (Bitcoin message signing protocol)

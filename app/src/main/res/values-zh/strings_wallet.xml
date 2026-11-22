@@ -316,6 +316,12 @@
     <string name="ad_balance">余额</string>
     <string name="ad_info">资产信息</string>
     <string name="ad_description">描述</string>
+    <!-- Asset detail: the audio or video an asset declares. Named only; nothing is played. -->
+    <string name="ad_media">媒体</string>
+    <string name="ad_media_audio">音频</string>
+    <string name="ad_media_video">视频</string>
+    <!-- %1$s: "Audio" or "Video"; %2$s: a file size, already formatted, e.g. "4.1 MB". -->
+    <string name="ad_media_kind_size">%1$s · %2$s</string>
     <string name="ad_total_supply">总供应量</string>
     <string name="ad_unknown">未知</string>
     <string name="ad_identical_metadata">元数据相同</string>
