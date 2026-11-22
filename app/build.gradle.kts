@@ -82,8 +82,8 @@ android {
         applicationId = "app.aroundtheblock.wallet"
         minSdk = 26
         targetSdk = 36
-        versionCode = 40104 // x-release-please-version-code
-        versionName = "4.1.4" // x-release-please-version
+        versionCode = 40105 // x-release-please-version-code
+        versionName = "4.1.5" // x-release-please-version
     }
 
     // Match native module flavors
