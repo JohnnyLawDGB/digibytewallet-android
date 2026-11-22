@@ -1,8 +1,15 @@
 # Coinomi-compatible Digi-ID, app steps 2 and 3: build plan for 4.1.6
 
-> **Status 2026-11-22: PLAN, not started.** The owner's answers to the numbered questions at the
-> end are not in yet. Nothing here is decided until they are recorded in this file. Precondition P0
-> (the 4.1.5 release branch merged back into `develop`) is PR #298.
+> **Status 2026-11-22: PLAN, not started.** Precondition P0 (the 4.1.5 release branch merged back
+> into `develop`) is PR #298.
+>
+> **Owner's answers recorded 2026-11-22** (section 6; the other questions are still open, and
+> nothing else here is decided until its answer is recorded in this file):
+>
+> - **Q1.** The properties live inside the existing seed-record file (`dgb_wallet_seed[_<id>]`).
+>   No new store.
+> - **Q8.** The restore question has nothing preselected, and "Not sure" is an explicit answer.
+> - **Q5.** A setting to undo a wrong restore answer is added.
 
 Plan only. No production code was written and no PR opened. Read at `origin/develop` `5bfcfe891`
 (core pin `8014392`), 2026-11-22. Design: `docs/superpowers/specs/2026-11-17-coinomi-digiid-design.md`
@@ -44,8 +51,9 @@ core comment-only PR trails the app work (task C-doc).
 - **Independent check, re-run for this plan.** A standard-library-only Python model that shares no
   code with the core or the bridge (PBKDF2 for BIP39, its own secp256k1 point arithmetic, BIP32 CKDpriv,
   SLIP-0013 path, RIPEMD160/Base58Check) reproduces every committed literal it was asked for. The
-  script is at
-  `docs/superpowers/plans/2026-11-22-coinomi-slip13-model.py` (task A0 moves it beside the host KATs).
+  script is `native/src/test/host/digiid_core_kat/slip13_model.py`, which PR #305 (task A0) adds
+  beside the host KATs. That is its one copy: the scratch copy that sat beside this plan was
+  deleted on 2026-11-22.
 
   | Input (phrase `abandon…about`, index 0) | Root | Model answer | Committed literal it matches |
   |---|---|---|---|
@@ -65,8 +73,9 @@ core comment-only PR trails the app work (task C-doc).
 - **A limit that shapes the tests.** Through the choice (`BRDigiIdChooseIdentity`) a request to a
   DigiScope host never signs with its own callback. So of the three measured addresses only
   `DSsC7WWi…` is reachable through the app; the two probe addresses stay header-level vectors.
-- **Gap this plan closes.** The Python model is cited in the KAT's comments but is not in the repo.
-  Task A0 commits it and makes the KAT run it.
+- **Gap this plan closes.** The Python model was cited in the KAT's comments but was not in the repo.
+  Task A0 (PR #305) commits it at `native/src/test/host/digiid_core_kat/slip13_model.py` and makes
+  the KAT run it.
 
 ---
 
@@ -172,7 +181,7 @@ task starts.
 ### Task A0: the model in the repo, and the bridge frozen before it moves (test-only)
 
 **Files**
-- Create `native/src/test/host/digiid_core_kat/slip13_model.py` (the scratch script, tidied).
+- Create `native/src/test/host/digiid_core_kat/slip13_model.py` (the scratch script, tidied; PR #305).
 - Create `native/src/test/host/digiid_core_kat/bridge_golden.txt`.
 - Modify `native/src/test/host/digiid_core_kat/run.sh`, `digiid_core_bridge_main.c`.
 
@@ -587,7 +596,7 @@ open PR at a time: U3, then U1, then U2.
 
 ## 6. Open questions for the owner
 
-1. **Where do the properties live?** Recommended: four keys in the wallet's seed-record file
+1. **ANSWERED 2026-11-22: inside the existing seed-record file.** Where do the properties live? Recommended: four keys in the wallet's seed-record file
    (`dgb_wallet_seed[_<id>]`), written in the record's own commit. Truly atomic, already erased by
    every shipped wipe and by removal, no new store name. The alternative, a new per-wallet store,
    needs a reserved name that 4.1.5 never shipped.
@@ -599,7 +608,7 @@ open PR at a time: U3, then U1, then U2.
    own screen. The alternative is the Digi-ID tab.
 4. **Does the toggle ask for the PIN or biometric?** Recommended: yes. It changes which key signs
    and ends a session.
-5. **A wrong restore answer.** Recommended: add one plain row under the toggle, "Site sign-in keys:
+5. **ANSWERED 2026-11-22: the setting is added.** A wrong restore answer. Recommended: add one plain row under the toggle, "Site sign-in keys:
    DigiByte app / Standard", with the same warning, so every state is reachable. As designed, a
    HoldFast phrase restored as "Coinomi" can only be fixed by removing the wallet and restoring it
    again (a full wipe on a one-wallet phone).
@@ -608,7 +617,7 @@ open PR at a time: U3, then U1, then U2.
    other state.
 7. **A stored value this build cannot read.** Recommended: sign nothing for that wallet and say so.
    Falling back to the upgrade row would move a Coinomi wallet's identity without a word.
-8. **The restore question's default.** Recommended: nothing preselected and Continue disabled until
+8. **ANSWERED 2026-11-22: nothing preselected; "Not sure" is an explicit answer.** The restore question's default. Recommended: nothing preselected and Continue disabled until
    one of the four is chosen; "Not sure" is an explicit answer.
 9. **When the site-key root changes, end the wallet's Market web session too?** Recommended: yes,
    only when the root changes, so no session stays open as an identity the wallet no longer signs
