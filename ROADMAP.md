@@ -627,6 +627,11 @@ not — but the coupling ran through the duress PIN, which was cancelled
    Coinomi's), and no app's output changes. Shown by `digiid_core_kat`:
    its `STANDARD` rows give the addresses Coinomi showed, and arms
    131072, 262144, 524288 and 1048576 each fail exactly their cases.
+   Before step 2 touches the bridge (test-only, 2026-11-22): the
+   independent model those rows cite is in the repo and run by the suite
+   (`slip13_model.py`, its MODEL leg), and `bridge_golden.txt` holds
+   what the bridge of 4.1.5 answers, compared byte for byte on every run
+   (its GOLDEN leg), so step 2 can show it moves no identity.
    Steps 2 (the app), 3 (the UI) and 4 (watching Coinomi's fund paths:
    core engine work, with multi-wallet step 2) are pending. Step 2 is
    done only with a bridge test that holds the bridge's
