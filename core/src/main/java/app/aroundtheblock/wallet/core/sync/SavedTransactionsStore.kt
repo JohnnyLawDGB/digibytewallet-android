@@ -146,8 +146,9 @@ object SavedTransactionsStore {
             val bin = file(ctx, scope)
             val tmp = tmpFile(ctx, scope)
             DurableFile.delete(bin, tmp)
+            // Only a key that is there is removed: a commit to a store with no file creates one.
             val legacyGone = runCatching {
-                legacyPrefs(ctx, scope).edit().remove(LEGACY_KEY).remove(KEY_COUNT).commit()
+                removeHeldKeys("SavedTransactionsStore", legacyPrefs(ctx, scope), LEGACY_KEY, KEY_COUNT)
             }.getOrDefault(false)
             !bin.exists() && !tmp.exists() && legacyGone
         }.all { it }

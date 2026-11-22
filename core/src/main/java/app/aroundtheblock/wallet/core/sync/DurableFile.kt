@@ -132,3 +132,23 @@ enum class StoreWrite {
     val failed: Boolean get() = this == FAILED
 
 }
+
+/**
+ * Removes [keys] from [prefs] for a full wallet reset, with a checked commit: true when none of
+ * them is held afterwards and the write, if one was needed, landed.
+ *
+ * A store that holds none of them is not written (WIPE-WRITES-NOTHING): opening a preferences file
+ * creates nothing, but a `commit()` to one with no file writes an empty file, so an unconditional
+ * removal on a network this wallet never used leaves a file the wipe itself made. A write that did
+ * not land leaves the file as it was, and this process reading what it holds, so a retry sees the
+ * key again and removes it again.
+ */
+internal fun removeHeldKeys(tag: String, prefs: SharedPreferences, vararg keys: String): Boolean {
+    if (keys.none(prefs::contains)) return true
+    val held = prefs.all
+    val editor = prefs.edit()
+    keys.forEach { editor.remove(it) }
+    val landed = editor.commit()
+    if (!landed) app.aroundtheblock.wallet.core.readWhatTheFileHolds(tag, "legacy keys", prefs, held)
+    return landed
+}

@@ -330,11 +330,22 @@ object CfAbandonmentStore {
      * [clear] for EVERY network's band, not only the selected one, for a full wallet reset: a
      * band describes ONE wallet's scan, so the next wallet must not be shown it on either
      * network. Returns true only when every write landed; both networks are always attempted.
+     *
+     * A network with no band is not written (WIPE-WRITES-NOTHING): a commit to a store with no file
+     * creates an empty one, a file the wipe itself made. A write that did not land leaves the file
+     * as it was, and this process reading what it holds.
      */
     fun clearAllNetworks(ctx: Context): Boolean =
         listOf(false, true).map { testnet ->
             runCatching {
-                prefs(ctx, WalletScope.legacy(testnet)).edit().clear().commit()
+                val store = prefs(ctx, WalletScope.legacy(testnet))
+                val held = store.all
+                if (held.isEmpty()) return@runCatching true
+                val landed = store.edit().clear().commit()
+                if (!landed) {
+                    app.aroundtheblock.wallet.core.readWhatTheFileHolds("CfAbandonmentStore", PREFS_BASE, store, held)
+                }
+                landed
             }.getOrDefault(false)
         }.all { it }
 }

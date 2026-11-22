@@ -287,7 +287,8 @@ class WipeLeavesNoWalletNamesTest {
         assertTrue("$report", report.verified)
         assertFalse("the PIN store was not cleared", pin.hasPin())
         // The wipe only deletes the reserved names: looking for one that is not there creates no file.
-        // (Three of legacy's own 4.1.4 stores are written back empty by today's wipe; not this test's.)
+        // (No file of any name is created: WIPE-WRITES-NOTHING, `WipeWritesNothingTest`.)
+        assertEquals("files the wipe created", emptySet<String>(), listing() - before)
         assertEquals(
             "files the wipe created under a reserved name",
             emptyList<String>(),

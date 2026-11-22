@@ -46,6 +46,12 @@ import app.aroundtheblock.wallet.core.wallets.storageSuffix
  * with the compact-filter state, its key record and the alias that wraps the key records with the
  * leftover state. Each is looked for by its exact name, deleted (a prefs file with its backup, not
  * only cleared) and read back gone; one that is not there costs nothing and creates no file.
+ *
+ * A wipe creates no file (WIPE-WRITES-NOTHING). No step commits to a preferences store that holds
+ * nothing, since a commit to a store with no file writes an empty one, and a step is true only
+ * when no store it opened has a file now that it did not have before. The one file a wipe may make
+ * is the display currency's (`dgb_price<net>`), when it moves that device setting out of the sync
+ * data it is about to clear. `WipeWritesNothingTest` lists the device before and after.
  */
 interface WalletDataEraser {
     /** Clear the encrypted-seed prefs (`dgb_wallet_seed`). MUST run first. */
@@ -132,6 +138,7 @@ fun interface WalletSessionStop {
  *   record's write landed, no wallet's seed record is readable, and no seed key alias of any
  *   wallet exists. Never inferred from "no step threw".
  * @property everythingCleared every other store of every wallet reported cleared (both networks),
+ *   no store the wipe opened was left with a file it did not have before (WIPE-WRITES-NOTHING),
  *   the registry was cleared, the identity sessions ended, every session running for the wallet
  *   stopped, and the native session stopped.
  */
@@ -214,14 +221,40 @@ class AndroidWalletDataEraser internal constructor(
      * refused its clear therefore still reads as the wallet it holds, so the PIN that opens that
      * wallet can load it in this same process — never an empty store over a record still on disk.
      */
-    private fun clearPrefs(name: String): Boolean = step("clear $name") {
-        val store = context.getSharedPreferences(name, Context.MODE_PRIVATE)
-        val held = store.all
-        // Nothing to clear: no commit, which on a store with no file would create an empty one.
-        if (held.isEmpty()) return@step true
-        val landed = store.edit().clear().commit()
-        if (!landed) readWhatTheFileHolds(TAG, name, store, held)
-        landed
+    private fun clearPrefs(name: String): Boolean = creatingNoFile(listOf(name)) {
+        step("clear $name") {
+            val store = context.getSharedPreferences(name, Context.MODE_PRIVATE)
+            val held = store.all
+            // Nothing to clear: no commit, which on a store with no file would create an empty one.
+            if (held.isEmpty()) return@step true
+            val landed = store.edit().clear().commit()
+            if (!landed) readWhatTheFileHolds(TAG, name, store, held)
+            landed
+        }
+    }
+
+    /**
+     * Runs [erase] over the preferences stores [names] and leaves no file it made
+     * (WIPE-WRITES-NOTHING): true only when [erase] reported its stores cleared AND no store whose
+     * file was not on the device before is on it now.
+     *
+     * Opening a preferences file creates nothing, and the steps do not commit to a store that holds
+     * nothing. A file can still appear: a store this process shows values for while its file is not
+     * on the device is cleared by a commit, which writes an empty file; and an encrypted store
+     * writes its keyset when it is opened. Such a file is one the wipe made, so the wipe deletes it
+     * and reads back that it went. Only behind an erase that reported its stores cleared: a file
+     * that appears beside a write that did not land is left as it is, with the step already false.
+     * What cannot be looked for counts as present, as everywhere in the eraser.
+     */
+    private fun creatingNoFile(names: List<String>, erase: () -> Boolean): Boolean {
+        val absentBefore = names.filter { name -> runCatching { !prefsFileOnDisk(context, name) }.getOrDefault(false) }
+        if (!erase()) return false
+        return absentBefore.map { name ->
+            step("remove the file made for $name") {
+                if (prefsFileOnDisk(context, name)) context.deleteSharedPreferences(name)
+                !prefsFileOnDisk(context, name)
+            }
+        }.all { it }
     }
 
     /**
@@ -319,7 +352,8 @@ class AndroidWalletDataEraser internal constructor(
     override fun eraseOutgoingTx(): Boolean = clearPrefs("dgb_outgoing_tx")
 
     override fun eraseCfSyncState(): Boolean {
-        val headerChain = step("filter-header chain") { FilterHeaderStore.deleteAllNetworks(context) }
+        val syncData = legacyOnEveryNetwork.map { WalletStores.prefsName("dgb_sync_data", it) }
+        val headerChain = creatingNoFile(syncData) { step("filter-header chain") { FilterHeaderStore.deleteAllNetworks(context) } }
         // The scan ledger records which heights this wallet has already had a cfilter
         // evaluated for. Carried into a different wallet it is actively wrong: heights
         // the old wallet scanned are treated as scanned for the new one, so the new
@@ -329,12 +363,16 @@ class AndroidWalletDataEraser internal constructor(
         // dgb_sync_data .clear() no longer reaches it, so it must be deleted here.
         // Left behind, the next wallet would restore against a header window built
         // from a DIFFERENT wallet's chain position.
-        val savedBlocks = step("saved blocks") { SavedBlockStore.deleteAllNetworks(context) }
+        val savedBlocks = creatingNoFile(syncData) { step("saved blocks") { SavedBlockStore.deleteAllNetworks(context) } }
         // The transaction checkpoint (TX-CKPT-CAP) is a file per network too: the next wallet must not
         // restore this one's history.
-        val savedTransactions = step("saved transactions") { SavedTransactionsStore.deleteAllNetworks(context) }
-        // The abandoned-band record describes the scan of the wallet that made it.
-        val abandonedBand = step("abandoned band") { CfAbandonmentStore.clearAllNetworks(context) }
+        val savedTransactions = creatingNoFile(syncData) { step("saved transactions") { SavedTransactionsStore.deleteAllNetworks(context) } }
+        // The abandoned-band record describes the scan of the wallet that made it. Its store, and the
+        // sync data the stores above keep their legacy keys in, are opened here by name: none of
+        // those files may be on the device afterwards unless it was there before.
+        val abandonedBand = creatingNoFile(legacyOnEveryNetwork.map { WalletStores.prefsName("dgb_cf_abandonment", it) }) {
+            step("abandoned band") { CfAbandonmentStore.clearAllNetworks(context) }
+        }
         // Reserved for step 2: the files of legacy's own band, a scan like the ones above.
         val reservedBand = eraseReservedBandFiles()
         return headerChain && scanLedger && savedBlocks && savedTransactions && abandonedBand && reservedBand
@@ -410,7 +448,11 @@ class AndroidWalletDataEraser internal constructor(
         return filterPeers && dandelionPeers && reconcile && assetBackfill && assetHeal && diag && logTag && quickstart && autoLock && scanFloor && reservedKeys
     }
 
-    override fun eraseHubSession(): Boolean = step("hub session") { hubTokenStore().clearConfirmed() }
+    // The encrypted store writes its keyset into its file when it is opened: on a device where it
+    // was never opened, asking it for the token would leave a file the wipe made.
+    override fun eraseHubSession(): Boolean = creatingNoFile(
+        listOf(HubTokenStore.LEGACY_PREFS_NAME, HubTokenStore.SECURE_PREFS_NAME).map { WalletStores.prefsName(it, WalletScope.legacy(false)) },
+    ) { step("hub session") { hubTokenStore().clearConfirmed() } }
 
     private companion object {
         const val TAG = "WalletDataEraser"
