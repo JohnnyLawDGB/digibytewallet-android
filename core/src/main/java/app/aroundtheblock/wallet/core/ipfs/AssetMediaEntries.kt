@@ -20,18 +20,27 @@ import org.json.JSONObject
  * downloaded as a picture and thrown away. In order:
  *
  *  1. the top-level `image`, `imageUrl`, `image_url`, `icon` text, unless a `urls` entry for the
- *     same URL declares it something else, or its own file extension says audio or video;
+ *     same FILE is audio or video, or its own file extension says audio or video. "The same file"
+ *     is decided as the picture loader decides it ([IpfsLocation]): a bare CID, `ipfs://<cid>`,
+ *     `/ipfs/<cid>` and a gateway URL for that CID are one file, however each is spelled;
  *  2. from `urls`: an entry of kind IMAGE named "icon" or "image"; else any entry of kind IMAGE;
- *     else an entry that declares no type and is named "icon" or "image".
+ *     else an entry named "icon" or "image" that is not audio or video.
  *
- * An entry that declares `audio/…`, `video/…` or any other non-image type is never the picture,
- * whatever it is called. An entry of unknown type can be: its bytes have the last word, and a file
- * that does not decode as an image is remembered as that by [IpfsClient.rememberNotAPicture].
+ * Only audio and video rule a file out without its bytes being looked at
+ * ([AssetMediaEntry.mayBePicture]): an entry that declares `audio/…` or `video/…` is never the
+ * picture, whatever it is called. Any other declared type that is not an image
+ * (`application/octet-stream`, `application/png`, a typo) decides nothing, and an entry named as
+ * the picture is then judged like one that declares no type: its bytes have the last word, and a
+ * file that does not decode as an image is remembered as that by [IpfsClient.rememberNotAPicture].
  *
  * ## What is kept
  *
  * Every `urls` entry with a usable URL, in the document's order, up to [MAX_ENTRIES]: URL, declared
- * type and name. The picture is among them. Stored as JSON text in `asset_metadata.mediaJson`.
+ * type and name. The picture is among them. An entry is kept WITH ITS KIND whether or not the
+ * wallet could ever fetch it: a web URL, or a CID with a path, is kept and is not fetchable
+ * ([AssetMediaEntry.cid], [AssetMediaEntry.fetchable]). Stored as JSON text in
+ * `asset_metadata.mediaJson`; the CID and "fetchable" are derived from the URL on reading, so the
+ * stored shape carries one copy of where the file is.
  */
 object AssetMediaEntries {
 
@@ -56,14 +65,24 @@ object AssetMediaEntries {
 
         val topLevel = PICTURE_KEYS.firstNotNullOfOrNull { json.textOrNull(it) }
         val picture = if (topLevel != null) {
-            // A top-level key carries no type. The same file's `urls` entry may; failing that, its extension.
-            val declared = media.firstOrNull { it.url == topLevel }?.kind ?: AssetMediaKind.of(null, null, topLevel)
-            topLevel.takeIf { declared == AssetMediaKind.IMAGE || declared == AssetMediaKind.UNKNOWN }
+            // A top-level key carries no type. The same file's `urls` entry may; failing that, its
+            // extension. The same FILE, not the same text: the loader fetches a bare CID,
+            // `ipfs://<cid>`, `/ipfs/<cid>` and a gateway URL for it as one file, so an audio
+            // entry in one spelling must rule out a top-level picture in another.
+            val where = IpfsLocation.parse(topLevel)
+            val sameFile = media.filter { e -> e.url == topLevel || (where != null && e.location?.sameFileAs(where) == true) }
+            val mayBePicture = when {
+                sameFile.isEmpty() -> AssetMediaEntry(topLevel, null, null).mayBePicture
+                // Declared twice with different types: an image declaration keeps it; else every one must allow it.
+                else -> sameFile.any { it.kind == AssetMediaKind.IMAGE } || sameFile.all { it.mayBePicture }
+            }
+            topLevel.takeIf { mayBePicture }
         } else {
             fun named(e: AssetMediaEntry) = e.name?.lowercase() in PICTURE_NAMES
             (media.firstOrNull { it.kind == AssetMediaKind.IMAGE && named(it) }
                 ?: media.firstOrNull { it.kind == AssetMediaKind.IMAGE }
-                ?: media.firstOrNull { it.kind == AssetMediaKind.UNKNOWN && named(it) })?.url
+                // Named as the picture and not audio or video: no type, or a type that decides nothing.
+                ?: media.firstOrNull { named(it) && it.mayBePicture })?.url
         }
         return Parsed(picture?.takeIf { it.length <= AssetMetadataService.MAX_IMAGE_URL_LEN }, media)
     }

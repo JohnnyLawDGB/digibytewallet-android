@@ -39,6 +39,7 @@ class MetadataCidNotShadowedTest {
         every { Log.d(any(), any<String>()) } returns 0
         coEvery { dao.getMetadata(any()) } returns null
         coEvery { ipfs.fetchVerified(any()) } returns null     // IPFS unreachable
+        coEvery { ipfs.fetch(any()) } returns IpfsClient.Fetched(null, 1)   // the same, as the first pass asks
         coEvery { provider.getAssetData(any()) } returns AssetDataResponse(
             assetId = assetId, cid = "bafyprovider", issuer = "DProviderSaysSo", count = 10, decimals = 0,
             ipfs = mapOf("data" to mapOf("assetName" to "Not The Issuer's Name")), rules = null,
@@ -75,7 +76,7 @@ class MetadataCidNotShadowedTest {
     @Test fun `a caller without the CID gets the issuance's CID from the chain facts, never the provider`() = runBlocking {
         coEvery { dao.getMetadata(assetId) } returns chainFacts(cid = ISSUANCE_CID)
         service().getMetadata(assetId, metadataCid = null)
-        coVerify { ipfs.fetchVerified(ISSUANCE_CID) }
+        coVerify { ipfs.fetch(ISSUANCE_CID) }
         coVerify(exactly = 0) { provider.getAssetData(any()) }
     }
 }

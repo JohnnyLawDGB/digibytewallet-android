@@ -38,7 +38,9 @@ import okhttp3.Request
  *    the answer will be as large a second later. [Fetched.refusedForSize] says that is what
  *    happened, so a caller does not report an oversized file as a gateway failing.
  *  - A file a caller found not to be a picture is remembered as that ([rememberNotAPicture]), in
- *    the same memory again, for [NOT_A_PICTURE_MS].
+ *    the same memory again, for [NOT_A_PICTURE_MS]. Only bytes that are the whole file may be
+ *    judged ([Fetched.wholeFile]): a gateway that failed, or a public gateway's block of a dag-pb
+ *    CID, says nothing about the file.
  *  - Callers that ask for one CID at the same moment share one request ([fetch]).
  *
  * No IPFS daemon or libp2p dependency is required.
@@ -184,7 +186,8 @@ class IpfsClient internal constructor(
         /** Maximum allowed response body size (5 MiB). */
         const val MAX_RESPONSE_SIZE = 5 * 1024 * 1024L // 5 MB as Long for contentLength check
 
-        /** Gateways whose answer for a dag-pb CID (CIDv0 `Qm…`, CIDv1 `bafybe…`) is accepted
+        /** Gateways whose answer for a dag-pb CID (every CIDv0 `Qm…`; a CIDv1 whose codec field is
+         *  dag-pb, most often written `bafybe…`; read from the CID by [CidVerifier.codec]) is accepted
          *  without re-verifying the content hash: a dag-pb CID hashes the UnixFS wrapper, which
          *  this unwrapping gateway strips before serving, so a local rehash would always fail.
          *  For those CIDs the trust anchor is the server's identity: the DigiScope host is
@@ -224,6 +227,25 @@ class IpfsClient internal constructor(
         /** How many of [gatewaysFailed] answered with a file over [MAX_RESPONSE_SIZE] and nothing
          *  else wrong. When it equals [gatewaysFailed], nothing failed but the size. */
         val refusedForSize: Int = 0,
+        /**
+         * True only when [bytes] are known to be the WHOLE FILE the CID names, from a source that
+         * can speak for it (ASSET-MEDIA-FIXES):
+         *
+         *  - a trusted, pinned gateway's complete answer (HTTP 200) for a dag-pb CID, which it
+         *    serves unwrapped; or
+         *  - an answer that hashes to a `raw`-codec CID, whose hash covers the file's every byte,
+         *    whichever gateway gave it.
+         *
+         * False for everything else, and above all for a PUBLIC gateway's answer to a dag-pb CID:
+         * that is the CID's root block (it hashes to the CID, so it verifies), not the file. Such
+         * bytes are no evidence of what the file is. A caller that draws a conclusion ABOUT THE
+         * FILE (it is not a picture; it is this long) may do so only when this is true. A fetch
+         * that returned nothing is never evidence either: [bytes] is null and this is false.
+         */
+        val wholeFile: Boolean = false,
+        /** How many of [gatewaysFailed] answered, in this fetch, that they do not have the CID
+         *  (HTTP 404 or 400): an answer about the CID, where a 5xx, a timeout or no network is not. */
+        val saidNotHere: Int = 0,
     )
 
     /**
@@ -231,6 +253,11 @@ class IpfsClient internal constructor(
      * "icon" can be a song). Remembered for [NOT_A_PICTURE_MS] so that no screen downloads it for
      * that purpose again. It does not stop [fetch]: the file is still a file, for a document
      * reader or a later player. A value that is not a CID is ignored.
+     *
+     * The caller must have judged the whole file: call this only for bytes of a [Fetched] whose
+     * [Fetched.wholeFile] is true. A failed fetch, or a block that is not the file, did not decode
+     * as an image either, and remembering THAT hid a good picture for a day whenever the trusted
+     * gateway was down while a public one had the root block.
      */
     fun rememberNotAPicture(rawCid: String) {
         val cid = normalizeCid(rawCid) ?: return
@@ -247,8 +274,9 @@ class IpfsClient internal constructor(
      * The size in bytes of the file [rawCid] names, when an answer ALREADY MADE gave it; else
      * null. Never makes a request: it exists so a screen can say "Audio · 4.1 MB" without paying a
      * request to say it. Known after a fetch that returned the file (its length), or after the
-     * trusted gateway declared a length the wallet then refused as too large. A public gateway's
-     * answer for a dag-pb CID is that CID's root block, not the file, and is never recorded.
+     * trusted gateway declared a length the wallet then refused as too large. Only an answer that
+     * is the whole file ([Fetched.wholeFile]) is recorded: a public gateway's answer for a dag-pb
+     * CID is that CID's root block, not the file.
      * Held in memory only, at most [SIZES_MAX_ENTRIES].
      */
     fun knownSize(rawCid: String?): Long? {
@@ -311,6 +339,7 @@ class IpfsClient internal constructor(
         android.util.Log.i(TAG, "fetchVerified: cid=$cid")
         var asked = 0
         var tooLarge = 0
+        var notHere = 0
         for (gateway in gateways) {
             if (misses.isRemembered(gateway, cid)) {
                 android.util.Log.d(TAG, "fetchVerified: $gateway said recently it does not have $cid, or not in a size the wallet takes; not asked")
@@ -323,17 +352,22 @@ class IpfsClient internal constructor(
                 // Tor is on and not connected: every gateway would wait and be refused the same
                 // way, so stop here rather than wait out each one in turn.
                 android.util.Log.i(TAG, "fetchVerified: waiting for Tor; not fetched")
-                return Fetched(null, asked - 1, tooLarge)
+                return Fetched(null, asked - 1, tooLarge, saidNotHere = notHere)
             }
             if (result === TOO_LARGE) {
                 tooLarge++
                 continue
             }
+            if (result === NOT_HERE) {
+                notHere++
+                continue
+            }
             if (result != null) {
-                android.util.Log.i(TAG, "fetchVerified: OK via $gateway (${result.size}b)")
+                android.util.Log.i(TAG, "fetchVerified: OK via $gateway (${result.bytes.size}b" +
+                    (if (result.wholeFile) ")" else "; a block, not known to be the whole file)"))
                 // It has it now: a later "not here" from it starts at the short wait again.
                 misses.forget(gateway, cid)
-                return Fetched(result, asked - 1, tooLarge)
+                return Fetched(result.bytes, asked - 1, tooLarge, wholeFile = result.wholeFile, saidNotHere = notHere)
             }
         }
         if (asked == 0) {
@@ -345,17 +379,23 @@ class IpfsClient internal constructor(
         } else {
             android.util.Log.w(TAG, "fetchVerified: all gateways failed for $cid")
         }
-        return Fetched(null, asked, tooLarge)
+        return Fetched(null, asked, tooLarge, saidNotHere = notHere)
     }
 
+    /** One gateway's accepted answer, and whether it is the whole file ([Fetched.wholeFile]). */
+    private class Answer(val bytes: ByteArray, val wholeFile: Boolean)
+
     /** What [tryGateway] returns for an answer refused for size and nothing else. Compared by identity. */
-    private val TOO_LARGE = ByteArray(0)
+    private val TOO_LARGE = Answer(ByteArray(0), false)
+
+    /** What [tryGateway] returns for a gateway's "not here" ([isMiss]). Compared by identity. */
+    private val NOT_HERE = Answer(ByteArray(0), false)
 
     // -------------------------------------------------------------------------
     // Internal helpers
     // -------------------------------------------------------------------------
 
-    private fun tryGateway(gateway: String, cid: String): ByteArray? {
+    private fun tryGateway(gateway: String, cid: String): Answer? {
         return try {
             val url = gatewayUrl(gateway, cid) ?: run {
                 android.util.Log.w(TAG, "tryGateway: not a cid; nothing requested")
@@ -376,7 +416,10 @@ class IpfsClient internal constructor(
                     android.util.Log.d(TAG, "tryGateway: $gateway → HTTP ${response.code} for $cid")
                     // "Not here" and "bad request" are answers about this CID at this gateway: kept,
                     // so the next refresh does not ask the same question. Any other failure is not.
-                    if (isMiss(response.code)) misses.remember(gateway, cid)
+                    if (isMiss(response.code)) {
+                        misses.remember(gateway, cid)
+                        return NOT_HERE
+                    }
                     return null
                 }
 
@@ -413,8 +456,14 @@ class IpfsClient internal constructor(
                 // bafybe… case, dag-pb v1 images (e.g. CHANG token art) failed verify on the
                 // real 279KB file and "passed" on the 108-byte dag root from a ?format=raw
                 // fallback — so the picture never rendered.
-                val isDagPbWrapped = cid.startsWith("Qm") || cid.startsWith("bafybe")
-                val accept = if (isDagPbWrapped && isTrustedGateway) {
+                //
+                // Which CIDs those are is read from the CID's CODEC ([CidVerifier.codec]), not from
+                // how its text begins: `Qm…` and `bafybe…` are two spellings of dag-pb, and the
+                // same codec in base58, in base16 or with another hash begins differently.
+                val codec = cidVerifier.codec(cid)
+                val isDagPbWrapped = codec == CidVerifier.CODEC_DAG_PB
+                val byPin = isDagPbWrapped && isTrustedGateway
+                val accept = if (byPin) {
                     android.util.Log.i(TAG,
                         "tryGateway: $gateway → dag-pb trust-by-cert for $cid (${bytes.size}b)")
                     true
@@ -422,9 +471,14 @@ class IpfsClient internal constructor(
                     cidVerifier.verify(cid, bytes)
                 }
                 if (accept) {
-                    // The file itself, unless this is a public gateway's root block for a dag-pb CID.
-                    if (isTrustedGateway || !isDagPbWrapped) recordSize(cid, bytes.size.toLong())
-                    bytes
+                    // The whole file, from a source that can speak for it ([Fetched.wholeFile]):
+                    // the pinned gateway's complete answer, or bytes that hash to a raw-codec CID.
+                    // Anything else that verified is a BLOCK (a public gateway's root block of a
+                    // dag-pb CID, or a block of some other codec): returned as before, and marked
+                    // as not known to be the file, so nothing is concluded about the file from it.
+                    val wholeFile = if (byPin) response.code == 200 else codec == CidVerifier.CODEC_RAW
+                    if (wholeFile) recordSize(cid, bytes.size.toLong())
+                    Answer(bytes, wholeFile)
                 } else {
                     android.util.Log.w(TAG, "tryGateway: $gateway → hash MISMATCH for $cid (${bytes.size}b)")
                     null

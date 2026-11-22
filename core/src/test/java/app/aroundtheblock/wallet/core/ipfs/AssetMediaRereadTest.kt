@@ -60,7 +60,7 @@ class AssetMediaRereadTest {
 
     @Test fun `a row stored before media was kept is read once more, and loses its song as picture`() = runBlocking {
         row = rowFrom415()
-        coEvery { ipfs.fetchVerified(CID) } returns DOCUMENT.toByteArray()
+        coEvery { ipfs.fetch(CID) } returns IpfsClient.Fetched(DOCUMENT.toByteArray(), 0, wholeFile = true)
         val service = service()
 
         val first = service.getMetadata(assetId, null)
@@ -70,29 +70,29 @@ class AssetMediaRereadTest {
 
         // Marked as read: every later call is answered from the row.
         repeat(5) { assertNull(service.getMetadata(assetId, null)!!.imageUrl) }
-        coVerify(exactly = 1) { ipfs.fetchVerified(any()) }
+        coVerify(exactly = 1) { ipfs.fetch(any()) }
     }
 
     @Test fun `a row already read for media is never fetched again`() = runBlocking {
         row = rowFrom415().copy(imageUrl = null, mediaJson = "[]")
         assertNotNull(service().getMetadata(assetId, CID))
-        coVerify(exactly = 0) { ipfs.fetchVerified(any()) }
+        coVerify(exactly = 0) { ipfs.fetch(any()) }
     }
 
     @Test fun `when the document cannot be fetched the row is still shown, and asked for no more often than any failure`() = runBlocking {
         row = rowFrom415()
-        coEvery { ipfs.fetchVerified(CID) } returns null
+        coEvery { ipfs.fetch(CID) } returns IpfsClient.Fetched(null, 4)
         val service = service()
         repeat(5) {
             val shown = service.getMetadata(assetId, null)
             assertEquals("a name the wallet has must not vanish because a re-read failed", "DigiKid", shown?.name)
         }
-        coVerify(exactly = 1) { ipfs.fetchVerified(any()) }        // then held by the ten-minute memory
+        coVerify(exactly = 1) { ipfs.fetch(any()) }        // then held by the ten-minute memory
     }
 
     @Test fun `the retry pass's call re-reads a 4-1-5 row and costs a settled one no request`() = runBlocking {
         row = rowFrom415()
-        coEvery { ipfs.fetchVerified(CID) } returns DOCUMENT.toByteArray()
+        coEvery { ipfs.fetch(CID) } returns IpfsClient.Fetched(DOCUMENT.toByteArray(), 0, wholeFile = true)
         val service = service()
         repeat(20) { service.rereadForMedia(assetId) }           // twenty sweeps
         assertNull(row!!.imageUrl)
@@ -100,12 +100,12 @@ class AssetMediaRereadTest {
             listOf(app.aroundtheblock.wallet.core.model.AssetMediaEntry(MP3, "audio/mpeg", "icon")),
             AssetMediaEntries.decode(row!!.mediaJson),
         )
-        coVerify(exactly = 1) { ipfs.fetchVerified(any()) }
+        coVerify(exactly = 1) { ipfs.fetch(any()) }
 
         // An asset with no row at all is nothing to read: no request.
         row = null
         service.rereadForMedia(assetId)
-        coVerify(exactly = 1) { ipfs.fetchVerified(any()) }
+        coVerify(exactly = 1) { ipfs.fetch(any()) }
     }
 
     @Test fun `which rows are read again is one rule, and the retry pass uses it`() {
@@ -126,10 +126,95 @@ class AssetMediaRereadTest {
         org.junit.Assert.assertTrue(pass.substringBefore("\n    }\n").contains("metadataService.rereadForMedia(assetId)"))
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // The re-read ends (review F4): a 4.1.5 row whose document is gone was asked for with no end,
+    // about once per gateway per hour for as long as the wallet was installed.
+    // ---------------------------------------------------------------------------------------------
+
+    private val GONE = IpfsClient.Fetched(null, 4, saidNotHere = 1)
+    private val UNREACHABLE = IpfsClient.Fetched(null, 4)
+    private val HOUR = 60L * 60_000L
+
+    /** A new process: the ten-minute memory and the per-process count are the service's own. */
+    private suspend fun launchAndAsk() = service().getMetadata(assetId, null)
+
+    /** The row's "not here" answers, moved back in time as if [ms] had passed since the last one. */
+    private fun age(ms: Long) {
+        val mark = MediaRereadMark.read(row!!.mediaJson) ?: return
+        row = row!!.copy(mediaJson = mark.copy(at = mark.at - ms).encode())
+    }
+
+    @Test fun `a document the gateway says is gone is asked for a fixed number of times, then never again`() = runBlocking {
+        row = rowFrom415()
+        coEvery { ipfs.fetch(CID) } returns GONE
+        repeat(40) {                                    // forty launches, an hour apart
+            assertEquals("the row stays on screen", "DigiKid", launchAndAsk()?.name)
+            age(HOUR)
+        }
+        coVerify(exactly = AssetMetadataService.MEDIA_REREAD_NOT_HERE_LIMIT) { ipfs.fetch(any()) }
+        org.junit.Assert.assertFalse(AssetMetadataService.needsMediaReread(row!!))
+        // Given up, and what the row held is kept: nothing was invented in its place.
+        assertEquals(MP3, row!!.imageUrl)
+        assertEquals(emptyList<app.aroundtheblock.wallet.core.model.AssetMediaEntry>(), AssetMediaEntries.decode(row!!.mediaJson))
+    }
+
+    @Test fun `launches minutes apart during one outage count as one answer`() = runBlocking {
+        row = rowFrom415()
+        coEvery { ipfs.fetch(CID) } returns GONE
+        repeat(40) { launchAndAsk() }                   // forty launches in a row, no time between them
+        assertEquals(1, MediaRereadMark.read(row!!.mediaJson)!!.notHere)
+        org.junit.Assert.assertTrue("not given up on one outage", AssetMetadataService.needsMediaReread(row!!))
+    }
+
+    @Test fun `a document that comes back before the limit is read, and the count is gone`() = runBlocking {
+        row = rowFrom415()
+        coEvery { ipfs.fetch(CID) } returns GONE
+        repeat(AssetMetadataService.MEDIA_REREAD_NOT_HERE_LIMIT - 1) { launchAndAsk(); age(HOUR) }
+        org.junit.Assert.assertTrue(AssetMetadataService.needsMediaReread(row!!))
+
+        coEvery { ipfs.fetch(CID) } returns IpfsClient.Fetched(DOCUMENT.toByteArray(), 0, wholeFile = true)
+        val read = launchAndAsk()!!
+        assertNull(read.imageUrl)
+        assertEquals(listOf(AssetMediaKind.AUDIO), read.media.map { it.kind })
+        assertNull("the row holds the files now, not a count", MediaRereadMark.read(row!!.mediaJson))
+        org.junit.Assert.assertFalse(AssetMetadataService.needsMediaReread(row!!))
+    }
+
+    /** No network, a timeout, a 5xx: no evidence about the document, so nothing is written to the row. */
+    @Test fun `a failure that is not an answer is never held against the document, and still ends within the process`() = runBlocking {
+        row = rowFrom415()
+        coEvery { ipfs.fetch(CID) } returns UNREACHABLE
+        val service = service()
+        val failed = AssetMetadataService::class.java.getDeclaredField("recentlyFailed").apply { isAccessible = true }
+        repeat(100) {
+            assertEquals("DigiKid", service.getMetadata(assetId, null)?.name)
+            (failed.get(service) as MutableMap<*, *>).clear()      // ten minutes pass
+        }
+        coVerify(exactly = AssetMetadataService.MEDIA_REREAD_ROUNDS_PER_PROCESS) { ipfs.fetch(any()) }
+        assertNull("nothing recorded: a new process asks again", row!!.mediaJson)
+        org.junit.Assert.assertTrue(AssetMetadataService.needsMediaReread(row!!))
+
+        // ...and the next launch does ask again, and reads it when the network is back.
+        coEvery { ipfs.fetch(CID) } returns IpfsClient.Fetched(DOCUMENT.toByteArray(), 0, wholeFile = true)
+        assertNull(launchAndAsk()!!.imageUrl)
+    }
+
+    @Test fun `the count is the column's third shape and nothing else reads as one`() {
+        val mark = MediaRereadMark(3, 1_795_000_000_000L)
+        assertEquals(mark, MediaRereadMark.read(mark.encode()))
+        for (other in listOf(null, "", "[]", """[{"url":"$MP3"}]""", "{}", """{"notHere":0,"at":1}""", """{"notHere":2}""", "{not json", "null"))
+            assertNull("'$other'", MediaRereadMark.read(other))
+        // Entries are an array, a count is an object: neither is taken for the other.
+        assertEquals(emptyList<app.aroundtheblock.wallet.core.model.AssetMediaEntry>(), AssetMediaEntries.decode(mark.encode()))
+        // A row marked beyond the limit (or with a damaged count) is settled, not asked for.
+        org.junit.Assert.assertFalse(AssetMetadataService.needsMediaReread(rowFrom415().copy(mediaJson = MediaRereadMark(99, 0).encode())))
+        org.junit.Assert.assertFalse(AssetMetadataService.needsMediaReread(rowFrom415().copy(mediaJson = "{}")))
+    }
+
     /** No CID, nothing to read again: no provider is asked on this account. */
     @Test fun `a named row with no CID is left as it is`() = runBlocking {
         row = rowFrom415().copy(metadataCid = null)
         assertEquals("DigiKid", service().getMetadata(assetId, null)?.name)
-        coVerify(exactly = 0) { ipfs.fetchVerified(any()) }
+        coVerify(exactly = 0) { ipfs.fetch(any()) }
     }
 }

@@ -53,7 +53,9 @@ interface AssetMetadataDao {
 
     /** The files the metadata document declares, as JSON text; `"[]"` for a document read and found
      *  to declare none, so a later reader can tell it from "never read" (NULL). Written by
-     *  AssetMetadataService.storeFromJson only, straight after [updateIpfsFacts]. */
+     *  AssetMetadataService.storeFromJson, straight after [updateIpfsFacts]; and, for a named row
+     *  whose re-read was answered "not here", by the same service with a count of those answers
+     *  (a JSON object, MediaRereadMark), so that the re-read ends. */
     @Query("UPDATE asset_metadata SET mediaJson = :mediaJson WHERE assetId = :assetId")
     suspend fun updateMedia(assetId: String, mediaJson: String?)
 

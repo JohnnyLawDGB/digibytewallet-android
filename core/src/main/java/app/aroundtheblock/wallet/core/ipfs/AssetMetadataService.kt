@@ -20,7 +20,9 @@ import org.json.JSONObject
  *    parsed, persisted to Room, and then returned.
  *  - If [metadataCid] is null, returns null (no metadata to fetch).
  *  - One exception to "returned immediately": a named row that has never been read for the files
- *    the document declares (written before schema 13) is fetched once more by its own CID.
+ *    the document declares (written before schema 13) is fetched once more by its own CID. That
+ *    re-read is bounded ([MEDIA_REREAD_NOT_HERE_LIMIT], [MEDIA_REREAD_ROUNDS_PER_PROCESS]): a
+ *    document that is gone is not asked for with no end.
  *
  * Expected JSON shape (all fields optional):
  * ```json
@@ -54,6 +56,9 @@ class AssetMetadataService(
      */
     private val recentlyFailed = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
+    /** Failed re-reads for media in this process, by asset: see [MEDIA_REREAD_ROUNDS_PER_PROCESS]. */
+    private val mediaRereadRounds = java.util.concurrent.ConcurrentHashMap<String, Int>()
+
     internal companion object {
         /**
          * The only issuer the wallet will show: the one the chain proves.
@@ -79,7 +84,41 @@ class AssetMetadataService(
          * AssetManager's metadata retry pass, is what asks for it. A row with no CID has nothing to be read again from.
          */
         fun needsMediaReread(row: AssetMetadataEntity): Boolean =
-            row.name != null && row.mediaJson == null && IpfsClient.normalizeCid(row.metadataCid) != null
+            row.name != null && IpfsClient.normalizeCid(row.metadataCid) != null && when {
+                row.mediaJson == null -> true
+                // Tried, and a gateway said the document is not there: again, until that has been said often enough.
+                else -> MediaRereadMark.read(row.mediaJson)?.let { it.notHere < MEDIA_REREAD_NOT_HERE_LIMIT } ?: false
+            }
+
+        /**
+         * How many times a gateway may answer "not here" for a row's document, across launches,
+         * before the re-read for media is given up FOR GOOD: 5. The count is kept with the row
+         * ([MediaRereadMark], in `mediaJson`, so no column is added), and two answers count as two
+         * only when at least [IpfsClient.MISS_FIRST_MS] (10 minutes) apart, so five quick launches
+         * during one outage are one answer.
+         *
+         * Only "not here" (HTTP 404 or 400, [IpfsClient.Fetched.saidNotHere]) is counted: it is an
+         * answer about the document. No network, a timeout and a 5xx say nothing about it and are
+         * bounded per process instead ([MEDIA_REREAD_ROUNDS_PER_PROCESS]). Inside one process the
+         * gateway memory spaces "not here" answers 10, 20, 40 and 60 minutes apart, so a document
+         * that stays missing is given up after about two hours of running, having been asked for
+         * five times; a document the gateway pins again before that is read and the count is gone.
+         *
+         * What giving up costs: the row keeps what 4.1.5 stored. It gets no "Media" line, and if
+         * its image is a file that is not a picture, that file is still downloaded once per day
+         * per process and judged ([IpfsClient.rememberNotAPicture]).
+         */
+        const val MEDIA_REREAD_NOT_HERE_LIMIT = 5
+
+        /**
+         * How many failed re-reads for media ONE PROCESS makes for one asset, whatever the reason:
+         * 6, which at the service's ten-minute wait after a failure ([NEGATIVE_CACHE_TTL_MS]) is
+         * the hour of [IpfsClient.MISS_TTL_MS], the gateway memory's ceiling. After that the row is
+         * left as it is until the app is started again. This is the bound for failures that are no
+         * evidence about the document (no network, timeouts, 5xx), which is why it ends with the
+         * process and writes nothing to the row.
+         */
+        const val MEDIA_REREAD_ROUNDS_PER_PROCESS = 6
 
         /** 10 minutes. Long enough to stop hammering broken gateways;
          *  short enough that a proxy recovery is picked up naturally
@@ -230,6 +269,9 @@ class AssetMetadataService(
         // to fetch it by. Same gateways, same backoff. Until that lands the row is shown as it is.
         val named = cached?.takeIf { it.name != null }
         if (named != null && !needsMediaReread(named)) return named.toModel()
+        // ...and the re-read ends (bounded twice: see MEDIA_REREAD_NOT_HERE_LIMIT, just checked,
+        // and MEDIA_REREAD_ROUNDS_PER_PROCESS).
+        if (named != null && (mediaRereadRounds[assetId] ?: 0) >= MEDIA_REREAD_ROUNDS_PER_PROCESS) return named.toModel()
 
         // The CID is the issuance's: the caller's, or the one the parent walk recorded with the chain facts.
         // A value that is not a CID is no CID (IPFS-NO-NULL): a row written before this rule could hold
@@ -255,12 +297,16 @@ class AssetMetadataService(
 
         return withContext(Dispatchers.IO) {
             // Pass 1: IPFS via CID (if we have one)
+            var saidNotHere = false
             if (cid != null) {
-                val bytes = ipfsClient.fetchVerified(cid)
+                val fetched = ipfsClient.fetch(cid)
+                saidNotHere = fetched.saidNotHere > 0
+                val bytes = fetched.bytes
                 if (bytes != null) {
                     val json = runCatching { JSONObject(String(bytes, Charsets.UTF_8)) }.getOrNull()
                     if (json != null) {
                         recentlyFailed.remove(negativeKey)
+                        mediaRereadRounds.remove(assetId)
                         // Path 1 resolves the document straight from the issuance's metadata hash and
                         // never consults a provider, so there is no chain-proven issuer to record.
                         // null is the correct answer here, and the row simply will not render.
@@ -307,6 +353,7 @@ class AssetMetadataService(
             // Everything failed — mark for suppression until TTL expires.
             recentlyFailed[negativeKey] = System.currentTimeMillis()
             // A row that was already named stays on screen: only its re-read for media failed.
+            if (named != null) noteMediaRereadFailed(named, saidNotHere)
             named?.toModel()
         }
     }
@@ -318,6 +365,28 @@ class AssetMetadataService(
      */
     suspend fun rereadForMedia(assetId: String) {
         getMetadata(assetId, null)
+    }
+
+    /**
+     * A re-read for media of the named row [row] just failed: counted, so that it ends. Every
+     * failure counts toward this process's bound; one in which a gateway answered "not here"
+     * ([saidNotHere]) is also recorded with the row, toward the bound that outlives the process.
+     */
+    private suspend fun noteMediaRereadFailed(row: AssetMetadataEntity, saidNotHere: Boolean) {
+        val rounds = mediaRereadRounds.merge(row.assetId, 1, Int::plus) ?: 1
+        val before = MediaRereadMark.read(row.mediaJson)
+        val now = System.currentTimeMillis()
+        val mark = if (saidNotHere) MediaRereadMark.next(before, now, IpfsClient.MISS_FIRST_MS) else before
+        if (mark != null && mark != before) {
+            runCatching { assetMetadataDao.updateMedia(row.assetId, mark.encode()) }
+                .onFailure { android.util.Log.w("AssetMetadataService", "media re-read count not saved for ${row.assetId}", it) }
+        }
+        val givenUp = (mark?.notHere ?: 0) >= MEDIA_REREAD_NOT_HERE_LIMIT
+        if (givenUp || rounds >= MEDIA_REREAD_ROUNDS_PER_PROCESS) {
+            android.util.Log.i("AssetMetadataService", "media re-read for ${row.assetId} stopped: " +
+                if (givenUp) "its document was not there ${mark?.notHere} times; not asked for again"
+                else "$rounds failed attempts; not asked for again until the app restarts")
+        }
     }
 
     /**

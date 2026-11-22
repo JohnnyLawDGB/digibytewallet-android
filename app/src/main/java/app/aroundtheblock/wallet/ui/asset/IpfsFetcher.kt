@@ -35,6 +35,12 @@ import okio.Buffer
  * draw. Whether the bytes are an image is asked here, of the same platform decoder Coil will use
  * ([decodesAsImage], bounds only, nothing allocated for pixels), and a "no" is remembered in
  * [IpfsClient], which the list, the detail screen and the full-screen viewer all load through.
+ *
+ * **Only the whole file is judged.** The "no" is remembered only when the bytes are known to be the
+ * file itself ([IpfsClient.Fetched.wholeFile]): the trusted gateway's complete answer, or bytes
+ * that hash to a raw-codec CID. A fetch that failed is no evidence, and neither is a public
+ * gateway's root block of a dag-pb CID, which is what comes back when the trusted gateway is down
+ * or has not pinned the file yet. Neither decodes as an image, and neither says the file is not one.
  */
 class IpfsFetcher(
     private val uri: Uri,
@@ -75,6 +81,16 @@ class IpfsFetcher(
             return null
         }
         if (!decodesAsImage(bytes)) {
+            if (!fetched.wholeFile) {
+                // A block, not the file: what a public gateway gives for a dag-pb CID when the
+                // trusted gateway failed or does not have it yet. It says nothing about the file,
+                // so nothing is remembered and the next draw asks again, as before this memory existed.
+                android.util.Log.i(
+                    "IpfsFetcher",
+                    "Not shown: only a block of ${LogSafe.text(cid, 80)} was fetched (${bytes.size} bytes), not the file; asked again later"
+                )
+                return null
+            }
             ipfsClient.rememberNotAPicture(cid)
             android.util.Log.w(
                 "IpfsFetcher",

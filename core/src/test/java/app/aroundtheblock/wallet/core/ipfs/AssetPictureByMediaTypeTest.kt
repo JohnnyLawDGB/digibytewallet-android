@@ -81,10 +81,39 @@ class AssetPictureByMediaTypeTest {
 
     @Test fun `the declared type outranks the name, whatever the name is`() {
         for (name in listOf("icon", "image", "cover.png", "art.jpg", "x.gif", "logo.webp")) {
-            for (mime in listOf("video/mp4", "audio/mpeg", "AUDIO/OGG", "video/webm; codecs=vp9", "application/pdf", "text/html")) {
+            for (mime in listOf("video/mp4", "audio/mpeg", "AUDIO/OGG", "video/webm; codecs=vp9")) {
                 assertNull("$name declared $mime", store(urls(entry(name, MP4, mime))).imageUrl)
             }
         }
+        // A declared type that is neither image, audio nor video is still no picture under a file's
+        // own name. (Under the name "icon" or "image" it is judged by its bytes: review F2, below.)
+        for (name in listOf("cover.png", "art.jpg", "x.gif", "logo.webp", "file", null)) {
+            for (mime in listOf("application/pdf", "text/html")) {
+                assertNull("$name declared $mime", store(urls(entry(name, PNG, mime))).imageUrl)
+            }
+        }
+    }
+
+    /**
+     * Review F2. 4.1.5 showed the picture of an entry named "icon" whatever type it declared. Only
+     * `audio/…` and `video/…` may take that away without the bytes being looked at: a wrong or
+     * meaningless declared type (`binary/octet-stream`, `application/png`, a typo) decides nothing.
+     */
+    @Test fun `an entry named as the picture with a type that is neither image, audio nor video is judged by its bytes`() {
+        for (name in listOf("icon", "image", "Icon", "IMAGE")) {
+            for (mime in listOf("binary/octet-stream", "application/png", "application/x-png", "imagee/png", "img/png", "text/plain", "application/pdf", "text/html", "model/gltf-binary")) {
+                assertEquals("$name declared $mime", PNG, store(urls(entry(name, PNG, mime))).imageUrl)
+            }
+        }
+        // It is still kept as what it declared, and it never outranks an entry that IS an image.
+        val stored = store(urls(entry("icon", PNG, "application/png"), entry("file", JPEG, "image/jpeg")))
+        assertEquals(JPEG, stored.imageUrl)
+        assertEquals(listOf(AssetMediaKind.OTHER, AssetMediaKind.IMAGE), stored.media.map { it.kind })
+        // Audio and video are ruled out as before, by declaration and, with no usable type, by extension.
+        assertNull(store(urls(entry("icon", MP3, "audio/mpeg"))).imageUrl)
+        assertNull(store(urls(entry("icon", MP4, "video/mp4"))).imageUrl)
+        assertNull(store(urls(entry("icon", "$MP3/song.mp3", "binary/octet-stream"))).imageUrl)
+        assertNull(store(urls(entry("icon", "$MP4/clip.mp4", "application/x-whatever"))).imageUrl)
     }
 
     @Test fun `an image is the picture whatever it is named, and a named icon is preferred`() {
@@ -112,6 +141,103 @@ class AssetPictureByMediaTypeTest {
             assertNull(key, store(doc).imageUrl)
             assertEquals(key, PNG, store("""{"data":{"assetName":"X","$key":"$PNG"}}""").imageUrl)
             assertNull("$key with a video extension", store("""{"data":{"assetName":"X","$key":"https://x.example/ipfs/a/clip.mp4"}}""").imageUrl)
+        }
+    }
+
+    /**
+     * Review F3 (the Codex finding). The loader fetches a bare CID, `ipfs://<cid>`, `/ipfs/<cid>` and
+     * a gateway URL for it as ONE file, so the audio declaration must be found whichever way each
+     * side spells it. Compared as text, a top-level bare CID beside an `ipfs://` audio entry was
+     * taken as the picture, and the song was downloaded as one.
+     */
+    @Test fun `a top-level picture is matched to its urls entry by the file it names, not by its spelling`() {
+        val cid = MP3.removePrefix("ipfs://")
+        val spellings = listOf(
+            cid, "ipfs://$cid", "/ipfs/$cid",
+            "https://ipfs.io/ipfs/$cid", "https://gateway.example/ipfs/$cid?filename=icon", "https://$cid.ipfs.dweb.link/", "ipfs://$cid/",
+        )
+        for (top in spellings) for (inUrls in spellings) {
+            for (mime in listOf("audio/mpeg", "video/mp4")) {
+                val doc = JSONObject().put("assetName", "X").put("image", top)
+                    .put("urls", org.json.JSONArray().put(JSONObject(entry("song", inUrls, mime))))
+                assertNull("top-level '$top', declared $mime as '$inUrls'", store(JSONObject().put("data", doc).toString()).imageUrl)
+            }
+            // The same pairing declared an image, or declared nothing, is still the picture, as written.
+            for (mime in listOf("image/png", null, "application/octet-stream")) {
+                val doc = JSONObject().put("assetName", "X").put("image", top)
+                    .put("urls", org.json.JSONArray().put(JSONObject(entry("file", inUrls, mime))))
+                assertEquals("top-level '$top', declared $mime as '$inUrls'", top, store(JSONObject().put("data", doc).toString()).imageUrl)
+            }
+        }
+    }
+
+    @Test fun `a top-level picture is not ruled out by another file's declaration`() {
+        val cid = MP3.removePrefix("ipfs://")
+        // A different CID, and a file INSIDE the same CID, are other files.
+        for (other in listOf(MP4, "ipfs://$cid/song.mp3", "https://ipfs.io/ipfs/$cid/song.mp3", "https://example.com/$cid")) {
+            val doc = """{"data":{"assetName":"X","image":"$cid","urls":[${entry("song", other, "audio/mpeg")}]}}"""
+            assertEquals(other, cid, store(doc).imageUrl)
+        }
+        // A web URL that names no CID is matched as text, as before.
+        val web = "https://example.com/a"
+        assertNull(store("""{"data":{"assetName":"X","image":"$web","urls":[${entry("song", web, "audio/mpeg")}]}}""").imageUrl)
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // 1b. What may be fetched for an entry (for the player this model is kept for)
+    // ---------------------------------------------------------------------------------------------
+
+    @Test fun `an entry's kind survives when there is no CID, and such an entry is not fetchable`() {
+        val stored = store(urls(
+            entry("clip", "https://cdn.issuer.example/clip.mp4", "video/mp4"),
+            entry("song.mp3", "http://issuer.example/a", null),
+            entry("page", "https://issuer.example/", "text/html"),
+        ))
+        assertEquals(listOf(AssetMediaKind.VIDEO, AssetMediaKind.AUDIO, AssetMediaKind.OTHER), stored.media.map { it.kind })
+        for (e in stored.media) {
+            assertNull("${e.url}: a web URL names no CID", e.cid)
+            assertTrue("${e.url}: and is never fetched", !e.fetchable)
+        }
+        assertNull("no picture among them", stored.imageUrl)
+    }
+
+    @Test fun `an entry's CID is the one the picture loader would fetch, however the URL is written`() {
+        val cid = MP4.removePrefix("ipfs://")
+        for (url in listOf(cid, "ipfs://$cid", "/ipfs/$cid", "https://ipfs.io/ipfs/$cid", "https://$cid.ipfs.dweb.link", "ipfs://$cid?filename=a.mp4", "ipfs://$cid/")) {
+            val e = store(urls(entry("file", url, "video/mp4"))).media.single()
+            assertEquals(url, cid, e.cid)
+            assertTrue(url, e.fetchable)
+            assertEquals(url, AssetMediaKind.VIDEO, e.kind)
+            assertEquals("stored as written: one copy of where the file is", url, e.url)
+        }
+    }
+
+    /** `<cid>/song.mp3` is a file inside a directory. The bare CID is the directory, not the file. */
+    @Test fun `a CID with a path is kept with its kind and marked not fetchable`() {
+        val dir = MP3.removePrefix("ipfs://")
+        for (url in listOf("ipfs://$dir/song.mp3", "/ipfs/$dir/album/song.mp3", "https://ipfs.io/ipfs/$dir/song.mp3", "https://$dir.ipfs.dweb.link/song.mp3")) {
+            val e = store(urls(entry("file", url, "audio/mpeg"))).media.single()
+            assertEquals(url, AssetMediaKind.AUDIO, e.kind)
+            assertEquals("$url: the CID named is the directory's", dir, e.cid)
+            assertTrue("$url: so it must not be fetched as the file", !e.fetchable)
+        }
+    }
+
+    @Test fun `an entry whose URL is neither a CID nor a web URL is kept and names nothing`() {
+        for (url in listOf("ipfs://null", "ipfs://not-a-cid/x.mp4", "ar://abc", "data:video/mp4;base64,AAAA", "clip.mp4")) {
+            val e = store(urls(entry("file", url, "video/mp4"))).media.single()
+            assertEquals(url, AssetMediaKind.VIDEO, e.kind)
+            assertNull(url, e.cid)
+            assertTrue(url, !e.fetchable)
+        }
+    }
+
+    /** Derived on reading, so the stored JSON is what it was: url, mimeType, name and nothing else. */
+    @Test fun `the stored shape carries no cid and no flag`() {
+        val json = store(urls(entry("file", "$MP3/song.mp3", "audio/mpeg"), entry("clip", "https://x.example/c.mp4", "video/mp4"))).mediaJson!!
+        val arr = org.json.JSONArray(json)
+        for (i in 0 until arr.length()) {
+            assertEquals(setOf("url", "mimeType", "name"), arr.getJSONObject(i).keys().asSequence().toSet())
         }
     }
 
