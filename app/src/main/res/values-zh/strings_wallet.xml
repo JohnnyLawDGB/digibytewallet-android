@@ -840,4 +840,44 @@
     <string name="quickstart_unverified_sub">在同步证实之前不可花费，也不计入您的余额。</string>
     <string name="quickstart_running_skip">不等待，继续</string>
     <string name="quickstart_incomplete">查询未能完成，因此不显示数字。钱包同步时仍会找到其余额。</string>
+    <!-- RECONCILE-SCREEN-I18N: the rest of the Scan for missing funds screen. A stuck-send result is one
+         sentence from up to four parts; each part after the first starts with its own separator. -->
+    <string name="reconcile_what_title">此操作的作用</string>
+    <string name="reconcile_trust_notice">此操作会查询外部节点。默认端点为 api.digiscope.me（已固定证书）。若要完全自主，请在下方指向您自己的节点——任何密钥或交易凭据都不会离开您的设备，只会发送公开地址。</string>
+    <string name="reconcile_endpoint_title">节点端点</string>
+    <string name="reconcile_endpoint_reset">恢复默认</string>
+    <string name="reconcile_scanning">正在扫描…</string>
+    <string name="reconcile_stuck_title">卡住的未确认发送</string>
+    <string name="reconcile_stuck_body">如果发送的交易一直无法确认，它们可能花费了更早一笔从未上链的发送所产生的找零——因此永远无法被打包。此操作会移除这些无法打包的交易，并释放被它们占用的币。已确认的发送绝不会受到影响。</string>
+    <string name="reconcile_stuck_none">没有需要清除的卡住发送。</string>
+    <string name="reconcile_stuck_button">清除卡住的发送</string>
+    <string name="reconcile_rebuild_title">从链上完全重建</string>
+    <string name="reconcile_done_title">扫描完成</string>
+    <string name="reconcile_addresses_scanned">已扫描的地址</string>
+    <string name="reconcile_txs_imported">已导入的交易</string>
+    <string name="reconcile_history_recovered">从历史记录中恢复</string>
+    <string name="reconcile_balance_updates">您的余额很快就会更新。</string>
+    <string name="reconcile_failed_title">扫描失败</string>
+    <string name="reconcile_fail_no_addresses">没有可用的地址（钱包未加载？）</string>
+    <string name="reconcile_fail_node">节点请求失败——请检查网络或端点</string>
+    <string name="reconcile_fail_error">扫描因错误而停止：%1$s</string>
+    <string name="reconcile_stage_pending">正在检查待确认的交易…</string>
+    <string name="reconcile_stage_history">正在扫描地址历史…</string>
+    <string name="reconcile_stage_reading_history">正在读取地址历史…</string>
+    <string name="reconcile_stage_recovering">正在恢复交易 %1$d/%2$d…</string>
+    <string name="reconcile_stage_addresses">正在列出钱包地址…</string>
+    <string name="reconcile_stage_assets">正在整理资产持有记录…</string>
+    <string name="reconcile_stage_importing">正在导入交易 %1$d/%2$d</string>
+    <plurals name="reconcile_stuck_cleared">
+        <item quantity="other">已清除 %1$d 笔卡住的发送</item>
+    </plurals>
+    <plurals name="reconcile_stuck_orphans">
+        <item quantity="other">，其中 %1$d 笔为孤立交易（花费了此钱包已不再持有的父交易）</item>
+    </plurals>
+    <plurals name="reconcile_stuck_asset_rows">
+        <item quantity="other">；已修正 %1$d 条资产记录。余额很快就会更新。</item>
+    </plurals>
+    <plurals name="reconcile_stage_querying">
+        <item quantity="other">正在向节点查询 %1$d 个地址上的 UTXO…</item>
+    </plurals>
 </resources>

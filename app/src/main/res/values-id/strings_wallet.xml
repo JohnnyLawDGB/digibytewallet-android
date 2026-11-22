@@ -840,4 +840,44 @@
     <string name="quickstart_unverified_sub">Tidak dapat dibelanjakan dan tidak masuk saldo Anda sampai sinkronisasi membuktikannya.</string>
     <string name="quickstart_running_skip">Lanjutkan tanpa menunggu</string>
     <string name="quickstart_incomplete">Pencarian tidak dapat diselesaikan, jadi tidak ada angka yang ditampilkan. Dompet tetap akan menemukan saldonya saat sinkronisasi.</string>
+    <!-- RECONCILE-SCREEN-I18N: the rest of the Scan for missing funds screen. A stuck-send result is one
+         sentence from up to four parts; each part after the first starts with its own separator. -->
+    <string name="reconcile_what_title">Apa yang dilakukan ini</string>
+    <string name="reconcile_trust_notice">Ini menanyai node eksternal. Endpoint bawaan adalah api.digiscope.me (sertifikat di-pin). Untuk kedaulatan penuh, arahkan ke node Anda sendiri di bawah — tidak ada kunci atau kredensial transaksi yang pernah meninggalkan perangkat Anda, hanya alamat publik yang dikirim.</string>
+    <string name="reconcile_endpoint_title">Endpoint node</string>
+    <string name="reconcile_endpoint_reset">Kembalikan ke bawaan</string>
+    <string name="reconcile_scanning">Memindai…</string>
+    <string name="reconcile_stuck_title">Kiriman belum terkonfirmasi yang macet</string>
+    <string name="reconcile_stuck_body">Jika kiriman tidak pernah terkonfirmasi, mungkin kiriman itu membelanjakan kembalian dari kiriman sebelumnya yang tidak pernah masuk ke chain — sehingga tidak akan pernah bisa ditambang. Ini membuang transaksi yang tidak bisa ditambang tersebut dan mengembalikan koin yang ditahannya. Kiriman yang sudah terkonfirmasi tidak pernah disentuh.</string>
+    <string name="reconcile_stuck_none">Tidak ada kiriman macet untuk dibersihkan.</string>
+    <string name="reconcile_stuck_button">Bersihkan kiriman macet</string>
+    <string name="reconcile_rebuild_title">Bangun ulang penuh dari chain</string>
+    <string name="reconcile_done_title">Pemindaian selesai</string>
+    <string name="reconcile_addresses_scanned">Alamat yang dipindai</string>
+    <string name="reconcile_txs_imported">Transaksi yang diimpor</string>
+    <string name="reconcile_history_recovered">Dipulihkan dari riwayat</string>
+    <string name="reconcile_balance_updates">Saldo Anda akan segera diperbarui.</string>
+    <string name="reconcile_failed_title">Pemindaian gagal</string>
+    <string name="reconcile_fail_no_addresses">Tidak ada alamat yang tersedia (dompet belum dimuat?)</string>
+    <string name="reconcile_fail_node">Permintaan ke node gagal — periksa jaringan atau endpoint</string>
+    <string name="reconcile_fail_error">Pemindaian berhenti karena kesalahan: %1$s</string>
+    <string name="reconcile_stage_pending">Memeriksa transaksi yang tertunda…</string>
+    <string name="reconcile_stage_history">Memindai riwayat alamat…</string>
+    <string name="reconcile_stage_reading_history">Membaca riwayat alamat…</string>
+    <string name="reconcile_stage_recovering">Memulihkan transaksi %1$d/%2$d…</string>
+    <string name="reconcile_stage_addresses">Mendaftar alamat dompet…</string>
+    <string name="reconcile_stage_assets">Merapikan kepemilikan aset…</string>
+    <string name="reconcile_stage_importing">Mengimpor transaksi %1$d/%2$d</string>
+    <plurals name="reconcile_stuck_cleared">
+        <item quantity="other">%1$d kiriman macet dibersihkan</item>
+    </plurals>
+    <plurals name="reconcile_stuck_orphans">
+        <item quantity="other">, %1$d di antaranya yatim (membelanjakan transaksi induk yang tidak lagi dimiliki dompet ini)</item>
+    </plurals>
+    <plurals name="reconcile_stuck_asset_rows">
+        <item quantity="other">; %1$d baris aset dikoreksi. Saldo akan segera diperbarui.</item>
+    </plurals>
+    <plurals name="reconcile_stage_querying">
+        <item quantity="other">Menanyai node tentang UTXO pada %1$d alamat…</item>
+    </plurals>
 </resources>

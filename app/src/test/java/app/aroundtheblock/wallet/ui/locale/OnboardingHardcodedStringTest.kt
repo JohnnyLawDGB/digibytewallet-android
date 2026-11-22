@@ -97,6 +97,10 @@ class OnboardingHardcodedStringTest {
         "ui/wallets/WalletSwitcherSheet.kt",
         "ui/wallets/ManageWalletsScreen.kt",
         "ui/wallets/RemoveWalletDialog.kt",
+        // "Scan for missing funds": the whole screen (RECONCILE-SCREEN-I18N). A user who opens it
+        // has funds missing; the trust notice (what leaves the device) and the stuck-send result
+        // have to be readable in their language.
+        "ui/settings/ReconcileScreen.kt",
         // AppNavigation is deliberately NOT here. It is a router: ~100 of its literals are route
         // names and argument keys, so an every-literal scan would need an allow-list longer than
         // the file and would stop meaning anything. Its user-visible text is three toast/label
@@ -183,6 +187,8 @@ class OnboardingHardcodedStringTest {
         // Hub handle sheet and recovery phrase grid: a truncated address, a lazy-grid item key and a
         // word's 1-based position number.
         "\${address.take(10)}…\${address.takeLast(8)}", "passphrase", "\${idx + 1}.",
+        // Scan for missing funds: a value plus the ticker, and a count beside one.
+        "\${fmt.format(sat / 100_000_000.0)} DGB", "\${t.count} · \${dgb(t.sat)}",
     )
 
     private val quoted = Regex("\"([^\"\\n]{2,})\"")

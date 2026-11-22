@@ -855,4 +855,48 @@
     <string name="quickstart_unverified_sub">Nicht ausgebbar und nicht in deinem Guthaben, bis die Synchronisierung es belegt.</string>
     <string name="quickstart_running_skip">Weiter, ohne zu warten</string>
     <string name="quickstart_incomplete">Die Abfrage konnte nicht abgeschlossen werden, daher wird kein Betrag angezeigt. Die Wallet findet ihr Guthaben trotzdem beim Synchronisieren.</string>
+    <!-- RECONCILE-SCREEN-I18N: the rest of the Scan for missing funds screen. A stuck-send result is one
+         sentence from up to four parts; each part after the first starts with its own separator. -->
+    <string name="reconcile_what_title">Was das bewirkt</string>
+    <string name="reconcile_trust_notice">Dies fragt einen externen Knoten ab. Der Standard-Endpunkt ist api.digiscope.me (mit Zertifikats-Pinning). Für volle Souveränität geben Sie unten Ihren eigenen Knoten an — Schlüssel oder Zugangsdaten für Transaktionen verlassen Ihr Gerät nie, es werden nur öffentliche Adressen gesendet.</string>
+    <string name="reconcile_endpoint_title">Knoten-Endpunkt</string>
+    <string name="reconcile_endpoint_reset">Auf Standard zurücksetzen</string>
+    <string name="reconcile_scanning">Suche läuft…</string>
+    <string name="reconcile_stuck_title">Hängende unbestätigte Sendungen</string>
+    <string name="reconcile_stuck_body">Wenn Sendungen nie bestätigt werden, geben sie möglicherweise Wechselgeld aus einer früheren Sendung aus, die nie in der Blockchain angekommen ist — sie können dann nie in einen Block aufgenommen werden. Dies entfernt diese nicht bestätigbaren Transaktionen und gibt die Coins wieder frei, die sie gebunden haben. Bestätigte Sendungen werden nie angetastet.</string>
+    <string name="reconcile_stuck_none">Keine hängenden Sendungen zu entfernen.</string>
+    <string name="reconcile_stuck_button">Hängende Sendungen entfernen</string>
+    <string name="reconcile_rebuild_title">Vollständiger Neuaufbau aus der Blockchain</string>
+    <string name="reconcile_done_title">Suche abgeschlossen</string>
+    <string name="reconcile_addresses_scanned">Geprüfte Adressen</string>
+    <string name="reconcile_txs_imported">Importierte Transaktionen</string>
+    <string name="reconcile_history_recovered">Aus dem Verlauf wiederhergestellt</string>
+    <string name="reconcile_balance_updates">Ihr Guthaben sollte sich in Kürze aktualisieren.</string>
+    <string name="reconcile_failed_title">Suche fehlgeschlagen</string>
+    <string name="reconcile_fail_no_addresses">Keine Adressen verfügbar (Wallet nicht geladen?)</string>
+    <string name="reconcile_fail_node">Knotenanfrage fehlgeschlagen — Netzwerk oder Endpunkt prüfen</string>
+    <string name="reconcile_fail_error">Die Suche wurde durch einen Fehler beendet: %1$s</string>
+    <string name="reconcile_stage_pending">Ausstehende Transaktionen werden geprüft…</string>
+    <string name="reconcile_stage_history">Adressverlauf wird durchsucht…</string>
+    <string name="reconcile_stage_reading_history">Adressverlauf wird gelesen…</string>
+    <string name="reconcile_stage_recovering">Transaktion %1$d/%2$d wird wiederhergestellt…</string>
+    <string name="reconcile_stage_addresses">Wallet-Adressen werden aufgelistet…</string>
+    <string name="reconcile_stage_assets">Asset-Bestände werden bereinigt…</string>
+    <string name="reconcile_stage_importing">Transaktion %1$d/%2$d wird importiert</string>
+    <plurals name="reconcile_stuck_cleared">
+        <item quantity="one">%1$d hängende Sendung entfernt</item>
+        <item quantity="other">%1$d hängende Sendungen entfernt</item>
+    </plurals>
+    <plurals name="reconcile_stuck_orphans">
+        <item quantity="one">, davon %1$d verwaist (gibt eine Vorgängertransaktion aus, die diese Wallet nicht mehr hat)</item>
+        <item quantity="other">, davon %1$d verwaist (geben eine Vorgängertransaktion aus, die diese Wallet nicht mehr hat)</item>
+    </plurals>
+    <plurals name="reconcile_stuck_asset_rows">
+        <item quantity="one">; %1$d Asset-Eintrag korrigiert. Das Guthaben wird in Kürze aktualisiert.</item>
+        <item quantity="other">; %1$d Asset-Einträge korrigiert. Das Guthaben wird in Kürze aktualisiert.</item>
+    </plurals>
+    <plurals name="reconcile_stage_querying">
+        <item quantity="one">Knoten wird nach UTXOs für %1$d Adresse gefragt…</item>
+        <item quantity="other">Knoten wird nach UTXOs für %1$d Adressen gefragt…</item>
+    </plurals>
 </resources>

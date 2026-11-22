@@ -847,4 +847,48 @@
     <string name="quickstart_unverified_sub">Hindi magagastos at hindi kasama sa iyong balanse hangga\'t hindi napapatunayan ng sync.</string>
     <string name="quickstart_running_skip">Magpatuloy nang hindi naghihintay</string>
     <string name="quickstart_incomplete">Hindi natapos ang paghahanap, kaya walang ipinapakitang halaga. Mahahanap pa rin ng wallet ang balanse nito habang nagsi-sync.</string>
+    <!-- RECONCILE-SCREEN-I18N: the rest of the Scan for missing funds screen. A stuck-send result is one
+         sentence from up to four parts; each part after the first starts with its own separator. -->
+    <string name="reconcile_what_title">Ano ang ginagawa nito</string>
+    <string name="reconcile_trust_notice">Nagtatanong ito sa isang panlabas na node. Ang default na endpoint ay api.digiscope.me (naka-pin ang certificate). Para sa buong soberanya, ituro ito sa sarili mong node sa ibaba — walang key o kredensyal ng transaksyon na umaalis sa iyong device, mga pampublikong address lang ang ipinapadala.</string>
+    <string name="reconcile_endpoint_title">Endpoint ng node</string>
+    <string name="reconcile_endpoint_reset">I-reset sa default</string>
+    <string name="reconcile_scanning">Nag-i-scan…</string>
+    <string name="reconcile_stuck_title">Mga naipit na padalang hindi pa nakukumpirma</string>
+    <string name="reconcile_stuck_body">Kung hindi kailanman nakukumpirma ang mga padala, maaaring ginagastos nila ang sukli mula sa naunang padala na hindi kailanman umabot sa chain — kaya hindi sila kailanman mamimina. Tinatanggal nito ang mga transaksyong hindi mamimina at ibinabalik ang mga coin na naipit ng mga ito. Hindi kailanman ginagalaw ang mga kumpirmadong padala.</string>
+    <string name="reconcile_stuck_none">Walang naipit na padalang aalisin.</string>
+    <string name="reconcile_stuck_button">Alisin ang mga naipit na padala</string>
+    <string name="reconcile_rebuild_title">Buong muling pagbuo mula sa chain</string>
+    <string name="reconcile_done_title">Tapos na ang pag-scan</string>
+    <string name="reconcile_addresses_scanned">Mga address na na-scan</string>
+    <string name="reconcile_txs_imported">Mga transaksyong na-import</string>
+    <string name="reconcile_history_recovered">Nabawi mula sa history</string>
+    <string name="reconcile_balance_updates">Mag-a-update ang iyong balanse sa ilang sandali.</string>
+    <string name="reconcile_failed_title">Nabigo ang pag-scan</string>
+    <string name="reconcile_fail_no_addresses">Walang available na address (hindi na-load ang wallet?)</string>
+    <string name="reconcile_fail_node">Nabigo ang request sa node — tingnan ang network o endpoint</string>
+    <string name="reconcile_fail_error">Huminto ang pag-scan dahil sa error: %1$s</string>
+    <string name="reconcile_stage_pending">Sinusuri ang mga nakabinbing transaksyon…</string>
+    <string name="reconcile_stage_history">Ini-scan ang history ng mga address…</string>
+    <string name="reconcile_stage_reading_history">Binabasa ang history ng mga address…</string>
+    <string name="reconcile_stage_recovering">Binabawi ang transaksyon %1$d/%2$d…</string>
+    <string name="reconcile_stage_addresses">Inililista ang mga address ng wallet…</string>
+    <string name="reconcile_stage_assets">Inaayos ang mga hawak na asset…</string>
+    <string name="reconcile_stage_importing">Ini-import ang transaksyon %1$d/%2$d</string>
+    <plurals name="reconcile_stuck_cleared">
+        <item quantity="one">Naalis ang %1$d naipit na padala</item>
+        <item quantity="other">Naalis ang %1$d naipit na padala</item>
+    </plurals>
+    <plurals name="reconcile_stuck_orphans">
+        <item quantity="one">, %1$d sa mga ito ay ulila (ginagastos ang parent na transaksyong wala na sa wallet na ito)</item>
+        <item quantity="other">, %1$d sa mga ito ay ulila (ginagastos ang parent na transaksyong wala na sa wallet na ito)</item>
+    </plurals>
+    <plurals name="reconcile_stuck_asset_rows">
+        <item quantity="one">; naitama ang %1$d hilera ng asset. Mag-a-update ang balanse sa ilang sandali.</item>
+        <item quantity="other">; naitama ang %1$d hilera ng asset. Mag-a-update ang balanse sa ilang sandali.</item>
+    </plurals>
+    <plurals name="reconcile_stage_querying">
+        <item quantity="one">Tinatanong ang node tungkol sa mga UTXO sa %1$d address…</item>
+        <item quantity="other">Tinatanong ang node tungkol sa mga UTXO sa %1$d address…</item>
+    </plurals>
 </resources>

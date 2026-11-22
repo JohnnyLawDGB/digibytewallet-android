@@ -847,4 +847,48 @@
     <string name="quickstart_unverified_sub">सिंक द्वारा प्रमाणित होने तक खर्च योग्य नहीं और आपके बैलेंस में शामिल नहीं।</string>
     <string name="quickstart_running_skip">प्रतीक्षा किए बिना जारी रखें</string>
     <string name="quickstart_incomplete">खोज पूरी नहीं हो सकी, इसलिए कोई राशि नहीं दिखाई जा रही। सिंक होते समय वॉलेट फिर भी अपना बैलेंस खोज लेगा।</string>
+    <!-- RECONCILE-SCREEN-I18N: the rest of the Scan for missing funds screen. A stuck-send result is one
+         sentence from up to four parts; each part after the first starts with its own separator. -->
+    <string name="reconcile_what_title">यह क्या करता है</string>
+    <string name="reconcile_trust_notice">यह एक बाहरी नोड से पूछताछ करता है। डिफ़ॉल्ट एंडपॉइंट api.digiscope.me है (सर्टिफ़िकेट-पिन किया हुआ)। पूरी संप्रभुता के लिए, नीचे अपना खुद का नोड सेट करें — कोई भी कुंजी या लेनदेन क्रेडेंशियल कभी आपके डिवाइस से बाहर नहीं जाता, केवल सार्वजनिक पते भेजे जाते हैं।</string>
+    <string name="reconcile_endpoint_title">नोड एंडपॉइंट</string>
+    <string name="reconcile_endpoint_reset">डिफ़ॉल्ट पर रीसेट करें</string>
+    <string name="reconcile_scanning">स्कैन हो रहा है…</string>
+    <string name="reconcile_stuck_title">अटके हुए अपुष्ट भेजे गए लेनदेन</string>
+    <string name="reconcile_stuck_body">अगर भेजे गए लेनदेन कभी पुष्ट नहीं होते, तो हो सकता है कि वे किसी ऐसे पुराने भेजे गए लेनदेन का चेंज खर्च कर रहे हों जो कभी चेन पर पहुँचा ही नहीं — इसलिए वे कभी माइन नहीं हो सकते। यह उन माइन न हो सकने वाले लेनदेन को हटा देता है और उनके द्वारा रोके गए कॉइन वापस कर देता है। पुष्ट हो चुके लेनदेन को कभी नहीं छुआ जाता।</string>
+    <string name="reconcile_stuck_none">हटाने के लिए कोई अटका हुआ लेनदेन नहीं है।</string>
+    <string name="reconcile_stuck_button">अटके हुए लेनदेन हटाएँ</string>
+    <string name="reconcile_rebuild_title">चेन से पूरा पुनर्निर्माण</string>
+    <string name="reconcile_done_title">स्कैन पूरा हुआ</string>
+    <string name="reconcile_addresses_scanned">स्कैन किए गए पते</string>
+    <string name="reconcile_txs_imported">आयात किए गए लेनदेन</string>
+    <string name="reconcile_history_recovered">इतिहास से पुनर्प्राप्त</string>
+    <string name="reconcile_balance_updates">आपका बैलेंस जल्द ही अपडेट हो जाएगा।</string>
+    <string name="reconcile_failed_title">स्कैन विफल रहा</string>
+    <string name="reconcile_fail_no_addresses">कोई पता उपलब्ध नहीं है (वॉलेट लोड नहीं हुआ?)</string>
+    <string name="reconcile_fail_node">नोड अनुरोध विफल रहा — नेटवर्क या एंडपॉइंट जाँचें</string>
+    <string name="reconcile_fail_error">स्कैन एक त्रुटि के कारण रुक गया: %1$s</string>
+    <string name="reconcile_stage_pending">लंबित लेनदेन जाँचे जा रहे हैं…</string>
+    <string name="reconcile_stage_history">पतों का इतिहास स्कैन हो रहा है…</string>
+    <string name="reconcile_stage_reading_history">पतों का इतिहास पढ़ा जा रहा है…</string>
+    <string name="reconcile_stage_recovering">लेनदेन %1$d/%2$d पुनर्प्राप्त किया जा रहा है…</string>
+    <string name="reconcile_stage_addresses">वॉलेट के पते सूचीबद्ध किए जा रहे हैं…</string>
+    <string name="reconcile_stage_assets">एसेट होल्डिंग ठीक की जा रही हैं…</string>
+    <string name="reconcile_stage_importing">लेनदेन %1$d/%2$d आयात किया जा रहा है</string>
+    <plurals name="reconcile_stuck_cleared">
+        <item quantity="one">%1$d अटका हुआ लेनदेन हटाया गया</item>
+        <item quantity="other">%1$d अटके हुए लेनदेन हटाए गए</item>
+    </plurals>
+    <plurals name="reconcile_stuck_orphans">
+        <item quantity="one">, जिनमें से %1$d अनाथ है (ऐसे पैरेंट लेनदेन को खर्च करता है जो अब इस वॉलेट में नहीं है)</item>
+        <item quantity="other">, जिनमें से %1$d अनाथ हैं (ऐसे पैरेंट लेनदेन को खर्च करते हैं जो अब इस वॉलेट में नहीं है)</item>
+    </plurals>
+    <plurals name="reconcile_stuck_asset_rows">
+        <item quantity="one">; %1$d एसेट पंक्ति ठीक की गई। बैलेंस जल्द ही अपडेट होगा।</item>
+        <item quantity="other">; %1$d एसेट पंक्तियाँ ठीक की गईं। बैलेंस जल्द ही अपडेट होगा।</item>
+    </plurals>
+    <plurals name="reconcile_stage_querying">
+        <item quantity="one">नोड से %1$d पते के UTXO पूछे जा रहे हैं…</item>
+        <item quantity="other">नोड से %1$d पतों के UTXO पूछे जा रहे हैं…</item>
+    </plurals>
 </resources>

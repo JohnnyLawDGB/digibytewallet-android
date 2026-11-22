@@ -856,4 +856,52 @@
     <string name="quickstart_unverified_sub">No se puede gastar ni cuenta en tu saldo hasta que la sincronización lo compruebe.</string>
     <string name="quickstart_running_skip">Continuar sin esperar</string>
     <string name="quickstart_incomplete">La consulta no pudo completarse, así que no se muestra ninguna cifra. La billetera igualmente encontrará su saldo al sincronizarse.</string>
+    <!-- RECONCILE-SCREEN-I18N: the rest of the Scan for missing funds screen. A stuck-send result is one
+         sentence from up to four parts; each part after the first starts with its own separator. -->
+    <string name="reconcile_what_title">Qué hace esto</string>
+    <string name="reconcile_trust_notice">Esto consulta un nodo externo. El punto de conexión predeterminado es api.digiscope.me (con certificado fijado). Para una soberanía total, indica tu propio nodo abajo — ninguna clave ni credencial de transacción sale nunca de tu dispositivo, solo se envían direcciones públicas.</string>
+    <string name="reconcile_endpoint_title">Punto de conexión del nodo</string>
+    <string name="reconcile_endpoint_reset">Restablecer el predeterminado</string>
+    <string name="reconcile_scanning">Buscando…</string>
+    <string name="reconcile_stuck_title">Envíos sin confirmar atascados</string>
+    <string name="reconcile_stuck_body">Si los envíos nunca se confirman, puede que estén gastando el cambio de un envío anterior que nunca llegó a la cadena — por eso nunca podrán minarse. Esto elimina esas transacciones imposibles de minar y libera las monedas que tenían retenidas. Los envíos confirmados nunca se tocan.</string>
+    <string name="reconcile_stuck_none">No hay envíos atascados que eliminar.</string>
+    <string name="reconcile_stuck_button">Eliminar envíos atascados</string>
+    <string name="reconcile_rebuild_title">Reconstrucción completa desde la cadena</string>
+    <string name="reconcile_done_title">Búsqueda completada</string>
+    <string name="reconcile_addresses_scanned">Direcciones analizadas</string>
+    <string name="reconcile_txs_imported">Transacciones importadas</string>
+    <string name="reconcile_history_recovered">Recuperadas del historial</string>
+    <string name="reconcile_balance_updates">Tu saldo debería actualizarse en breve.</string>
+    <string name="reconcile_failed_title">La búsqueda falló</string>
+    <string name="reconcile_fail_no_addresses">No hay direcciones disponibles (¿billetera no cargada?)</string>
+    <string name="reconcile_fail_node">La solicitud al nodo falló — revisa la red o el punto de conexión</string>
+    <string name="reconcile_fail_error">La búsqueda se detuvo por un error: %1$s</string>
+    <string name="reconcile_stage_pending">Comprobando transacciones pendientes…</string>
+    <string name="reconcile_stage_history">Analizando el historial de direcciones…</string>
+    <string name="reconcile_stage_reading_history">Leyendo el historial de direcciones…</string>
+    <string name="reconcile_stage_recovering">Recuperando la transacción %1$d/%2$d…</string>
+    <string name="reconcile_stage_addresses">Listando las direcciones de la billetera…</string>
+    <string name="reconcile_stage_assets">Ordenando las tenencias de activos…</string>
+    <string name="reconcile_stage_importing">Importando la transacción %1$d/%2$d</string>
+    <plurals name="reconcile_stuck_cleared">
+        <item quantity="one">Se eliminó %1$d envío atascado</item>
+        <item quantity="many">Se eliminaron %1$d envíos atascados</item>
+        <item quantity="other">Se eliminaron %1$d envíos atascados</item>
+    </plurals>
+    <plurals name="reconcile_stuck_orphans">
+        <item quantity="one">, %1$d de ellos huérfano (gasta una transacción anterior que esta billetera ya no tiene)</item>
+        <item quantity="many">, %1$d de ellos huérfanos (gastan una transacción anterior que esta billetera ya no tiene)</item>
+        <item quantity="other">, %1$d de ellos huérfanos (gastan una transacción anterior que esta billetera ya no tiene)</item>
+    </plurals>
+    <plurals name="reconcile_stuck_asset_rows">
+        <item quantity="one">; se corrigió %1$d registro de activos. El saldo se actualizará en breve.</item>
+        <item quantity="many">; se corrigieron %1$d registros de activos. El saldo se actualizará en breve.</item>
+        <item quantity="other">; se corrigieron %1$d registros de activos. El saldo se actualizará en breve.</item>
+    </plurals>
+    <plurals name="reconcile_stage_querying">
+        <item quantity="one">Consultando al nodo los UTXO de %1$d dirección…</item>
+        <item quantity="many">Consultando al nodo los UTXO de %1$d direcciones…</item>
+        <item quantity="other">Consultando al nodo los UTXO de %1$d direcciones…</item>
+    </plurals>
 </resources>

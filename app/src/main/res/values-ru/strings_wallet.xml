@@ -861,4 +861,56 @@
     <string name="quickstart_unverified_sub">Нельзя потратить и не входит в баланс, пока синхронизация это не подтвердит.</string>
     <string name="quickstart_running_skip">Продолжить, не дожидаясь</string>
     <string name="quickstart_incomplete">Запрос не удалось завершить, поэтому сумма не показана. Кошелёк всё равно найдёт свой баланс при синхронизации.</string>
+    <!-- RECONCILE-SCREEN-I18N: the rest of the Scan for missing funds screen. A stuck-send result is one
+         sentence from up to four parts; each part after the first starts with its own separator. -->
+    <string name="reconcile_what_title">Что делает это сканирование</string>
+    <string name="reconcile_trust_notice">Запрос отправляется на внешний узел. Адрес по умолчанию — api.digiscope.me (с закреплённым сертификатом). Для полной независимости укажите ниже собственный узел — ни ключи, ни данные для подписи транзакций никогда не покидают устройство, отправляются только публичные адреса.</string>
+    <string name="reconcile_endpoint_title">Адрес узла</string>
+    <string name="reconcile_endpoint_reset">Сбросить по умолчанию</string>
+    <string name="reconcile_scanning">Сканирование…</string>
+    <string name="reconcile_stuck_title">Зависшие неподтверждённые отправки</string>
+    <string name="reconcile_stuck_body">Если отправки не подтверждаются, возможно, они тратят сдачу от более ранней отправки, которая так и не попала в блокчейн, — поэтому их невозможно включить в блок. Это действие удаляет такие транзакции и освобождает занятые ими монеты. Подтверждённые отправки не затрагиваются.</string>
+    <string name="reconcile_stuck_none">Зависших отправок нет.</string>
+    <string name="reconcile_stuck_button">Удалить зависшие отправки</string>
+    <string name="reconcile_rebuild_title">Полная перестройка из цепочки</string>
+    <string name="reconcile_done_title">Сканирование завершено</string>
+    <string name="reconcile_addresses_scanned">Проверено адресов</string>
+    <string name="reconcile_txs_imported">Импортировано транзакций</string>
+    <string name="reconcile_history_recovered">Восстановлено из истории</string>
+    <string name="reconcile_balance_updates">Баланс скоро обновится.</string>
+    <string name="reconcile_failed_title">Сканирование не удалось</string>
+    <string name="reconcile_fail_no_addresses">Нет доступных адресов (кошелёк не загружен?)</string>
+    <string name="reconcile_fail_node">Запрос к узлу не удался — проверьте сеть или адрес узла</string>
+    <string name="reconcile_fail_error">Сканирование остановлено из-за ошибки: %1$s</string>
+    <string name="reconcile_stage_pending">Проверка ожидающих транзакций…</string>
+    <string name="reconcile_stage_history">Сканирование истории адресов…</string>
+    <string name="reconcile_stage_reading_history">Чтение истории адресов…</string>
+    <string name="reconcile_stage_recovering">Восстановление транзакции %1$d/%2$d…</string>
+    <string name="reconcile_stage_addresses">Составление списка адресов кошелька…</string>
+    <string name="reconcile_stage_assets">Упорядочение записей об активах…</string>
+    <string name="reconcile_stage_importing">Импорт транзакции %1$d/%2$d</string>
+    <plurals name="reconcile_stuck_cleared">
+        <item quantity="one">Удалена %1$d зависшая отправка</item>
+        <item quantity="few">Удалено %1$d зависшие отправки</item>
+        <item quantity="many">Удалено %1$d зависших отправок</item>
+        <item quantity="other">Удалено %1$d зависшей отправки</item>
+    </plurals>
+    <plurals name="reconcile_stuck_orphans">
+        <item quantity="one">, из них %1$d осиротевшая (тратит родительскую транзакцию, которой в этом кошельке больше нет)</item>
+        <item quantity="few">, из них %1$d осиротевшие (тратят родительскую транзакцию, которой в этом кошельке больше нет)</item>
+        <item quantity="many">, из них %1$d осиротевших (тратят родительскую транзакцию, которой в этом кошельке больше нет)</item>
+        <item quantity="other">, из них %1$d осиротевших (тратят родительскую транзакцию, которой в этом кошельке больше нет)</item>
+    </plurals>
+    <plurals name="reconcile_stuck_asset_rows">
+        <item quantity="one">; исправлена %1$d запись об активах. Баланс скоро обновится.</item>
+        <item quantity="few">; исправлено %1$d записи об активах. Баланс скоро обновится.</item>
+        <item quantity="many">; исправлено %1$d записей об активах. Баланс скоро обновится.</item>
+        <item quantity="other">; исправлено %1$d записи об активах. Баланс скоро обновится.</item>
+    </plurals>
+    <plurals name="reconcile_stage_querying">
+        <item quantity="one">Запрос UTXO у узла по %1$d адресу…</item>
+        <item quantity="few">Запрос UTXO у узла по %1$d адресам…</item>
+        <item quantity="many">Запрос UTXO у узла по %1$d адресам…</item>
+        <item quantity="other">Запрос UTXO у узла по %1$d адреса…</item>
+    </plurals>
 </resources>

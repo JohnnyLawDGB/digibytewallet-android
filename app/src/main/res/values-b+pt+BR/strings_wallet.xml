@@ -854,4 +854,52 @@
     <string name="quickstart_unverified_sub">Não pode ser gasto e não entra no seu saldo até a sincronização comprovar.</string>
     <string name="quickstart_running_skip">Continuar sem esperar</string>
     <string name="quickstart_incomplete">A consulta não pôde ser concluída, então nenhum valor é mostrado. A carteira ainda encontrará seu saldo durante a sincronização.</string>
+    <!-- RECONCILE-SCREEN-I18N: the rest of the Scan for missing funds screen. A stuck-send result is one
+         sentence from up to four parts; each part after the first starts with its own separator. -->
+    <string name="reconcile_what_title">O que isto faz</string>
+    <string name="reconcile_trust_notice">Isto consulta um nó externo. O endpoint padrão é api.digiscope.me (com certificado fixado). Para soberania total, aponte para o seu próprio nó abaixo — nenhuma chave ou credencial de transação sai do seu dispositivo, apenas endereços públicos são enviados.</string>
+    <string name="reconcile_endpoint_title">Endpoint do nó</string>
+    <string name="reconcile_endpoint_reset">Restaurar o padrão</string>
+    <string name="reconcile_scanning">Procurando…</string>
+    <string name="reconcile_stuck_title">Envios não confirmados travados</string>
+    <string name="reconcile_stuck_body">Se os envios nunca são confirmados, talvez estejam gastando o troco de um envio anterior que nunca chegou à cadeia — por isso nunca poderão ser minerados. Isto descarta essas transações impossíveis de minerar e libera as moedas que elas prendiam. Envios confirmados nunca são tocados.</string>
+    <string name="reconcile_stuck_none">Nenhum envio travado para limpar.</string>
+    <string name="reconcile_stuck_button">Limpar envios travados</string>
+    <string name="reconcile_rebuild_title">Reconstrução completa a partir da cadeia</string>
+    <string name="reconcile_done_title">Busca concluída</string>
+    <string name="reconcile_addresses_scanned">Endereços verificados</string>
+    <string name="reconcile_txs_imported">Transações importadas</string>
+    <string name="reconcile_history_recovered">Recuperadas do histórico</string>
+    <string name="reconcile_balance_updates">Seu saldo deve ser atualizado em breve.</string>
+    <string name="reconcile_failed_title">A busca falhou</string>
+    <string name="reconcile_fail_no_addresses">Nenhum endereço disponível (carteira não carregada?)</string>
+    <string name="reconcile_fail_node">A solicitação ao nó falhou — verifique a rede ou o endpoint</string>
+    <string name="reconcile_fail_error">A busca parou por um erro: %1$s</string>
+    <string name="reconcile_stage_pending">Verificando transações pendentes…</string>
+    <string name="reconcile_stage_history">Analisando o histórico de endereços…</string>
+    <string name="reconcile_stage_reading_history">Lendo o histórico de endereços…</string>
+    <string name="reconcile_stage_recovering">Recuperando a transação %1$d/%2$d…</string>
+    <string name="reconcile_stage_addresses">Listando os endereços da carteira…</string>
+    <string name="reconcile_stage_assets">Organizando os ativos mantidos…</string>
+    <string name="reconcile_stage_importing">Importando a transação %1$d/%2$d</string>
+    <plurals name="reconcile_stuck_cleared">
+        <item quantity="one">%1$d envio travado removido</item>
+        <item quantity="many">%1$d envios travados removidos</item>
+        <item quantity="other">%1$d envios travados removidos</item>
+    </plurals>
+    <plurals name="reconcile_stuck_orphans">
+        <item quantity="one">, %1$d deles órfão (gasta uma transação anterior que esta carteira não tem mais)</item>
+        <item quantity="many">, %1$d deles órfãos (gastam uma transação anterior que esta carteira não tem mais)</item>
+        <item quantity="other">, %1$d deles órfãos (gastam uma transação anterior que esta carteira não tem mais)</item>
+    </plurals>
+    <plurals name="reconcile_stuck_asset_rows">
+        <item quantity="one">; %1$d registro de ativo corrigido. O saldo será atualizado em breve.</item>
+        <item quantity="many">; %1$d registros de ativos corrigidos. O saldo será atualizado em breve.</item>
+        <item quantity="other">; %1$d registros de ativos corrigidos. O saldo será atualizado em breve.</item>
+    </plurals>
+    <plurals name="reconcile_stage_querying">
+        <item quantity="one">Consultando o nó sobre UTXOs de %1$d endereço…</item>
+        <item quantity="many">Consultando o nó sobre UTXOs de %1$d endereços…</item>
+        <item quantity="other">Consultando o nó sobre UTXOs de %1$d endereços…</item>
+    </plurals>
 </resources>
