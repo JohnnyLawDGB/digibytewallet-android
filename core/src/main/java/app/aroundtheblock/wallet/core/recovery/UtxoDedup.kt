@@ -1,6 +1,7 @@
 package app.aroundtheblock.wallet.core.recovery
 
 import app.aroundtheblock.wallet.core.reconcile.UtxoEntry
+import app.aroundtheblock.wallet.core.reconcile.outpointKey
 
 /**
  * Collapses repeated mentions of one outpoint into a single coin.
@@ -25,7 +26,9 @@ import app.aroundtheblock.wallet.core.reconcile.UtxoEntry
 object UtxoDedup {
 
     /**
-     * One entry per `(txid, vout)`, input order preserved.
+     * One entry per `(txid, vout)`, input order preserved. The txid is compared as the 32 bytes it
+     * names, not as its text: two spellings of one txid are one outpoint ([outpointKey], the key the
+     * reconcile's own distinct-outpoint rule uses; the core's BRRecoveryUtxoDedup compares bytes).
      *
      * Where copies disagree the CONFIRMED one wins: `blockHeight == 0` means "not in a block
      * yet", and preferring it would describe a settled coin as pending, which can gate spending
@@ -35,7 +38,7 @@ object UtxoDedup {
         if (utxos.size < 2) return utxos
         val best = LinkedHashMap<Pair<String, Int>, UtxoEntry>(utxos.size)
         for (u in utxos) {
-            val key = u.txid to u.vout
+            val key = outpointKey(u)
             val existing = best[key]
             best[key] = when {
                 existing == null -> u

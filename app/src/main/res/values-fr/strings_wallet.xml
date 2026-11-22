@@ -828,4 +828,52 @@
     <string name="quickstart_unverified_sub">Non dépensable et non compté dans votre solde tant que la synchronisation ne l’a pas prouvé.</string>
     <string name="quickstart_running_skip">Continuer sans attendre</string>
     <string name="quickstart_incomplete">La recherche n’a pas pu aboutir, aucun montant n’est donc affiché. Le portefeuille trouvera quand même son solde en se synchronisant.</string>
+    <!-- RECONCILE-SCREEN-I18N: the rest of the Scan for missing funds screen. A stuck-send result is one
+         sentence from up to four parts; each part after the first starts with its own separator. -->
+    <string name="reconcile_what_title">Ce que fait cette analyse</string>
+    <string name="reconcile_trust_notice">Cette analyse interroge un nœud externe. Le point d’accès par défaut est api.digiscope.me (certificat épinglé). Pour une souveraineté totale, indiquez votre propre nœud ci-dessous — aucune clé ni aucun identifiant de transaction ne quitte votre appareil, seules des adresses publiques sont envoyées.</string>
+    <string name="reconcile_endpoint_title">Point d’accès du nœud</string>
+    <string name="reconcile_endpoint_reset">Rétablir la valeur par défaut</string>
+    <string name="reconcile_scanning">Analyse en cours…</string>
+    <string name="reconcile_stuck_title">Envois non confirmés bloqués</string>
+    <string name="reconcile_stuck_body">Si des envois ne sont jamais confirmés, ils dépensent peut-être la monnaie rendue d’un envoi antérieur qui n’a jamais atteint la chaîne — ils ne pourront donc jamais être minés. Cette action supprime ces transactions impossibles à miner et libère les pièces qu’elles immobilisaient. Les envois confirmés ne sont jamais touchés.</string>
+    <string name="reconcile_stuck_none">Aucun envoi bloqué à supprimer.</string>
+    <string name="reconcile_stuck_button">Supprimer les envois bloqués</string>
+    <string name="reconcile_rebuild_title">Reconstruction complète depuis la chaîne</string>
+    <string name="reconcile_done_title">Analyse terminée</string>
+    <string name="reconcile_addresses_scanned">Adresses analysées</string>
+    <string name="reconcile_txs_imported">Transactions importées</string>
+    <string name="reconcile_history_recovered">Récupérées depuis l’historique</string>
+    <string name="reconcile_balance_updates">Votre solde devrait se mettre à jour sous peu.</string>
+    <string name="reconcile_failed_title">Échec de l’analyse</string>
+    <string name="reconcile_fail_no_addresses">Aucune adresse disponible (portefeuille non chargé ?)</string>
+    <string name="reconcile_fail_node">La requête au nœud a échoué — vérifiez le réseau ou le point d’accès</string>
+    <string name="reconcile_fail_error">L’analyse s’est arrêtée sur une erreur : %1$s</string>
+    <string name="reconcile_stage_pending">Vérification des transactions en attente…</string>
+    <string name="reconcile_stage_history">Analyse de l’historique des adresses…</string>
+    <string name="reconcile_stage_reading_history">Lecture de l’historique des adresses…</string>
+    <string name="reconcile_stage_recovering">Récupération de la transaction %1$d/%2$d…</string>
+    <string name="reconcile_stage_addresses">Liste des adresses du portefeuille…</string>
+    <string name="reconcile_stage_assets">Nettoyage des avoirs en actifs…</string>
+    <string name="reconcile_stage_importing">Importation de la transaction %1$d/%2$d</string>
+    <plurals name="reconcile_stuck_cleared">
+        <item quantity="one">%1$d envoi bloqué supprimé</item>
+        <item quantity="many">%1$d envois bloqués supprimés</item>
+        <item quantity="other">%1$d envois bloqués supprimés</item>
+    </plurals>
+    <plurals name="reconcile_stuck_orphans">
+        <item quantity="one">, dont %1$d orphelin (dépensant une transaction parente que ce portefeuille n’a plus)</item>
+        <item quantity="many">, dont %1$d orphelins (dépensant une transaction parente que ce portefeuille n’a plus)</item>
+        <item quantity="other">, dont %1$d orphelins (dépensant une transaction parente que ce portefeuille n’a plus)</item>
+    </plurals>
+    <plurals name="reconcile_stuck_asset_rows">
+        <item quantity="one">\u00A0; %1$d ligne d’actif corrigée. Le solde sera bientôt mis à jour.</item>
+        <item quantity="many">\u00A0; %1$d lignes d’actifs corrigées. Le solde sera bientôt mis à jour.</item>
+        <item quantity="other">\u00A0; %1$d lignes d’actifs corrigées. Le solde sera bientôt mis à jour.</item>
+    </plurals>
+    <plurals name="reconcile_stage_querying">
+        <item quantity="one">Interrogation du nœud pour les UTXO de %1$d adresse…</item>
+        <item quantity="many">Interrogation du nœud pour les UTXO de %1$d adresses…</item>
+        <item quantity="other">Interrogation du nœud pour les UTXO de %1$d adresses…</item>
+    </plurals>
 </resources>

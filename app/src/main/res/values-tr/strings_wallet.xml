@@ -841,4 +841,48 @@
     <string name="quickstart_unverified_sub">Eşitleme kanıtlayana kadar harcanamaz ve bakiyenize dahil edilmez.</string>
     <string name="quickstart_running_skip">Beklemeden devam et</string>
     <string name="quickstart_incomplete">Sorgu tamamlanamadı, bu yüzden tutar gösterilmiyor. Cüzdan eşitlenirken bakiyesini yine de bulacaktır.</string>
+    <!-- RECONCILE-SCREEN-I18N: the rest of the Scan for missing funds screen. A stuck-send result is one
+         sentence from up to four parts; each part after the first starts with its own separator. -->
+    <string name="reconcile_what_title">Bu ne yapar</string>
+    <string name="reconcile_trust_notice">Bu işlem harici bir düğümü sorgular. Varsayılan uç nokta api.digiscope.me adresidir (sertifika sabitlemeli). Tam egemenlik için aşağıdan kendi düğümünüzü gösterin — hiçbir anahtar veya işlem kimlik bilgisi cihazınızdan çıkmaz, yalnızca açık adresler gönderilir.</string>
+    <string name="reconcile_endpoint_title">Düğüm uç noktası</string>
+    <string name="reconcile_endpoint_reset">Varsayılana sıfırla</string>
+    <string name="reconcile_scanning">Taranıyor…</string>
+    <string name="reconcile_stuck_title">Takılı kalan onaylanmamış gönderimler</string>
+    <string name="reconcile_stuck_body">Gönderimler hiç onaylanmıyorsa, zincire hiç ulaşmamış önceki bir gönderimin para üstünü harcıyor olabilirler — bu yüzden hiçbir zaman bloğa alınamazlar. Bu işlem, bloğa alınamayan bu işlemleri kaldırır ve bağladıkları coinleri geri verir. Onaylanmış gönderimlere asla dokunulmaz.</string>
+    <string name="reconcile_stuck_none">Temizlenecek takılı gönderim yok.</string>
+    <string name="reconcile_stuck_button">Takılı gönderimleri temizle</string>
+    <string name="reconcile_rebuild_title">Zincirden tam yeniden oluşturma</string>
+    <string name="reconcile_done_title">Tarama tamamlandı</string>
+    <string name="reconcile_addresses_scanned">Taranan adresler</string>
+    <string name="reconcile_txs_imported">İçe aktarılan işlemler</string>
+    <string name="reconcile_history_recovered">Geçmişten kurtarılanlar</string>
+    <string name="reconcile_balance_updates">Bakiyeniz kısa süre içinde güncellenecek.</string>
+    <string name="reconcile_failed_title">Tarama başarısız oldu</string>
+    <string name="reconcile_fail_no_addresses">Kullanılabilir adres yok (cüzdan yüklenmedi mi?)</string>
+    <string name="reconcile_fail_node">Düğüm isteği başarısız oldu — ağı veya uç noktayı kontrol edin</string>
+    <string name="reconcile_fail_error">Tarama bir hata nedeniyle durdu: %1$s</string>
+    <string name="reconcile_stage_pending">Bekleyen işlemler kontrol ediliyor…</string>
+    <string name="reconcile_stage_history">Adres geçmişi taranıyor…</string>
+    <string name="reconcile_stage_reading_history">Adres geçmişi okunuyor…</string>
+    <string name="reconcile_stage_recovering">İşlem kurtarılıyor: %1$d/%2$d…</string>
+    <string name="reconcile_stage_addresses">Cüzdan adresleri listeleniyor…</string>
+    <string name="reconcile_stage_assets">Varlık kayıtları düzenleniyor…</string>
+    <string name="reconcile_stage_importing">İşlem içe aktarılıyor: %1$d/%2$d</string>
+    <plurals name="reconcile_stuck_cleared">
+        <item quantity="one">%1$d takılı gönderim temizlendi</item>
+        <item quantity="other">%1$d takılı gönderim temizlendi</item>
+    </plurals>
+    <plurals name="reconcile_stuck_orphans">
+        <item quantity="one">, bunlardan %1$d tanesi yetim (bu cüzdanda artık bulunmayan bir üst işlemi harcıyor)</item>
+        <item quantity="other">, bunlardan %1$d tanesi yetim (bu cüzdanda artık bulunmayan bir üst işlemi harcıyor)</item>
+    </plurals>
+    <plurals name="reconcile_stuck_asset_rows">
+        <item quantity="one">; %1$d varlık satırı düzeltildi. Bakiye kısa süre içinde güncellenir.</item>
+        <item quantity="other">; %1$d varlık satırı düzeltildi. Bakiye kısa süre içinde güncellenir.</item>
+    </plurals>
+    <plurals name="reconcile_stage_querying">
+        <item quantity="one">Düğüme %1$d adresteki UTXO\'lar soruluyor…</item>
+        <item quantity="other">Düğüme %1$d adresteki UTXO\'lar soruluyor…</item>
+    </plurals>
 </resources>
