@@ -1,6 +1,48 @@
 # DigiByte Wallet — Roadmap
 
-> ## Update — 2026-11-15 (HoldFast Wallet 4.1.4 shipped; NEXT = 4.1.5)
+> ## Update — 2026-11-22 (HoldFast Wallet 4.1.5 shipped; NEXT = 4.1.6)
+>
+> **4.1.5 shipped 2026-11-22** as a signed APK ([release](https://github.com/JohnnyLawDGB/aroundtheblock-wallet-releases/releases/tag/v4.1.5),
+> tag `v4.1.5`, commit `02621acf3`), on digiscope.me, and to Google Play open testing (in Google's
+> review on the day). What it carried:
+>
+> - **Several wallets on one phone** (multi-wallet step 1): each wallet has its own recovery
+>   phrase, stores, Hub session and Digi-ID identities; one app PIN covers them all. A build older
+>   than 4.1.5 does not show wallets added in 4.1.5, so there is no downgrade past it.
+> - **Market sign-in works again.** DigiStamp moved its Digi-ID sign-in to `id.digistamp.co`; that
+>   host is now in-app, pinned, and still reached with no JavaScript bridge.
+> - **One Digi-ID key rule on every phone:** the shared key signs only for DigiScope's two hosts;
+>   every other site gets its own key. Login history and the old identity choice decide nothing.
+> - The restore quick scan shows DigiDollar; DigiAsset names and art load again; a busy asset index
+>   reads as "not known yet".
+> - A security and reliability train (its scope stays private): the wipe, the signers, the Hub and
+>   IPFS clients, and the native peer callback each gained a stated guarantee. See the release notes.
+> - The pre-publish suite was rebuilt to drive the real screens and to fail when a scenario's
+>   subject is broken ([`RELEASING.md`](RELEASING.md) §4).
+>
+> **NEXT: 4.1.6.** The public part of its scope (the security rows stay private until it ships):
+>
+> | Item | What it means | State on 2026-11-22 |
+> |---|---|---|
+> | **Coinomi-compatible Digi-ID sign-in (app)** | A wallet restored from a Coinomi phrase signs each site with the identity Coinomi used: the per-wallet site-key root, the restore question, the Settings toggle, the approval screen's address row. Steps 2 and 3 of `docs/superpowers/specs/2026-11-17-coinomi-digiid-design.md`; step 1 (the core's `BRDigiIdRoot`) shipped in 4.1.5 | build plan being written |
+> | **Transaction queue** | A user who sends again before the last send confirms must not end up with a train of unconfirmed parent and child transactions that gets stuck. Design first; nothing is decided. It should also give the long-promised way to deal with a send stuck unconfirmed | design being written |
+> | **Play device reach** | The manifest requires only what the app cannot run without, so Play does not exclude device models needlessly (today: a portrait-capable screen is required by implication) | in progress |
+> | **Peer count** | The count on the home screen includes only peers that completed the handshake | in progress |
+> | **"Scan for missing funds" in every language** | The rest of that screen is still English | in progress |
+> | **Lost PIN: phrase first** | With a wallet present and no PIN, a new PIN needs a wallet's recovery phrase first; a restore sets the PIN before it writes the wallet. Design: `docs/superpowers/specs/2026-11-19-lost-pin-phrase-first-design.md` (owner's answers recorded there) | designed, not built |
+>
+> **After 4.1.6:** multi-wallet step 2 (its own release; plan in
+> `docs/superpowers/plans/2026-11-17-multi-wallet-step2.md`), with step 4 of the Coinomi design
+> riding on it.
+>
+> **Recurring chore:** the block and filter checkpoint tables go stale by wall-clock time. They
+> were refreshed on 2026-11-21 (block 24,550,000); `checkpoint_staleness_kat` warns from
+> 2026-11-26 and fails CI from 2026-12-11, so 4.1.6 needs a refresh if it is cut after that.
+>
+> **Unchanged:** the phase order below (sovereignty first). Choosing chains by accumulated work
+> is still the scheduled structural change under Phase 1.
+
+> ## Update — 2026-11-15 (HoldFast Wallet 4.1.4 shipped; NEXT was 4.1.5)
 >
 > **4.1.4 shipped 2026-11-15** as a signed APK ([release](https://github.com/JohnnyLawDGB/aroundtheblock-wallet-releases/releases/tag/v4.1.4),
 > tag `v4.1.4`) and to Google Play open testing. Its fixes reached `develop` through the security
@@ -10,8 +52,8 @@
 > rule everywhere (matching DigiAsset Core), DigiDollar sends via Dandelion++ when it is on, and
 > sync progress kept across restarts on long-history wallets.
 >
-> **NEXT: 4.1.5, a security and reliability train.** As before, its scope stays private until it
-> ships. The public part so far:
+> **NEXT (then): 4.1.5, a security and reliability train.** *(Shipped 2026-11-22: see the banner
+> above.)* The public part as it stood:
 >
 > - **Block and filter checkpoints refreshed.** The newest checkpoint passed 21 days, so CI on
 >   `develop` is red on `checkpoint_staleness_kat` until both tables are regenerated.

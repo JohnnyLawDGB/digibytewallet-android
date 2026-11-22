@@ -2,9 +2,9 @@
 
 **Effective:** 2026-05-03
 **Maximum reward:** 100,000 DGB
-**Bounty target:** **HoldFast Wallet 4.1.4** (`app.aroundtheblock.wallet`), released 2026-11-15 (UTC).
-4.1.3 stays in scope until the end of **2026-11-29 UTC** (14 days, under the overlap rule below). Before you
-start, read "Known issues being addressed after 4.1.4"
+**Bounty target:** **HoldFast Wallet 4.1.5** (`app.aroundtheblock.wallet`), released 2026-11-22 (UTC).
+4.1.4 stays in scope until the end of **2026-12-06 UTC** (14 days, under the overlap rule below). Before you
+start, read "Known issues being addressed after 4.1.5"
 below: those are already on our list.
 
 This is a small, self-funded, open-source project. Rewards are the ceilings below and most
@@ -35,7 +35,7 @@ HoldFast Wallet release and name its exact version.
 | Asset | Where to get it |
 |-------|-----------------|
 | HoldFast Wallet from Google Play (`app.aroundtheblock.wallet`) | https://play.google.com/store/apps/details?id=app.aroundtheblock.wallet |
-| `aroundtheblock-wallet-v4.1.4.apk` (release signed, same key as Play) | https://github.com/JohnnyLawDGB/aroundtheblock-wallet-releases/releases/tag/v4.1.4 |
+| `aroundtheblock-wallet-v4.1.5.apk` (release signed, same key as Play) | https://github.com/JohnnyLawDGB/aroundtheblock-wallet-releases/releases/tag/v4.1.5 |
 | Source code | https://github.com/JohnnyLawDGB/digibytewallet-android at the latest release tag (`develop` follows it). The `phase1-modernization` branch is frozen at v3.9.2 and out of scope. |
 | C core (submodule) | https://github.com/JohnnyLawDGB/digibytewallet-core |
 
@@ -224,7 +224,7 @@ _The half-tier rule was applied from the 2026-10 waves but was not written here 
 after a reporter rightly pointed out that the published rules did not cover it. It was replaced on
 2026-10-13 as above._
 
-### Known issues being addressed after 4.1.4
+### Known issues being addressed after 4.1.5
 
 These are on our list for a coming release. A report that only restates one of them is a
 duplicate: credit, no payment. A report that shows one of them reaching **DGB, DigiDollar or the
@@ -244,6 +244,9 @@ seed** in a way not described here is new, and is assessed as new.
 - **Wallets holding very many small coins.** A send whose coins would not fit in one transaction
   is refused, and the message reads as an insufficient balance; "send max" is refused the same way.
   A clearer message and a way to consolidate coins are planned.
+- **Sending again before the last send confirms.** A chain of unconfirmed transactions, each
+  spending the one before, can stay unconfirmed. A queue for such sends is being designed.
+- **The peer count on the home screen** can include peers that are still connecting.
 - **Confirmations and recovery screens.** A user-initiated way to cancel a send stuck
   unconfirmed; protected-screen and confirmation treatment for wallet wipe, Digi-ID and node
   pairing prompts; recovery of every DigiDollar and asset case from another wallet.
@@ -290,7 +293,7 @@ Reports without these elements are returned for missing information:
 
 - **Title** — one-line summary
 - **Severity claim** — your initial Critical/High/Medium/Low assessment
-- **Affected version** — the exact tag (e.g. `v4.1.4`) you tested against
+- **Affected version** — the exact tag (e.g. `v4.1.5`) you tested against
 - **Affected platform** — Android version, device model, ROM
 - **Repro steps** — numbered, deterministic; copy-pasteable commands where possible
 - **PoC** — minimal artifact that triggers the bug. For network bugs: a `curl` or
@@ -420,3 +423,6 @@ not listed. Anonymity, or no answer, never affects payment.*
   4.1.4 fixed (own-node status, large histories after a restart, DigiDollar sends and Dandelion,
   binding the seed key to the device lock from creation, and the DigiAsset carrier rule) is off the
   known-issues list, which now names what is being addressed after 4.1.4.
+- **4.1.5 — target moved (2026-11-22).** Bounty target HoldFast Wallet 4.1.5 (4.1.4 overlaps until 2026-12-06). The
+  known-issues list keeps its four entries and gains two: sending again before the last send
+  confirms, and the home-screen peer count.
