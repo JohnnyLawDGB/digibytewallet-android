@@ -79,6 +79,27 @@
 #                     plants a third host in a temp copy of each file, and the gate must refuse both by name; a
 #                     host planted only in comments, and a literal written over several lines, must still read as
 #                     the two.
+#   MODEL             slip13_model.py, an independent model (Python's standard library only: its own secp256k1
+#                     arithmetic, BIP32, RIPEMD-160, Base58Check and RFC 6979 signature; no code shared with the
+#                     core, the bridge or digiid_core_kat_main.c), gives the literals again. Each `KAT <id>` line it
+#                     prints must be a string literal of digiid_core_kat_main.c, on the line MODEL_ROWS names for
+#                     that id (or the line after it): the addresses Coinomi showed under "Bitcoin seed", BitID's
+#                     published vector, the STANDARD answers nothing measured, and the bridge's own under "DigiByte
+#                     seed". Each `GOLDEN` line must be a whole line of bridge_golden.txt, and every ADDRESS and
+#                     SIGN line there is one the model gives (but MODEL_NOT_GOLDEN's, named). Its comparison arms
+#                     run the model with one root's HMAC key replaced (STANDARD with "DigiByte seed", DIGIBYTE with
+#                     "Bitcoin seed", the shared identity with "Bitcoin seed"): exactly that root's lines must be
+#                     refused, each by name, and every other line held. No python3 is a failure, not a skip.
+#   GOLDEN            bridge_golden.txt: every ADDRESS and SIGN line `digiid_core_bridge print` answers and every
+#                     SWEEP line of its sweep (the count and SHA-256 of the bridge's answers over the fixed stream,
+#                     refusals included), written once from the bridge of 4.1.5 and compared byte for byte, 64-bit
+#                     and 32-bit, on every run. This is the characterization taken before the Coinomi design's step
+#                     2 changes how the bridge derives a per-site key: once the bridge calls the header, "the bridge
+#                     equals the header" proves nothing, and this file is what still holds the bridge to the
+#                     answers it gave. Its comparison arms: a file with one answer changed and a file with one line
+#                     missing are refused by that line's name; and a bridge whose per-site path begins m/14' (a
+#                     temp copy of jni_wallet.c) is refused on every per-site and SWEEP line while both shared
+#                     lines hold.
 #
 # CORE_DIR may be set to run against a core checkout other than the android submodule.
 # MACRO CONVENTION: VALUE of -DDIGIID_UNFIXED, a set of bits (one bit per comparison arm, =0 shipped).
@@ -475,6 +496,154 @@ else
     fi
 fi
 
+# ---- MODEL: an independent model gives the literals again ----------------------------------
+MODEL_PY="$SCRIPT_DIR/slip13_model.py"
+GOLDEN="$SCRIPT_DIR/bridge_golden.txt"
+MODEL_DIR="$BUILD_DIR/model"
+mkdir -p "$MODEL_DIR"
+# digiid_core_kat_main.c without its whole-line comments: a literal quoted in a comment holds nothing.
+grep -vE '^[[:space:]]*//' "$SCRIPT_DIR/digiid_core_kat_main.c" > "$MODEL_DIR/kat_code.c"
+: > "$MODEL_DIR/golden.txt"
+[ -f "$GOLDEN" ] && grep -vE '^#' "$GOLDEN" > "$MODEL_DIR/golden.txt"
+SHARED_NAME_RE='^(ADDRESS shared$|SIGN shared )'   # the golden lines the shared identity answers; every other is per-site
+# <the model's id>|<the case of digiid_core_kat_main.c that holds the literal, or - for a constant of the file's>|<line:
+# the literal's own line carries the text; above: that line or the one before it>|<the text>. The case matters: both
+# roots' tables name the same three callback URLs, and a STANDARD answer found in the DIGIBYTE table holds nothing.
+MODEL_ROWS=(
+    'standard.coinomi.0|site_key_standard_coinomi_uris|line|"https://api.digiscope.me/api/digiid-probe/callback"'
+    'standard.coinomi.1|site_key_standard_coinomi_uris|line|"https://api.digiscope.me/api/auth/digiid/callback"'
+    'standard.coinomi.2|site_key_standard_coinomi_uris|line|"https://digiscope.me/api/digiid-probe/callback"'
+    'standard.login.index.1|site_key_standard_login_and_indexes|line|{ 1, '
+    'standard.login.index.2|site_key_standard_login_and_indexes|line|{ 2, '
+    'standard.login.index.2147483647|site_key_standard_login_and_indexes|line|{ INT32_MAX, '
+    'standard.login.answer|-|above|LOGIN_ANSWER_STANDARD_SITE ='
+    'standard.bitid|site_key_standard_bitid_vector|line|BRBase58CheckDecode(published'
+    'digibyte.coinomi.0|site_key_digibyte_coinomi_uris|line|"https://api.digiscope.me/api/digiid-probe/callback"'
+    'digibyte.coinomi.1|site_key_digibyte_coinomi_uris|line|"https://api.digiscope.me/api/auth/digiid/callback"'
+    'digibyte.coinomi.2|site_key_digibyte_coinomi_uris|line|"https://digiscope.me/api/digiid-probe/callback"'
+    'digibyte.login.answer|site_key_digibyte_coinomi_uris|above|"https://api.digiscope.me/api/auth/digiid/callback"'
+    'digibyte.bitid|site_key_derivation|line|the BitID phrase and callback'
+    'digibyte.request.0|request_golden_inputs|line|"https://example.com/callback"'
+    'digibyte.request.1|request_golden_inputs|line|"https://example.com:8443/callback"'
+    'digibyte.request.2|request_golden_inputs|line|"https://example.com:443/callback"'
+    'digibyte.request.3|request_golden_inputs|line|"https://shop.example.com/digiid/callback/v1"'
+    'digibyte.request.4|request_golden_inputs|line|"http://example.com/auth"'
+    'digibyte.request.5|request_golden_inputs|line|"http://localhost:8080/auth"'
+    'digibyte.request.6|request_golden_inputs|line|"https://api.digiscope.me/api/digiid/callback"'
+    'digibyte.request.7|request_golden_inputs|line|"https://example.com/cb"'
+    'digibyte.request.8|request_golden_inputs|line|"https://example.com/"'
+    'digibyte.request.9|request_golden_inputs|line|"https://example.com"'
+    'digibyte.request.10|request_golden_inputs|line|"https://sub.domain-with-dash.co.uk/digiid/login.php"'
+    'digibyte.request.11|request_golden_inputs|line|"http://192.168.1.10:3000/digiid"'
+    'digibyte.request.12|request_golden_inputs|line|"https://Example.COM/cb"'
+    'digibyte.request.index.1|address_rules|line|REQUEST_CALLBACK, 1)'
+    'digibyte.request.index.2147483647|address_rules|line|REQUEST_CALLBACK, INT32_MAX)'
+    'digibyte.empty-uri|address_rules|line|hAddress(out, seed, "", 0)'
+    'digibyte.emoji-uri|-|line|EMOJI_URI_ADDRESS ='
+    'digibyte.emoji-uri.spec-bytes|-|line|EMOJI_URI_SPEC_ADDRESS ='
+    'digibyte.nul-uri|-|line|NUL_URI_ADDRESS ='
+    'digibyte.lone-surrogate-uri|-|line|LONE_URI_ADDRESS ='
+    'digibyte.request.answer|-|above|REQUEST_SITE_ANSWER ='
+    'digibyte.emoji-uri.answer|-|above|EMOJI_URI_REQUEST_ANSWER ='
+    'digibyte.emoji-message.answer|-|above|EMOJI_SITE_ANSWER ='
+    'shared.address|-|line|SHARED_ADDRESS ='
+    'shared.login.answer|-|above|LOGIN_ANSWER_P2PKH ='
+    'shared.empty.answer|-|above|EMPTY_ANSWER ='
+    'shared.request.answer|-|above|REQUEST_SHARED_ANSWER ='
+)
+# bridge_golden.txt's ADDRESS and SIGN lines the model does not give, by name: the P2WPKH answer (the model
+# writes no bech32; its signature is the format 0 line's, which the model gives).
+MODEL_NOT_GOLDEN=('SIGN shared login format 2')
+# model_verdict <the model's output>: one "REFUSED<tab><id><tab><why>" line for each line of the model's that
+# the literals do not hold (a GOLDEN line's id is "GOLDEN <the line but its last field>"); returns 0 when none.
+model_verdict() {
+    local file="$1" row id rest section where anchor ans hits line name skip src bad=0 printed listed
+    printed="$(awk '$1 == "KAT" { print $2 }' "$file" | LC_ALL=C sort | tr '\n' ' ')"
+    listed="$(printf '%s\n' "${MODEL_ROWS[@]%%|*}" | LC_ALL=C sort | tr '\n' ' ')"
+    if [ "$printed" != "$listed" ]; then
+        printf 'REFUSED\tthe rows\tthe model prints [ %s] where MODEL_ROWS lists [ %s]\n' "$printed" "$listed"; bad=1
+    fi
+    for row in "${MODEL_ROWS[@]}"; do
+        id="${row%%|*}"; rest="${row#*|}"; section="${rest%%|*}"; rest="${rest#*|}"; where="${rest%%|*}"; anchor="${rest#*|}"
+        ans="$(awk -v id="$id" '$1 == "KAT" && $2 == id { print $3 }' "$file")"
+        [ -n "$ans" ] || continue   # said above
+        src="$MODEL_DIR/kat_code.c"
+        if [ "$section" != - ]; then   # that case's body alone
+            src="$MODEL_DIR/section.c"
+            awk -v f="static void $section(void)" '$0 == f { on = 1 } on { print } on && /^}/ { exit }' "$MODEL_DIR/kat_code.c" > "$src"
+            if [ ! -s "$src" ]; then
+                printf 'REFUSED\t%s\tdigiid_core_kat_main.c has no case %s\n' "$id" "$section"; bad=1; continue
+            fi
+        fi
+        if [ "$where" = above ]; then hits="$(grep -B1 -F -- "\"$ans\"" "$src")"
+        else hits="$(grep -F -- "\"$ans\"" "$src")"; fi
+        if [ -z "$hits" ]; then
+            printf 'REFUSED\t%s\t%s holds no literal "%s"\n' "$id" "${section/#-/digiid_core_kat_main.c}" "$ans"; bad=1
+        elif ! grep -qF -- "$anchor" <<<"$hits"; then
+            printf 'REFUSED\t%s\t"%s" is a literal of %s, but not beside %s\n' "$id" "$ans" "${section/#-/digiid_core_kat_main.c}" "$anchor"; bad=1
+        fi
+    done
+    sed -n 's/^GOLDEN //p' "$file" > "$MODEL_DIR/given.txt"
+    sed 's/ [^ ]*$//' "$MODEL_DIR/given.txt" > "$MODEL_DIR/given_names.txt"
+    while IFS= read -r line; do
+        if ! grep -qFx -- "$line" "$MODEL_DIR/golden.txt"; then
+            printf 'REFUSED\tGOLDEN %s\tbridge_golden.txt has no line "%s"\n' "${line% *}" "$line"; bad=1
+        fi
+    done < "$MODEL_DIR/given.txt"
+    while IFS= read -r line; do
+        name="${line% *}"
+        case "$name" in ADDRESS*|SIGN*) ;; *) continue ;; esac
+        grep -qFx -- "$name" "$MODEL_DIR/given_names.txt" && continue
+        skip=0
+        for row in "${MODEL_NOT_GOLDEN[@]}"; do [ "$row" = "$name" ] && skip=1; done
+        [ $skip -eq 1 ] && continue
+        printf 'REFUSED\tGOLDEN %s\tthe model gives no such line, and MODEL_NOT_GOLDEN does not name it\n' "$name"; bad=1
+    done < "$MODEL_DIR/golden.txt"
+    return $bad
+}
+# model_arm <label> <ROOT=KEY> <the id prefix of the KAT lines it must lose> <site|shared|none: the GOLDEN lines it must lose>
+model_arm() {
+    local label="$1" swap="$2" prefix="$3" kind="$4" out want got
+    if ! python3 -I "$MODEL_PY" --hmac-key "$swap" > "$MODEL_DIR/arm.txt" 2> "$MODEL_DIR/err.txt"; then
+        echo "  [model $label] GATE FAILURE: the model did not run: $(head -1 "$MODEL_DIR/err.txt")"; FAIL=1; return
+    fi
+    out="$(model_verdict "$MODEL_DIR/arm.txt")"
+    got="$(cut -f2 <<<"$out" | LC_ALL=C sort | tr '\n' '|')"
+    want="$( { printf '%s\n' "${MODEL_ROWS[@]%%|*}" | grep -E "^$prefix\\."
+               case "$kind" in
+                   site) grep -vE "$SHARED_NAME_RE" "$MODEL_DIR/good_names.txt" | sed 's/^/GOLDEN /' ;;
+                   shared) grep -E "$SHARED_NAME_RE" "$MODEL_DIR/good_names.txt" | sed 's/^/GOLDEN /' ;;
+               esac; } | LC_ALL=C sort | tr '\n' '|')"
+    if [ -n "$want" ] && [ "$got" = "$want" ]; then
+        echo "  [model $label] refused, as it must be: exactly its $(tr -cd '|' <<<"$want" | wc -c | tr -d ' ') lines, each by name, and no other"
+    else
+        echo "  [model $label] GATE FAILURE: the comparison did not refuse exactly that root's lines"
+        echo "      refused: $got"; echo "      wanted:  $want"; FAIL=1
+    fi
+}
+model_note="FAILED"
+echo "--- MODEL: slip13_model.py (standard library only) gives digiid_core_kat_main.c's literals and bridge_golden.txt's lines again ---"
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "  GATE FAILURE: no python3 to run the model with (slip13_model.py)"; FAIL=1
+elif [ ! -f "$MODEL_PY" ] || [ ! -s "$MODEL_DIR/golden.txt" ]; then
+    echo "  GATE FAILURE: slip13_model.py or bridge_golden.txt is gone, or the golden file holds no line"; FAIL=1
+elif ! python3 -I "$MODEL_PY" > "$MODEL_DIR/model.txt" 2> "$MODEL_DIR/err.txt"; then
+    echo "  GATE FAILURE: the model did not run: $(head -1 "$MODEL_DIR/err.txt")"; FAIL=1
+elif ! out="$(model_verdict "$MODEL_DIR/model.txt")"; then
+    echo "  [model] GATE FAILURE: the model and the literals disagree"
+    while IFS=$'\t' read -r _ id why; do echo "      $id: ${why:0:220}"; done <<<"$out"
+    FAIL=1
+else
+    sed -n 's/^GOLDEN //p' "$MODEL_DIR/model.txt" | sed 's/ [^ ]*$//' > "$MODEL_DIR/good_names.txt"
+    model_note="${#MODEL_ROWS[@]} literals and $(grep -c '' "$MODEL_DIR/good_names.txt") golden lines given again"
+    echo "  [model] ${#MODEL_ROWS[@]} literals of digiid_core_kat_main.c, each on the line named for it, and $(grep -c '' "$MODEL_DIR/good_names.txt") of bridge_golden.txt's lines, are the model's"
+    before=$FAIL
+    model_arm 'STANDARD derived with "DigiByte seed"' "STANDARD=DigiByte seed" standard none
+    model_arm 'DIGIBYTE derived with "Bitcoin seed"' "DIGIBYTE=Bitcoin seed" digibyte site
+    model_arm 'the shared identity derived with "Bitcoin seed"' "SHARED=Bitcoin seed" shared shared
+    [ $FAIL -ne $before ] && model_note="FAILED"
+fi
+
 for arm in "${ARMS[@]}"; do
     bit="${arm%%:*}"; name="${arm#*:}"
     echo "--- COMPARISON ARM -DDIGIID_UNFIXED=$bit ($name): fails exactly its cases ---"
@@ -526,19 +695,21 @@ fi
 
 # ---- the bridge it moved from --------------------------------------------------------------
 BRIDGE_CORE=(BRWallet.c BRTransaction.c BRMerkleBlock.c BRWalletFilterElements.c BRDigiDollar.c BRDigiAsset.c BRSet.c)
+BRIDGE_WALLET_C="$BRIDGE_DIR/jni_wallet.c"   # the GOLDEN leg's comparison arm builds once with a planted copy
 build_bridge() {   # <out> <core objects dir> [extra flags]
     local out="$1" objs="$2" src; shift 2
     local extra=()
     for src in "${BRIDGE_CORE[@]}"; do extra+=("$CORE_DIR/$src"); done
     "$CC" -w -include stdint.h "$@" -I "$HOST_JNI" -I "$BRIDGE_DIR" -I "$CORE_DIR" -I "$CORE_DIR/secp256k1/include" \
         "$SCRIPT_DIR/digiid_core_bridge_main.c" "$BRIDGE_DIR/jni_wallet_sign.c" "$BRIDGE_DIR/jni_transaction_persist.c" \
-        "$BRIDGE_DIR/jni_wallet.c" "$BRIDGE_DIR/coin_reservation.c" "$BRIDGE_DIR/slip13.c" "${extra[@]}" "$objs"/*.o \
+        "$BRIDGE_WALLET_C" "$BRIDGE_DIR/coin_reservation.c" "$BRIDGE_DIR/slip13.c" "${extra[@]}" "$objs"/*.o \
         -lm -lpthread -o "$out"
 }
 run_bridge() {   # <binary> <label>
     local out rc
     echo "--- BRIDGE ($2): the bridge's signMessage, signIdentityMessage and identityAddress against the header ---"
     out="$(timeout 300 "$1" sweep 2>&1)"; rc=$?
+    printf '%s\n' "$out" > "$BUILD_DIR/sweep_$2.txt"   # its SWEEP lines are the GOLDEN leg's
     if [ $rc -eq 0 ] && ! grep -Eq "$SAN_RE" <<<"$out" && grep -q "^RESULT bridge pass$" <<<"$out"; then
         echo "  [$2] $(grep -E '^PASS: [0-9]+ answers compared' <<<"$out" | cut -c7-)"
         echo "  [$2] $(grep -c '^PASS: a [0-9]*-byte message' <<<"$out") long-message answers the bridge's"
@@ -546,8 +717,107 @@ run_bridge() {   # <binary> <label>
         echo "  [$2] GATE FAILURE (rc=$rc)"; grep -E "^FAIL:|$SAN_RE" <<<"$out" | cut -c1-240 | sed 's/^/      /'; FAIL=1
     fi
 }
+
+# ---- GOLDEN: the bridge held to the answers it gave in 4.1.5 -------------------------------
+# bridge_lines <binary> <its sweep's output> <out file>: the bridge's ADDRESS and SIGN lines (print) and SWEEP lines
+# (sweep), in bridge_golden.txt's order. A sweep that disagreed with the header still gave its lines.
+bridge_lines() {
+    local out rc
+    out="$(timeout 300 "$1" print 2>&1)"; rc=$?
+    if [ $rc -ne 0 ] || grep -Eq "$SAN_RE" <<<"$out"; then echo "print did not run clean (rc=$rc)"; return 1; fi
+    if [ ! -f "$2" ] || grep -Eq "$SAN_RE" "$2"; then echo "the sweep did not run clean"; return 1; fi
+    grep -E '^(ADDRESS|SIGN) ' <<<"$out" > "$3"
+    grep -E '^SWEEP ' "$2" >> "$3"
+    return 0
+}
+# golden_verdict <the bridge's lines> [<a golden file's lines>]: one "DIFFERS<tab><the line but its last field><tab><why>"
+# line for each line that is not the same in both; returns 0 when the two are the same bytes.
+golden_verdict() {
+    local got="$1" golden="${2:-$MODEL_DIR/golden.txt}" line name other bad=0
+    cmp -s "$golden" "$got" && return 0
+    while IFS= read -r line; do
+        grep -qFx -- "$line" "$got" && continue
+        name="${line% *}"
+        other="$(awk -v n="$name " 'substr($0, 1, length(n)) == n && index(substr($0, length(n) + 1), " ") == 0 { print; exit }' "$got")"
+        if [ -n "$other" ]; then other="${other##* }"; else other="no such line"; fi
+        printf 'DIFFERS\t%s\tfrozen as %s, the bridge answers %s\n' "$name" "${line##* }" "$other"; bad=1
+    done < "$golden"
+    while IFS= read -r line; do
+        name="${line% *}"
+        other="$(awk -v n="$name " 'substr($0, 1, length(n)) == n && index(substr($0, length(n) + 1), " ") == 0 { print; exit }' "$golden")"
+        [ -n "$other" ] && continue
+        printf 'DIFFERS\t%s\tthe bridge answers %s, and the file holds no such line\n' "$name" "${line##* }"; bad=1
+    done < "$got"
+    [ $bad -eq 0 ] && printf 'DIFFERS\tthe order\tthe same lines in another order\n'
+    return 1
+}
+golden_note="FAILED"
+run_golden() {   # <binary> <label>; returns 0 when the bridge's lines are the file's
+    local lines="$BUILD_DIR/golden_$2.txt" out
+    echo "--- GOLDEN ($2): the bridge's answers against bridge_golden.txt, frozen from the bridge of 4.1.5 ---"
+    if [ "$(grep -c '^ADDRESS ' "$MODEL_DIR/golden.txt")" -lt 1 ] || [ "$(grep -c '^SIGN ' "$MODEL_DIR/golden.txt")" -lt 1 ] ||
+       [ "$(grep -c '^SWEEP ' "$MODEL_DIR/golden.txt")" -lt 1 ]; then
+        echo "  [$2] GATE FAILURE: bridge_golden.txt is gone, or holds no ADDRESS, SIGN or SWEEP line: nothing holds the bridge"; FAIL=1; return 1
+    fi
+    if ! out="$(bridge_lines "$1" "$BUILD_DIR/sweep_$2.txt" "$lines")"; then
+        echo "  [$2] GATE FAILURE: $out"; FAIL=1; return 1
+    fi
+    if out="$(golden_verdict "$lines")"; then
+        echo "  [$2] $(grep -c '' "$lines") lines the same, byte for byte: $(grep -c '^ADDRESS ' "$lines") addresses, $(grep -c '^SIGN ' "$lines") signed answers, $(grep -c '^SWEEP ' "$lines") sweeps"
+        return 0
+    fi
+    echo "  [$2] GATE FAILURE: the bridge no longer answers as it did in 4.1.5. An identity moved, or a signature changed:"
+    while IFS=$'\t' read -r _ name why; do echo "      $name: ${why:0:260}"; done <<<"$out"
+    FAIL=1; return 1
+}
+# expect_golden <label> <the names that must differ, one per line> <the bridge's lines> [<a golden file's lines>]
+expect_golden() {
+    local label="$1" want got out
+    want="$(LC_ALL=C sort <<<"$2" | tr '\n' '|')"
+    out="$(golden_verdict "$3" ${4:+"$4"})"
+    got="$(cut -f2 <<<"$out" | LC_ALL=C sort | tr '\n' '|')"
+    if [ -n "$2" ] && [ "$got" = "$want" ]; then
+        echo "  [golden $label] refused, as it must be: exactly its $(tr -cd '|' <<<"$want" | wc -c | tr -d ' ') lines, each by name, and no other"
+    else
+        echo "  [golden $label] GATE FAILURE: the comparison did not refuse exactly those lines"
+        echo "      refused: $got"; echo "      wanted:  $want"; FAIL=1
+    fi
+}
 if build_bridge "$BUILD_DIR/bridge" "$BUILD_DIR/core_san" "${SAN[@]}"; then
     run_bridge "$BUILD_DIR/bridge" 64-bit
+    if run_golden "$BUILD_DIR/bridge" 64-bit; then
+        golden_note="$(grep -c '' "$MODEL_DIR/golden.txt") lines the same"
+        # COMPARISON ARMS. In temp copies of the file: one answer changed, and one line missing.
+        before=$FAIL
+        GOLDEN_ARM="$BUILD_DIR/golden_arm"
+        mkdir -p "$GOLDEN_ARM"
+        sed '/^SIGN site request /s/DPeEMYki/DPeEMYkj/' "$MODEL_DIR/golden.txt" > "$GOLDEN_ARM/changed.txt"
+        grep -v '^SWEEP long messages: ' "$MODEL_DIR/golden.txt" > "$GOLDEN_ARM/missing.txt"
+        if [ "$(grep -c 'DPeEMYkj' "$GOLDEN_ARM/changed.txt")" -ne 1 ] ||
+           [ "$(grep -c '' "$GOLDEN_ARM/missing.txt")" -ne $(( $(grep -c '' "$MODEL_DIR/golden.txt") - 1 )) ]; then
+            echo "  [golden] GATE FAILURE: a plant found no anchor in bridge_golden.txt -- the comparison arm is blind"; FAIL=1
+        else
+            expect_golden "one answer changed in the file" "SIGN site request" "$BUILD_DIR/golden_64-bit.txt" "$GOLDEN_ARM/changed.txt"
+            expect_golden "one line missing from the file" "SWEEP long messages: 16 answers, sha256" "$BUILD_DIR/golden_64-bit.txt" "$GOLDEN_ARM/missing.txt"
+        fi
+        # And a bridge that moved: the per-site path begins m/14' in a temp copy of jni_wallet.c. Every per-site
+        # line and every SWEEP line (per-site answers are in each) must be refused; the shared identity's must hold.
+        sed 's/13 | BIP32_HARD,/14 | BIP32_HARD,/' "$BRIDGE_DIR/jni_wallet.c" > "$GOLDEN_ARM/jni_wallet.c"
+        if [ "$(grep -c '13 | BIP32_HARD,' "$BRIDGE_DIR/jni_wallet.c")" -ne 1 ] || [ "$(grep -c '14 | BIP32_HARD,' "$GOLDEN_ARM/jni_wallet.c")" -ne 1 ]; then
+            echo "  [golden] GATE FAILURE: the plant found no anchor in jni_wallet.c (seed_derive_identity_key's 13') -- the comparison arm is blind"; FAIL=1
+        elif ! BRIDGE_WALLET_C="$GOLDEN_ARM/jni_wallet.c" build_bridge "$GOLDEN_ARM/bridge" "$BUILD_DIR/core_san" "${SAN[@]}"; then
+            echo "GATE FAILURE: the moved bridge did not compile (a build error is not evidence)."; FAIL=1
+        else
+            timeout 300 "$GOLDEN_ARM/bridge" sweep > "$GOLDEN_ARM/sweep.txt" 2>&1
+            if ! out="$(bridge_lines "$GOLDEN_ARM/bridge" "$GOLDEN_ARM/sweep.txt" "$GOLDEN_ARM/lines.txt")"; then
+                echo "  [golden a bridge that moved] GATE FAILURE: $out"; FAIL=1
+            else
+                expect_golden "a bridge whose per-site path begins m/14'" \
+                    "$(sed 's/ [^ ]*$//' "$MODEL_DIR/golden.txt" | grep -vE "$SHARED_NAME_RE")" "$GOLDEN_ARM/lines.txt"
+            fi
+        fi
+        [ $FAIL -ne $before ] && golden_note="FAILED"
+    fi
 else
     echo "GATE FAILURE: the bridge comparison did not compile (a build error is not evidence)."; FAIL=1
 fi
@@ -565,6 +835,7 @@ if "$CC" "${M32[@]}" "$BUILD_DIR/probe32.c" -o "$BUILD_DIR/probe32" >/dev/null 2
         before=$FAIL
         run_shipped "$BUILD_DIR/green32" 32-bit
         run_bridge "$BUILD_DIR/bridge32" 32-bit
+        run_golden "$BUILD_DIR/bridge32" 32-bit || golden_note="FAILED"
         [ $FAIL -ne $before ] && bits_note="FAILED"
     else
         echo "GATE FAILURE: the 32-bit build failed though a 32-bit link works (a build error is not evidence)."; FAIL=1; bits_note="FAILED"
@@ -594,6 +865,6 @@ if ! grep -q "detect_leaks is not supported" <<<"$leak_probe"; then
 fi
 echo "leak check: $leak_note"
 
-[ $FAIL -eq 0 ] && echo "PASS: digiid_core_kat (${#CASES[@]} cases: ${#ARMS[@]} comparison arms each failing exactly its cases, shipped arm clean under ASan + UBSan and unsanitized; the bridge's own answers matched; 32-bit $bits_note; leak check $leak_note; one DigiScope list in BRDigiId.h and IdentityKeyPolicy.kt; portability)"
+[ $FAIL -eq 0 ] && echo "PASS: digiid_core_kat (${#CASES[@]} cases: ${#ARMS[@]} comparison arms each failing exactly its cases, shipped arm clean under ASan + UBSan and unsanitized; the bridge's own answers matched; 32-bit $bits_note; leak check $leak_note; one DigiScope list in BRDigiId.h and IdentityKeyPolicy.kt; the independent model: $model_note; bridge_golden.txt: $golden_note; portability)"
 [ $FAIL -ne 0 ] && echo "FAIL: digiid_core_kat"
 exit $FAIL
