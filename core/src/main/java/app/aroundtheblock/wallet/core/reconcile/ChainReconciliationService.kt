@@ -46,15 +46,29 @@ class ChainReconciliationService(
     private val appContext: android.content.Context? = null,
 ) {
 
-    companion object {
-        /** The stage shown while the scan compares what it found with the wallet. Named so the
-         *  screen can show it in the user's language. */
-        const val STAGE_COMPARING = "Comparing with the wallet…"
-    }
+    /**
+     * What the scan is doing. A name, never text: this module has no string resources, so the
+     * screen words each stage in the user's language. RECOVERING_TX, QUERYING_NODE and
+     * IMPORTING_TX carry counts in [State.Scanning].
+     */
+    enum class Stage { CHECKING_PENDING, SCANNING_HISTORY, READING_HISTORY, RECOVERING_TX, LISTING_ADDRESSES, TIDYING_ASSETS, QUERYING_NODE, IMPORTING_TX, COMPARING }
+
+    /** Why a scan failed. ERROR is anything not named here: its [State.Failed.detail] is the
+     *  exception's own text, which no language file can word. */
+    enum class Failure { NO_ADDRESSES, NODE_REQUEST, ERROR }
 
     sealed class State {
         object Idle : State()
-        data class Scanning(val stage: String, val progress: Float = 0f) : State()
+        /**
+         * @param current the item being worked on, 1-based (RECOVERING_TX, IMPORTING_TX), else 0
+         * @param total   how many items there are (those two, and the address count of QUERYING_NODE), else 0
+         */
+        data class Scanning(
+            val stage: Stage,
+            val progress: Float = 0f,
+            val current: Int = 0,
+            val total: Int = 0,
+        ) : State()
         data class Done(
             /** Distinct addresses sent to the node. */
             val scannedAddresses: Int,
@@ -77,7 +91,7 @@ class ChainReconciliationService(
              *  seen there were not added: a rescan from this height proves them (4.1.3 row 1). */
             val unprovableFromHeight: Long = 0L,
         ) : State()
-        data class Failed(val reason: String) : State()
+        data class Failed(val failure: Failure, val detail: String = "") : State()
     }
 
     private val _state = MutableStateFlow<State>(State.Idle)
@@ -95,7 +109,7 @@ class ChainReconciliationService(
             // Forget heights an earlier scan (or the automatic confirmation pass) left behind: the
             // answer below is this scan's own.
             runCatching { NativeBridge.takeUnprovableServerHeight() }
-            _state.value = State.Scanning("Checking pending transactions…")
+            _state.value = State.Scanning(Stage.CHECKING_PENDING)
             val promotedPending = runCatching { confirmPendingTransactions() }.getOrDefault(0)
             if (promotedPending > 0) {
                 android.util.Log.i("ChainReconciliation",
@@ -107,7 +121,7 @@ class ChainReconciliationService(
             // — all four address types), each WITH its confirming height. Unlike
             // confirmPendingTransactions this recovers a tx that fell out of the
             // wallet's set entirely, not just one stuck at Pending. Non-fatal.
-            _state.value = State.Scanning("Scanning address history…")
+            _state.value = State.Scanning(Stage.SCANNING_HISTORY)
             val historyImported = runCatching { reconcileAddressHistory() }.getOrDefault(0)
             if (historyImported > 0) {
                 android.util.Log.i("ChainReconciliation",
@@ -126,12 +140,12 @@ class ChainReconciliationService(
             // is precisely the silent loss the valve is only tolerable without.
             if (lastHistoryPassCovered) markAbandonedBandRecovered()
 
-            _state.value = State.Scanning("Listing wallet addresses…")
+            _state.value = State.Scanning(Stage.LISTING_ADDRESSES)
             // Each address once: the node answers per address occurrence, so a repeated
             // address would come back as repeated rows.
             val addrs = distinctAddresses(NativeBridge.dumpAllAddresses().trim().lines())
             if (addrs.isEmpty()) {
-                val failed = State.Failed("No addresses available (wallet not loaded?)")
+                val failed = State.Failed(Failure.NO_ADDRESSES)
                 _state.value = failed
                 return@withContext failed
             }
@@ -143,15 +157,15 @@ class ChainReconciliationService(
             // POSTed the whole address set to an indexer (and had been 404ing besides).
             // Non-fatal if it fails.
             if (assetManager != null) {
-                _state.value = State.Scanning("Tidying asset holdings…", progress = 0.05f)
+                _state.value = State.Scanning(Stage.TIDYING_ASSETS, progress = 0.05f)
                 runCatching { assetManager.reconcileAssetRowsLocally(pruneUnowned = false) }
                     .onFailure { /* non-fatal */ }
             }
 
-            _state.value = State.Scanning("Querying node for UTXOs on ${addrs.size} addresses…")
+            _state.value = State.Scanning(Stage.QUERYING_NODE, total = addrs.size)
             val result = nodeClient.reconcileAddresses(addrs)
             if (result == null) {
-                val failed = State.Failed("Node request failed — check network or endpoint")
+                val failed = State.Failed(Failure.NODE_REQUEST)
                 _state.value = failed
                 return@withContext failed
             }
@@ -195,8 +209,10 @@ class ChainReconciliationService(
 
             for ((idx, txid) in uniqueTxids.withIndex()) {
                 _state.value = State.Scanning(
-                    stage = "Importing tx ${idx + 1}/${uniqueTxids.size}",
+                    stage = Stage.IMPORTING_TX,
                     progress = (idx + 1).toFloat() / uniqueTxids.size,
+                    current = idx + 1,
+                    total = uniqueTxids.size,
                 )
                 val rawTx = result.rawTxs[txid] ?: continue
                 // Held before this scan? Asked first, so "already in wallet" counts exactly that;
@@ -221,7 +237,7 @@ class ChainReconciliationService(
 
             // Classify AFTER the import, so what this scan added is classified as the wallet now
             // holds it. Then try to prove the held remainders zero.
-            _state.value = State.Scanning(STAGE_COMPARING, progress = 1f)
+            _state.value = State.Scanning(Stage.COMPARING, progress = 1f)
             var partition = classify(utxos)
             if (partition != null && assetManager != null) {
                 partition = proveHeldRemainders(
@@ -249,7 +265,7 @@ class ChainReconciliationService(
             _state.value = done
             done
         } catch (t: Throwable) {
-            val failed = State.Failed(t.message ?: t.javaClass.simpleName)
+            val failed = State.Failed(Failure.ERROR, t.message ?: t.javaClass.simpleName)
             _state.value = failed
             failed
         }
@@ -384,7 +400,7 @@ class ChainReconciliationService(
                     "recovered (banner nags, Synced withheld) until this recovers.")
         }
         val known = knownTxidsForHistoryPlan(allHashes, details)
-        _state.value = State.Scanning("Reading address history…", progress = 0.2f)
+        _state.value = State.Scanning(Stage.READING_HISTORY, progress = 0.2f)
         // ONE batched POST per 500 addresses (not one GET per address) — stays
         // well under the server's request limiter that the per-address loop tripped.
         val history = nodeClient.addressHistoryBatch(addrs) ?: return 0
@@ -399,8 +415,10 @@ class ChainReconciliationService(
             },
             onProgress = { i, total ->
                 _state.value = State.Scanning(
-                    "Recovering tx ${i + 1}/$total…",
+                    Stage.RECOVERING_TX,
                     progress = 0.5f + (i + 1).toFloat() / total * 0.5f,
+                    current = i + 1,
+                    total = total,
                 )
             },
             onImported = { tx ->
