@@ -145,8 +145,12 @@ jobs:
       # activity attribute can make a hardware feature REQUIRED with no line in the manifest saying
       # so, and a dependency can add an ABI directory that lacks our own native library; either
       # one costs devices on Play, or offers the app to a device it cannot start on.
+      # --self-test first: canned aapt2 output for a manifest that asks for an OpenGL ES version,
+      # restricts screens or requires an unlisted feature must each read as FAIL.
       - name: Required features and ABIs are the listed ones
-        run: ./scripts/check-play-device-reach.sh
+        run: |
+          ./scripts/check-play-device-reach.sh --self-test
+          ./scripts/check-play-device-reach.sh
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v7

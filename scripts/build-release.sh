@@ -14,6 +14,8 @@
 # all under dist/v<version>/ (gitignored). Both artifacts must be signed by the key whose SHA-256 is
 # EXPECTED_SHA256 below, or nothing is kept: a build signed by anything else cannot update a single
 # existing install, and finding that out after uploading it to Play is the expensive way.
+# Both must also pass scripts/check-play-device-reach.sh (required features, OpenGL ES version,
+# screens, ABIs): a requirement nobody meant to add costs devices on Play just as quietly.
 #
 # The key is read as the Gradle build reads it — ATB_SIGNING_* or keystore.properties — see
 # docs/SIGNING.md. Nothing here prints, stores or forwards the password.
@@ -72,6 +74,13 @@ $aab_signer"
 pkg=$("$AAPT2" dump packagename "$APK")
 [ "$pkg" = "app.aroundtheblock.wallet" ] || die "the APK's package is $pkg"
 echo "Signed by the release key ($EXPECTED_SHA256): AAB and APK. Package $pkg."
+
+# ── What Play will offer these to ───────────────────────────────────────────────────────────────
+# The same guard CI runs on the debug APKs, here on the two files that ship: required features,
+# OpenGL ES version, screens, and the ABI directories (each with libcore-lib.so). It reads the AAB
+# as well as the APK. A failure stops here, before anything is put in dist/.
+AAPT2="$AAPT2" ./scripts/check-play-device-reach.sh "$APK" "$AAB" \
+    || die "the signed artifacts fail scripts/check-play-device-reach.sh (see FAIL lines above)"
 
 # ── Collect ─────────────────────────────────────────────────────────────────────────────────────
 OUT="dist/v$VERSION"
