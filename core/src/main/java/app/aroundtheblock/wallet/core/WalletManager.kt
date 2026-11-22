@@ -252,13 +252,16 @@ class WalletManager @Suppress("LongParameterList") constructor(
     private fun holdsSeedRecord(scope: WalletScope): Boolean =
         holdsSeed(context.getSharedPreferences(WalletStores.seedRecordPrefs(scope), Context.MODE_PRIVATE))
 
-    /** Clear the registry `dgb_wallets`: true only when the write landed. */
-    private fun clearWalletRegistry(): Boolean {
-        val store = context.getSharedPreferences(WalletRegistry.PREFS, Context.MODE_PRIVATE)
-        val held = store.all
-        val landed = store.edit().clear().commit()
-        if (!landed) readWhatTheFileHolds("WalletManager", WalletRegistry.PREFS, store, held)
-        return landed
+    /**
+     * Clear the registry `dgb_wallets`, by the rule of every other store of the wipe
+     * (WIPE-WRITES-NOTHING): true only when the write landed, or there was nothing to write, and no
+     * file of the registry is on the device that was not there before. A device that never had a
+     * second wallet has no registry file, and a commit to it would make one: it is not written. A
+     * file this clear did make is removed and read back gone here, inside the verdict, and not left
+     * to the delete after it ([deleteWalletNamedPrefsFiles]).
+     */
+    private fun clearWalletRegistry(): Boolean = creatingNoPrefsFile(context, "WalletManager", listOf(WalletRegistry.PREFS)) {
+        clearHeldPrefs(context, "WalletManager", WalletRegistry.PREFS)
     }
 
     /**

@@ -493,11 +493,12 @@ class DigiScopeClient(
     /**
      * [HubSessionRevoke] for any wallet on the device: the token [scope]'s store holds is sent once to
      * `POST /api/auth/logout`, as [logout] sends the running one. Reads the store only — erasing it is
-     * the caller's next step. Never throws; the request is queued, not awaited.
+     * the caller's next step — and reads it where it is ([HubTokenStore.stored]): the wipe calls this,
+     * and a wipe creates no file. Never throws; the request is queued, not awaited.
      */
     fun revokeStoredSession(scope: app.aroundtheblock.wallet.core.wallets.WalletScope) {
         val token = try {
-            HubTokenStore(appContext, scope).load()
+            HubTokenStore(appContext, scope).stored()
         } catch (e: Exception) {
             android.util.Log.w("DigiScope", "stored session not read for revoke: ${e.javaClass.simpleName}")
             null

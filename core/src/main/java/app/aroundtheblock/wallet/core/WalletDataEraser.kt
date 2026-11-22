@@ -14,6 +14,7 @@ import app.aroundtheblock.wallet.core.wallets.StoreScope
 import app.aroundtheblock.wallet.core.wallets.WalletScope
 import app.aroundtheblock.wallet.core.wallets.WalletStores
 import app.aroundtheblock.wallet.core.wallets.prefsFileOnDisk
+import app.aroundtheblock.wallet.core.wallets.prefsFilesOf
 import app.aroundtheblock.wallet.core.wallets.storageSuffix
 
 /**
@@ -47,11 +48,31 @@ import app.aroundtheblock.wallet.core.wallets.storageSuffix
  * leftover state. Each is looked for by its exact name, deleted (a prefs file with its backup, not
  * only cleared) and read back gone; one that is not there costs nothing and creates no file.
  *
- * A wipe creates no file (WIPE-WRITES-NOTHING). No step commits to a preferences store that holds
- * nothing, since a commit to a store with no file writes an empty one, and a step is true only
- * when no store it opened has a file now that it did not have before. The one file a wipe may make
- * is the display currency's (`dgb_price<net>`), when it moves that device setting out of the sync
- * data it is about to clear. `WipeWritesNothingTest` lists the device before and after.
+ * A verified wipe leaves no preferences file that these steps made (WIPE-WRITES-NOTHING). No step
+ * commits to a store that holds nothing, since a commit to a store with no file writes an empty
+ * one, and a file a step did make is removed and read back gone before the step answers
+ * ([creatingNoPrefsFile]); one that will not go makes the step false. A step that fails leaves no
+ * file of its own either, so the next run does not find one and take it for the device's.
+ *
+ * What that covers, exactly: every preferences store these steps open by name, except the two
+ * below; the Hub stores also when the token is read for the revoke or cleared at logout
+ * (`HubTokenStore` opens its encrypted store only when it can hold something); and, in
+ * [WalletManager.wipeWallet], the registry `dgb_wallets` and the record `dgb_wipe_owed`. Every
+ * other wallet's stores are deleted and read back gone by `WalletStoreEraser`.
+ *
+ * What it does not cover, each on purpose:
+ *  - `dgb_settings`: device settings (the language, the network, the own node). The wipe takes one
+ *    key out and keeps the file, so when this process holds it with no file on the device, that
+ *    removal writes the file and it stays.
+ *  - `dgb_price<net>`: made when the display currency is found in the sync data the wipe is about
+ *    to clear and is moved to its own file first (owner decision, 2026-11-12).
+ *  - The app module's two marks, which core cannot see: `dgb_web_session_owner`, set to `wiped` by
+ *    the identity step (`IdentitySessionEraser`), and `dgb_erasure_owed`, written before the wipe
+ *    starts and emptied, not deleted, once a wipe verifies (`FreshStartAfterWipe`).
+ *
+ * `WipeWritesNothingTest` lists the data directory before and after, over every starting state it
+ * can build. It runs on a JVM over a model of the platform's preferences; the PIN store's file,
+ * the database's open and the WebView's data are not in it.
  */
 interface WalletDataEraser {
     /** Clear the encrypted-seed prefs (`dgb_wallet_seed`). MUST run first. */
@@ -138,9 +159,13 @@ fun interface WalletSessionStop {
  *   record's write landed, no wallet's seed record is readable, and no seed key alias of any
  *   wallet exists. Never inferred from "no step threw".
  * @property everythingCleared every other store of every wallet reported cleared (both networks),
- *   no store the wipe opened was left with a file it did not have before (WIPE-WRITES-NOTHING),
  *   the registry was cleared, the identity sessions ended, every session running for the wallet
- *   stopped, and the native session stopped.
+ *   stopped, and the native session stopped. It also says that no preferences file the wipe made
+ *   is left (WIPE-WRITES-NOTHING), for the stores that rule covers and no others: the ones
+ *   [WalletDataEraser]'s steps open by name, the registry `dgb_wallets` and the record
+ *   `dgb_wipe_owed`. It says nothing about `dgb_settings`, `dgb_price<net>` or the app module's
+ *   marks `dgb_web_session_owner` and `dgb_erasure_owed`, which a verified wipe may write; the
+ *   list and the reason for each are on [WalletDataEraser].
  */
 data class WipeReport(val seedGone: Boolean, val everythingCleared: Boolean) {
     /** The only result an entry point may treat as "the wallet was wiped". */
@@ -184,6 +209,67 @@ internal fun readWhatTheFileHolds(tag: String, name: String, store: SharedPrefer
 }
 
 /**
+ * Clear one preferences file: true only when the write LANDED. The in-memory view of a
+ * preferences file takes an edit before the file does, so for these stores the write result is
+ * the evidence and a read-back would add nothing; the seed is read back separately, by
+ * [WalletManager.wipeWallet].
+ *
+ * A store that holds nothing is not written: a commit to a store with no file creates an empty one.
+ *
+ * A write that did not land leaves the file as it was, and this process goes on reading what
+ * the file holds: the view is put back to what it showed before the clear. A seed store that
+ * refused its clear therefore still reads as the wallet it holds, so the PIN that opens that
+ * wallet can load it in this same process — never an empty store over a record still on disk.
+ */
+internal fun clearHeldPrefs(context: Context, tag: String, name: String): Boolean {
+    val store = context.getSharedPreferences(name, Context.MODE_PRIVATE)
+    val held = store.all
+    if (held.isEmpty()) return true
+    val landed = store.edit().clear().commit()
+    if (!landed) readWhatTheFileHolds(tag, name, store, held)
+    return landed
+}
+
+/**
+ * Runs [erase] over the preferences stores [names] and leaves no file it made
+ * (WIPE-WRITES-NOTHING): true only when [erase] reported its stores cleared AND no store whose
+ * file was not on the device before is on it now.
+ *
+ * Opening a preferences file creates nothing, and the steps do not commit to a store that holds
+ * nothing. A file can still appear: a store this process shows values for while its file is not
+ * on the device is cleared by a commit, which writes an empty file; an encrypted store writes its
+ * keyset when it is opened; and after a write that did not land, the rewrite of what the store
+ * held can land where there was no file. Such a file is one the wipe made, so it is removed and
+ * read back gone, whatever [erase] reported:
+ *
+ *  - behind an erase that cleared its stores, with the platform's delete, which also lets go of
+ *    the emptied store;
+ *  - behind an erase that did not (one store of several refused, or the step threw), by taking
+ *    the file away and nothing else, so the device and this process are both as the step found
+ *    them: a store this process held with no file is held still, and the next run clears it. Left
+ *    there, the file would be on the device when that run looks, and count as not the wipe's.
+ *
+ * What cannot be looked for counts as present, as everywhere in the eraser.
+ */
+internal fun creatingNoPrefsFile(context: Context, tag: String, names: List<String>, erase: () -> Boolean): Boolean {
+    val absentBefore = names.filter { name -> runCatching { !prefsFileOnDisk(context, name) }.getOrDefault(false) }
+    val erased = runCatching(erase)
+    val cleared = erased.getOrDefault(false)
+    val noneMade = absentBefore.map { name ->
+        try {
+            if (prefsFileOnDisk(context, name)) {
+                if (cleared) context.deleteSharedPreferences(name) else prefsFilesOf(context, name).forEach { it.delete() }
+            }
+            (!prefsFileOnDisk(context, name)).also { gone -> if (!gone) Log.w(tag, "remove the file made for $name: not confirmed") }
+        } catch (t: Throwable) {
+            Log.w(tag, "remove the file made for $name: ${t.javaClass.simpleName}")
+            false
+        }
+    }.all { it }
+    return erased.getOrThrow() && noneMade
+}
+
+/**
  * Production [WalletDataEraser] operating on real SharedPreferences / files.
  *
  * All stores here hold regenerable, non-seed data (chain-derived caches, address
@@ -210,52 +296,13 @@ class AndroidWalletDataEraser internal constructor(
         { HubTokenStore(context, WalletScope.legacy(false)) },
     )
 
-    /**
-     * Clear one preferences file: true only when the write LANDED. The in-memory view of a
-     * preferences file takes an edit before the file does, so for these stores the write result is
-     * the evidence and a read-back would add nothing; the seed is read back separately, by
-     * [WalletManager.wipeWallet].
-     *
-     * A write that did not land leaves the file as it was, and this process goes on reading what
-     * the file holds: the view is put back to what it showed before the clear. A seed store that
-     * refused its clear therefore still reads as the wallet it holds, so the PIN that opens that
-     * wallet can load it in this same process — never an empty store over a record still on disk.
-     */
+    /** [clearHeldPrefs] as a step of this eraser, leaving no file it made ([creatingNoFile]). */
     private fun clearPrefs(name: String): Boolean = creatingNoFile(listOf(name)) {
-        step("clear $name") {
-            val store = context.getSharedPreferences(name, Context.MODE_PRIVATE)
-            val held = store.all
-            // Nothing to clear: no commit, which on a store with no file would create an empty one.
-            if (held.isEmpty()) return@step true
-            val landed = store.edit().clear().commit()
-            if (!landed) readWhatTheFileHolds(TAG, name, store, held)
-            landed
-        }
+        step("clear $name") { clearHeldPrefs(context, TAG, name) }
     }
 
-    /**
-     * Runs [erase] over the preferences stores [names] and leaves no file it made
-     * (WIPE-WRITES-NOTHING): true only when [erase] reported its stores cleared AND no store whose
-     * file was not on the device before is on it now.
-     *
-     * Opening a preferences file creates nothing, and the steps do not commit to a store that holds
-     * nothing. A file can still appear: a store this process shows values for while its file is not
-     * on the device is cleared by a commit, which writes an empty file; and an encrypted store
-     * writes its keyset when it is opened. Such a file is one the wipe made, so the wipe deletes it
-     * and reads back that it went. Only behind an erase that reported its stores cleared: a file
-     * that appears beside a write that did not land is left as it is, with the step already false.
-     * What cannot be looked for counts as present, as everywhere in the eraser.
-     */
-    private fun creatingNoFile(names: List<String>, erase: () -> Boolean): Boolean {
-        val absentBefore = names.filter { name -> runCatching { !prefsFileOnDisk(context, name) }.getOrDefault(false) }
-        if (!erase()) return false
-        return absentBefore.map { name ->
-            step("remove the file made for $name") {
-                if (prefsFileOnDisk(context, name)) context.deleteSharedPreferences(name)
-                !prefsFileOnDisk(context, name)
-            }
-        }.all { it }
-    }
+    private fun creatingNoFile(names: List<String>, erase: () -> Boolean): Boolean =
+        creatingNoPrefsFile(context, TAG, names, erase)
 
     /**
      * Clear [name] with a checked commit, then DELETE its file and backup, and read back that
