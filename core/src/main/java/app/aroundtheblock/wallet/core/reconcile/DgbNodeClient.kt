@@ -388,8 +388,7 @@ class DgbNodeClient internal constructor(
             val txids = mutableListOf<String>()
             r.optJSONArray("transactions")?.let { arr ->
                 for (i in 0 until arr.length()) {
-                    arr.optJSONObject(i)?.optString("txid")?.takeIf { it.isNotEmpty() }
-                        ?.let { txids += it }
+                    arr.optJSONObject(i)?.optString("txid")?.takeIf { it.isNotEmpty() }?.let { txids += canonicalTxid(it) }
                 }
             }
             DigiDollarHoldingResult(
@@ -495,7 +494,7 @@ class DgbNodeClient internal constructor(
         for (i in 0 until utxosJson.length()) {
             val u = utxosJson.getJSONObject(i)
             utxos += UtxoEntry(
-                txid = u.getString("txid"),
+                txid = canonicalTxid(u.getString("txid")),
                 vout = u.getInt("vout"),
                 amountSatoshi = u.getLong("amountSatoshi"),
                 address = u.getString("address"),
@@ -507,8 +506,13 @@ class DgbNodeClient internal constructor(
         val rawTxs = mutableMapOf<String, RawTxEntry>()
         val keys = rawTxsJson.keys()
         while (keys.hasNext()) {
-            val txid = keys.next()
-            val entry = rawTxsJson.getJSONObject(txid)
+            // Keyed by the wallet's spelling of the txid (UTXO-DEDUP-CASE), so a row finds its parent
+            // by a plain lookup. A parent listed under two spellings is one entry, the first read;
+            // whichever it is, its bytes are bound to the txid before they are used (RawTxBinding).
+            val key = keys.next()
+            val txid = canonicalTxid(key)
+            if (txid in rawTxs) continue
+            val entry = rawTxsJson.getJSONObject(key)
             rawTxs[txid] = RawTxEntry(
                 hex = entry.getString("hex"),
                 blockHeight = entry.getLong("height"),
@@ -519,7 +523,8 @@ class DgbNodeClient internal constructor(
     }
 }
 
-/** One UTXO from the node's view. */
+/** One UTXO from the node's view. [txid] is in the wallet's spelling ([canonicalTxid]) when the row
+ *  came from [DgbNodeClient]. */
 data class UtxoEntry(
     val txid: String,
     val vout: Int,
@@ -624,7 +629,7 @@ internal fun parseAddressHistory(root: JSONObject): List<AddressTx> {
     val out = ArrayList<AddressTx>(txs.length())
     for (i in 0 until txs.length()) {
         val t = txs.optJSONObject(i) ?: continue
-        val txid = t.optString("txid", "")
+        val txid = canonicalTxid(t.optString("txid", ""))
         if (txid.isBlank()) continue
         out += AddressTx(txid, t.optLong("height", 0L))
     }

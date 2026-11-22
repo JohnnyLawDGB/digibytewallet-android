@@ -94,7 +94,9 @@ data class ScanPartition(
 internal fun distinctAddresses(addrs: List<String>): List<String> =
     addrs.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
 
-internal fun outpointKey(u: UtxoEntry): Pair<String, Int> = u.txid.lowercase() to u.vout
+/** An outpoint as a key: two spellings of one txid are one outpoint. The one definition, for the
+ *  reconcile's distinct rows and the recovery scan's ([app.aroundtheblock.wallet.core.recovery.UtxoDedup]). */
+internal fun outpointKey(u: UtxoEntry): Pair<String, Int> = canonicalTxid(u.txid) to u.vout
 
 /** The node's rows with each outpoint once (first row kept), before anything is counted. */
 internal fun distinctOutpoints(utxos: List<UtxoEntry>): List<UtxoEntry> = utxos.distinctBy(::outpointKey)
