@@ -1,8 +1,9 @@
 # TX-QUEUE: one send at a time, one send waiting (4.1.6 design)
 
-> **Status 2026-11-22: fourth revision. Corrected against the third independent critique (20
-> points, section 10.6). Closed for build, subject to the two questions in section 9.1 and
-> any veto of the list in section 9.2.**
+> **Status 2026-11-22: fifth revision. Corrected against the independent check of the fourth
+> revision: 4 earlier points it found answered only in part, and 11 new findings (section
+> 10.7). Closed for build, subject to the three questions in section 9.1 and any veto of the
+> list in section 9.2.**
 >
 > The owner decided, all on 2026-11-22, in his words:
 >
@@ -26,10 +27,12 @@
 
 Design only. No production code.
 
-Sources: app tree `8ca18a567`, core pinned at `8014392`. `origin/develop` at `99e74e803` does
-not differ from it in the app, the bridge or the core pin. The lines cited for the gate, the
-signers, the publish paths, Cancel, the clearing paths and the stores were opened for this
-revision. Some cites carried over in sections 1 to 4 were not opened again. Paths under `core:`
+Sources: this branch's tree at `64935e2d7` (app and bridge) and core `8014392`, the submodule
+commit it pins. Every line cited for a point of section 10.7 was opened in that tree for this
+revision. Cites carried over from the fourth revision, in sections 1 to 4 and elsewhere, were
+not opened again. `origin/develop` has since moved to `442de80fe` and pins core `c3236de`. It
+differs from this tree in `SyncService.kt`, the reconcile package and `jni_peer.c`. The cites
+were **not** re-checked against it: whoever builds a PR opens each one again. Paths under `core:`
 are the C core (`native/src/main/jni/digibytewallet-core/`). Paths under `kt:` are
 `core/src/main/java/app/aroundtheblock/wallet/core/`. Paths under `app:` are
 `app/src/main/java/app/aroundtheblock/wallet/`. Paths under `jni:` are
@@ -41,9 +44,11 @@ are the C core (`native/src/main/jni/digibytewallet-core/`). Paths under `kt:` a
   fewer than 3 confirmations. The wallet's own sync must have proven them.
 - The rule covers plain DGB, DigiDollar and DigiAsset sends, and any sweep that spends one of
   this wallet's coins. It is decided by what a transaction spends, not by which screen made it.
-- The rule is one function in the shared core. It is checked in three places: before signing,
+- The rule is one function in the shared core. It is checked in three places: at the signer,
   when the wallet takes the send into its list, and when the send is handed to the network. The
   middle one decides. A refused send is not published and is not left in the wallet.
+- After a restore, a rebuild from chain or the crash-loop breaker, no send starts until the
+  wallet's **scan** of the chain has reached the tip once. Headers at the tip are not enough.
 - While one send is confirming, the user can leave **one** more send waiting. It is a note of
   what to pay: payee, amount, kind. Nothing is signed.
 - Any further send is refused while one is waiting, ready or not (D4).
@@ -56,7 +61,9 @@ are the C core (`native/src/main/jni/digibytewallet-core/`). Paths under `kt:` a
   leave a send on the network that the wallet does not know.
 - A send that does not confirm is shown as "Not confirmed yet". The user can try again or
   **cancel it**. Cancel is a small payment to yourself that spends the same coins, behind its
-  own PIN prompt. It has its own narrow signing entry, which builds the cancel itself.
+  own PIN prompt. It has its own narrow signing entry, which builds the cancel itself. The
+  entry belongs to the peer manager, so the send it replaces leaves the wallet and the
+  network list together.
 - Before the PIN prompt of any review, the wallet says so when the payee may already have been
   paid: a cancel that lost, a send that was removed, a send to the same address that confirmed.
 - No new automatic question to a server. No automatic removal. No override.
@@ -374,7 +381,8 @@ the user approves each send when it goes (section 5).
 3. **The user approves at the time.** When the gate opens, the wallet says the request is
    ready. The user reviews it and approves it. Only then is anything built, signed or sent.
 4. **History first.** After a restore, a rebuild from chain or the crash-loop breaker, no send
-   starts until the wallet has reached the chain tip once (D5).
+   starts until the wallet has reached the chain tip once (D5). "Reached the tip" means its
+   scan has, by the one definition in 5.2.
 
 There is no signed transaction held on the device. There is no chain signed in advance, no
 automatic release, no pause rule and no "held" set in the core.
@@ -430,20 +438,58 @@ signer.
 - The messages never show a count the wallet cannot stand behind. While the wallet is behind
   the tip and the send has no height, the text is "catching up", not "0 of 3".
 
+**"At the tip": one definition.** Wherever this design says "at the tip" it means the same
+thing. It is the test Kotlin already applies before it marks a wallet synced
+(`app:service/SyncService.kt:1398-1403`, and again at `:3064-3072`). All of these hold:
+
+- the header tip is at or above the newest built-in checkpoint, and within 5 blocks of the
+  height the peers report;
+- the compact-filter **scan** has reached it too: `getLowestNeededHeight() - 1` is within 10
+  blocks (`CF_TIP_SLACK`, `:4437`) of that height. A frontier that reads 0 means "unknown" and
+  never counts as caught up;
+- the bridge is not in a rescan (`g_isRescanning`, `jni:jni_peer.c:130`).
+
+The header tip alone is never enough. The core says "sync succeeded" when the headers arrive
+(`core:BRPeerManager.c:1494-1505`), and the scan can be far behind. Kotlin records a measured
+case of 60,817 blocks not yet scanned at that moment (`app:service/SyncService.kt:1387-1392`).
+
+The two Kotlin sites become one function, `SyncTip.atTip()`. Every user of the words calls it:
+"history complete" below, "Ready" (5.3), the clocks and the third state (6.2), the reading of
+notes and records (5.7, 6.7).
+
 **History first (D5).**
 
 - The wallet carries one flag: "history complete". The gate is closed while it is off. The
   screen says: "Your wallet is rebuilding its history. You can send when it has finished."
-- It is off in a new wallet object. The platform turns it on at load when the saved value is
-  on. The peer manager turns it on when a sync reaches the tip. Nothing else turns it on.
+- **Where it lives.** In the core's wallet object, under the wallet lock. G1, G2 and G3 read it
+  in the same hold as the rest of the rule. It is off in a new wallet object.
+- **Who sets it.** The platform, through one core call. **The peer manager never sets it.**
+  (The fourth revision said it did. That would have fired at the header tip.) On Android,
+  Kotlin calls it from two places only:
+  1. at load, when the saved key is on and the transaction checkpoint loaded whole;
+  2. when `persistSyncCompletionState()` has returned true
+     (`app:service/SyncService.kt:1436`, `:3080`). Both callers run only at the tip by the
+     definition above. The function returns true only after the transaction checkpoint is on
+     disk (`:4008-4009`) and `has_synced` is committed (`:4035-4039`).
+- **The bridge's rescan after the first sync.** In a wallet that has never synced, the bridge
+  answers the core's first "sync complete" by starting a rescan, and does **not** pass that
+  signal to Kotlin (`jni:jni_peer.c:311-327`). So it reaches neither place above, and the flag
+  stays off through that rescan. As a second lock on the same door, the native call that sets
+  the flag refuses while `g_isRescanning` is set and the flag is off. A wallet that synced
+  before skips that rescan (`jni:jni_peer.c:1528-1539`).
+- **A rescan of a wallet whose flag is on leaves it on.** A rescan keeps the transactions and
+  their heights. That is item K of section 9.2.
 - The saved value is a new key, `send_history_complete`, in `dgb_sync_data`. It is written in
-  the same commit as `has_synced` (`app:service/SyncService.kt:4038`), which is written only
-  after the transaction checkpoint is on disk.
-- It is cleared wherever the saved transactions are cleared: `clearSyncData`
-  (`kt:WalletManager.kt:1911-1912`, the whole file), the crash-loop breaker
+  the same commit as `has_synced` (`app:service/SyncService.kt:4035-4038`).
+- It is turned off, on disk and in memory, wherever the saved transactions are cleared:
+  `clearSyncData` (`kt:WalletManager.kt:1911-1912`, the whole file), the crash-loop breaker
   (`app:StaleDataWiper.kt:56`, the whole file), the rebuild's clear
   (`kt:sync/HistoryRebuildOnUpgrade.kt:536-545`, a new line in that list), and the start that
-  finds the checkpoint shorter than it declared (`app:service/SyncService.kt:2255-2273`).
+  finds the checkpoint shorter than it declared (`app:service/SyncService.kt:2255-2273`). Where
+  a wallet object is loaded at that moment (the rebuild from chain), the same step turns the
+  flag off in memory.
+- A wallet above the transaction-checkpoint limit never gets `has_synced` today. Section 5.6
+  says what that means for this flag. It is question 2 of section 9.1.
 - It is **not** cleared by the other reasons for the filter-chain reset, which keep the
   transactions (`app:service/SyncService.kt:2275-2291` removes `has_synced` for every reason).
   That is why the gate does not reuse `has_synced`: that reset re-fetches headers for hours
@@ -454,23 +500,43 @@ signer.
 **Where the gate is enforced.** Three checks, one rule. The rule is in the shared core
 (`BRSendGate.h` and one function in `BRWallet.c`, under the wallet lock).
 
-- **G1, before signing.** So that no signature is made for a send that cannot start. Android has
-  two signer exits and both get the check: `seed_sign_transaction`
-  (`jni:jni_wallet.c:490-514`) and `wallet_signed_spend_gate` (`jni:jni_wallet.c:529-537`). The
-  core's own copy for iOS gets it in `BRSignedSpendGate` (`core:BRSpendGate.h:68`).
+- **G1, at the signer.** So that no signature leaves native memory for a send that cannot
+  start. Android has two signer exits and both get the check.
+  - `seed_sign_transaction` (`jni:jni_wallet.c:490-514`) asks **before** it signs.
+  - The three recovery signers sign first, with keys of their own, and then pass
+    `wallet_signed_spend_gate` (`jni:jni_derive.c:635` then `:648`; the gate's body at
+    `jni:jni_wallet.c:529-537`). For them the check comes **after** the signature. A refusal
+    frees the signed transaction inside the same native call (`jni:jni_derive.c:648`). The
+    signature never reaches Kotlin.
+  - The core's own copy for iOS gets the check in `BRSignedSpendGate` (`core:BRSpendGate.h:68`).
+- **G1 while the history is not complete.** "Spends a wallet coin" is read from the wallet's own
+  transactions (`_BRWalletOwnedInputs`, `core:BRWallet.c:2506-2527`). A wallet that is still
+  rebuilding does not know its coins yet. A sweep of this wallet's own phrase would read as
+  another phrase's coins and pass. So while the flag is off, G1 **refuses all three recovery
+  signers, whatever they spend**, and G2 and G3 refuse anything the wallet does not already
+  hold. The screen says: "Your wallet is rebuilding its history. You can sweep when it has
+  finished." The cost: a sweep of another phrase's coins also waits for the scan.
 - **G2, when the wallet takes the send. This one decides.** A new registration mode,
-  `BR_WALLET_REGISTER_OWN_SEND`, beside the three that exist (`core:BRWallet.h:380-382`). Inside
-  `_BRWalletRegisterTx`, in the same hold of the wallet lock as the insert
-  (`core:BRWallet.c:2603-2632`): if the wallet does not hold the transaction yet, and it spends
-  a wallet coin, and the gate is closed, it is not inserted and the outcome is the new
-  `BR_WALLET_REGISTER_GATE_CLOSED`. Two sends approved in the same instant cannot both pass:
-  the second one's check sees the first one's insert.
+  `BR_WALLET_REGISTER_OWN_SEND`, beside the three that exist (`core:BRWallet.h:380-382`).
+  `_BRWalletRegisterTx` (`core:BRWallet.c:2603`) puts a record among the wallet's transactions
+  in **two** places, and G2 sits before both, in the same hold of the wallet lock:
+  - the ordinary insert, for a transaction the wallet does not hold (`:2624-2631`);
+  - the promote branch, which takes a record the wallet already keeps as "not mine" and makes
+    it one of the wallet's transactions (`:2646-2670`). It is a second insert.
+
+  In both: if the record spends a wallet coin and the gate is closed, it is not inserted and
+  not promoted, and the outcome is the new `BR_WALLET_REGISTER_GATE_CLOSED`. Two sends approved
+  in the same instant cannot both pass: the second one's check sees the first one's insert.
 - **G3, when the send is handed to the network.** `BRPeerManagerPublishTx`
   (`core:BRPeerManager.c:9903`) and `BRPeerManagerStemPublishTx` (`:9802`) refuse a transaction
-  that spends a wallet coin and that the wallet does not hold as valid. `_peerRequestedTx`
-  registers what it serves as an own send, not as plain trusted (`:5161-5162`), and serves
-  nothing when that is refused. So a send that skipped G2 cannot reach the wire and cannot
-  enter the wallet through a peer's request.
+  that spends a wallet coin and that the wallet does not hold as valid. Two peer handlers can
+  also put a listed transaction into the wallet, and today both register it as plain trusted:
+  `_peerRequestedTx`, when a peer asks for it (`:5161-5162`), and `_peerHasTx`, when a peer
+  announces it (`:2868-2872`). Both change to the own-send mode. `_peerRequestedTx` serves
+  nothing when that is refused. With the publish refusal in place a refused send is never
+  listed, so neither handler can meet one. The change is there so that this stays true if a
+  later change lists one. So a send that skipped G2 cannot reach the wire, and cannot enter the
+  wallet through a peer's request or a peer's announcement.
 
 The peer-relay path (`core:BRPeerManager.c:2752-2754`) and the server import
 (`jni:jni_transaction.c:866`) keep their modes. They are how another device's send arrives. They
@@ -489,8 +555,8 @@ are not gated, and what they bring in closes the gate.
 | 7 | The generic signer | no Kotlin caller today | `signTransaction`, `jni:jni_transaction.c:299` | (none) | G1 |
 | 8 | Stranded-send republish | `app:service/SyncService.kt:3849` | (already signed) | `publishTransaction` with the wallet's own bytes | G2 and G3 pass: the wallet holds it |
 | 9 | Embargo flood | `kt:dandelion/Broadcaster.kt:99` | (already signed) | `BRPeerManagerFluffTx`, only a transaction already listed | passed when it was listed |
-| 10 | A peer asks for a published send | none | (already signed) | `core:BRPeerManager.c:5161-5162` | G2, in the core |
-| 11 | Cancel | section 6.4 | its own entry | its own swap, then `publishTransaction` | Not gated. Its own checks. |
+| 10 | A peer asks for a published send, or announces it | none | (already signed) | `core:BRPeerManager.c:5161-5162`, `:2868-2872` | G2, in the core |
+| 11 | Cancel | section 6.4 | its own entry, in the peer manager | its own swap, then `publishTransaction` | Not gated. Its own checks. |
 
 All of 1 to 6 publish through three native entry points, and each of those registers through
 one function, `_registerWalletCopy` (`jni:jni_transaction.c:162-174`). That function is the
@@ -504,6 +570,10 @@ today.
 - The three publish entry points read the verdict. On "gate closed" they release the coin
   reservation, free the transaction, publish nothing and report the refusal to Kotlin. The stem
   entry reports it as a refusal, so the caller does not fall through to a flood.
+- The coin reservation ends wherever a send stops being "signed and not yet in the wallet".
+  `registerSend` (5.6) releases it when the wallet takes the send, as the publish entry does
+  today (`jni:jni_transaction.c:559`). `registerSend` also releases it on a refusal. The
+  rollback of 5.6 step 4 releases it. Nothing is left held for the table's 60 seconds.
 - A send that is refused therefore leaves: no signature outside native memory, no entry in the
   wallet, no entry in the peer manager's publish list, no coin reservation.
 - A host KAT reads the bridge source, as `tx_publish_ownership_kat` does today, and fails when a
@@ -552,7 +622,7 @@ amount above zero). It is checked fully at its turn.
 | State | Meaning | Stored |
 |---|---|---|
 | Waiting | The gate is closed. | Yes |
-| Ready | The gate is open and the wallet is at the tip. | No. It is worked out each time from the gate, so it cannot be wrong after a restart. |
+| Ready | The gate is open and the wallet is at the tip (the one definition, 5.2). | No. It is worked out each time from the gate, so it cannot be wrong after a restart. |
 | Signed | The user approved it. The signed txid is in the request. | Yes: the txid, written before anything else is done with the signature. |
 
 **No guessing after a crash.** The request is matched to a send by **txid**, never by payee and
@@ -582,8 +652,13 @@ lost later (a storage fault, a clearing path). So the wallet does not trust the 
 The request stays, marked "checking", and cannot be reviewed until the wallet has been at the
 tip for 20 blocks in this process (the count of section 6.2). If the txid has appeared in the
 wallet by then, the request is deleted. If not, it becomes a plain request again and its row
-says once: "An earlier try at this send did not go out." While it is "checking" the row says:
-"Checking whether this send went out."
+says once: "An earlier try at this send could not be found." While it is "checking" the row
+says: "Checking whether this send went out."
+
+The wallet does not say "did not go out", because it cannot know that. After the crash-loop
+breaker the request can carry the txid of a send that was published and is still unconfirmed.
+Such a send has a record (step 5 comes before step 6), so the "missing from the history"
+notice of 5.7 is owed before this request can be approved again.
 
 **It never moves on its own.** No service, worker or timer builds, signs or publishes it. The
 app locked, in the background or killed: it stays as it is.
@@ -613,6 +688,9 @@ is filled in as today. On Review, in place of the review screen:
 - If the history is not complete (D5): "Your wallet is rebuilding its history. You can send
   when it has finished." There is no offer to store a request in this state: the wallet does
   not know yet what it is waiting behind.
+- If the wallet is rescanning and the last send already has 1 or 2 confirmations: "Your wallet
+  is rescanning. Your last send has 2 of 3 confirmations. You can send when the rescan has
+  caught up." The offer to store a request is shown as usual (section 6.6).
 - If the gate opens while the user is still on the screen, Review works as today.
 
 **(b) Tapping Send when one is already waiting (D4).** Refused before the form:
@@ -696,7 +774,9 @@ already on the network still confirms."
   message (b).
 - **Sweep and recovery.** Gated by content (table in 5.2). They keep their own PIN prompts. A
   sweep that is refused says: "Wait for your last send to confirm. This sweep would spend coins
-  of this wallet." Swept coins cannot be spent until the sweep confirms, as today.
+  of this wallet." While the wallet's history is not complete every sweep and recovery move
+  waits, because the wallet cannot yet tell whose coins they are (5.2, G1). Swept coins cannot
+  be spent until the sweep confirms, as today.
 - **Digi-ID.** Not a transaction. Never waits.
 - **Dandelion.** Unchanged. A send goes out by the user's setting.
 - **Selection.** A send made under the gate never needs the wallet's own unconfirmed change.
@@ -713,14 +793,25 @@ publish call returns. Registration and publish are one native call
 that the wallet does not hold. Under the gate the wallet's own list is the only evidence, so
 that window must close.
 
-New order, for plain DGB, DigiDollar, DigiAsset, sweeps and recovery moves alike:
+New order, for plain DGB, DigiDollar, DigiAsset, sweeps and recovery moves alike. It is one
+shared helper (8.2), and every path goes through it:
 
+0. **Ask `SendAdmission`.** The helper asks it itself, as its first line: start, offer to
+   wait, refused because another send is waiting (D4), or history not complete (D5). The one
+   send that may pass while a request is held is that request's own review. D4 is a rule about
+   requests, which only Kotlin has, so the core cannot enforce it. Putting the question in the
+   helper is what stops a path from skipping it: the native sign entries are called from the
+   helper and nowhere else, and a source test fails when another file calls one.
 1. **Sign** (native). G1.
 2. **If it came from a request:** write the signed txid into the request, `commit()`.
 3. **Register** (new native `registerSend(bytes)`: the verdict of G2). On "gate closed": stop,
    show the offer of 5.4 (a), nothing else happens.
-4. **Save the checkpoint**, synchronously. If it does not land: remove the send from the wallet
-   again, stop, and say "Nothing was sent." Nothing was published.
+4. **Save**, synchronously. "Saved" means the transaction checkpoint landed
+   (`WalletTxPersister.Result.landed`, `kt:WalletTxPersister.kt:41-53`). If it does not land:
+   remove the send from the wallet again, release its coin reservation, stop, and say "Nothing
+   was sent." Nothing was published. The removal goes through the peer manager's removal
+   (`core:BRPeerManager.c:10004-10023`), like every other. A wallet above the checkpoint limit
+   is the case below.
 5. **Write the record** (`OutgoingTxStore.record`, changed to `commit()` on this path).
 6. **Publish.** The publish entry points find the send already held. Their own registration is
    then a no-op, as it is for a republish today (`jni:jni_transaction.c:165`).
@@ -738,6 +829,48 @@ What a process death leaves, step by step:
 
 There is no row where the network has a send the saved wallet does not.
 
+**A wallet above the checkpoint limit (question 2 of section 9.1).**
+
+The checkpoint writer refuses a wallet with more than 100,000 transaction records. It writes
+nothing and answers `REFUSED_OVER_LIMIT` (`kt:WalletTxPersister.kt:46-48`, `:68-82`; the limit
+at `kt:sync/SavedTransactionsCheckpoint.kt:25`). Today such a wallet still sends. It never
+reaches "synced", because the same refusal stops `has_synced`
+(`app:service/SyncService.kt:3994-3999`, `:4008-4009`), and it rescans at each launch
+(`kt:WalletTxPersister.kt:77-78`).
+
+Under steps 0 to 7 as written, step 4 would fail on every send, the cancel's save would fail
+on every cancel, and "history complete" would never be set. That wallet could never send. It
+needs a rule of its own. Four were weighed.
+
+- **A. A small record of the one send in flight. Recommended.** When the checkpoint answers
+  `REFUSED_OVER_LIMIT`, the helper writes one small file instead: the signed bytes of this
+  send, and, for a cancel, the txid it replaced. Written to a temporary file, synced, renamed.
+  That counts as "saved". At the next start it is loaded after the checkpoint: the replaced
+  send, if named and held, is taken out with everything built on it, then the recorded send is
+  registered. The file is deleted when its send has 3 confirmations, is removed, or is beaten
+  in a block. For such a wallet "history complete" is set in memory when the wallet is at the
+  tip and is never saved, so after each launch it waits for its launch rescan before it can
+  send. *Cost:* one more store with its row in 7.2; one more load path; the signed bytes of
+  one unconfirmed send in a second file (the checkpoint already holds such bytes for every
+  other wallet, section 1.7); and a path that only rare wallets take, so its tests must force
+  the refusal.
+- **B. The same small record for every wallet, in place of the checkpoint at step 4.** One
+  path, taken by every send, and no whole-checkpoint write before each send. *Cost:* every
+  wallet gets a new load path and two sources to merge at start, in the same release that
+  adds the gate. More to get wrong, for everyone, for the sake of a rare wallet.
+- **C. Let such a wallet publish without a save.** Today's order, for it alone. *Cost:* the
+  gap this section closes stays open for it. A process death after the publish leaves a send
+  on the network that the restarted wallet does not hold. The record still names it (step 5),
+  so the "missing from the history" notice is owed. Cancel would have to be refused for such a
+  wallet: after a restart its start table could not tell a cancel that went out from one that
+  did not.
+- **D. Refuse to send above the limit.** *Cost:* a wallet that can receive and never spend.
+  Today it can send. Not acceptable.
+
+The rest of this design is written to A. If the owner chooses B, step 4 changes for every
+wallet and nothing else does. If C, the over-limit row of 6.6 changes and Cancel is refused
+for that wallet.
+
 ### 5.7 Notices before a review
 
 The gate stops two sends being in flight. It cannot stop the user approving a second payment to
@@ -750,7 +883,8 @@ moment. None depends on a background task having run.
 |---|---|---|
 | A cancel lost | A "cancel requested" mark (section 7) for a txid the wallet now holds at a height | "A send you cancelled was paid after all: 50 DGB to D8k…x2Q, confirmed 22 Nov, 14:05. It was not cancelled." |
 | A removed send may still confirm | A "removed" mark for a txid the wallet does not hold | "You removed a send of 50 DGB to D8k…x2Q. Removing it did not stop it. It could still confirm." |
-| A send is missing from the history | An unsettled record in `dgb_outgoing_tx`, or a note the rebuild wrote, for a txid the wallet does not hold, with the wallet at the tip and the history complete | "A send of 50 DGB to D8k…x2Q is not in your wallet's history. It may still confirm. Check with the person before you pay again." |
+| A send is missing from the history | A record in `dgb_outgoing_tx` that is unsettled or marked "missing" (6.7), or a note the rebuild wrote, for a txid the wallet does not hold, with the history complete and the wallet at the tip (5.2) | "A send of 50 DGB to D8k…x2Q is not in your wallet's history. It may still confirm. Check with the person before you pay again." |
+| This wallet was restored | A "restored" mark (7.2), written by a restore that could not keep this wallet's stores, not yet acknowledged | "This wallet was restored from its recovery phrase. It cannot show a payment you sent before that if the payment has not confirmed yet. If you sent one recently, check with the person before you pay again." |
 | The same address was just paid | This review pays an address that a send of this wallet also paid, where that send is the one the request was stored behind, or was registered after the request was stored | "Your earlier send of 50 DGB to this address confirmed on 22 Nov, 14:05. Approving this pays the same address a second time." **[Pay a second time]** **[Remove this send]** |
 | The history was rebuilt while this waited | The request is older than the last time the history was cleared | "Your wallet's history was rebuilt while this send waited. Check your activity for a payment to this address before you approve." |
 
@@ -761,6 +895,8 @@ moment. None depends on a background task having run.
   derived each time. An acknowledged "cancel lost" or "removed" mark is deleted once its txid
   has 3 confirmations, or on the wallet's next clearing path (section 7).
 - The first three are also shown on the send's own row in the activity list.
+- No review opens while the history is not complete (D5). So no notice is ever worked out from
+  a half-built history. Section 6.7 says what keeps the evidence until then.
 
 ## 6. A send that does not confirm, and "Cancel this send"
 
@@ -791,9 +927,10 @@ wallet that cannot send. So this half is required. It ships in the same release 
 All three are defined from the wallet's transaction, not from the app's record. So a send made
 on another device gets the same states and the same actions.
 
-**"Not confirmed yet".** All of these hold: the wallet is at the chain tip; the send is valid
-and has no height; and at least **20 blocks** (about 5 minutes) have been verified at the tip
-since this wallet first saw the send, or since it last reached the tip, whichever is later.
+**"Not confirmed yet".** All of these hold: the wallet is at the tip (the one definition,
+5.2); the send is valid and has no height; and at least **20 blocks** (about 5 minutes) have
+been verified at the tip since this wallet first saw the send, or since it last reached the
+tip, whichever is later.
 
 - Counted in blocks the wallet verified, in this process. A restart starts the count again.
   That is the safe side.
@@ -819,21 +956,46 @@ has stopped never gets there: a tip on a dead branch (wedge b), or a sync loop w
   stronger words in its dialog (6.4).
 
 **"Reported confirmed, not verified".** The wallet already asks its endpoint about each
-unconfirmed transaction, at most once in 5 minutes (`app:service/SyncService.kt:4211-4236`,
-`kt:reconcile/ChainReconciliationService.kt:344-351`). When the endpoint reports a height and
-the wallet cannot prove it, the core answers "re-checking" or "unprovable" and changes nothing
-(`core:BRPeerManager.c:11060-11119`). Today that answer is dropped. This design keeps it, in
-memory, for the life of the process.
+unconfirmed transaction, at most once in 5 minutes (`app:service/SyncService.kt:4211-4236`).
+For each one it calls `txConfirmation(txid)` and hands the height it gets to the core
+(`kt:reconcile/ChainReconciliationService.kt:344-351`, the two calls at `:347-348`).
 
-- A send with such an answer is in this state, whatever the two clocks say.
+The core never takes a server's height (section 1.7). It gives one of three answers and
+changes nothing:
+
+- "refused", when the height is above the wallet's own tip, or is not on a chain the wallet
+  vouches for (`core:BRPeerManager.c:11076`; the rule at `:3898-3915`);
+- "re-checking" (`:11101-11104`);
+- "unprovable" (`:11114`).
+
+**The state is keyed on the endpoint's answer, not on the core's.** The fourth revision keyed
+it on "re-checking" and "unprovable". But a wallet whose tip has stopped gets "refused" for
+exactly the send that confirmed after the tip stopped. That is the wallet that most needs
+Cancel hidden.
+
+- The rule: when `txConfirmation` returns a height for a transaction this wallet holds without
+  a height, that answer is **kept**, whatever the core then says: the txid, the height, and
+  when it was given.
+- It is kept in the marks store (7.1), with `commit()`. So it is still there after a restart,
+  when both clocks have started again and the next check may be minutes away.
+- Not kept: an answer for a transaction the wallet does not hold; and an answer naming a
+  height more than 20 blocks above the height the wallet's peers report, when there are peers.
+- A send with a kept answer is in this state, whatever the two clocks say.
 - Text: "The network reports this send as confirmed. Your wallet has not verified that yet."
 - Actions: **Rescan** only. **No Cancel and no Try again.** Cancelling a send that is in a
-  block cannot work and would take the real payment out of the wallet's list (6.4).
-- It does not open the gate. Only a height the wallet proved does.
+  block cannot work and would take the real payment out of the wallet's list (6.4). The cancel
+  path looks for a kept answer again after the PIN, and stops if there is one.
+- **It never opens the gate.** G1, G2 and G3 read heights the wallet proved and nothing else.
+  This answer is not a height, and it lives in Kotlin.
 - It is not a new query. It uses an answer the existing check already fetched.
-- The answer is forgotten when the wallet's own scan has covered that height at the tip and
-  still found nothing. A wrong answer from an endpoint can therefore hide Cancel for a while.
-  It cannot hide it for good, and it cannot make the wallet send or sign anything.
+- The kept answer is dropped when: the wallet proves a height for the send; or the wallet no
+  longer holds the send; or the wallet is at the tip (5.2), its scan has passed the reported
+  height, and the send still has no height. An answer dropped for that last reason is not kept
+  again for the same height.
+- A wrong answer can therefore hide Cancel until the wallet's own scan has covered that
+  height. It cannot make the wallet send or sign anything, and Rescan stays. Because the answer
+  is kept across restarts, an endpoint that is wrong hides Cancel for longer than in the
+  fourth revision. That is the price of not offering Cancel on a confirmed payment.
 
 **Notifications.** One, once per send: "A send has not confirmed yet." No amount and no payee.
 
@@ -901,11 +1063,16 @@ every other signer.
   no transaction from its caller, so it can be narrow. Nothing in the wallet changes until
   every check has passed and the cancel is signed.
 
-**The entry: `BRWalletCancelSend`.** In the core, so iOS gets it. On Android it is reached
-through one function in `jni:jni_wallet.c`, the only file that can read the seed.
+**The entry: `BRPeerManagerCancelSend`.** In the core, so iOS gets it. It is a **peer manager**
+entry. The fourth revision made it a wallet function, `BRWalletCancelSend`; that was a
+memory-safety fault, set out below. On Android it is reached through one function in
+`jni:jni_wallet.c`, the only file that can read the seed. It is refused when no peer manager
+is paired with the loaded wallet, which is the window the bridge already marks with
+`g_walletSwapped` (`jni:jni_transaction.c:723`): "Try again in a moment."
 
 It takes: the txid of the send to cancel, the fee the user approved, the amount the user was
-shown coming back, and the seed. It returns the signed cancel, or a refusal that says why.
+shown coming back, the seed, and the coin reservation to use (two functions and a clock
+reading, below). It returns the signed cancel, or a refusal that says why.
 
 It does **not** take a transaction, inputs, outputs or an address. It builds the cancel itself.
 That is the whole of its narrowness: it can only ever sign "the plain inputs of X, paid to this
@@ -923,21 +1090,82 @@ Steps, inside the one call:
    wallet's change chain. The fee is the default rate for its size. What comes back must be
    above the dust line, the fee must equal the approved fee and the output must equal the
    approved amount. Otherwise it stops: the user approved something else.
-3. **Claim** the inputs in the coin reservation for the cancel's txid. Refused if another
-   signed send holds one of them. This stops two cancels of one send being signed at once.
-4. **Sign**, outside the lock, with keys derived from the seed. The spend guard is not asked:
-   by step 1 every input is spent by X, and by X only.
-5. **Check again and swap, in one hold of the wallet lock.** Everything of step 1 again, on the
-   signed transaction: X still held, valid, without a height and still the oldest; every input
-   of the cancel is an input of X and still qualifies; the one output pays an address of this
-   wallet; the transaction is fully signed. Everything the swap needs is allocated first. Then,
-   with nothing left that can fail: X and everything built on it are taken out of the wallet,
-   and the cancel is put in.
-6. Release the reservation. Tell the app, after the lock is released, in this order: the
+3. **Sign**, outside both locks, with keys derived from the seed. The spend guard is not
+   asked: by step 1 every input is spent by X, and by X only.
+4. **Claim** the signed cancel's inputs in the coin reservation, for the signed cancel's txid.
+   Refused if another signed send holds one of them.
+5. **Check again and swap, in one hold of the peer manager's lock, and inside it one hold of
+   the wallet lock.** That is the order the manager already takes them in
+   (`core:BRWallet.c:3114-3115`, `core:BRPeerManager.c:10008-10014`).
+   1. Take the manager lock. Record which entries of the publish list the wallet holds a
+      record for (`_BRPeerManagerSnapshotHeld`, `core:BRPeerManager.c:1097-1102`).
+   2. Take the wallet lock. Everything of step 1 again, on the signed transaction: X still
+      held, valid, without a height and still the oldest; every input of the cancel is an input
+      of X and still qualifies; the one output pays an address of this wallet; the transaction
+      is fully signed. Everything the swap needs is allocated first. Then, with nothing left
+      that can fail: X and everything built on it are taken out of the wallet, their txids are
+      noted, and the cancel is put in. Release the wallet lock.
+   3. Purge the publish list: every entry the wallet held before and does not hold now is
+      dropped (`_BRPeerManagerPurgeReleasedRecords`, `:1112-1128`). Drop the relay, reject and
+      request records of each removed txid, as the existing removal does for one (`:10016-10018`).
+   4. Release the manager lock. Deliver the answers the purge queued (`:1063-1075`).
+6. Release the reservation. Tell the app, after both locks are released, in this order: the
    removed transactions, the cancel added, the balance.
 
 The signature exists outside this call only if step 5 completed. On any earlier stop the
 signed transaction is freed inside the call.
+
+**Why the swap belongs to the peer manager (memory safety).** The publish list holds plain
+pointers to transactions the wallet owns. A swap under the wallet lock alone would free X and
+leave the list pointing at it. The next peer to ask for X would make the manager read freed
+memory (`core:BRPeerManager.c:5131-5135`). That is reachable in the very case Cancel exists
+for: X is live on the network and a peer relayed it back. Every removal the wallet makes today
+goes through the manager for this reason (`core:BRPeerManager.c:10004-10023`, used by the
+bridge at `jni:jni_transaction.c:721-727`; the manager's own clean-up does the same at
+`:1371-1375`). The swap follows the same road: snapshot, change the wallet, purge.
+
+Everything that can hold a pointer to a transaction the wallet owns, and what the swap does
+about it:
+
+| What holds it | Where | After the swap |
+|---|---|---|
+| A publish-list entry for the parent of a published child. The list does not own it. | added at `core:BRPeerManager.c:997-1001` | X is such a parent whenever a send built on X was published. Purged by its cached txid, never by reading the object (`:1104-1111`). The wallet freed the object. The list does not free it again (`:1047`, `:1057`). |
+| A publish-list entry for a send a peer relayed back. The list does not own it. | `core:BRPeerManager.c:2784-2790` | The same. This is the usual state of a send that reached the network. |
+| A publish-list entry whose object the wallet took when a peer announced it or asked for it. | ownership follows the object: `:1137-1144`, from `:2872-2876` and `:5162-5165` | The same. |
+| The publish list's own copy of X, which the list does own. | the bridge publishes the original and gives the wallet a copy, `jni:jni_transaction.c:553-568` | Dropped and freed by the list in the same purge (`core:BRPeerManager.c:1034-1058`). A publish still waiting for its answer gets "cancelled", once. Left in the list, X would be announced to every peer beside the cancel (`:1466-1482`). |
+| The pointer a peer handler holds while it runs: a transaction a peer announced (`_peerHasTx`, `:2848-2873`), one a peer relayed (`_peerRelayedTx`, `:2770-2790`), and the two walks over unconfirmed transactions (`:1289-1297`, `:1424-1445`). | each holds the manager lock from the lookup to the last use | The swap holds the manager lock, so it cannot run in the middle of one. This is why the wallet lock alone is not enough. |
+| What a peer is served. | `_peerRequestedTx` hands out a copy made under the lock (`:5176-5182`) | Not affected. A request for X after the purge finds no entry and serves nothing. |
+| A later announcement of X by a peer. | `_peerHasTx` looks X up in the wallet, then in the list (`:2848-2853`) | Finds neither. Nothing is registered and nothing is read. If a peer goes on to relay X itself, that is the case "A peer relays X without a height", below. |
+| The relay, reject and request records. | they hold txids, not pointers (`:10016-10018`) | Dropped for X and for each transaction removed with it. |
+| The reject handler and the server-height check. | both read copies (`:2917`, `:11067`) | Not affected. |
+
+The wallet's half of the swap is a function for the peer manager only. It is declared in a
+header the platforms do not include, and a source check in the KAT fails when it has a second
+caller. The existing removal unlocks and calls itself for each dependant
+(`core:BRWallet.c:2794-2802`); the swap needs a form that stays inside one hold. That is
+unwritten code (8.6).
+
+**The coin reservation.** There are two tables. Android's signers use the bridge's
+(`jni:coin_reservation.c:18-20`; claimed at `jni:jni_wallet.c:501` and in
+`jni:signed_spend_gate.h`). The core has its own (`core:BRCoinReservation.h`), and the bridge
+does not call it. A claim made in the core's table would be invisible to every Android signer.
+
+- So the entry does not choose a table. Its caller passes the reservation in: a claim
+  function, a release function and one clock reading.
+- Android passes the bridge's table and `coin_reservation_now()`, which is monotonic seconds
+  (`jni:coin_reservation.h:29-41`, `jni:coin_reservation.c:94-97`). iOS passes the core's table
+  and the one clock its other signers use (`core:BRCoinReservation.h:24-38`).
+- **The key is the signed cancel's txid, and the claim is made after signing**, as the ordinary
+  signer does (`jni:jni_wallet.c:498-501`). A txid taken before signing is not the final one
+  when an input is a legacy input: its signature is part of the txid.
+- What the claim is for: one rule for every signer. A signed transaction that the wallet does
+  not hold yet holds its coins in the table.
+- What it is **not** for: keeping two cancels of one send apart. Two cancels built from the
+  same inputs to the same address can have the same txid, and the table renews a claim for
+  the same owner (`jni:coin_reservation.c:56`). Step 5 keeps them apart: the second one finds X
+  gone and stops with nothing changed.
+- It is released on every way out of the call after step 4. The 60-second lapse is only a
+  backstop.
 
 **Which inputs qualify.** An input of X qualifies only if all of these hold:
 
@@ -972,31 +1200,56 @@ asset. A wrong "not plain" leaves a send that cannot be cancelled.
 |---|---|---|
 | 1 Check | X confirmed a moment ago; X is not the oldest; no input qualifies; history not complete | X, unchanged. Nothing signed. The screen says which. |
 | 2 Build | Dust; the fee or the amount is no longer what was approved | X, unchanged. Nothing signed. The review opens again. |
-| 3 Claim | Another signed send holds an input | X, unchanged. Nothing signed. |
-| 4 Sign | The session locked meanwhile; a key cannot be derived | X, unchanged. The claim is released. |
-| 5 Swap | The block that confirms X arrived between the PIN and here; a peer delivered a child of X | X, unchanged. The signed cancel is freed inside the call. The claim is released. |
-| 5 Swap, done | (nothing can fail after the first change) | The cancel, valid, without a height. Not X, and nothing built on X. |
-| After the call | The process dies before the checkpoint is saved | On disk: X, as before. The cancel was never published. See the write order below. |
+| 3 Sign | The session locked meanwhile; a key cannot be derived | X, unchanged. Nothing is claimed. |
+| 4 Claim | Another signed send holds an input | X, unchanged. The signed cancel is freed inside the call. |
+| 5 Swap | The block that confirms X arrived between the PIN and here; a peer delivered a child of X; X is no longer held | X, or whatever replaced it, unchanged. The signed cancel is freed inside the call. The claim is released. The publish list is untouched. |
+| 5 Swap, done | (nothing can fail after the first change) | The cancel, valid, without a height. Not X, and nothing built on X. No publish-list entry names X or anything built on it. |
+| After the call | The process dies before the save lands | On disk: X, as before. The cancel was never published. See the write order below. |
+| After the call | The save does not land and the process lives on | In memory: the cancel. On disk: X. The wallet rolls **forward**, below. |
 
 **The order of what is written.** The swap changes memory. Disk and network follow in a fixed
 order, each step finished before the next:
 
 1. Write the mark "cancel requested" for X: its txid, payee, amount, kind and time (`commit()`).
-2. Call `BRWalletCancelSend`. On a refusal: delete the mark, show why.
-3. Save the transaction checkpoint. It now holds the cancel and not X. If it does not land:
-   say so, publish nothing. The next start loads X from the old checkpoint and clears the mark
-   by the rule below.
-4. Add the cancel's txid to the mark, and write the cancel's own record (`commit()`).
-5. Publish the cancel, by the user's Dandelion setting.
+2. Call `BRPeerManagerCancelSend`. On a refusal: delete the mark, show why.
+3. Add the cancel's txid to the mark, with "not saved yet", and write the cancel's own record
+   (`commit()`). This is done whether or not the next step lands.
+4. Save (the meaning of "saved" in 5.6 step 4). What is saved now holds the cancel and not X.
+   When it lands, set the mark to "saved" (`commit()`).
+5. Publish the cancel, by the user's Dandelion setting. **Only a cancel whose mark says
+   "saved" is ever published.**
+
+**When the save does not land: roll forward.** After step 2 there is no way back. X was freed
+in the swap, and the wallet in memory holds the cancel. The fourth revision said "publish
+nothing" and stopped there. That was not a state the wallet could stay in: the next
+checkpoint write by anything else would have saved a cancel that had no txid in its mark and
+no record, so nothing would ever have published it. So a save that does not land is retried,
+never undone:
+
+- The mark says "not saved yet". While it does, nothing publishes the cancel. The sweep and
+  Try again both read the mark first.
+- The gate stays closed on the cancel.
+- The row reads: "Cancelling. Your wallet could not save this yet and keeps trying. Nothing has
+  been sent."
+- The sweep's timer saves again, with or without peers. When a save lands it sets "saved" and
+  publishes the cancel.
+- A checkpoint write by another part of the app that lands in between also holds the cancel,
+  because every write saves what is in memory. The mark is still set only by a save made after
+  step 3, so the order "txid and record, then saved, then published" holds in every case.
+- If the process dies first, the disk still has X and no cancel went out. The start table
+  below puts X back as an ordinary stuck send.
 
 At every start, each "cancel requested" mark is read against the wallet:
 
-| The wallet holds | It means | The wallet does |
-|---|---|---|
-| X valid and without a height, and no cancel | The swap never reached the disk. No cancel was published (step 5 comes after step 3). | Deletes the mark. X is an ordinary stuck send again and the sweep looks after it. |
-| the cancel, not X | The normal case. | Nothing. The sweep republishes the cancel like any send. |
-| X at a height | The cancel lost. | The "cancel lost" notice of 5.7, worked out when a review opens. |
-| neither | The history was cleared since. | The "missing from the history" notice of 5.7. |
+| The wallet holds | The mark says | It means | The wallet does |
+|---|---|---|---|
+| X valid and without a height, and no cancel | no cancel txid | The call of step 2 never finished. | Deletes the mark. X is an ordinary stuck send again and the sweep looks after it. |
+| X valid and without a height, and no cancel | a cancel txid, "not saved yet" | The swap never reached the disk. No cancel was published (step 5 needs "saved"). | Deletes the mark and the cancel's record. X is an ordinary stuck send again. |
+| X valid and without a height, and no cancel | a cancel txid, "saved" | A save landed and was lost afterwards. The cancel may be on the network. | Keeps the mark. X's row reads "A cancel was sent for this send. One of the two will confirm." Cancel is offered again only after 20 blocks at the tip. |
+| the cancel, not X | "not saved yet" | A save by something else landed before the process died. | Rolls forward: saves, sets "saved", publishes. |
+| the cancel, not X | "saved" | The normal case. | Nothing. The sweep republishes the cancel like any send. |
+| X at a height | any | The cancel lost. | The "cancel lost" notice of 5.7, worked out when a review opens. |
+| neither | any | The history was cleared since. | The "missing from the history" notice of 5.7. |
 
 **What decides the outcome.** The chain. A transaction with a height always sorts before one
 without (`core:BRWallet.c:161-162`), and of two that conflict the earlier is valid
@@ -1014,8 +1267,8 @@ without (`core:BRWallet.c:161-162`), and of two that conflict the earlier is val
   then by arrival (`core:BRWallet.c:124-133`, `:205-214`). The cancel pays a segwit change
   address, which that comparison does not see. If X pays a legacy address of this wallet, X
   can sort first, and then the cancel is the invalid one and the hold removes it. That outcome
-  is safe: the gate follows X, the mark is cleared by the first row of the table above, and
-  Cancel is offered again later. The KAT has both orders.
+  is safe: the gate follows X, the mark stays until X has a height or the user cancels again,
+  and Cancel is offered again later. The KAT has both orders.
 - **Neither confirms.** The cancel is itself a send that has not confirmed. It gets the states
   of 6.2, with Try again and Rescan.
 
@@ -1081,6 +1334,8 @@ and none of them opens the gate without proof.
 | A send from another device never confirms | The same states, from the wallet's transaction | Try again and Cancel work here too: this wallet holds the transaction and the keys. |
 | **A send that confirmed, but this wallet still holds it without a height** | "Reported confirmed, not verified" when the existing check has the endpoint's answer. Otherwise "Not confirmed yet" or "Cannot check yet". | Rescan. The wallet proves the height itself and the gate opens on that proof. Cancel is hidden when the endpoint's answer is known. If the user cancelled without it, the rescan also undoes that (6.4). |
 | **A rescan is running** | Sends that had 3 confirmations still have them: the count is taken against the verified mark (5.2). The gate is open for them. | None needed. A send that has no height yet waits until the scan reaches its block. |
+| **A rescan starts while the last send has 1 or 2 confirmations** | "Your wallet is rescanning. Your last send has 2 of 3 confirmations. You can send when the rescan has caught up." The count does not move during the rescan: the mark rises only when the wallet verifies a block above the tip it had before. The send has a height, so it is in none of the three states of 6.2. No Try again and no Cancel: it is in a block. | Wait. It is shorter than the whole rescan: the mark follows the verified header tip (`core:BRPeerManager.c:4428`), and the headers are back at the tip well before the scan is (`app:service/SyncService.kt:3058-3060`). One or two blocks after that the gate opens. A request can be stored meanwhile. A rescan the user starts says so first: "Your last send has 2 of 3 confirmations. If you rescan now, you cannot send until the rescan has caught up." **[Wait]** **[Rescan now]**. If the headers cannot get back to the tip, the cures are those of the stalled-tip row. None of this is an override: the gate still opens only on 3 proven confirmations. |
+| **A wallet above the checkpoint limit** (more than 100,000 records) | It sends like any other, by the rule the owner chooses (5.6; A is assumed). After each launch: "Your wallet is rebuilding its history" until its launch rescan is at the tip. | Wait for the launch rescan. Question 2 of section 9.1. |
 | **The tip has stalled** (dead branch, or no peers) and the wallet believes it is at the tip | "Cannot check yet" after 20 minutes with the app open and no new block | Try again. Rescan, which cures a dead-branch tip. Force-stop, which cures a dead sync loop. Cancel, with the stronger wording. |
 | The wallet is behind the tip for a long time | "Catching up with the network", then "Cannot check yet" after 20 minutes with the app open | The same. |
 | A cancel that does not confirm | The states of 6.2 on the cancel | Try again. Rescan. If the original confirms instead, the gate follows the original. |
@@ -1111,10 +1366,59 @@ So the rebuild changes, in the shared step list:
 - A waiting send that is older than the rebuild opens with the "history was rebuilt" notice.
 
 The crash-loop breaker clears the saved transactions and keeps the records
-(`app:StaleDataWiper.kt:47-95`). The same reading applies to it without a new step: once the
-wallet is at the tip, an unsettled record whose txid the wallet does not hold raises the same
-notice. The one-time history rebuild after an update keeps the records too
-(`kt:sync/HistoryRebuildOnUpgrade.kt:28-30`) and gets the same reading.
+(`app:StaleDataWiper.kt:47-95`). The one-time history rebuild after an update keeps the
+records too (`kt:sync/HistoryRebuildOnUpgrade.kt:28-30`). Neither needs a new step, **but both
+need the sweep to leave those records alone until the wallet is at the tip.** Today it does
+not. Section 6.7 is that rule.
+
+### 6.7 The sweep and a recorded send the wallet does not hold
+
+**What happens today.** The sweep gives up on such a record.
+
+- It counts a try before it looks for the bytes (`app:service/SyncService.kt:3835-3837`). After
+  three tries it marks the record settled (`SETTLE_GAVE_UP`,
+  `app:service/StrandedSendSelector.kt:120`; `markSettled` at `app:service/SyncService.kt:3738`).
+- In a wallet whose list is full it settles at once. It takes "not among the newest 100 rows"
+  to mean "confirmed long ago" (`SETTLE_AGED_OUT`, `StrandedSendSelector.kt:119`).
+- It runs every 90 seconds with peers. So about five minutes into a scan that takes hours, the
+  record is settled.
+
+After the breaker, the one-time rebuild or a same-wallet restore (7.2), that record is the
+only evidence of a send that may still be live. The notice of 5.7 would find nothing to read.
+
+**The new rules.** They go in the selector, so there is one copy and it has a unit test.
+
+1. **Whether the wallet holds a txid is asked of the wallet, by txid.** It is not read off the
+   100-row list. The lookup the sweep already makes for the bytes answers it
+   (`app:service/SyncService.kt:3838`). "Aged out" then means: held, at a height.
+2. **While the history is not complete, the sweep does nothing with a record the wallet does
+   not hold.** No try is counted. It is not settled. It is not republished: there are no bytes
+   to send. The record stays exactly as it was.
+3. **Once the history is complete and the wallet is at the tip (5.2):**
+   - held at a height: settled as confirmed, as today;
+   - held without a height: republished, as today;
+   - not held: marked **missing**. Not settled.
+4. A missing record leaves the sweep's working set, so it is not tried again. It stays
+   readable. The notice of 5.7 reads it, and its row in the activity list shows it. The mark is
+   written with `commit()`; today's settled mark is written with `apply()`
+   (`kt:OutgoingTxStore.kt:79-80`).
+5. A missing record becomes settled only when its txid later appears in the wallet at a
+   height.
+
+**What the user sees in the window.** No review can open while the history is not complete
+(D5), so no notice is due yet.
+
+- The home screen says: "Your wallet is rebuilding its history. You can send when it has
+  finished."
+- The record's row in the activity list says: "Sent 50 DGB to D8k…x2Q · your wallet is
+  rebuilding its history and has not found this send yet".
+- At the tip, a send the scan found is an ordinary confirmed row.
+- At the tip, a send the scan did not find is missing. Its row says: "Not in your wallet's
+  history. It may still confirm." Before the next review of any send the notice reads: "A send
+  of 50 DGB to D8k…x2Q is not in your wallet's history. It may still confirm. Check with the
+  person before you pay again."
+
+Try again is not offered on a missing record. The wallet has no bytes to send.
 
 ## 7. What this design stores, and what erases it
 
@@ -1126,9 +1430,11 @@ through `WalletStores.prefsName`. The legacy wallet gets the bare names and `_te
 `<id>` gets `_<id>` and `_<id>_testnet`.
 
 - **`dgb_waiting_send`**: the one request (section 5.3).
-- **`dgb_send_marks`**: the marks beside a send. "Cancel requested" (6.4). "Removed" (6.5).
-  The notes a rebuild writes for sends in flight (6.6). The "acknowledged" bit of each notice
-  (5.7). Each mark carries the txid, payee, amount, kind and time it needs to be shown.
+- **`dgb_send_marks`**: the marks beside a send. "Cancel requested", with the cancel's txid
+  and its "saved" bit once there is one (6.4). "Removed" (6.5). The notes a rebuild writes for
+  sends in flight (6.6). The endpoint's "confirmed at height h" answers (6.2). The "restored"
+  mark (7.2). The "acknowledged" bit of each notice (5.7). Each mark carries the txid, payee,
+  amount, kind and time it needs to be shown.
 
 The third revision put the marks in `dgb_outgoing_tx`, "which every wipe path already clears".
 That was wrong: `clearSyncData` does not touch that file (`kt:WalletManager.kt:1902-1927`) and
@@ -1165,21 +1471,28 @@ Rules for both:
 and `verified_tip_mark`. Both are written by the code that saves the transaction checkpoint, in
 the same commit as the values it already writes there.
 
-**One change to a store that exists, `dgb_outgoing_tx`:** the send path writes its record with
-`commit()` and before the publish (5.6). The store is otherwise as it is. This design relies on
-its "not settled" records for one notice (5.7).
+**Two changes to a store that exists, `dgb_outgoing_tx`:** the send path writes its record
+with `commit()` and before the publish (5.6); and a record can be marked "missing", with
+`commit()` (6.7). The store is otherwise as it is. This design relies on its "not settled" and
+"missing" records for one notice (5.7).
+
+**One new file, if the owner chooses option A of 5.6: the in-flight record.** Per wallet and
+per network, named and resolved through `WalletStores` like the transaction checkpoint. It
+holds the signed bytes of one unconfirmed send, and for a cancel the txid it replaced. Only a
+wallet above the checkpoint limit ever has one. It is cleared wherever the saved transactions
+are cleared, with no exception.
 
 **Kept in memory only, lost at a restart on purpose:** the tip height at which a send was first
-seen (the 20-block count); the app-open clock (6.2); the endpoint's "confirmed at height h"
-answers (6.2). Losing any of them makes the wallet wait longer or offer Cancel again. None of
-them can open the gate.
+seen (the 20-block count), and the app-open clock (6.2). Losing either makes the wallet wait
+longer. Neither can open the gate. The endpoint's answers are no longer in this list: they are
+kept on disk (6.2).
 
 ### 7.2 Every mark and store against every clearing path
 
 "Kept" and "cleared" below are what the design requires. Each "cleared" that is not by the list
 is its own line of code with its own test.
 
-| | Full wipe | Removing a wallet | `clearSyncData` (create, recover, seed change, fingerprint mismatch) | Rebuild from chain | One-time rebuild after an update | Crash-loop breaker |
+| | Full wipe | Removing a wallet | `clearSyncData` for **another** wallet (create; a recover or a seed change whose v2 fingerprint differs or cannot be shown to match) | Rebuild from chain | One-time rebuild after an update | Crash-loop breaker |
 |---|---|---|---|---|---|---|
 | The waiting request (`dgb_waiting_send`) | **Cleared.** By the list for other wallets (`kt:wallets/WalletStoreEraser.kt:193`); a named step on both networks, read back, for legacy (`kt:WalletDataEraser.kt:319-337`). | **Cleared**, by the list. | **Cleared**, by name. It is another wallet's note. | **Kept.** Opens with the "history was rebuilt" notice. | **Kept**, same notice. | **Kept**, same notice. Reading it cannot crash a start. |
 | "Cancel requested" (`dgb_send_marks`) | **Cleared**, as above. | **Cleared**, by the list. | **Cleared**, by name. | **Kept.** It is the evidence the rebuild would otherwise destroy. | **Kept.** | **Kept.** |
@@ -1187,6 +1500,10 @@ is its own line of code with its own test.
 | "Removed, may still confirm" (`dgb_send_marks`) | **Cleared.** | **Cleared.** | **Cleared.** | **Kept.** | **Kept.** | **Kept.** |
 | Notes for sends in flight (`dgb_send_marks`) | **Cleared.** | **Cleared.** | **Cleared.** | **Written** by the new step, then kept. | Not needed: this rebuild keeps the records and waits while one is unsettled. | Not needed: the breaker keeps the records. |
 | "Acknowledged" bits (`dgb_send_marks`) | **Cleared.** | **Cleared.** | **Cleared.** | **Kept**, with the mark they belong to. | **Kept.** | **Kept.** |
+| "Reported confirmed" answers (`dgb_send_marks`) | **Cleared.** | **Cleared.** | **Cleared.** | **Kept.** Dropped by their own rule (6.2). | **Kept.** | **Kept.** |
+| The "restored" mark (`dgb_send_marks`) | **Cleared.** | **Cleared.** | **Written**, by a recover, after the clear. | **Kept** until acknowledged. | **Kept.** | **Kept.** |
+| "Missing" on a record (`dgb_outgoing_tx`) | With the record. | With the record. | With the record. | Copied into a note by the new step, then cleared with the record. | **Kept.** | **Kept.** |
+| The in-flight record (option A of 5.6) | **Cleared.** | **Cleared**, by the list. | **Cleared**, with the saved transactions. | **Cleared**, after the new step has noted the send. | **Cleared.** | **Cleared.** Loading it cannot then crash a start. |
 | Records of sends (`dgb_outgoing_tx`, exists) | Cleared today (`kt:WalletDataEraser.kt:319`). | Cleared today, by the list (`kt:wallets/WalletStores.kt:10-13`). | **Not cleared today** (`kt:WalletManager.kt:1902-1927`). **Changed: cleared**, by name. See below. | Cleared today (`kt:WalletManager.kt:899`), after the new step has copied what is unsettled. | Kept today. | Kept today. |
 | `send_history_complete` (`dgb_sync_data`) | Cleared with the file. | Cleared, by the list. | **Cleared** with the file (`kt:WalletManager.kt:1911-1912`). | **Cleared**: a new line in the rebuild's list (`kt:sync/HistoryRebuildOnUpgrade.kt:536-545`). | **Cleared**, same function. | **Cleared** with the file (`app:StaleDataWiper.kt:56`). |
 | `verified_tip_mark` (`dgb_sync_data`) | Cleared with the file. | Cleared. | **Cleared** with the file. | **Cleared**, same new line. | **Cleared.** | **Cleared.** |
@@ -1197,11 +1514,55 @@ Two details the table needs:
 - **The "missing from the history" notice reads `dgb_outgoing_tx`, which has no fingerprint.**
   After a recover with a different phrase the old wallet's unsettled records are still in that
   file today. A notice raised from them would show the old wallet's payee to the new wallet.
-  So `clearSyncData` clears `dgb_outgoing_tx` from now on, by name, with a test. Every caller
-  of `clearSyncData` is starting a wallet's history from nothing. That also closes a leftover
-  that exists today.
+  So `clearSyncData` clears `dgb_outgoing_tx` from now on, by name, with a test, **unless the
+  wallet is shown to be the same one** (below). That also closes a leftover that exists today.
 - **A wallet removed and a full wipe erase both new stores on both networks**, read back. The
   tests that pin the store lists are updated in the same PR (8.4).
+
+**A restore of the same wallet.** The column above is for another wallet. The fourth revision
+sent every recover down it. But `recoverWallet` calls `clearSyncData` every time
+(`kt:WalletManager.kt:344-346`); only the unlock path first asks whether the seed changed
+(`:483-484`). `recoverWallet` has one caller, the onboarding restore
+(`app:ui/onboarding/OnboardingViewModel.kt:475`). A user who restores the same phrase on the
+same device, with the wallet's stores still on disk, would have lost the marks, the records
+and the waiting send with no note written. At the tip the gate would have opened with a send
+perhaps still live and nothing to say so.
+
+The rule:
+
+- Before the new seed record is stored, the restore reads the v2 fingerprints already on
+  disk: the old seed record's (`seed_fingerprint_v2`, `kt:WalletManager.kt:92`) and the one
+  each of the two new stores carries (7.1).
+- **If the restored wallet's v2 fingerprint equals one of them, it is the same wallet.**
+  `clearSyncData` then **keeps** `dgb_send_marks`, `dgb_waiting_send` and `dgb_outgoing_tx`. It
+  clears everything it clears today: the sync data, the saved transactions, the two new keys.
+- So "history complete" is off, and no send starts until the tip (D5).
+- At the tip the kept stores are read as after the breaker. Records the wallet does not hold
+  are missing, by 6.7, and raise the notice. The waiting send opens with the "history was
+  rebuilt" notice. Each "cancel requested" mark is read by the start table of 6.4.
+- No "notes" step runs, and none can: at a restore no old wallet object is loaded to read
+  sends from. A send made on another device has no record here and is not noted. That is true
+  after any restore.
+- If no fingerprint on disk equals the new one, or none can be read, the stores are cleared as
+  another wallet's. If the new wallet's own fingerprint cannot be worked out right now, the
+  stores are neither shown nor deleted (the rule of 7.1).
+
+**What a restore cannot keep, and what the user is told.** After a full wipe, or on a new
+device, the stores are gone or were never there. Lost: the waiting send; the "cancel
+requested" and "removed" marks; the records, which hold the payee names of past sends and the
+only evidence of a send that has not confirmed. The chain gives back every confirmed payment.
+It does not give back a send that has not confirmed: the wallet learns of it only when it
+confirms, or if a peer happens to relay it. Nothing on the device can close that gap. So the
+user is told, twice:
+
+- On the restore screen: "If you sent a payment from this wallet in the last few minutes, let
+  it confirm before you send again. A restored wallet cannot see a payment that has not
+  confirmed."
+- Before the first review after the restore: the "This wallet was restored" notice of 5.7. It
+  comes from a "restored" mark that every recover writes when it did not keep the stores.
+
+Which routes reach the restore screen with a wallet's stores still on disk was not traced
+(8.6). The rule is by fingerprint, so it holds whichever route it is.
 
 **Multi-wallet.** Storing, approving and removing all check that the wallet this process runs
 is still the one the screen was opened for. A wallet switch restarts the process
@@ -1219,19 +1580,23 @@ iOS gets all of this with the pin.
 - `BRSendGate.h`, header-only: the number 3; the count against the verified mark, with its
   guard; the 20-block rule of "Not confirmed yet".
 - `BRWallet`: the verified mark and the "history complete" flag, both under the wallet lock.
-  One call that answers the gate for the wallet: open, closed with the txid and count of the
-  send it waits for, or history not complete. One call that answers it for a transaction: does
-  it spend a wallet coin, is it already held, may it start. No new field on a transaction and
-  no change to the checkpoint format.
+  One call that sets the flag and one that clears it, **for the platform only**: nothing in
+  the core calls either, and a source check in `send_gate_kat` fails if `BRPeerManager.c`
+  does. One call that answers the gate for the wallet: open, closed with the txid and count of
+  the send it waits for, or history not complete. One call that answers it for a transaction:
+  does it spend a wallet coin, is it already held, may it start. No new field on a transaction
+  and no change to the checkpoint format.
 - `BRWallet`: the registration mode `BR_WALLET_REGISTER_OWN_SEND` and the outcome
-  `BR_WALLET_REGISTER_GATE_CLOSED` (G2).
+  `BR_WALLET_REGISTER_GATE_CLOSED` (G2), checked before the insert **and** before the promote
+  branch.
 - `BRWalletSend.h`: `BRWalletRegisterOwnSend` returns its verdict.
 - `BRSpendGate.h` and `BRAssetSend.c`: the sign-time check (G1) for a platform that uses the
   core's signer gate.
 - `BRPeerManager`: `BRPeerManagerPublishTx` and `BRPeerManagerStemPublishTx` refuse a
   transaction that spends a wallet coin and that the wallet does not hold as valid, with their
-  own error code; `_peerRequestedTx` registers as an own send and serves nothing on a refusal
-  (G3). The peer manager sets "history complete" when a sync reaches the tip.
+  own error code; `_peerRequestedTx` and `_peerHasTx` register as an own send, and
+  `_peerRequestedTx` serves nothing on a refusal (G3). The peer manager does **not** set
+  "history complete".
 
 **For republish and rebuild.**
 
@@ -1243,10 +1608,15 @@ iOS gets all of this with the pin.
 **For Cancel.**
 
 - `BRWallet`: the cancel plan (which inputs qualify, the fee, what comes back, which later
-  sends go with it) for the dialog, and `BRWalletCancelSend` (6.4).
+  sends go with it) for the dialog; the build-and-sign half of the cancel; and the swap half,
+  in a form that stays inside one hold of the wallet lock, for the peer manager only.
+- `BRPeerManager`: `BRPeerManagerCancelSend`, the one public entry (6.4). It runs the swap
+  under the manager lock with the snapshot and purge the existing removal uses, and takes the
+  coin reservation from its caller.
 
 **What the core does not get.** No held set. No change to the conflict order. No pause rule.
-No change to the spend guard or the coin reservation for any existing signer.
+No change to the spend guard or the coin reservation for any existing signer. No knowledge of
+the waiting request: D4 is asked in the platform's send helper (5.6).
 
 ### 8.2 What changes in the Android bridge and in Kotlin
 
@@ -1255,22 +1625,38 @@ No change to the spend guard or the coin reservation for any existing signer.
 - `seed_sign_transaction` and `wallet_signed_spend_gate` ask the gate (G1).
 - `_registerWalletCopy` becomes a call to `BRWalletRegisterOwnSend`; the three publish entry
   points read the verdict and stop on a refusal (5.2).
-- New natives: the gate's answer for the screens; `registerSend`; `signApprovedDigiDollar` (the
-  first half of today's `sendApprovedDigiDollar`); the cancel plan; `cancelSend`, in
-  `jni_wallet.c`; the verified mark, read and seeded; "history complete", seeded at load.
+- New natives: the gate's answer for the screens; `registerSend`, which releases the coin
+  reservation on every outcome; `signApprovedDigiDollar` (the first half of today's
+  `sendApprovedDigiDollar`); the cancel plan; `cancelSend`, in `jni_wallet.c`, which passes the
+  bridge's reservation table and clock; the verified mark, read and seeded; "history
+  complete", set and cleared, where the set refuses during a rescan while the flag is off; a
+  by-txid "held, and at what height" answer for the sweep.
 - The table generator runs with `--check` in CI (`docs/development-process.md` rule 6).
 
 **Kotlin.**
 
 - The send order of 5.6 for all five kinds of path, in one shared helper, so there is one copy.
-- `SendAdmission`: the one function every review asks first. It answers: start, offer to wait,
-  refused because one is waiting (D4), or history not complete (D5).
+  Its first line asks `SendAdmission`. Its rollback releases the coin reservation. It is the
+  only caller of the native sign entries, and a source test holds that.
+- `SendAdmission`: the one function every review asks first, and the helper asks again. It
+  answers: start, offer to wait, refused because one is waiting (D4), or history not complete
+  (D5).
+- `SyncTip.atTip()`: the one definition of "at the tip" (5.2), taken out of the two places
+  `SyncService` has it today. The call that sets "history complete" sits behind it.
+- The in-flight record for a wallet above the checkpoint limit, if the owner chooses option A
+  (5.6): its store, its load at start, its clearing lines.
 - `WaitingSendStore`, `SendMarksStore`, their `WalletStores` entries, and every cell of 7.2.
 - The two keys in `dgb_sync_data` and their clearing lines.
 - The screens of 5.4, the notices of 5.7, the three states of 6.2, the dialogs of 6.4 and 6.5.
 - The sweep: skips a send with a "cancel requested" mark; never removes a cancel as refused;
-  writes the "removed" mark before a removal.
-- The existing confirmation check keeps the core's answer in memory instead of dropping it.
+  writes the "removed" mark before a removal; publishes a cancel only when its mark says
+  "saved", and retries the save until it does (6.4); asks the wallet by txid; leaves an unheld
+  record alone while the history is not complete, and marks it "missing" afterwards (6.7).
+- The existing confirmation check keeps the **endpoint's** answer in the marks store, whatever
+  the core said (6.2).
+- The restore: the same-wallet rule of 7.2, the line on the restore screen, the "restored"
+  mark.
+- The manual rescan's line when the last send has 1 or 2 confirmations (6.6).
 - The rebuild's new step; the reading of notes and unsettled records at the tip.
 - The reconcile screen offering Cancel in place of removal.
 - Asset row clean-up after a cancel.
@@ -1284,14 +1670,14 @@ lands on its `develop` before each app pin moves.
 
 | # | Repo | What | Owner-gated |
 |---|---|---|---|
-| 1 | core | The gate: `BRSendGate.h`, the mark, "history complete", the own-send registration mode and verdict, the publish refusal, the sign-time check; `send_gate_kat` | Yes |
+| 1 | core | The gate: `BRSendGate.h`, the mark, "history complete" set by the platform only, the own-send registration mode and verdict before both inserts, the publish refusal, both peer handlers, the sign-time check, the recovery signers' refusal while the history is not complete; `send_gate_kat` | Yes |
 | 2 | core | Ancestors-first republish; 25 to 24; the rebuild's new step; `stranded_send_kat` extended | Yes |
-| 3 | core | Cancel plan and `BRWalletCancelSend`; `cancel_send_kat` | Yes. This is the one that adds a signing entry outside the spend guard (section 9.1, question 1). |
-| 4 | app | Pin to 1 and 2. Bridge: G1, the verdict, the publish entry points, the new natives. Kotlin: the send order of 5.6 for every path, `SendAdmission`, the "wait" message for all kinds, the two keys and D5, ancestors-first wiring | Yes |
-| 5 | app | `SendMarksStore` and every cell of 7.2; the "removed" mark on every removal; the rebuild's new step; the reading at the tip; the notices of 5.7 that need no request | Yes |
+| 3 | core | Cancel plan and `BRPeerManagerCancelSend`, with the swap under the manager lock and the publish-list purge; `cancel_send_kat`, built with the address and leak sanitizers | Yes. This is the one that adds a signing entry outside the spend guard (section 9.1, question 1). |
+| 4 | app | Pin to 1 and 2. Bridge: G1, the verdict, the publish entry points, the new natives. Kotlin: the send order of 5.6 for every path with `SendAdmission` asked by the helper, the reservation released on every way out, the rule for a wallet above the checkpoint limit (question 2), the "wait" message for all kinds, `SyncTip.atTip()`, the two keys and D5, ancestors-first wiring | Yes |
+| 5 | app | `SendMarksStore` and every cell of 7.2; the "removed" mark on every removal; the rebuild's new step; the sweep's rules for a record the wallet does not hold (6.7); the same-wallet restore and the "restored" notice (7.2); the reading at the tip; the notices of 5.7 that need no request | Yes |
 | 6 | app | `WaitingSendStore` and its cells of 7.2; the offer, the refusal (D4), the waiting row, the ready banner, review from a request, the same-address notice, remove. Plain DGB. | Yes |
-| 7 | app | The three states of 6.2, defined from the wallet's transaction; the two clocks; the endpoint's answer kept; Try again; Rescan on the row | Yes |
-| 8 | app | Pin to 3. Cancel this send: dialog, PIN prompt, the write order, the marks, the lost-cancel notice, asset clean-up, the sweep's two rules for a cancel, the reconcile screen change | Yes |
+| 7 | app | The three states of 6.2, defined from the wallet's transaction; the two clocks; the endpoint's answer kept in the marks store; Try again; Rescan on the row; the row and the rescan line for a send with 1 or 2 confirmations (6.6) | Yes |
+| 8 | app | Pin to 3. Cancel this send: dialog, PIN prompt, the write order with its roll-forward, the marks, the lost-cancel notice, asset clean-up, the sweep's rules for a cancel, the reconcile screen change | Yes |
 | 9 | app | DigiDollar and DigiAsset requests in the waiting slot | Yes |
 | 10 | app | Notifications: ready, not confirmed yet, cancel lost | No. Independent review and green CI. No amount or payee in any text. |
 
@@ -1300,6 +1686,8 @@ lands on its `develop` before each app pin moves.
 - **1, 2, 3, 4, 5, 7 and 8 are one release.** A gate without the stuck half is a wallet that
   can stop sending. A gate without the marks is a wallet that can be led to pay twice after a
   rebuild or a removal. Cancel without the marks has no lost-cancel notice.
+- **The sweep's rules of 6.7 are in 5, and 5 ships with 4.** With the gate and D5 in place and
+  the old sweep still running, a record would be settled before its notice could be read.
 - **4 must not merge to `develop` ahead of 5, 7 and 8 by more than the time it takes to review
   them.** `develop` is what ships. If a release had to be cut in between, it would be cut from
   before 4.
@@ -1332,10 +1720,18 @@ Every new gate is seen red on the unfixed code first, and the PR comment says ho
   - **two own sends registered at once: exactly one is held, the other's verdict is "gate
     closed" and the wallet does not hold it**;
   - **a refused registration followed by a publish: the peer manager refuses it, and a later
-    `getdata` for it serves nothing and registers nothing**;
+    `getdata` for it serves nothing and registers nothing; a later `inv` for it registers
+    nothing either**;
+  - **a record the wallet keeps as "not mine" that spends a wallet coin, registered as an own
+    send while the gate is closed: it is not promoted** (red arm: the check before the promote
+    branch removed);
+  - **headers at the tip and the filter scan not: "history complete" stays off, because
+    nothing in the core sets it**; the source check that `BRPeerManager.c` never calls the
+    setter;
+  - while "history complete" is off, the signer gate refuses a sweep whatever it spends;
   - a republish of a held send passes all three checks;
   - a DigiDollar build and an asset build are refused at the signer while closed;
-  - history not complete closes it; a sync that reaches the tip opens it;
+  - history not complete closes it; the platform's call opens it;
   - the 20-block rule.
   - Red arms: 2 confirmations accepted; the count taken against the current tip (the rescan arm
     then fails); the gate skipped at registration; the publish refusal skipped; the verdict
@@ -1362,8 +1758,23 @@ Every new gate is seen red on the unfixed code first, and the PR comment says ho
     first and the cancel is invalid)**; the same after a checkpoint save and load;
   - **a cancel of a send that is in fact confirmed: after the block is delivered the wallet
     holds the original at its height and the cancel as invalid**.
+  - **Memory safety, with the address and leak sanitizers.** X published and relayed back by a
+    peer, so the publish list points at the wallet's own record; then the cancel is swapped;
+    then, in turn: a `getdata` for X, an `inv` for X, a new peer that is sent the list, and
+    the manager torn down. Expected: no read of freed memory, no double free, no leak; X is
+    not served and is not announced. The same with X listed as the parent of a published
+    child (a train). The same with X listed as the list's own copy with a publish still
+    waiting: it is answered "cancelled" exactly once.
+  - **Red arm for it:** the swap done under the wallet lock alone, with no purge. The sanitizer
+    must report a use of freed memory at the `getdata`. The arm runs under a timeout, because
+    a sanitizer report can hang instead of exit.
+  - the source check: the wallet's swap half has one caller, in `BRPeerManager.c`;
+  - two cancels of one send at once: exactly one swaps, the other stops with nothing changed
+    and its claim released;
+  - a cancel with a legacy input: the claim is held under the signed txid;
+  - the entry is refused when no peer manager is paired with the wallet.
   - Red arms: an asset input accepted; a non-wallet output accepted; the second check skipped;
-    two cancels of one send both signed (the claim skipped).
+    two cancels of one send both swapped (the second check skipped).
 - `stranded_send_kat` extended: ancestors first; a parent on its hourly hold is still sent
   before its child; one wait per group. Red arm: txid order.
 - The selection KAT: a coin with 24 unconfirmed ancestors is not selected. Red arm: 25.
@@ -1376,6 +1787,16 @@ Every new gate is seen red on the unfixed code first, and the PR comment says ho
 
 - The send order: for each of DGB, DigiDollar, asset, sweep, a fake that fails at each step
   shows the row of the table in 5.6. Red arm: publish before the checkpoint.
+- The helper: **a send started while a request is held is refused by the helper itself, on
+  every path, even when the screen did not ask** (D4); the request's own review passes; after
+  a failed save the coin reservation is free; the source test that only the helper calls the
+  native sign entries.
+- A wallet above the checkpoint limit (a persister forced to answer `REFUSED_OVER_LIMIT`): by
+  the owner's choice. For option A: the send is saved in the in-flight record before the
+  publish; a restart registers it; a cancel's record replaces the send it cancelled; the
+  record is gone after every clearing path.
+- `SyncTip.atTip()`: false with headers at the tip and the scan behind; false with a frontier
+  of 0; false during a rescan; "history complete" is not set in any of the three.
 - `WaitingSendStore`: round trip; **load never throws** on a torn file, an unknown version, a
   wrong type, random bytes; another wallet's fingerprint is refused and deleted; **a fingerprint
   that cannot be read now is not shown and not deleted**; a second request is refused; **the
@@ -1398,9 +1819,22 @@ Every new gate is seen red on the unfixed code first, and the PR comment says ho
   acknowledged**; **the send a request waited behind paid the same address and confirmed: the
   same-address notice, acknowledge before PIN**; a removed send; a record with no transaction
   after the breaker; a note after a rebuild.
+- The sweep and an unheld record (6.7): **the breaker, then three sweeps with the history not
+  complete: the record is not settled and no try is counted; then the tip: it is "missing" and
+  the notice is owed**; the same in a wallet with more than 100 rows (red arm: "aged out" read
+  off the list); a record held at a height is settled; a missing record whose txid later
+  appears at a height is settled.
+- The restore (7.2): **the same phrase restored with marks, records and a request on disk:
+  all three are still there, the gate is closed until the tip, and the request opens with its
+  notice**; a different phrase: all three are gone and the "restored" mark is written; a
+  fingerprint that cannot be worked out: nothing shown, nothing deleted.
 - Cancel: the write order with a death at each step, against the start table of 6.4; a
   cancelled send is never selected for republish; a cancel is never removed as refused; the
   mark for a send with no record; the dialog lists the later sends.
+- Cancel, roll forward: **the save fails after the swap and the process lives: the cancel is
+  not published; the mark has its txid and "not saved yet"; another writer's checkpoint lands;
+  the cancel is still not published until the sweep's own save sets "saved"; then it is
+  published once.** Red arm: publish without "saved".
 - The asset arm the KAT cannot show: **an asset send whose input is implicit change, left
   unconfirmed, the replay run again as after a restart, Cancel planned: the asset input is not
   in the plan.**
@@ -1408,11 +1842,15 @@ Every new gate is seen red on the unfixed code first, and the PR comment says ho
   record; "Cannot check yet" after 20 minutes of app-open time with no block at the tip, not
   after 20 minutes in the background, reset by a block at the tip and not by a block below it;
   the endpoint's answer hides Cancel and Try again and is dropped once the scan has covered
-  the height.
+  the height; **the endpoint reports a height and the core answers "refused" (a stalled tip):
+  Cancel and Try again are still hidden** (red arm: keyed on the core's answer); the answer is
+  still there after a restart; it never changes what the gate answers.
+- A send with 1 or 2 confirmations when a rescan starts: the row's text; no Try again and no
+  Cancel; the manual rescan shows its line first.
 - `LocaleResourceParityTest`; `OnboardingHardcodedStringTest`.
 - Before each commit: the full core and app unit suites with `--continue`.
 
-**Device sends (Note 8 mule, small amounts between its own addresses).** About 30 sends.
+**Device sends (Note 8 mule, small amounts between its own addresses).** About 34 sends.
 
 1. Send, then Send again at once. Expected: the offer; the request is stored; nothing second on
    the network; "ready" after 3 confirmations; review; PIN; it confirms. Once with Dandelion
@@ -1452,6 +1890,18 @@ Every new gate is seen red on the unfixed code first, and the PR comment says ho
     with a send left unconfirmed before the update. Expected: the gate is closed and the row
     shows the states of 6.2.
 
+18. Send, wait for 1 confirmation, start a rescan. Expected: the line before the rescan; the
+    row's text during it; Send works again soon after the headers are back, well before the
+    scan ends.
+19. Cancel a send that a peer relayed back (send with the network on, cut it before a block,
+    cancel). Expected: no crash; the original is no longer announced; the outcome is one of
+    the two in test 9 or 10.
+20. Restore the same phrase on the same device with a send unconfirmed and a request waiting,
+    if a route to the restore screen keeps the stores (8.6). Expected: no send until the tip;
+    then the notice naming the send, before the waiting send can be approved.
+21. Restore on a wiped device. Expected: the line on the restore screen, and the "restored"
+    notice before the first review.
+
 The pre-publish suite sends no coins, so it cannot cover this. It gets one check at most: Send
 on an empty wallet still gives the insufficient-funds refusal, not a gate message.
 
@@ -1459,12 +1909,15 @@ on an empty wallet still gives the insufficient-funds refusal, not a gate messag
 
 From the shared core, with the pin: the gate and its number, the mark, "history complete", the
 own-send registration verdict, the publish refusal, the sign-time check in the core's signer
-gate, the "Not confirmed yet" rule, the cancel plan and `BRWalletCancelSend`, ancestors-first
-republish, the 24 fix, the rebuild's new step, and all the KATs.
+gate, the "Not confirmed yet" rule, the cancel plan and `BRPeerManagerCancelSend`,
+ancestors-first republish, the 24 fix, the rebuild's new step, and all the KATs.
 
 iOS still has to build: reading the registration verdict in its publish path (until it does,
-the publish refusal stops a gated send anyway); the send order of 5.6; its own two stores and
-their wipe coverage; the screens, the notices and the strings. Nothing in this design needs
+the publish refusal stops a gated send anyway); the send order of 5.6; the call that sets
+"history complete", behind the same definition of "at the tip" (until it does, the gate stays
+closed on iOS, which is the safe side); passing the core's reservation table and its clock to
+the cancel entry; its own stores and their wipe coverage; the screens, the notices and the
+strings. Nothing in this design needs
 background time, so iOS loses nothing by having little of it.
 
 ### 8.6 Not verified
@@ -1477,7 +1930,29 @@ background time, so iOS loses nothing by having little of it.
   it before cancel is relied on.
 - That nothing after the first change in the swap can fail. It rests on allocating first. The
   removal code today releases the lock and calls itself again for each dependant
-  (`core:BRWallet.c:2792-2800`); the swap needs a form that stays inside one hold. Not written.
+  (`core:BRWallet.c:2794-2802`); the swap needs a form that stays inside one hold. Not written.
+- That the table in 6.4 lists every holder of a pointer to a wallet-owned transaction. It was
+  made by reading every use of the publish list and every wallet lookup in `BRPeerManager.c`
+  at core `8014392`. It was not run. The sanitizer arm of `cancel_send_kat` is the proof, and
+  it must be seen red first.
+- That the wallet's removal callbacks may be delivered after the manager lock is released.
+  Today's removal delivers them inside it (`core:BRWallet.c:2831-2832`, called from
+  `core:BRPeerManager.c:10014`). The swap's order of messages is a requirement on new code.
+- That the verified mark rises with the header tip during a rescan, so a send with 1 or 2
+  confirmations waits only for the headers. Read from the three callers of
+  `BRWalletSetBlockHeight` (`core:BRPeerManager.c:4428`, `:5533`, `:9631`). Not run, and how
+  long the headers take after a rescan was not measured.
+- Whether the compact-filter frontier is moved back by the bridge's rescan after the first
+  sync. The design does not rely on it: the flag is not set during that rescan by rule.
+- How long the launch rescan of a wallet above the checkpoint limit takes. No such wallet was
+  at hand. Under option A that is how long it waits before it can send after each launch.
+- Which routes reach the restore screen with a wallet's stores still on disk. `recoverWallet`
+  has one caller. Whether the full wipe always runs before it, for example when a removed lock
+  screen has made the seed key unusable, was not traced.
+- Records that 4.1.5 already settled as "gave up" cannot be told from confirmed ones. A send
+  given up on before the update raises no notice after it.
+- Whether a peer ever relays a wallet's own unconfirmed send back to a freshly restored
+  wallet. The design assumes it cannot be relied on.
 - That an output of a transaction with no asset data can never hold asset units. It follows
   from the DigiAsset rules as this project records them. It was not checked against DigiAsset
   Core for this revision.
@@ -1487,11 +1962,11 @@ background time, so iOS loses nothing by having little of it.
   user send.
 - An old record whose height came from a server before 4.1.3. Nothing in the checkpoint tells
   it from a proven one. Same side.
-- Whether every caller of `clearSyncData` really starts a wallet's history from nothing. If a
-  same-phrase recover reaches it, clearing `dgb_outgoing_tx` there loses the payee names of
-  past sends in the activity list. To be traced in PR 5.
-- Whether the saved-checkpoint write reports failure in a form step 4 of 5.6 can act on
-  (`kt:WalletTxPersister.kt:47`).
+- (Answered in this revision.) A same-phrase recover does reach `clearSyncData`
+  (`kt:WalletManager.kt:344-346`). Section 7.2 has the rule for it.
+- (Answered in this revision.) The saved-checkpoint write does report failure in a form step
+  4 of 5.6 can act on (`Result.landed`, `kt:WalletTxPersister.kt:41-53`). One of its answers,
+  `REFUSED_OVER_LIMIT`, is permanent for a large wallet. That is question 2.
 - Whether the existing Rescan can start from a given height, for the "reported confirmed" row.
   The design needs only the Rescan that exists.
 - Whether the Send screen takes a note today.
@@ -1513,7 +1988,14 @@ D1 (as amended), D2, D3, D4 and D5 are decided and not asked again.
    send's plain inputs, pays one address of this wallet, and changes nothing until every check
    has passed. The guard stays as it is for every other signer. *Recommended: yes.* If the
    answer is no, Cancel cannot be built and D3 has to be looked at again.
-2. **Budget for device test sends on the Note 8.** *Recommended: approve 30 sends of small
+2. **What may a wallet with more than 100,000 transaction records do?** Its checkpoint is
+   refused on every write, so "saved before it is published" can never be true for it by the
+   ordinary road. It could neither send nor cancel. The choices are in 5.6: (A) save just the
+   one send in flight in its own small file; (B) do that for every wallet; (C) let such a
+   wallet publish without a save, and refuse Cancel for it; (D) refuse to send. *Recommended:
+   A.* Under A such a wallet sends and cancels like any other, and after each launch it waits
+   for its launch rescan first, as it rescans at each launch today.
+3. **Budget for device test sends on the Note 8.** *Recommended: approve 34 sends of small
    amounts between the mule's own addresses, plus two DigiDollar sends and three asset sends
    (one of them cancelled).*
 
@@ -1552,8 +2034,9 @@ Each can be vetoed in one line, by its letter.
   whole of every rescan. (New, critique point 6.)
 - **L. When the endpoint has already reported a send as confirmed, Cancel and Try again are
   hidden for that send and Rescan is offered.** It uses the answer the existing check already
-  fetches. It adds no query and does not open the gate. A wrong answer can hide Cancel until
-  the wallet's own scan has covered that block. (New, critique point 5.)
+  fetches. It adds no query and does not open the gate. The answer is kept whatever the core
+  says about it, and it is kept across restarts. A wrong answer can hide Cancel until the
+  wallet's own scan has covered that block. (Critique point 5; changed by check finding N4.)
 - **M. The rebuild from chain keeps a note of every send that was in flight**, keeps the
   waiting send, and shows the note before the next review. Today it erases the records. (New,
   critique points 4 and 16.)
@@ -1563,7 +2046,27 @@ Each can be vetoed in one line, by its letter.
   carries no asset data at all.** Some such sends then cannot be cancelled. (New, critique
   point 15.)
 - **P. `clearSyncData` also clears the records of sends**, so a new wallet never sees the last
-  wallet's payees. (New, critique point 3.)
+  wallet's payees. Not when the same wallet is restored: see S. (Critique point 3; changed by
+  check finding N5.)
+- **Q. "At the tip" means the scan, not the headers.** One definition for the whole design,
+  the one Kotlin already uses before it marks a wallet synced. "History complete" is set by
+  the app from that test and never by the core. (Check finding N2.)
+- **R. The sweep leaves a recorded send it cannot find alone while the history is rebuilding.**
+  Afterwards such a record is "missing", not settled, and the notice names it before the next
+  review. (Check finding N3.)
+- **S. Restoring the same wallet on the same device keeps its marks, its records and its
+  waiting send.** A restore that cannot keep them says so, on the restore screen and before
+  the first review. (Check finding N5.)
+- **T. While the history is rebuilding, every sweep and recovery move waits too**, even one
+  that spends another phrase's coins. The wallet cannot yet tell whose coins they are. (Check
+  finding N6.)
+- **U. A send with 1 or 2 confirmations when a rescan starts makes the user wait** until the
+  headers are back at the tip. A rescan the user starts says so first and offers to wait.
+  (Check finding N8.)
+- **V. A cancel is published only after it is saved.** If the save fails, the wallet keeps
+  trying and says so. It never goes back to the original. (Check finding N10.)
+- **W. The cancel entry belongs to the peer manager and is refused in the short window when
+  no peer manager is paired with the wallet.** (Check finding N1.)
 
 ## 10. History
 
@@ -1693,8 +2196,9 @@ The full text of both critiques is in this file's history (commit `af9d8ad8b` fo
 
 The third revision (commit `8ca18a567`) was the first written to the amended D1: one send
 waiting, approved at its turn. An independent critique of it had 20 points: 3 found wrong, 13
-risks, 4 suggestions. It found no path that signs or broadcasts with nobody present. This
-revision answers each. The owner's D4 and D5 arrived with it.
+risks, 4 suggestions. It found no path that signs or broadcasts with nobody present. The
+fourth revision answered each, as below. The owner's D4 and D5 arrived with it. Where the fifth
+revision changed an answer, 10.7 says so.
 
 1. **The gate was placed where Android's send paths do not go, and a refused registration did
    not stop the publish.** Accepted. Every path is traced in 5.2. The gate is now checked
@@ -1747,3 +2251,58 @@ revision answers each. The owner's D4 and D5 arrived with it.
     dialog lists the later sends it removes (6.4).
 20. **Checked and found as the design says.** No change, except that 6.3 now says a cancel's
     txid goes to the endpoint through the existing check.
+
+### 10.7 The fourth revision, and its check finding by finding
+
+The fourth revision (commit `64935e2d7`) answered the 20 points above. An independent check of
+it traced every Android path that signs or publishes and found the gate's placement right and
+the cancel signable. It found 16 of the 20 points answered and 4 answered only in part
+(points 2, 5, 14 and 16), and it raised eleven new findings. The numbers below are the
+check's own.
+
+The four points answered in part:
+
+- **Point 2** (Cancel can be signed): the swap bypassed the publish-list purge, and the
+  reservation was unstated. Now N1 and N7.
+- **Point 5** (a send that confirmed but is held without a height): the stalled-tip answer was
+  not kept. Now N4.
+- **Point 14** (the cancel's write order): a failed save left the swap live in memory. Now
+  N10.
+- **Point 16** (history cleared with a send unconfirmed): the sweep settled the record first.
+  Now N3.
+
+The eleven findings:
+
+- **N1. The cancel swap freed transactions the publish list still pointed at.** Accepted. The
+  entry is now the peer manager's, and the swap runs under its lock with the snapshot and
+  purge of the existing removal. 6.4 lists every holder of such a pointer. `cancel_send_kat`
+  has the sanitizer arm.
+- **N2. "History complete" would have opened at the header tip.** Accepted. One definition of
+  "at the tip" (5.2): the scan frontier at the tip. The app sets the flag from it; the core
+  never does; it is not set during the bridge's rescan after the first sync.
+- **N3. The sweep settled a record the wallet did not hold before the notice could read it.**
+  Accepted. 6.7: nothing is done with such a record while the history is not complete;
+  afterwards it is "missing", not settled.
+- **N4. The endpoint's answer for a send above a stalled tip is "refused", and was not kept.**
+  Accepted. 6.2: the third state is keyed on the endpoint's answer, kept in the marks store,
+  whatever the core says. It never opens the gate.
+- **N5. A restore of the same phrase erased the marks, the records and the waiting send.**
+  Accepted. 7.2: kept when the v2 fingerprint is unchanged. A restore that cannot keep them
+  tells the user.
+- **N6. Three gaps in the wording of G2 and G3.** Accepted. 5.2: both peer handlers register
+  as an own send; G2 sits before the promote branch as well as the insert; the recovery
+  signers are refused while the history is not complete; "before signing" is said only of the
+  signer it is true of.
+- **N7. Which reservation the cancel uses, its key and its clock.** Accepted. 6.4: the caller
+  passes its own table and clock; the key is the signed txid, claimed after signing; the text
+  says what the claim is not for.
+- **N8. A send with 1 or 2 confirmations when a rescan starts had no row.** Accepted. 6.6 has
+  the row, the message, and the line a manual rescan shows first.
+- **N9. A wallet above the checkpoint limit could neither send nor cancel.** Accepted. 5.6
+  sets out four choices. It is question 2 for the owner; A is recommended.
+- **N10. "Publish nothing" after a failed save was not a state the wallet could stay in.**
+  Accepted. 6.4: the cancel rolls forward. Its txid and record are written first, the save is
+  retried, and it is published only when its mark says "saved".
+- **N11. Small items.** Accepted. 5.3: "could not be found", not "did not go out". 5.6: the
+  shared helper asks the one-deep rule itself, so no path skips it. 5.2 and 5.6: the coin
+  reservation is released on a refusal and in the rollback.
