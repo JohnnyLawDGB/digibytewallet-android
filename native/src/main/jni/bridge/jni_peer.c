@@ -42,7 +42,8 @@ static void _applyPendingBip158State(void);
  * existed to close. All relaxed: these are independent scalar samples, not a
  * lock-ordered snapshot; the staleness stamp (below) is the only cross-field
  * invariant a consumer relies on. */
-static _Atomic int      g_mirrorPeerCount;
+static _Atomic int      g_mirrorPeerCount;            /* connecting or handshaken: recovery decisions */
+static _Atomic int      g_mirrorHandshakedPeerCount;  /* handshaken only: the count a screen shows */
 static _Atomic uint32_t g_mirrorLastHeight;
 static _Atomic uint32_t g_mirrorEstimatedHeight;
 static _Atomic uint32_t g_mirrorCFTip;
@@ -77,6 +78,7 @@ static void _refreshBridgeStatusMirror(void) {
     BRPeerManager *m = g_peerManager;
     if (m) {
         atomic_store_explicit(&g_mirrorPeerCount,       (int)BRPeerManagerPeerCount(m),           memory_order_relaxed);
+        atomic_store_explicit(&g_mirrorHandshakedPeerCount, (int)BRPeerManagerHandshakedPeerCount(m), memory_order_relaxed);
         atomic_store_explicit(&g_mirrorLastHeight,      BRPeerManagerLastBlockHeight(m),          memory_order_relaxed);
         atomic_store_explicit(&g_mirrorEstimatedHeight, BRPeerManagerEstimatedBlockHeight(m),     memory_order_relaxed);
         atomic_store_explicit(&g_mirrorCFTip,           BRPeerManagerCFChainTipHeight(m),         memory_order_relaxed);
@@ -1233,6 +1235,19 @@ NativeBridge_getPeerCount(JNIEnv *env, jobject thiz) {
     (void)env;
     (void)thiz;
     return (jint)atomic_load_explicit(&g_mirrorPeerCount, memory_order_relaxed);
+}
+
+/* ---------- getHandshakedPeerCount ---------- */
+
+/* PEER-COUNT-HANDSHAKED. The peers whose version/verack handshake has completed: the count a
+ * screen shows. getPeerCount above also counts a peer that is still connecting, which is right for
+ * a recovery decision (a manager with a dial in flight is not dead) and wrong on a screen. Same
+ * lock-free mirror read as getPeerCount. */
+jint JNICALL
+NativeBridge_getHandshakedPeerCount(JNIEnv *env, jobject thiz) {
+    (void)env;
+    (void)thiz;
+    return (jint)atomic_load_explicit(&g_mirrorHandshakedPeerCount, memory_order_relaxed);
 }
 
 /* ---------- serializePeerPenalties / loadPeerPenalties ---------- */

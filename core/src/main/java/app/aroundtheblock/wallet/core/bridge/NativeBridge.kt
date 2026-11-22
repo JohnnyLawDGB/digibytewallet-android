@@ -344,8 +344,20 @@ object NativeBridge {
      *  to find transactions matching the wallet's addresses. */
     external fun rescan()
 
-    /** Get number of currently connected peers. */
+    /**
+     * The peers that are not disconnected: handshaken ones AND ones still dialling or mid-handshake.
+     * For recovery decisions only ("0" = no socket open or opening; a manager with a dial in flight
+     * is not dead and must not be rebuilt as if it were). Never show this number: a screen shows
+     * [getHandshakedPeerCount].
+     */
     external fun getPeerCount(): Int
+
+    /**
+     * PEER-COUNT-HANDSHAKED: the peers whose version/verack handshake has completed. The count a
+     * screen or notification shows as "N peers", and the one that says a peer can be talked to.
+     * Never more than [getPeerCount]. Lock-free, safe on the main thread.
+     */
+    external fun getHandshakedPeerCount(): Int
 
     /** Send a keepalive ping to every connected peer so idle CF filter-peer connections aren't
      *  dropped by the remote node / NAT inactivity timeout. Call periodically (~every 10-20s). */

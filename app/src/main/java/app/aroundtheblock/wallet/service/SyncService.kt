@@ -1474,7 +1474,7 @@ class SyncService : Service() {
                         }
                     }
                 }
-                updateNotification(currentSyncProgress(), peers)
+                updateNotification(currentSyncProgress())
                 } catch (t: Throwable) {
                     // Swallow and continue. Losing a single 10s tick is fine;
                     // killing the poll forever is not. Log with stack so the
@@ -2975,8 +2975,7 @@ class SyncService : Service() {
             if (hasReachedSynced) return
 
             walletManager.updateSyncState(SyncState.Syncing(progress, blockHeight))
-            val peers = NativeBridge.getPeerCount()
-            updateNotification(progress, peers)
+            updateNotification(progress)
         }
 
         override fun onTransactionReceived(txHash: String, amount: Long, isReceive: Boolean) {
@@ -3023,7 +3022,7 @@ class SyncService : Service() {
 
         override fun onPeerConnected(peerCount: Int) {
             if (stoodDownForWipe) return
-            updateNotification(currentSyncProgress(), peerCount)
+            updateNotification(currentSyncProgress())
 
             // Persist newly connected peer address from the native side.
             // NativeBridge doesn't currently expose the address directly, so
@@ -3036,7 +3035,7 @@ class SyncService : Service() {
 
         override fun onPeerDisconnected(peerCount: Int) {
             if (stoodDownForWipe) return
-            updateNotification(currentSyncProgress(), peerCount)
+            updateNotification(currentSyncProgress())
             // Don't show failure if we already reached the chain tip —
             // peer drops are normal, the polling loop will reconnect.
         }
@@ -3094,8 +3093,7 @@ class SyncService : Service() {
                 // Do NOT call stopForeground — Android kills the service without
                 // the notification, which triggers onDestroy → stopSync → peers drop.
                 // Update the notification to show connected status instead.
-                val peers = NativeBridge.getPeerCount()
-                updateNotification(1f, peers)
+                updateNotification(1f)
 
                 // Sovereign asset-detection sweep: walk every known tx through
                 // the Kotlin DigiAssetDecoder now that the wallet is fully
@@ -4172,7 +4170,13 @@ class SyncService : Service() {
         return appName
     }
 
-    private fun updateNotification(progress: Float, peerCount: Int) {
+    /**
+     * The notification shows handshaken peers only (PEER-COUNT-HANDSHAKED), read here so no caller
+     * can hand it the count that includes connecting peers, which the recovery paths around the
+     * call sites hold. A lock-free read, safe on any thread.
+     */
+    private fun updateNotification(progress: Float) {
+        val peerCount = runCatching { NativeBridge.getHandshakedPeerCount() }.getOrDefault(0)
         val notification = buildNotification(progress, peerCount)
         getSystemService(NotificationManager::class.java)
             .notify(NOTIFICATION_ID, notification)
