@@ -1,28 +1,47 @@
-# TX-QUEUE: sending again before the last send confirms (4.1.6 design draft)
+# TX-QUEUE: a send queue that starts one send at a time (4.1.6 design)
 
-> **Status 2026-11-22: DRAFT. Nothing is decided.** Read the independent critique at the end
-> before the recommendation in section 6: it shows that the recommendation's "taken by a peer" mark
-> does not prove a node accepted the send, and that the gate as drafted can hold a wallet's whole
-> balance after a restart. Its point 13 proposes a simpler rule. The owner's answers to section 7
-> are not in yet.
+> **Status 2026-11-22: REVISED to the owner's decisions. Ready for his answers to section 8.**
+>
+> The owner decided three things on 2026-11-22. His words: *"we can queue as deep as we want, but
+> we can't initiate until we have at least 3 confirmations on previous transaction. 2. wait only.
+> 3. cancel this send. 4.1.6 works fine."*
+>
+> - **D1.** A real queue of any depth. The next send is not started (not put on the network)
+>   until the previous one has at least 3 confirmations.
+> - **D2.** When coins are waiting, the wallet waits. There is no "send anyway".
+> - **D3.** "Cancel this send" is built in 4.1.6.
+>
+> These overrule the first draft, which recommended a rule in coin selection and advised against
+> a queue. That draft's options and its independent critique are kept under History (sections 10
+> and 11). The critique's confirmed errors are corrected in the text.
 
-Design only. No production code, no PR.
+Design only. No production code.
 
 Sources: `origin/develop` at `5bfcfe891`, core pinned at `8014392`. Paths under `core:` are the C
 core (`native/src/main/jni/digibytewallet-core/`). Paths under `kt:` are
 `core/src/main/java/app/aroundtheblock/wallet/core/`. Paths under `app:` are
-`app/src/main/java/app/aroundtheblock/wallet/`.
+`app/src/main/java/app/aroundtheblock/wallet/`. Paths under `jni:` are
+`native/src/main/jni/bridge/`.
 
 ## 0. The short version
 
-The wallet already refuses to spend an unconfirmed coin someone else sent. It already spends
-confirmed coins first. What it still does is spend **its own unconfirmed change, up to 25
-generations deep, with no check that the parent ever reached the network**. That is the train.
-
-The recommendation is a small rule in the core's coin selection (the "chain gate"), a clear
-message on the Send screen when coins are waiting, and three repairs to the recovery side. It is
-not a background queue. A queue that signs later cannot honour the PIN gate, and a queue that
-holds signed sends makes "sent" mean "not sent yet".
+- The user may line up as many sends as they like. Each one is reviewed and approved with the
+  PIN or biometric **when it is added**, exactly as a send is approved today.
+- The wallet signs it then and **holds it on the device**. It puts it on the network only when
+  the send before it has 3 confirmations that the wallet's own sync has proven.
+- The rule covers every send from this wallet: DGB, DigiDollar and DigiAsset. One send is on the
+  network at a time. On DigiByte, 3 confirmations is about 45 seconds.
+- Nothing is ever signed without the user present. Releasing a held send needs no key, so it
+  works while the app is locked.
+- A queued send that can no longer go out as signed (an earlier one was cancelled, its coins
+  were spent elsewhere, the queue sat idle too long) is **never sent silently**. It stays in the
+  list as "Needs your approval" and asks for the PIN again.
+- A send that has not confirmed is shown as such, and only when the wallet is at the chain tip.
+  The user can try again or **cancel it**. Cancel is a small payment to yourself that spends the
+  same coins. If it confirms, the stuck send can never confirm.
+- There is no automatic release that asks a server. Cancel replaces it.
+- This is the largest item in 4.1.6: four core changes and about eight app changes. Section 7
+  has the order.
 
 ## 1. What the wallet does today
 
@@ -45,10 +64,10 @@ holds signed sends makes "sent" mean "not sent yet".
   `BRWalletMaxOutputAmount` (`:3325-3357`). One change to the predicate reaches all of them.
 - The gate is about ownership and depth only. It does not ask whether a peer took the parent,
   or how many ancestors the new send would have in total.
-- Off by one: the walk allows a coin whose transaction already has 24 unconfirmed ancestors.
-  The new send is then the 26th in the chain. DigiByte Core's limit is 25 (section 3). This
-  reading of the limit follows Bitcoin Core's meaning (the count includes the transaction
-  itself). It should be confirmed in a regtest or KAT before it is relied on.
+- Off by one, confirmed by the critique (point 12): DigiByte Core refuses a transaction when
+  `ancestors + 1 > 25`, so a transaction counts itself and may have at most 24 unconfirmed
+  ancestors. The walk starts at depth 25 on the coin's transaction (`core:BRWallet.c:1783`), so
+  it accepts a coin with 24 ancestors and the new send then has 25. One too many.
 - The limit is by generation, not by count or size. A send that merges several unconfirmed
   coins can pass the walk and still exceed 25 ancestors or 101 kvB.
 
@@ -106,6 +125,22 @@ holds signed sends makes "sent" mean "not sent yet".
   and still selectable (`core:BRSpendGate.h:10-19`, `core:BRPreparedSend.h:27-37`).
 - This stops a double spend. It does not stop a chain.
 
+### 1.7 Three facts the queue design rests on
+
+- **A server-reported height is stored like a proven one.** `BRWalletUpdateTransactionsUnproven`
+  writes the height a server reported into the same `blockHeight` field
+  (`core:BRWallet.c:2757-2765`, `:3034-3042`). Selection then reads the coin as confirmed
+  (`:1782`). Nothing in the wallet says today which heights it proved itself. A later proven
+  update with the same height and time is skipped (`:3033`), so no trace of the proof is left.
+- **Locking the app zeroes the seed and nothing else.** The wallet object and the peer manager
+  stay loaded (`jni:jni_wallet.c:474-480`, `kt:WalletManager.kt:598-602`). Publishing a signed
+  transaction needs no seed.
+- **A confirmed transaction always sorts before an unconfirmed one.** The wallet orders by
+  height, and "unconfirmed" is the greatest height (`core:BRWallet.c:161-162`, insert at `:224`).
+  Of two conflicting transactions, the earlier in that order is valid and the later is invalid
+  (`:417-431`). So the chain, not arrival order, decides between a confirmed transaction and an
+  unconfirmed one. Between two unconfirmed ones, arrival order decides.
+
 ## 2. What happens after broadcast
 
 - The send is registered in the wallet before it is published, so its coins are spent at once
@@ -117,9 +152,22 @@ holds signed sends makes "sent" mean "not sent yet".
   Embargoes live in memory only (`Broadcaster.kt:37-38`).
 - The stem peer is "any Dandelion peer" at that moment (`core:BRPeerManager.c:9811`). A child
   stemmed a few seconds later can go to a different peer than its parent.
-- The core answers each publish once: 0 (a peer took it), `EINVAL`, `ENOTCONN`, `ETIMEDOUT`
-  (20 s of silence), `ECANCELED` (`kt:sync/PublishOutcome.kt:13-22`,
-  `core:BRPeerManager.c:56`).
+- The core answers each publish once: 0, `EINVAL`, `ENOTCONN`, `ETIMEDOUT` (20 s of silence),
+  `ECANCELED` (`kt:sync/PublishOutcome.kt:13-22`, `core:BRPeerManager.c:55`).
+- **A verdict of 0 means a peer asked for the bytes. It does not mean a node accepted the send.**
+  (Corrected; the first draft said "a peer took it".) The verdict and the `txRelays` record are
+  set when a peer sends `getdata` for the send (`core:BRPeerManager.c:5119-5160`). A node asks
+  for any announced transaction it does not have, before it checks it. A send that is then
+  refused has the same record as an accepted one. The core's own header records such a case
+  (`core:BRPublishOutcome.h:17-20`).
+- `txRequests` is the other list, and it is not evidence either. It holds the peers **this
+  wallet** asked about a transaction and that have not answered
+  (`core:BRPeerManager.c:1441-1444`). (Corrected; the first draft read it as "a peer requested
+  the send".)
+- What does prove a mempool has the send: a peer serving it back, or a peer announcing it
+  (`core:BRPeerManager.c:2704-2729`, `:2837-2858`). The wallet rarely gets this, because it
+  never asks a peer that already fetched from it. So this design does not use relay evidence to
+  decide anything. It uses confirmations.
 - Nodes do not send reject messages any more. Silence is the usual sign of a refusal, and it is
   also what a slow relay looks like, so a timeout is never final
   (`core:BRPublishOutcome.h:14-28`).
@@ -150,7 +198,12 @@ holds signed sends makes "sent" mean "not sent yet".
 3. **Stale.** One day old, the pinned node says "transaction not found", and every input is
    unspent there (`core:BRStaleSend.h:9-22`, `:53`). This runs **only when the user opens the
    reconcile screen** (`app:ui/settings/ReconcileScreen.kt:301`; no other caller of
-   `clearStuckSends`, `kt:WalletManager.kt:706`).
+   `clearStuckSends`, `kt:WalletManager.kt:706`). It answers only when the endpoint is the
+   default one (`kt:reconcile/DgbNodeClient.kt:274`, `core:BRStaleSend.h:109`). A user with a
+   custom endpoint never gets it. Its clock needs a timestamp above 0
+   (`core:BRStaleSend.h:87`), and the peer manager sets an unconfirmed transaction's timestamp
+   to 0 when too few peers relay it (`core:BRPeerManager.c:1379-1381`). Whether that stops the
+   clock for exactly the sends that went nowhere has not been measured.
 4. **Orphan or dead.** Same manual pass (`kt:WalletManager.kt:762-799`).
 
 - Removing a transaction removes everything built on it (`core:BRWallet.c:2768-2803`). So
@@ -174,8 +227,9 @@ them in an order that does not help. That is a train, and nothing tells the user
 
 ## 3. Why a train gets stuck on DigiByte
 
-Checked on the local node (DigiByte Core 9.26.7, mainnet, synced, read-only RPC and help text)
-and in the 8.22.2 source (`src/validation.h`, `src/policy/policy.h`):
+Checked on the local node (DigiByte Core 9.26.7, mainnet, synced, read-only RPC and help text).
+The critique re-checked the limits in the local 8.26.0 tree (`src/policy/policy.h:61-67`,
+`src/kernel/mempool_options.h:24`); the 8.22.2 column was not re-checked:
 
 | Policy | 8.22.2 | 9.26.7 |
 |---|---|---|
@@ -199,7 +253,7 @@ rarely reaches 25. The causes that do happen:
    Note: this node reports `localrelay: true` and its config has no `blocksonly` line today,
    which differs from the September note. Its `minrelaytxfee` is set to 0.00001, below the
    default, so its mempool accepts sends that default nodes refuse. It is a poor witness for
-   "the network took it".
+   "the network took it". Three of its twenty peers report `relaytxes: false`.
 3. **Not a cause here: a fee below the relay floor.** The builder never pays less than
    100 sat/vB, whatever custom total is entered (`core:BRWallet.c:113-121`, `_txFee`;
    `kt:send/FeeQuote.kt:26-36`). A send from this wallet is not dropped for its fee by a default
@@ -237,232 +291,670 @@ From memory of their behaviour, not re-checked for this draft.
   transactions that no connected peer has, once the mempools are heard. This wallet has since
   narrowed both rules (sections 1.1 and 2.2).
 
-No common wallet runs a background queue that signs later. The ones that avoid trains do it by
-limiting what selection may take.
+No common wallet runs a background queue that signs later. This design does not sign later
+either: it signs when the user approves and sends later (section 5.1).
+## 5. The design
 
-## 5. The designs
+One design. Its parts are numbered so the build plan can name them.
 
-### Design A: chain gate (refuse or wait, in coin selection)
+### 5.1 What a queued send is
 
-**Rule.** The wallet's own unconfirmed change is selectable only when all of these hold:
+Two readings were worked through.
 
-1. The parent was taken by a peer on this peer manager (a relay or a request, the evidence the
-   publish verdict already uses), and it is not in a stem phase.
-2. The new send would have at most **K** unconfirmed ancestors in total, counted (not by
-   generation), and their size stays far below 101 kvB. Recommended K = 1.
+**Reading (i): approve and sign when it is queued, hold the signed transaction, release it
+later.**
 
-Otherwise the coin waits. Confirmed coins are used first, as today.
+- The user reviews the send and gives the PIN or biometric, as today
+  (`app:ui/components/SpendAuth.kt:131-142`, `app:ui/wallet/SendViewModel.kt:343`).
+- The wallet signs those exact bytes then (`kt:TransactionBuilder.kt:302-309`). Today the next
+  line publishes them (`:311`). In the queue, the wallet keeps them and publishes them when the
+  gate opens.
+- Releasing needs no key and no prompt. It is the same act as the re-publish the stranded-send
+  sweep already does without a prompt, for hours (`app:service/SyncService.kt:3715-3860`).
+- What leaves the device is exactly what the user approved: that payee, that amount, that fee,
+  those coins. Nothing is rebuilt later.
 
-**What the user sees.**
+**Reading (ii): store only the request, and ask for the PIN again when its turn comes.**
 
-- Enough confirmed coins: no change at all.
-- Not enough until the last send confirms: the Send screen says so in plain words. "1,200 DGB
-  available now. 800 DGB more after your last send confirms (about 15 seconds)." The Review
-  button enables itself when the coins arrive. Nothing is signed or sent on its own.
-- Max uses the amount available now.
-- The same message covers an unconfirmed receive from someone else, which today reads as
-  "Insufficient balance".
-- All text in all 13 languages in the same commit.
-
-**Core changes.**
-
-- `_BRWalletUtxoSelectable` pass 1 takes the new rule (`core:BRWallet.c:1780-1784`). Every
-  builder inherits it: plain sends, DigiDollar fee coins, asset fee coins, the prepared-send
-  check, Max.
-- The wallet does not know relay evidence; the peer manager does
-  (`core:BRPeerManager.c:1311-1312`, `txRelays`, `txRequests`). Add one per-transaction mark in
-  the wallet, "taken by the network", set by the peer manager when a peer relays or requests the
-  send, cleared when the manager is rebuilt. No evidence means not chainable. That is the safe
-  side: the coin waits for a confirmation.
-- Replace the generation walk with an ancestor count and size sum, with the same visit budget.
-  This also fixes the off-by-one in 1.1.
-- New read-only accessor: the amount selectable now, and the amount waiting. For the UI.
-- A header-only policy file (same shape as `BRStaleSend.h`) holds K and the rule, so iOS takes
-  the same rule.
-
-**Kotlin changes.**
-
-- `TransactionBuilder`: `Built.Short` splits into "not enough" and "waiting for N DGB"
-  (`kt:TransactionBuilder.kt:404-416`).
-- `SendViewModel` and `SendScreen`: the waiting state, the auto-enable, the strings.
-- No change to signing, SpendAuth, or the prepared-send flow.
-
-**Interactions.**
-
-- DigiDollar: a DigiDollar send already cannot chain on DigiDollar change. Its fee coin now
-  obeys the gate. If the only DGB is waiting, the send waits with the same message. The $1.00
-  output rule and the 0.1 DGB fee are untouched.
-- DigiAssets: asset inputs are untouched. Fee coins obey the gate. Implicit change to the last
-  output and `CONFLICTED` are untouched.
-- Dandelion: a stemmed parent is not chainable until it has fluffed and a peer has it. This
-  closes cause 5.
-- Multi-wallet: the rule is per wallet object. No new store.
-- PIN / SpendAuth: unchanged. Nothing is deferred, so nothing is signed away from the prompt.
-
-**Failure modes.**
-
-- Sync is wedged and confirmations do not arrive. The user gets K sends on top of confirmed
-  coins, then waits. Today they could build 25. Mitigation: the waiting message offers "check
-  now", which uses the existing node check and the existing unproven-height update
-  (`core:BRWallet.c:2757-2765`). Whether a server-reported height should open the gate is a
-  question for the owner (Q6).
-- The peer manager is rebuilt and the evidence is lost. The coin waits one block. Acceptable.
-- A parent taken by one peer and then dropped. The child is stuck with it. K = 1 bounds the
-  damage to one child, and the recovery half handles both.
-- A wallet with one coin makes several payments in a row. With K = 1 the third waits for the
-  first to confirm. On 15-second blocks that has usually already happened.
-
-**Tests.**
-
-- Host KAT `chain_gate_kat` with a comparison arm that must fail on today's code: depth, count,
-  size, no evidence, stem phase, the 26th-in-chain case, DigiDollar fee coin,
-  asset fee coin, Max.
-- Existing selection, prepared-send and coin-reservation KATs stay green.
-- Unit: builder outcomes, view-model states, locale parity, hardcoded-string gate.
-- Device (Note 8, budgeted sends): five sends as fast as the UI allows from a one-coin wallet;
-  the same with Dandelion on; the same with the network cut right after the first send.
-  Expected: never more than K+1 unconfirmed in a row, and all confirm.
-
-### Design B: a real queue (accept now, release one confirmation at a time)
-
-Two shapes exist. They differ in when the signature is made.
-
-**B1: sign later.** The wallet stores the request (address, amount). When the previous send
-confirms it builds and signs the next.
-
-- This cannot sign without the user. The PIN or biometric is required at the moment of action,
-  and the seed key needs a device unlock inside its 300 s window. So B1 becomes "we will remind
-  you": a notification, the user opens the app, reviews and approves. That is Design A plus a
-  reminder.
+- Nothing is signed until the user is there again. That is the strictest reading of the PIN
+  rule.
+- But a queued send then cannot leave without the user. With a queue of five the user must
+  come back and approve five times, about a minute apart. That is a reminder list, not a queue.
 - The fee and the coins can differ from what the user saw when they queued it.
 
-**B2: sign now, hold the bytes.** The user approves each send as today. The wallet signs a child
-on unconfirmed change, registers it, and holds the signed bytes until the parent confirms. Then
-it publishes.
+**Which keeps the standing rule.** The rule is: every spend needs the in-app PIN or biometric at
+the moment of action, and nothing signs without it. Both readings keep "nothing signs without
+it". They differ on what "the moment of action" is. In (i) it is the moment the user adds the
+send to the queue, which is the moment the user acts. In (ii) it is the moment the send leaves.
 
-- User sees "Queued. Will be sent when your previous send confirms."
-- Core: registration without publish, a held state the sweep must not republish, a release
-  step on the parent's confirmation, and removal when the parent dies.
-- Kotlin: a durable per-wallet queue store, a release worker in `SyncService`, wipe coverage,
-  and new rows in the activity list.
-- PIN gate: honoured. The user approved those exact bytes.
-- Failure modes are the problem:
-  - The app is frozen in the background. The held send does not go out. The user was told it
-    was queued and the payee sees nothing, not even an unconfirmed payment. This wallet's
-    background loop is known to freeze on aggressive devices.
-  - Only the active wallet syncs. A held send in another wallet waits until the user switches.
-  - The parent dies. Every held child dies with it and needs a fresh approval.
-  - Signed transactions at rest are a new thing to store, protect from tampering, and wipe.
-  - The 60 s coin reservation does not cover this. The held send must be registered to hold its
-    coins, which is new core behaviour.
-- DigiDollar and assets: their change is not spendable unconfirmed, so a held child could only
-  be a plain send. The queue would not help the two paths users find most confusing.
-- Tests: all of Design A's, plus process-death, freeze, wallet-switch and wipe cases on devices.
+**Recommendation: reading (i), with reading (ii) as the fallback state.**
 
-### Design C: batch (one transaction, several payments)
+- A queued send is a signed transaction held on the device. This is what makes D1 a real queue.
+- Whenever a held send can no longer go out exactly as signed, it becomes a stored request
+  ("Needs your approval") and takes a fresh review and PIN. It is never rebuilt or re-signed
+  without the user. Section 5.6 lists the cases.
+- One extra guard, because a held send leaves later than it was approved: if the wallet could
+  not work on the queue for a while (app killed, phone off), it does not resume on its own. It
+  asks once, with the PIN (section 5.5, "pause"). How long "a while" is, is owner question 2.
 
-- The user adds several recipients, or the wallet delays a send for a short window and merges
-  the next one into it.
-- One transaction, no chain. Lower total fee.
-- Merging after broadcast is not possible. Inputs are final and full RBF is off. So this needs
-  either a pay-many screen or a deliberate send delay. A delay breaks "sent means sent".
-- Core: the builder already takes several outputs (`core:BRWallet.c:2273-2276`). The
-  prepared-send check assumes one payment plus change and would need a new approved shape
-  (`core:BRPreparedSend.h:27-37`).
-- DigiDollar: the transfer builder has one recipient. Assets: one transfer per transaction.
-  Neither batches.
-- It is a good feature. It does not give the invariant, because a user who sends twice still
-  makes two transactions.
+**What the user sees.** On the confirmation screen, before the PIN: "This send will wait in your
+queue. It goes out when your earlier send has 3 confirmations (about 1 minute)." After the PIN:
+"Queued. 2nd in line." The row shows in the activity list as "Queued".
 
-### The recovery half (every option needs it)
+### 5.2 Which coins a queued send is built on
 
-**R1. Publish parents before children.** The sweep orders by txid today. Order by dependency
-instead. Small, Kotlin only, with the order rule written in `BRStrandedSend.h` so iOS matches.
+The queue is a **chain signed in advance, released one link at a time**.
 
-**R2. Tell the user.** A send with no "taken by a peer" verdict after the first three sweeps
-(about five minutes) shows as "Not sent yet" in the activity list and on its detail screen, with
-"Try again now". Today the Send screen says it once and the row looks like any pending send.
+- A held send is registered in the wallet when it is signed, like any send
+  (`core:BRWalletSend.h:14-15`). Its inputs are spent at once. Its change exists at once. The
+  balance and "Max" are right without any new accounting.
+- The next send is built by the normal selection: confirmed coins first, then the wallet's own
+  unconfirmed change (`core:BRWallet.c:1780-1784`, `:1917-1936`). So a queued send uses free
+  confirmed coins when the wallet has them, and the change of an earlier queued send when it
+  does not. A wallet whose whole balance is one coin can still queue ten payments.
+- Reserving separate confirmed coins for each queued send was the other option. It fails for
+  the common wallet, which has one coin after every send. It is not used.
+- Each queue entry records which earlier entries it spends from. That is read from its inputs.
+- By the time a link is released, the link before it has 3 confirmations. So a released send
+  never has an unconfirmed ancestor. The node limits in section 3 are never approached, and
+  causes 1, 5 and 6 of section 3 (an orphan child) cannot happen to a queued send.
+- The walk that finds "own unconfirmed change" stops at 25 generations
+  (`core:BRWallet.c:1783`). So at most 24 links can be signed ahead on one chain of change.
+  A send queued beyond that is stored as a request and approved at its turn (owner question 3).
+- Old-style inputs (a restored bread-wallet seed) can in theory have their txid altered before
+  confirmation. A link built on such a parent would then be invalid. It is caught by the same
+  check as every other broken link (section 5.6).
 
-**R3. Release automatically on the evidence the wallet already trusts.** Run the stale rule from
-the sweep, not only from the reconcile screen. Same evidence: the pinned node says "not found"
-and every input is unspent there. Removing the root removes the train. The age threshold stays
-one day unless the owner shortens it (Q4). Asset rows are cleaned as the manual pass does today.
+**What "held" needs in the core.** A held send must stay off the network until released. Today
+three paths would leak or publish it:
 
-**R4. Cancel by conflict (the release that needs no trust).** "Cancel this send" builds a
-self-payment that spends one plain DGB input of the stuck send and publishes it. If it confirms,
-the stuck send is dead by the chain's own rule, the existing invalid-hold removes it, and the
-coins are back. If the original confirms instead, nothing is lost but the attempt.
+1. On every connect the peer manager asks peers about each unconfirmed wallet transaction by
+   txid (`core:BRPeerManager.c:1422-1445`). A held send must be left out, as a stemmed one is.
+2. Publishing a transaction also lists its wallet parents for serving
+   (`core:BRPeerManager.c:997-1001`). A held parent must not be listed. Under D1 a released send
+   has no unconfirmed parent, so this is a guard, not a normal path.
+3. The stranded-send sweep republishes every recorded unconfirmed send. A held send is not
+   written to `OutgoingTxStore` until it is released, so the sweep never sees it.
 
-- It never touches an asset or DigiDollar input. It takes a plain DGB fee coin only. An asset
-  input spent by a plain transaction would destroy the asset.
-- It costs one fee and needs its own SpendAuth prompt.
-- Core: a builder that may select an input the wallet holds as spent by one named unconfirmed
-  transaction, and nothing else. This is a new signing path and needs its own KAT with a red arm.
-- The asset layer already reads the abandoned attempt as `CONFLICTED`.
+The core gets a per-wallet "held" set with three calls: register held, release, is held. The
+queue file is the source of truth. The held set is rebuilt from it at wallet load, before the
+peer manager connects. If the mark is ever missing, the worst case is path 1: a txid is asked
+about early. No held send is published by a missing mark, because nothing publishes it.
 
-R1 to R3 are small and reuse rules that already ship. R4 is new signing surface.
+### 5.3 The gate: "3 confirmations of the previous transaction"
 
-## 6. Recommendation
+**The rule.** A send may start only when **no send from this wallet that is already on the
+network has fewer than 3 proven confirmations**. Otherwise it is queued.
 
-**Design A with K = 1, plus R1, R2 and R3, in 4.1.6. R4 designed now, built in the release
-after. Design C later, as a pay-many feature. Design B not built.**
+- "A send from this wallet" is any valid transaction that spends a wallet coin and is not held.
+  A send made on another device with the same recovery phrase counts too, once this wallet sees
+  it.
+- The owner's words say "the previous transaction". This is read as **any new send**, not only
+  a send that spends the previous send's change. So a wallet with many unrelated confirmed
+  coins also sends one payment at a time, about one a minute. Paying twenty people takes about
+  twenty minutes. The answer to that is a pay-many screen (one transaction, many payees), which
+  is History option C and a later feature.
+- A send with nothing ahead of it starts at once, as today. Most sends never see the queue.
+- Receiving is not affected. An incoming payment never closes the gate.
 
-Why:
+**Proven by the wallet's own sync only.** A confirmation counts when the wallet itself matched
+the transaction to a block on its verified header chain. A height a server reported does not
+count. This was the first draft's Q6 and the recommendation stands. A server must not decide
+when the wallet spends.
 
-- It gives the invariant by construction. A send is never built on a parent the network has not
-  taken, and never more than one deep.
-- It is one predicate in one file. Every builder already goes through it.
-- It does not lock more coins than today. A stuck send already holds its inputs. The gate only
-  stops the wallet from building on its change.
-- It leaves signing, SpendAuth and the seed-key window exactly as they are.
-- "Sent" keeps meaning sent. Nothing is held back from the network.
-- No fee rule is needed in the gate: the builder cannot go below the relay floor (section 3).
-- 15-second blocks make the wait short when the network is healthy. When it is not, waiting is
-  the right answer.
+- The core cannot tell the two apart today (section 1.7). It needs one new bit per transaction,
+  "height proven", set by the proven update path only, and set even when the height was already
+  there from a server. And one accessor: proven confirmations of a transaction
+  (`tip - height + 1`, or 0).
+- Cost: when sync is wedged, the queue does not move. That is D2. The user is told the wallet
+  is catching up, not that anything failed.
 
-Order of work: core rule and KAT first (red arm proves it), then the accessor and the Send
-screen, then R1, R2, R3. Core lands on its `develop` before the app pin moves.
+**Reorgs.**
 
-## 7. Questions only the owner can answer
+- The previous send drops below 3 confirmations before the next was released: the gate closes
+  again and the next waits. The core already marks transactions unconfirmed after a reorg
+  (`core:BRWallet.c:3084-3105`), and that clears the proven bit.
+- The previous send is reorganised out after the next was released: both are valid and both
+  are on the network. The sweep republishes them, parent first (section 6.1). This needs a
+  reorg at least 3 deep and is rare.
+- 3 is the owner's number. It is one constant in one core header.
 
-1. **How deep may a chain go (K)?** 0 means confirmed coins only. 1 means one send on top of
-   one waiting send. 3 is looser. *Recommended: 1.*
-2. **Must the parent have been taken by a peer before its change is used?** *Recommended: yes.
-   Without it K = 1 still lets a child sit on a parent that went nowhere.*
-3. **When coins are waiting, wait or offer a way through?** The screen can only wait, or it can
-   offer "send anyway" behind a warning. *Recommended: wait only. No override. An override is the
-   train again.*
-4. **How old must a never-relayed send be before the wallet releases it on its own?** One day
-   today, and only by hand. *Recommended: make it automatic and keep one day for 4.1.6. Shorten
-   it only after R4 exists, because a wrong early release can lead to paying twice.*
-5. **Build "Cancel this send" (R4)?** It is the only release that does not rest on one node's
-   answer, and it is a new signing path. *Recommended: yes, in the release after 4.1.6, with its
-   own review.*
-6. **May a confirmation reported by the pinned node (not yet proven by the wallet's own sync)
-   open the gate?** It helps when sync is wedged. It also lets a server influence what the
-   wallet spends. *Recommended: no for 4.1.6. Proven confirmations only.*
-7. **Should a "Not sent yet" send raise a notification, or only show in the app (R2)?**
-   *Recommended: in the app only. No notification for 4.1.6.*
-8. **Show two figures on the home screen (balance and available now), or only on Send?**
-   *Recommended: only on Send, and only when they differ.*
-9. **Is the same rule wanted on iOS at the same time?** The rule lives in the shared core, so
-   iOS gets the selection change with the pin. Its Send screen text is separate work.
-   *Recommended: yes, core rule together; iOS text when that screen is next touched.*
-10. **Budget for device test sends on the Note 8 for this item?** The tests need about 30 small
-    sends. *Recommended: approve 30 sends of dust-safe amounts between the mule's own addresses.*
+### 5.4 Where the queue lives
 
-## 8. Things this draft did not verify
+- **One file per wallet and network.** Base name `send_queue`, added to
+  `WalletStores.WALLET_AND_NETWORK_FILES` (`kt:wallets/WalletStores.kt:16-17`). The name is
+  resolved by `WalletStores.fileName`, so the legacy wallet gets `send_queue.bin` and
+  `send_queue_testnet.bin`, and wallet `<id>` gets `send_queue_<id>.bin` and
+  `send_queue_<id>_testnet.bin`. Written through `.bin.tmp` and a rename, like its neighbours.
+- It is a file, not SharedPreferences. Signed transactions as hex strings in a prefs map would
+  be pinned in memory, which is the leak `dgb_sync_data` had.
+- The eraser reads the same list, so the **full wipe** erases every wallet's queue on both
+  networks, and **removing a wallet** erases that wallet's. Both get a test that fails if the
+  name is missing from the list.
+- The app is not backed up (`app/src/main/AndroidManifest.xml:22-24`), so the file does not
+  leave the device.
+- **What an entry holds.** Its place in line. Its kind (DGB, DigiDollar, asset). The request:
+  payee, amount, asset id. The signed bytes and their txid, when it is held. Its state. The
+  entries it spends from. When it was approved.
+- **Tampering.** Signed bytes cannot be changed without breaking the signature, and the release
+  step re-reads payee and amount from the bytes, never from the stored fields. A stored request
+  has no signature, but it is never sent as stored: the user sees it in full on the review
+  screen and approves it with the PIN.
+- **A restore** starts with an empty queue. The queue is not part of the recovery phrase. A
+  held send that was never released does not exist anywhere else.
 
-- That DigiByte Core counts the transaction itself in the ancestor limit of 25 (taken from
-  Bitcoin Core's meaning). Needs a regtest run.
+**What survives what.**
+
+| Event | The queue |
+|---|---|
+| Auto-lock, app in background | Keeps moving. Release needs no key (section 1.7). |
+| Process death, reboot | Kept on disk. Held sends are registered again at load. Resumes, unless the pause rule applies. |
+| App update | Kept. The file has a version number. An entry the new version cannot read is shown as "Needs your approval", never dropped. |
+| Rescan | Kept. A rescan does not remove unconfirmed sends. |
+| Rebuild from chain | The wallet's local transactions are discarded (`kt:WalletManager.kt:838-859`). Held sends are registered again from the file. One whose coins are gone becomes "Needs your approval". |
+| Wallet switch | Kept, and stopped. Only the active wallet syncs today (multi-wallet step 1). Before switching, the wallet says: "3 sends are still waiting in this wallet. They will not go out until you switch back." |
+| Wallet removal, full wipe | Erased. |
+
+### 5.5 Who releases the next send
+
+One function, `releaseNext`, with one lock so two callers cannot release at once. It:
+
+1. Stops if the wallet is not at the chain tip, or the pause rule applies.
+2. Asks the core whether the gate is open (section 5.3).
+3. Takes the first entry in line. Checks it can still go out as signed (section 5.6).
+4. Writes "releasing" to the file, records it in `OutgoingTxStore`, clears its held mark, and
+   publishes it through `Broadcaster.broadcast`. Publishing the same bytes twice is harmless, so
+   a crash between any two of these steps is safe.
+
+Its callers:
+
+- **`SyncService`**, on every transaction update from the core and on the 90-second sweep tick.
+  This is the normal path while the app is open, locked or not.
+- **The app coming to the foreground.**
+- **`SyncWorker`**, in its 30-second window every 15 minutes
+  (`app:service/SyncWorker.kt:27-28`, `:181`). It can release at most one send per run. So with
+  the app in the background and the service gone, the queue moves at most one send per quarter
+  hour.
+
+**Staying alive while there is work.** `SyncService` drops its foreground notification after
+sync. While the queue has entries that can be released, it keeps the foreground notification:
+"Sending queued payments: 2 of 5". It is a `dataSync` service already
+(`app/src/main/AndroidManifest.xml:37`). This is owner question 4. On phones that freeze
+background apps hard (the wedge class (c) in CLAUDE.md), the queue can still stall in the
+background. It continues when the app is opened. The wording never promises a time.
+
+**The pause rule.** The queue file keeps the time `releaseNext` last ran at the tip. If more
+than the pause limit has passed since then, the queue is paused. The wallet shows "Your queue
+was paused. 3 sends are waiting." with one button, "Resume", behind the PIN or biometric. One
+prompt resumes the whole queue. So a phone that was off for a day does not start paying people
+the moment it is opened. Recommended limit: 30 minutes (owner question 2).
+
+### 5.6 A queued send that cannot go out as signed
+
+Before a release the wallet asks the core: is this transaction still valid, are all its inputs
+still unspent by anything else, and does every input have at least one proven confirmation?
+If not, the entry becomes **"Needs your approval"**. Its request is kept. Its signed bytes are
+discarded and the core removes it. The causes:
+
+| Cause | What happens |
+|---|---|
+| An earlier queued send was removed by the user | Every held send that spends its change is removed with it by the core (`core:BRWallet.c:2768-2803`). Each becomes "Needs your approval". Sends that do not depend on it stay signed. |
+| An earlier started send was cancelled (section 6.4) | The same. |
+| An earlier send was reorganised out and did not return | The same, found by the check above. |
+| Its coins were spent on another device | The same. |
+| A parent confirmed under a different txid | The same. |
+| It was queued past the 24-link limit | It was stored as a request from the start. |
+| The queue was paused | Nothing is discarded. The signed sends resume after one PIN. |
+
+"The previous send's change differs" cannot happen while the bytes are held: a signed
+transaction's outputs are fixed. If the parent is replaced by anything else, the child is
+invalid and lands in the table above.
+
+When the user opens a "Needs your approval" entry, it goes through the normal review. If the
+balance no longer covers it, the review says so in plain words: "You no longer have enough for
+this send. 120 DGB short." The user can change the amount or remove it. The queue does not wait
+for it: later entries that do not depend on it carry on.
+
+### 5.7 The same rule for the other send types
+
+**DigiDollar.**
+
+- The gate applies. A DigiDollar send is a send from this wallet.
+- Holding one needs a bridge change: today one native call builds, signs and publishes
+  (`jni:jni_transaction.c:1121`, `kt:TransactionBuilder.kt:380`). It is split into "build
+  and sign, register held" and "release".
+- A DigiDollar send is always pending in the core, so none of its outputs can be spent until it
+  confirms (section 1.3). A second DigiDollar send queued behind it usually needs that change.
+  It then cannot be signed ahead. It is stored as a request and approved at its turn.
+- The $1.00 minimum per output, change included, and the 0.1 DGB fee are untouched. They are
+  checked when the send is built, as today.
+
+**DigiAssets.**
+
+- The gate applies.
+- Asset sends already sign and publish in two steps (`kt:asset/AssetManager.kt:3266-3283`), so
+  holding one is a Kotlin change.
+- The transfer-rule gate runs at signing, as today: only `TransferRuleState.NONE` is signed
+  (`kt:asset/AssetManager.kt:3129-3131`). It is not loosened and not skipped. An entry that
+  needs approval again goes through the whole gate again.
+- Implicit change to the last output is inside the signed bytes, and held bytes never change.
+- A plain queued send can never take an asset coin. Selection leaves asset-held outputs out
+  (`core:BRWallet.c:1813-1814`, `:1832-1855`), and a held asset send is pending, so its outputs
+  are in no coin list at all.
+- Unconfirmed asset change is not a holding (`kt:asset/AssetManager.kt:1761-1783`). A second
+  transfer of the same asset queued behind the first is stored as a request.
+- When a held asset send is removed without ever being sent, its rows are cleaned the way a
+  dead send's are (`clearDeadAssetSend`, `app:service/SyncService.kt:3808-3817`). If it is
+  approved again, the abandoned attempt reads `CONFLICTED` and is not counted twice.
+
+**Sweep and recovery.**
+
+- A legacy sweep spends coins that are not wallet coins and pays the wallet. It is not a send
+  from this wallet. It is not queued and it does not close the gate. The swept coins cannot be
+  spent until the sweep confirms, as today (section 1.5).
+- The asset recovery move already waits for its own split to confirm
+  (`kt:recovery/ForeignAssetTransferService.kt:117-122`). It is left as it is. Whether its
+  inputs are ever wallet coins was not traced (section 9).
+- These flows keep their own PIN gates.
+
+**Digi-ID.** Not a transaction. Never queued. Never blocked by the queue.
+
+**Dandelion.**
+
+- A release goes through `Broadcaster.broadcast` like any send, stem or flood by the user's
+  setting.
+- Cause 5 of section 3 (parent and child stemmed to different peers) cannot happen. The child
+  is released when the parent is 3 blocks deep.
+- A stem that dies with the process is recovered by the sweep, as today.
+
+### 5.8 What the user sees
+
+All text below ships in all 13 languages in the same commit as the screen that shows it. The
+wording is a proposal. Translations are machine-assisted and need the usual note.
+
+**Queueing a send.** The Send screen works as today. When the gate is closed, the review screen
+adds one line and the button changes:
+
+- Line: "Your earlier send is still confirming. This send will wait in your queue and go out
+  after it (about 1 minute)."
+- Button: "Add to queue" instead of "Send".
+- After the PIN: "Queued. 2nd in line."
+
+**The Send screen while something is waiting.** A banner at the top: "1 send confirming, 2
+waiting." Tapping it opens the queue. The balance and Max already leave out everything in the
+queue. There is no "send anyway" (D2).
+
+**The queue list.** One screen, reached from the banner and from the wallet screen.
+
+- First row: the send that is on the network. "Confirming: 1 of 3."
+- Then each queued send in order: payee, amount, and its state. "Queued", "Needs your
+  approval", or "Paused".
+- **Remove.** Any queued send can be removed before it starts. No fee and nothing goes on the
+  network. The dialog says what else is affected: "Removing this also returns 2 later sends for
+  approval, because they were built on it." No PIN is asked: removing spends nothing (owner
+  question 6).
+- **Reorder.** Not in 4.1.6. The signed sends are tied to their order. Moving one would return
+  every send after it for approval. Remove and add again does the same job (owner question 5).
+
+**Notifications.** No payee and no amount in any notification text.
+
+- While the queue is working: the ongoing service notification, "Sending queued payments: 2 of
+  5".
+- When the user is needed: "A queued send needs your approval." Also for a paused queue and for
+  a stuck send (section 6.2). Once per event, not repeated.
+- When the queue is empty: "All queued sends are confirmed." (owner question 7).
+
+**The activity list.** A held send is a row marked "Queued". It turns into the normal pending
+row when it is released.
+
+## 6. A send that does not confirm, and "Cancel this send"
+
+A queue waits for ever behind a first send that never reached a node. So this half is required,
+not optional.
+
+### 6.1 Republish parents first
+
+- Today the sweep works in txid order, and each send has its own schedule: three sweeps in a
+  row, then once an hour (`app:service/StrandedSendSelector.kt:108`, `:116`). A parent on its
+  hourly hold is not in the list when its child is retried (critique point 7).
+- New rule: **republishing a send republishes its unconfirmed wallet ancestors first, in the
+  same sweep, whatever their own schedule says.** The 15-second wait after each publish
+  (`app:service/SyncService.kt:3851`) is taken once for the group, not once per transaction.
+- The rule goes in `core:BRStrandedSend.h` so iOS follows it.
+- Under D1 a new send has no unconfirmed parent. This rule is for what is left: trains made by
+  older versions, a second device, and a reorg.
+- The one-line walk fix from critique point 12 (25 to 24, section 1.1) ships with it.
+
+### 6.2 Say so, and only when it is true
+
+- A send is shown as **"Not confirmed yet"** when all of these hold: the wallet is at the chain
+  tip; at least 20 blocks (about 5 minutes) have passed at the tip since the send was started
+  or since this wallet reached the tip, whichever is later; and it has no confirmation.
+- It does not use the publish verdict. The verdict is lost on restart and proves little
+  (section 2). It uses the chain, which the wallet verifies itself. This answers critique point
+  8: a wallet that is behind the tip says "Catching up", never "not sent".
+- The words do not deny the payment: "This send has not confirmed yet. It may not have reached
+  the network." Not "Not sent".
+- The row and the queue list offer three actions:
+  - **Try again.** Republish now, parents first.
+  - **Cancel this send** (section 6.4).
+  - **Check with the network.** The existing manual check on the reconcile screen. Shown only
+    when the default endpoint is in use, since the check answers only there.
+- The queue list says why the rest is waiting: "Your later sends are waiting for this one."
+- One notification, once.
+
+### 6.3 No automatic release in 4.1.6
+
+The first draft proposed running the stale-send rule from the sweep, so a send the pinned node
+does not know is removed on its own after a day. This design does **not** do that.
+
+- It would send a stuck send's txid and inputs to the default endpoint with no user action.
+  Today that happens only when the user opens the reconcile screen. It is a change to the data
+  path on a sovereignty-first roadmap (critique point 6).
+- It does nothing for a user with a custom endpoint, and its clock may never start for the
+  sends it is meant for (critique point 5; section 2.2 item 3).
+- One server's answer would decide when coins come back, with nobody watching.
+- Cancel gives the exit that needs no server.
+
+The manual check stays where it is and is linked from the stuck send (section 6.2). The cost of
+this choice: a user who never opens the app is never unstuck automatically. With D2 that is the
+intended behaviour. This is owner question 1.
+
+### 6.4 Cancel this send
+
+**What it is.** A payment from the wallet to itself that spends the same coins as the stuck
+send. Only one of the two can ever confirm. If the cancel confirms, the stuck send is dead by
+the chain's own rule.
+
+**When it is offered.** On a send in the "Not confirmed yet" state, and only on the **oldest**
+unconfirmed send of a chain. Cancelling it cancels everything built on it. It is not offered on
+a send that is merely seconds old.
+
+**What it cannot do.** If a node already accepted the original, nodes refuse the cancel:
+replacement is off on DigiByte (section 3). Then the original confirms and the cancel dies. The
+dialog says so before the PIN: "Cancelling works only if the network has not accepted this
+send. If it already has, the send will confirm and the cancel does nothing. The cancel costs a
+network fee." The fee itself is shown as a figure, from the built transaction.
+
+**How it works in the core.** Critique point 9 showed the first draft's version cannot be
+published: a transaction that spends what an earlier unconfirmed one spends is ordered second,
+marked invalid (`core:BRWallet.c:417-431`), and refused by the peer manager
+(`core:BRPeerManager.c:5133-5140`). The critique proposed changing the conflict order. This
+design does something smaller and leaves the order alone:
+
+1. **Plan.** A new core call takes the stuck send's txid. It lists the inputs the cancel may
+   spend. An input qualifies only if all of these hold: the wallet owns the output; the output's
+   transaction has a proven confirmation; the output is not asset-held, not ONE-FAMILY-held,
+   not a DigiDollar output, and is signable; and asset detection has run to completion, the
+   same preflight a review runs before it builds anything (`SpendPreflight.completed`,
+   `kt:TransactionBuilder.kt:349-351`). These are
+   the conditions of normal selection (`core:BRWallet.c:1812-1818`), asked of an outpoint the
+   wallet currently holds as spent. **An input that cannot be classified is refused.** A wrong
+   "plain" would destroy an asset. For a DigiDollar or asset send this leaves only its DGB fee
+   coins. If no input qualifies, the send cannot be cancelled and the screen says so.
+2. **Build.** Those inputs, one output to a new change address of this wallet, the default fee
+   rate. If what is left after the fee is below the dust limit, cancel is refused.
+3. **Approve and sign.** The user sees the fee and what comes back, and gives the PIN or
+   biometric. Cancel signs and pays a fee, so it is a spend and takes the same gate as a send.
+4. **Swap.** One core call, under the wallet lock where it can be: check that the cancel spends
+   only inputs of the named send and pays only this wallet's addresses; remove the named send
+   and everything built on it; register the cancel. If the cancel is not accepted, the original
+   is registered again. After this the cancel is an ordinary valid send. The peer manager
+   serves it and the sweep republishes it with no special case.
+5. **Publish** by the user's Dandelion setting.
+
+**What decides the outcome.** The chain (section 1.7).
+
+- The cancel confirms. The original can never confirm. Its coins are back, less one fee.
+- The original confirms after all. It arrives in a block, sorts before the unconfirmed cancel,
+  and the cancel becomes invalid. The existing ten-minute invalid hold removes it
+  (`app:service/SyncService.kt:3790-3824`). The send shows as confirmed, with a note: "This send
+  had already been accepted. It was not cancelled."
+- A peer relays the original unconfirmed. It is ordered after the cancel and marked invalid in
+  this wallet. Nothing is published for it. The chain still decides.
+
+**Kotlin side.**
+
+- The original's record in `OutgoingTxStore` is marked "cancel requested" and leaves the
+  sweep's working set. The sweep must never republish a send the user cancelled. The record is
+  kept so the row comes back with its payee if the original confirms.
+- An asset send's rows are cleaned as for a dead send. A re-send reads the old attempt as
+  `CONFLICTED`.
+
+**What cancelling does to the queue.**
+
+- Held sends built on the cancelled send's change are removed with it and become "Needs your
+  approval" (section 5.6). Held sends built on other coins stay.
+- The cancel is now "the previous transaction". Nothing else starts until **the cancel** has 3
+  proven confirmations.
+- This is what makes cancel safe against paying twice. The user cannot pay the same person
+  again until the cancel is 3 blocks deep, and by then the original is dead.
+
+**Removing a queued send is not this.** A send that never started is removed for free (section
+5.8). Cancel is only for a send that is already on the network, or was meant to be.
+
+## 7. Build plan
+
+### 7.1 Core and Kotlin
+
+**In the shared core** (so iOS gets the same rules):
+
+- `BRSendQueue.h`, header-only policy. The number 3. The gate rule. The pre-release check. The
+  pause rule. The "Not confirmed yet" rule (20 blocks at the tip). The entry states and which
+  state follows which event.
+- `BRWallet`: the "height proven" bit and the proven-confirmations accessor. The held set
+  (register held, release, is held). "Is the gate open" as one call under the wallet lock.
+- `BRPeerManager`: leave held sends out of the unrelayed-transaction request and out of the
+  parents listed for serving.
+- `BRWallet`: the cancel plan and the cancel swap.
+- `BRStrandedSend.h`: ancestors first. `BRWallet.c:1783`: 25 becomes 24.
+
+**In the Android bridge and Kotlin:**
+
+- JNI for the calls above. The table generator runs with `--check` in CI
+  (`docs/development-process.md` rule 6).
+- `SendQueueStore` (the file), the `WalletStores` list entry, eraser and removal tests.
+- The queue engine: enqueue in place of publish when the gate is closed, `releaseNext`, load at
+  start, the pause rule, the wallet-switch warning.
+- The DigiDollar call split in two. The asset send's hold step.
+- `SyncService`, `SyncWorker` and foreground callers. The foreground notification.
+- Screens: review line and button, banner, queue list, activity rows, stuck state, cancel
+  dialog. Strings in 13 languages. Each new screen added to `COVERED` in
+  `OnboardingHardcodedStringTest`.
+
+### 7.2 Pull requests, in order
+
+Every one that touches what is signed, held, released, cancelled or erased is **owner-gated**:
+the owner reviews it before merge, whatever the independent review says. Only the last is not.
+
+| # | Repo | What | Owner-gated |
+|---|---|---|---|
+| 1 | core | `BRSendQueue.h` policy and its KAT | Yes |
+| 2 | core | Proven bit, proven confirmations, held set, gate call, peer manager exclusions | Yes |
+| 3 | app | Core pin, JNI, `SendQueueStore`, `WalletStores` entry, wipe and removal coverage | Yes |
+| 4 | app | Queue engine for plain DGB sends, `releaseNext` and its callers, pause rule | Yes |
+| 5 | app | Send screen, queue list, activity rows, strings in 13 languages | Yes (it changes what "Send" does) |
+| 6 | core, then app | Ancestors-first republish, the 25 to 24 fix, "Not confirmed yet" state | Yes |
+| 7 | core | Cancel plan and cancel swap, with KAT | Yes |
+| 8 | app | Cancel this send: flow, dialog, PIN gate, store marking, asset cleanup | Yes |
+| 9 | core bridge, then app | DigiDollar and DigiAsset sends in the queue | Yes |
+| 10 | app | Notifications and the foreground service while the queue works | No (independent review and green CI) |
+
+After PR 5 the plain DGB queue works end to end. PRs 6 to 8 must be in the same release: a
+queue without the stuck half can stall for ever. PR 9 can follow them. Until PR 9, a DigiDollar
+or asset send while the gate is closed is refused with "Wait for your earlier send to confirm",
+never sent early. Core lands on its `develop` before each app pin moves.
+
+### 7.3 Tests
+
+Every new gate is seen red on the unfixed code first, and the PR says how.
+
+**Host KATs (core).**
+
+- `send_queue_policy_kat`: gate open and closed at 0, 1, 2, 3 confirmations; a server-reported
+  height does not open it; a reorg closes it again; held sends do not close it; the pause rule;
+  the 20-block rule. Red arms: 2 confirmations accepted; an unproven height accepted.
+- `held_send_kat`: a held send's coins are spent; its change is selectable for the next link;
+  it is not in the unrelayed request; it is not listed as a parent; release clears the mark;
+  removing a link removes its dependants and no others; the 24-link limit. Red arm: held mark
+  ignored by the peer manager.
+- `cancel_send_kat`: a cancel of a plain send; of an asset send (fee coin only); of a
+  DigiDollar send; refused when an input is asset-held, unclassified or unconfirmed; refused
+  when an output is not the wallet's; the swap leaves a valid, publishable cancel; the original
+  arriving confirmed makes the cancel invalid; the cancel confirming keeps the original out.
+  Red arms: an asset input accepted; a non-wallet output accepted.
+- `stranded_send_kat` extended: ancestors first. Red arm: txid order.
+- Existing selection, prepared-send, coin-reservation and stale-send KATs stay green.
+
+**Unit tests (Kotlin).**
+
+- `SendQueueStore`: round trip, torn write, unknown version, a stored field that disagrees with
+  the bytes.
+- Engine: enqueue, release order, single release under two callers, crash between each pair of
+  release steps, every row of the table in 5.6, pause and resume.
+- Wipe and wallet removal erase the queue for every network; fails if the name is unlisted.
+- `OutgoingTxStore`: a cancelled send is never selected for republish.
+- View models; `LocaleResourceParityTest`; `OnboardingHardcodedStringTest`.
+- Before each commit: the full core and app unit suites with `--continue`.
+
+**Device sends (Note 8 mule, small amounts between its own addresses).** About 40 sends.
+
+1. Five sends queued as fast as the screen allows from a one-coin wallet. Expected: never more
+   than one unconfirmed on the network; each starts after the one before has 3 confirmations;
+   all confirm.
+2. The same with Dandelion on.
+3. Queue three, lock the app. Expected: the queue finishes.
+4. Queue three, force-stop, reopen after 2 minutes and after 40 minutes. Expected: resumes; and
+   paused with one PIN.
+5. Queue three, remove the second. Expected: the third asks for approval.
+6. Network cut right after the first send; wait for "Not confirmed yet"; Try again with the
+   network back.
+7. Cancel a send that never reached a node (network cut at send, then restored for the
+   cancel). Expected: the cancel confirms; the original never does; the queue continues after
+   the cancel has 3 confirmations.
+8. Cancel a send that did reach the network. Expected: the original confirms; the cancel dies.
+9. A DigiDollar send and an asset send behind a DGB send. Expected: each waits its turn. One of
+   the test assets must be an unruled one; a rule-bound one must still be refused.
+10. Switch wallet with a queue waiting. Expected: the warning, and nothing sent until back.
+
+The pre-publish suite sends no coins, so it cannot cover this. It gets one scenario check at
+most: the queue screen opens empty.
+
+### 7.4 What iOS gets
+
+From the shared core, with the pin: the gate rule and its number, the proven-confirmation
+accessor, the held set, the peer manager exclusions, the pre-release check, the pause rule, the
+cancel plan and swap, ancestors-first republish, and all the KATs.
+
+iOS still has to build: its own queue file and wipe coverage, its own release loop, the screens
+and strings. iOS gives a background app far less time than Android. There the queue will move
+only while the app is open, and the wording must say so.
+
+## 8. Questions for the owner
+
+D1 to D3 answered the first draft's questions 1, 2, 3, 5 and 6. These are what is left.
+
+1. **Automatic release of a never-confirmed send by asking the default node: yes or no?**
+   *Recommended: no in 4.1.6.* Cancel is the exit. The manual check stays on the reconcile
+   screen and is linked from the stuck send. Yes would mean the default endpoint learns of stuck
+   sends with no user action (section 6.3).
+2. **How long may the queue sit unworked before it pauses and asks for the PIN to resume?**
+   *Recommended: 30 minutes.* Shorter is safer and asks more often. "Never pause" means a phone
+   switched on after a week sends what was queued a week ago.
+3. **Is it acceptable that only the first 24 queued sends on one chain of change are signed
+   ahead, and later ones ask for approval at their turn?** *Recommended: yes.* The alternative
+   is a core change to the selection walk for a case few users will meet.
+4. **Keep the foreground notification ("Sending queued payments: 2 of 5") while the queue is
+   working?** *Recommended: yes.* Without it Android may stop the service and the queue moves
+   one send per 15 minutes at best.
+5. **Reorder queued sends?** *Recommended: not in 4.1.6. Remove only.* Reordering returns every
+   later send for approval.
+6. **Ask for the PIN to remove a queued send that has not started?** *Recommended: no.* It
+   spends nothing. A confirm dialog is enough. Cancel (which signs) always asks.
+7. **A notification when the queue has finished?** *Recommended: yes, one line, no amounts.*
+8. **When is "Not confirmed yet" shown?** *Recommended: after 20 blocks at the tip (about 5
+   minutes).* Cancel is offered from the same moment.
+9. **DigiDollar and DigiAsset sends in the queue in 4.1.6, or one release later?**
+   *Recommended: in 4.1.6 if PR 9 is ready; otherwise they wait with a clear message and are
+   never sent early.* The rule (D1) applies to them from the first PR either way.
+10. **Does a send made on another device with the same phrase close the gate here?**
+    *Recommended: yes.* It is a send from this wallet. The cost is that this device waits for a
+    send it did not make.
+11. **iOS at the same time?** *Recommended: the core rules together, with the pin. The iOS
+    queue screens when that work is scheduled.*
+12. **Budget for device test sends on the Note 8.** *Recommended: approve 40 sends of small
+    amounts between the mule's own addresses, plus one DigiDollar and two asset sends.*
+
+## 9. Not verified
+
+- Nothing was built, run or sent. No KAT, no unit test, no device, no emulator. Every statement
+  about the code is from reading the cited lines.
+- That a confirmed original displaces an unconfirmed cancel was read from the ordering code
+  (`core:BRWallet.c:161-162`, `:224`, `:417-431`). It was not run. `cancel_send_kat` must show
+  it before cancel is relied on.
+- That a later proven update leaves no trace over a server-reported height (`:3033`) was read,
+  not run.
+- Whether asset detection can classify an outpoint the wallet holds as spent, which the cancel
+  plan needs. `BRWalletUtxoIsAsset` is asked of unspent outputs today.
+- Whether the asset recovery move ever spends wallet coins. If it does, it must take the gate.
+- Whether the stale rule's clock starts for a send that went nowhere (critique point 5b). Not
+  needed by this design, since the rule stays manual.
 - Section 4 is from memory.
-- Whether a height reported by a server makes a coin "confirmed" for selection today. The code
-  reads that way (`core:BRWallet.c:1782`, `:2757-2765`). It matters for Q6 and should be measured.
-- No device or emulator was used. No transaction was built or sent.
-- The September note calls the home node blocksonly. Today it reports `localrelay: true`. One of
-  the two is out of date.
+- The 8.22.2 policy column.
+- The September note calls the home node blocksonly. Today it reports `localrelay: true`. One
+  of the two is out of date.
+- The 13 translations. None exist yet. Cancel and queue wording need a native reader before
+  they are called done.
 
-## Critique (independent)
+## 10. History: the options the first draft weighed
+
+The first draft (2026-11-22, earlier the same day) set out three designs and recommended the
+first. The owner's decisions replaced that recommendation. **Design A, the chain gate,** changed
+coin selection so the wallet's own unconfirmed change could be spent only when a peer had taken
+the parent and the chain was at most one deep; the critique showed its evidence rule proved
+nothing and could hold a whole balance after a restart. **Design B, a queue,** came in two
+shapes: B1 signed later, which cannot honour the PIN rule without the user present, and B2
+signed at approval and held the bytes, which the draft advised against because a frozen app
+would leave a "queued" send unsent. The design above is B2, with the pieces that answer that
+objection: the pause rule, the foreground notification, wording that never promises a time, and
+a fallback to a fresh approval. **Design C, batching,** puts several payees in one transaction;
+it removes the chain for a user who plans ahead and does nothing for one who sends twice. It is
+still a good later feature and is the real answer to "one payment a minute". The recovery items
+R1 to R4 became sections 6.1 to 6.4; R3 (automatic release) was dropped.
+
+## 11. History: critique of the first draft
+
+The independent critique is kept below as written. Its section and design names refer to the
+first draft. First, how this revision answers each point:
+
+1. **"Taken by a peer" proves nothing.** Accepted. Corrected in section 2. No rule in this
+   design uses relay evidence; the gate uses proven confirmations.
+2. **`txRequests` misread.** Accepted. Corrected in section 2. The mark it fed is gone.
+3. **Strong evidence exists.** Recorded in section 2. Not used: confirmations are stronger.
+4. **The gate locks more coins.** Accepted; the claim is gone with Design A. Under D1 the
+   waiting is the owner's rule and is shown to the user. A wedged sync stops the queue, and the
+   screen says the wallet is catching up (section 5.3).
+5. **The stale release misses custom endpoints and may never start its clock.** Accepted. The
+   automatic release is dropped (section 6.3). The gaps are recorded in section 2.2.
+6. **The stale release becomes an automatic query.** Accepted. Same answer. Owner question 1.
+7. **Ordering alone does not put parent before child.** Accepted. The rule is now "a republish
+   republishes its unconfirmed ancestors first", with one wait for the group (section 6.1).
+8. **"Not sent yet" could be said of a confirmed send.** Accepted. The state is shown only at
+   the tip, is driven by blocks and not by the verdict, and its words do not deny the payment
+   (section 6.2).
+9. **The cancel could not be published; "plain" must be proven.** Accepted. The cancel replaces
+   the original in the wallet instead of outranking it, so no conflict-order change is needed,
+   and an unclassified input is refused (section 6.4).
+10. **DigiDollar and asset senders got the gate without the message.** Accepted. Both go through
+    the queue with the same screens, or are refused with a clear message until PR 9
+    (sections 5.7, 7.2). The "waiting" figure is not read from the coin set.
+11. **An approved send could be refused after the PIN.** The in-memory mark is gone. A held
+    send that fails its pre-release check becomes "Needs your approval" (section 5.6).
+12. **The off-by-one is real.** Accepted. Corrected in section 1.1. The fix ships with PR 6.
+13. **A simpler rule.** Overtaken by D1. Its part (b), ancestors first, is section 6.1.
+14. **Small corrections.** Applied in sections 2 and 3.
+
+### The critique as written
 
 Method: every cited line was opened in the same sources the draft used (`origin/develop`
 `5bfcfe891`, core `8014392`). Node policy was read from the local node (`digibyte-cli`,
