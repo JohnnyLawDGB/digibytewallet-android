@@ -982,7 +982,7 @@
     <!-- RECONCILE-SCREEN-I18N: the rest of the Scan for missing funds screen. A stuck-send result is one
          sentence from up to four parts; each part after the first starts with its own separator. -->
     <string name="reconcile_what_title">What this does</string>
-    <string name="reconcile_trust_notice">This queries an external node. The default endpoint is api.digiscope.me (cert-pinned). For full sovereignty, point it at your own node below — no tx credentials ever leave your device, we only send public addresses.</string>
+    <string name="reconcile_trust_notice">This queries an external node. The default endpoint is api.digiscope.me (cert-pinned). For full sovereignty, point it at your own node below — no keys or transaction credentials ever leave your device, we only send public addresses.</string>
     <string name="reconcile_endpoint_title">Node endpoint</string>
     <string name="reconcile_endpoint_reset">Reset to default</string>
     <string name="reconcile_scanning">Scanning…</string>
