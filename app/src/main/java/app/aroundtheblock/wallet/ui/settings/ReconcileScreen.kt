@@ -22,10 +22,13 @@ import androidx.navigation.NavController
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import app.aroundtheblock.wallet.R
 import app.aroundtheblock.wallet.core.asset.AssetManager
 import app.aroundtheblock.wallet.core.reconcile.ChainReconciliationService
+import app.aroundtheblock.wallet.core.reconcile.ChainReconciliationService.Failure
+import app.aroundtheblock.wallet.core.reconcile.ChainReconciliationService.Stage
 import app.aroundtheblock.wallet.core.reconcile.DgbNodeClient
 import app.aroundtheblock.wallet.core.reconcile.ClassTotal
 import app.aroundtheblock.wallet.core.reconcile.ScanClass
@@ -86,10 +89,10 @@ fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Scan for missing funds", color = Color.White) },
+                title = { Text(stringResource(R.string.set_scan_funds), color = Color.White) },
                 navigationIcon = {
                     IconButton(onClick = { navController.popBackStack() }) {
-                        Icon(Icons.Default.ArrowBack, "Back", tint = Color.White)
+                        Icon(Icons.Default.ArrowBack, stringResource(R.string.common_back), tint = Color.White)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -122,7 +125,7 @@ fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
                         )
                         Spacer(Modifier.width(10.dp))
                         Text(
-                            "What this does",
+                            stringResource(R.string.reconcile_what_title),
                             color = Color.White,
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 16.sp
@@ -157,10 +160,8 @@ fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
                     )
                     Spacer(Modifier.width(10.dp))
                     Text(
-                        "This queries an external node. The default endpoint is " +
-                        "api.digiscope.me (cert-pinned). For full sovereignty, " +
-                        "point it at your own node below — no tx credentials ever " +
-                        "leave your device, we only send public addresses.",
+                        // What leaves the device, and to whom: a disclosure, so it is in every language.
+                        stringResource(R.string.reconcile_trust_notice),
                         color = Color(0xFFFFCC66),
                         fontSize = 12.sp,
                         lineHeight = 17.sp
@@ -174,7 +175,7 @@ fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
             ) {
                 Column(Modifier.padding(16.dp)) {
                     Text(
-                        "Node endpoint",
+                        stringResource(R.string.reconcile_endpoint_title),
                         color = Color.White,
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 15.sp
@@ -198,12 +199,12 @@ fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
                             TextButton(onClick = {
                                 client.setCustomEndpoint(endpoint)
                                 editingEndpoint = false
-                            }) { Text("Save") }
+                            }) { Text(stringResource(R.string.ni_save)) }
                             TextButton(onClick = {
                                 client.setCustomEndpoint(null)
                                 endpoint = DgbNodeClient.DEFAULT_BASE_URL
                                 editingEndpoint = false
-                            }) { Text("Reset to default") }
+                            }) { Text(stringResource(R.string.reconcile_endpoint_reset)) }
                         }
                     } else {
                         Text(
@@ -213,7 +214,7 @@ fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
                         )
                         Spacer(Modifier.height(6.dp))
                         TextButton(onClick = { editingEndpoint = true }) {
-                            Text("Use my own node")
+                            Text(stringResource(R.string.ni_use_own_node))
                         }
                     }
                 }
@@ -271,7 +272,7 @@ fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
                 colors = ButtonDefaults.buttonColors(containerColor = DigiByteBlue)
             ) {
                 Text(
-                    if (busy) "Scanning…" else "Scan for missing funds",
+                    if (busy) stringResource(R.string.reconcile_scanning) else stringResource(R.string.set_scan_funds),
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 16.sp
                 )
@@ -280,16 +281,13 @@ fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
             // --- Stuck / phantom-chain send recovery ---
             HorizontalDivider(color = Color(0xFF243352))
             Text(
-                "Stuck unconfirmed sends",
+                stringResource(R.string.reconcile_stuck_title),
                 color = Color.White,
                 fontSize = 15.sp,
                 fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
             )
             Text(
-                "If sends never confirm, they may be spending change from an earlier send " +
-                    "that never landed on-chain — so they can never be mined. This drops those " +
-                    "un-mineable transactions and restores the coins they tied up. Confirmed " +
-                    "sends are never touched.",
+                stringResource(R.string.reconcile_stuck_body),
                 color = Color(0xFFB0BEC5),
                 fontSize = 13.sp,
             )
@@ -300,22 +298,23 @@ fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
                             // A day-old send the node has never seen is cleared too (4.1.3, review R8).
                             walletManager.clearStuckSends(neverRelayed = { txid, inputs -> client.sendNeverRelayed(txid, inputs) })
                         }
+                        // One sentence from up to four parts. Each part after the first carries its own
+                        // leading separator in the resource, so a language picks its own punctuation.
+                        val res = context.resources
                         stuckResult = if (result.dropped == 0)
-                            "No stuck sends to clear."
+                            context.getString(R.string.reconcile_stuck_none)
                         else buildString {
-                            append("Cleared ${result.dropped} stuck send(s)")
+                            append(res.getQuantityString(R.plurals.reconcile_stuck_cleared, result.dropped, result.dropped))
                             // Name orphans explicitly: they are the ones that could never
                             // confirm no matter how long you waited, and until now the only
                             // cure was a full rebuild-from-chain re-sync.
                             if (result.orphansCleared > 0) {
-                                append(", ${result.orphansCleared} of them orphaned " +
-                                    "(spending a parent this wallet no longer has)")
+                                append(res.getQuantityString(R.plurals.reconcile_stuck_orphans, result.orphansCleared, result.orphansCleared))
                             }
                             if (result.staleCleared > 0) {
                                 append(context.getString(R.string.reconcile_stuck_stale_cleared, result.staleCleared))
                             }
-                            append("; corrected ${result.assetRowsCleared} asset row(s). ")
-                            append("Balance updates shortly.")
+                            append(res.getQuantityString(R.plurals.reconcile_stuck_asset_rows, result.assetRowsCleared, result.assetRowsCleared))
                         }
                     }
                 },
@@ -324,7 +323,7 @@ fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
                     .height(52.dp),
                 shape = RoundedCornerShape(12.dp),
             ) {
-                Text("Clear stuck sends")
+                Text(stringResource(R.string.reconcile_stuck_button))
             }
             stuckResult?.let {
                 Text(it, color = Color(0xFF6BE8A3), fontSize = 13.sp)
@@ -333,7 +332,7 @@ fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
             // --- Full rebuild from chain (rescan every tx, re-stamp block heights) ---
             HorizontalDivider(color = Color(0xFF243352))
             Text(
-                "Full rebuild from chain",
+                stringResource(R.string.reconcile_rebuild_title),
                 color = Color.White,
                 fontSize = 15.sp,
                 fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
@@ -409,9 +408,17 @@ fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
                             .padding(16.dp)
                     ) {
                         Text(
+                            // Every stage is worded here: the service only names it.
                             when (s.stage) {
-                                ChainReconciliationService.STAGE_COMPARING -> stringResource(R.string.reconcile_stage_comparing)
-                                else -> s.stage
+                                Stage.CHECKING_PENDING -> stringResource(R.string.reconcile_stage_pending)
+                                Stage.SCANNING_HISTORY -> stringResource(R.string.reconcile_stage_history)
+                                Stage.READING_HISTORY -> stringResource(R.string.reconcile_stage_reading_history)
+                                Stage.RECOVERING_TX -> stringResource(R.string.reconcile_stage_recovering, s.current, s.total)
+                                Stage.LISTING_ADDRESSES -> stringResource(R.string.reconcile_stage_addresses)
+                                Stage.TIDYING_ASSETS -> stringResource(R.string.reconcile_stage_assets)
+                                Stage.QUERYING_NODE -> pluralStringResource(R.plurals.reconcile_stage_querying, s.total, s.total)
+                                Stage.IMPORTING_TX -> stringResource(R.string.reconcile_stage_importing, s.current, s.total)
+                                Stage.COMPARING -> stringResource(R.string.reconcile_stage_comparing)
                             },
                             color = Color.White,
                             fontSize = 14.sp
@@ -431,6 +438,7 @@ fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
                         minimumFractionDigits = 2
                         maximumFractionDigits = 8
                     }
+                    // A value and the ticker; a count and that. Nothing here is a sentence.
                     fun dgb(sat: Long) = "${fmt.format(sat / 100_000_000.0)} DGB"
                     fun line(t: ClassTotal) = "${t.count} · ${dgb(t.sat)}"
                     val p = s.partition
@@ -444,14 +452,14 @@ fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
                             .padding(16.dp)
                     ) {
                         Text(
-                            "Scan complete",
+                            stringResource(R.string.reconcile_done_title),
                             color = Color(0xFF6BE8A3),
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 16.sp
                         )
                         Spacer(Modifier.height(8.dp))
-                        ResultRow("Addresses scanned", "${s.scannedAddresses}")
-                        ResultRow(stringResource(R.string.reconcile_outputs_found), "${s.utxosSeenOnChain}")
+                        ResultRow(stringResource(R.string.reconcile_addresses_scanned), s.scannedAddresses.toString())
+                        ResultRow(stringResource(R.string.reconcile_outputs_found), s.utxosSeenOnChain.toString())
                         if (p == null) {
                             // No wallet to compare with: say so rather than show a raw sum as a balance.
                             ResultRow(stringResource(R.string.reconcile_found_not_compared), dgb(s.totalChainBalanceSat))
@@ -473,7 +481,7 @@ fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
                             val proven = p.total(ScanClass.PROVEN_PLAIN)
                             if (proven.count > 0) ResultRow(stringResource(R.string.reconcile_proven_plain), line(proven))
                             val dd = p.total(ScanClass.DIGIDOLLAR)
-                            if (dd.count > 0) ResultRow(stringResource(R.string.reconcile_digidollar_outputs), "${dd.count}")
+                            if (dd.count > 0) ResultRow(stringResource(R.string.reconcile_digidollar_outputs), dd.count.toString())
                             val immature = p.total(ScanClass.IMMATURE)
                             if (immature.count > 0) ResultRow(stringResource(R.string.reconcile_immature), line(immature))
                             val pending = p.total(ScanClass.PENDING)
@@ -493,25 +501,25 @@ fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
                         }
                         Spacer(Modifier.height(8.dp))
                         ResultRow(
-                            "Transactions imported",
-                            "${s.txsImported}",
+                            stringResource(R.string.reconcile_txs_imported),
+                            s.txsImported.toString(),
                             emphasize = s.txsImported > 0
                         )
-                        ResultRow(stringResource(R.string.reconcile_txs_already_in_wallet), "${s.alreadyKnown}")
+                        ResultRow(stringResource(R.string.reconcile_txs_already_in_wallet), s.alreadyKnown.toString())
                         if (s.txsNotAdded > 0) {
-                            ResultRow(stringResource(R.string.reconcile_txs_not_added), "${s.txsNotAdded}")
+                            ResultRow(stringResource(R.string.reconcile_txs_not_added), s.txsNotAdded.toString())
                         }
                         if (s.historyTxsImported > 0) {
                             ResultRow(
-                                "Recovered from history",
-                                "${s.historyTxsImported}",
+                                stringResource(R.string.reconcile_history_recovered),
+                                s.historyTxsImported.toString(),
                                 emphasize = true
                             )
                         }
                         if (s.txsImported > 0 || s.historyTxsImported > 0) {
                             Spacer(Modifier.height(8.dp))
                             Text(
-                                "Your balance should update shortly.",
+                                stringResource(R.string.reconcile_balance_updates),
                                 color = Color(0xFFB0BEC5),
                                 fontSize = 12.sp
                             )
@@ -582,13 +590,23 @@ fun ReconcileScreen(navController: NavController, autoStart: Boolean = false) {
                             .padding(16.dp)
                     ) {
                         Text(
-                            "Scan failed",
+                            stringResource(R.string.reconcile_failed_title),
                             color = Color(0xFFFF8A80),
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 16.sp
                         )
                         Spacer(Modifier.height(6.dp))
-                        Text(s.reason, color = Color(0xFFB0BEC5), fontSize = 13.sp)
+                        Text(
+                            when (s.failure) {
+                                Failure.NO_ADDRESSES -> stringResource(R.string.reconcile_fail_no_addresses)
+                                Failure.NODE_REQUEST -> stringResource(R.string.reconcile_fail_node)
+                                // The detail is an exception's own text: shown as it is, after
+                                // a line the user can read.
+                                Failure.ERROR -> stringResource(R.string.reconcile_fail_error, s.detail)
+                            },
+                            color = Color(0xFFB0BEC5),
+                            fontSize = 13.sp,
+                        )
                     }
                 }
             }

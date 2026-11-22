@@ -979,4 +979,48 @@
     <string name="quickstart_unverified_sub">Not spendable and not in your balance until the sync proves it.</string>
     <string name="quickstart_running_skip">Continue without waiting</string>
     <string name="quickstart_incomplete">The lookup could not finish, so no figure is shown. The wallet will still find its balance as it syncs.</string>
+    <!-- RECONCILE-SCREEN-I18N: the rest of the Scan for missing funds screen. A stuck-send result is one
+         sentence from up to four parts; each part after the first starts with its own separator. -->
+    <string name="reconcile_what_title">What this does</string>
+    <string name="reconcile_trust_notice">This queries an external node. The default endpoint is api.digiscope.me (cert-pinned). For full sovereignty, point it at your own node below — no keys or transaction credentials ever leave your device, we only send public addresses.</string>
+    <string name="reconcile_endpoint_title">Node endpoint</string>
+    <string name="reconcile_endpoint_reset">Reset to default</string>
+    <string name="reconcile_scanning">Scanning…</string>
+    <string name="reconcile_stuck_title">Stuck unconfirmed sends</string>
+    <string name="reconcile_stuck_body">If sends never confirm, they may be spending change from an earlier send that never landed on-chain — so they can never be mined. This drops those un-mineable transactions and restores the coins they tied up. Confirmed sends are never touched.</string>
+    <string name="reconcile_stuck_none">No stuck sends to clear.</string>
+    <string name="reconcile_stuck_button">Clear stuck sends</string>
+    <string name="reconcile_rebuild_title">Full rebuild from chain</string>
+    <string name="reconcile_done_title">Scan complete</string>
+    <string name="reconcile_addresses_scanned">Addresses scanned</string>
+    <string name="reconcile_txs_imported">Transactions imported</string>
+    <string name="reconcile_history_recovered">Recovered from history</string>
+    <string name="reconcile_balance_updates">Your balance should update shortly.</string>
+    <string name="reconcile_failed_title">Scan failed</string>
+    <string name="reconcile_fail_no_addresses">No addresses available (wallet not loaded?)</string>
+    <string name="reconcile_fail_node">Node request failed — check network or endpoint</string>
+    <string name="reconcile_fail_error">The scan stopped on an error: %1$s</string>
+    <string name="reconcile_stage_pending">Checking pending transactions…</string>
+    <string name="reconcile_stage_history">Scanning address history…</string>
+    <string name="reconcile_stage_reading_history">Reading address history…</string>
+    <string name="reconcile_stage_recovering">Recovering transaction %1$d/%2$d…</string>
+    <string name="reconcile_stage_addresses">Listing wallet addresses…</string>
+    <string name="reconcile_stage_assets">Tidying asset holdings…</string>
+    <string name="reconcile_stage_importing">Importing transaction %1$d/%2$d</string>
+    <plurals name="reconcile_stuck_cleared">
+        <item quantity="one">Cleared %1$d stuck send</item>
+        <item quantity="other">Cleared %1$d stuck sends</item>
+    </plurals>
+    <plurals name="reconcile_stuck_orphans">
+        <item quantity="one">, %1$d of them orphaned (spending a parent this wallet no longer has)</item>
+        <item quantity="other">, %1$d of them orphaned (spending a parent this wallet no longer has)</item>
+    </plurals>
+    <plurals name="reconcile_stuck_asset_rows">
+        <item quantity="one">; corrected %1$d asset row. Balance updates shortly.</item>
+        <item quantity="other">; corrected %1$d asset rows. Balance updates shortly.</item>
+    </plurals>
+    <plurals name="reconcile_stage_querying">
+        <item quantity="one">Querying node for UTXOs on %1$d address…</item>
+        <item quantity="other">Querying node for UTXOs on %1$d addresses…</item>
+    </plurals>
 </resources>

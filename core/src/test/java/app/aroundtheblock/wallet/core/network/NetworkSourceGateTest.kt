@@ -99,7 +99,6 @@ class NetworkSourceGateTest {
     private val namesWithoutRequest = mapOf(
         "core/src/main/java/app/aroundtheblock/wallet/core/network/DigiScopePins.kt" to "the pin set itself",
         "core/src/main/java/app/aroundtheblock/wallet/core/digiid/IdentityKeyPolicy.kt" to "a Digi-ID domain comparison",
-        "app/src/main/java/app/aroundtheblock/wallet/ui/settings/ReconcileScreen.kt" to "text shown to the user",
     )
 
     @Test fun `every file that names the DigiScope host applies its pins or is given the pinned client`() {
