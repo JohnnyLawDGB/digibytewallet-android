@@ -9,8 +9,9 @@ import java.io.File
 /**
  * The funds scan's result lines (ReconcileScreen) and the Market's Tor notice (DigistampScreen)
  * read their text from string resources, which exist in every language ([LocaleResourceParityTest]
- * checks the other locales against English). ReconcileScreen as a whole is not yet in
- * [OnboardingHardcodedStringTest]'s list, so these lines are pinned here by their English text.
+ * checks the other locales against English). ReconcileScreen as a whole is in
+ * [OnboardingHardcodedStringTest]'s list since RECONCILE-SCREEN-I18N; these lines stay pinned here
+ * by their English text, and the scan's stages and failures, which that scan cannot see, by name.
  */
 class ScanAndMarketStringsTest {
 
@@ -108,14 +109,29 @@ class ScanAndMarketStringsTest {
         }
     }
 
-    @Test fun `the scan's comparing stage is named by the service and worded by the screen`() {
+    /**
+     * The scan's progress line and its failure reason are built in `:core`, which has no string
+     * resources, so the hardcoded-string scan of the screen cannot see them: the screen only shows
+     * a variable. The service therefore NAMES each stage and each failure it knows, and the screen
+     * words them. A stage or failure given as text would reach the screen in English only.
+     */
+    @Test fun `every scan stage and known failure is named by the service and worded by the screen`() {
         val service = File("../core/src/main/java/app/aroundtheblock/wallet/core/reconcile/ChainReconciliationService.kt").readText()
-        assertTrue("the service does not name its comparing stage",
-            Regex("""State\.Scanning\(\s*STAGE_COMPARING\b""").containsMatchIn(service))
+        val freeText = Regex("""State\.(Scanning|Failed)\(\s*(\w+\s*=\s*)?"[^"]*"""").findAll(service).map { it.value }.toList()
+        assertTrue("the service gives a stage or a failure as English text: $freeText", freeText.isEmpty())
+
         val screen = File(srcRoot, "ui/settings/ReconcileScreen.kt").readText()
-        assertTrue("the screen does not word the comparing stage",
-            Regex("""ChainReconciliationService\.STAGE_COMPARING\s*->\s*stringResource\(R\.string\.reconcile_stage_comparing\)""")
-                .containsMatchIn(screen))
+        for (enumName in listOf("Stage", "Failure")) {
+            val names = Regex("""enum class $enumName \{([^}]*)\}""").find(service)?.groupValues?.get(1)
+                ?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()
+            assertTrue("the service does not name its ${enumName.lowercase()}s", names.size >= 3)
+            for (name in names) {
+                assertTrue("the screen does not word $enumName.$name",
+                    Regex("""$enumName\.$name\s*->\s*(stringResource|pluralStringResource)\(""").containsMatchIn(screen))
+            }
+        }
+        assertTrue("the service does not name its comparing stage",
+            Regex("""State\.Scanning\(\s*Stage\.COMPARING\b""").containsMatchIn(service))
     }
 
     @Test fun `the Market notice reads its text from resources`() {

@@ -23,6 +23,14 @@
  *   digiid_core_bridge print    the bridge's answers for the hand cases' fixed inputs (how the
  *                               literals in digiid_core_kat_main.c were read off the bridge).
  *
+ * THE GOLDEN FILE (bridge_golden.txt, run.sh's GOLDEN leg). Every `ADDRESS ...` and `SIGN ...` line of `print`,
+ * and every `SWEEP ...` line of `sweep`, is the bridge's answer alone: the header has no part in it. `sweep`
+ * prints one SWEEP line per phrase and one for the long messages: how many answers the bridge gave there and
+ * the SHA-256 of all of them in order (golden_add below). Those lines were written to bridge_golden.txt once,
+ * from the bridge of 4.1.5, before the Coinomi design's step 2 touches it, and run.sh compares them on every
+ * run. Holding the bridge to the header says nothing once the bridge calls the header; the file still holds
+ * it to the answers it gave before.
+ *
  * Exit 0 when every answer agrees.
  */
 #include <stdarg.h>
@@ -193,6 +201,43 @@ int dgb_register_natives(JNIEnv *e) { (void)e; return 0; }   /* jni_registry.c i
 int __android_log_print(int prio, const char *tag, const char *fmt, ...) { (void)prio; (void)tag; (void)fmt; return 0; }
 
 static const char *answerText(jstring answer) { return answer ? ((HostString *)answer)->text : NULL; }
+
+/* ---- the bridge's answers alone, for bridge_golden.txt ------------------------------------------ */
+
+static uint8_t *g_golden;
+static size_t g_goldenLen, g_goldenCap;
+static long g_goldenCount;
+
+/* One answer of the bridge's, in order: its text and a newline, or "NULL" and a newline for a refusal. */
+static void golden_add(const char *answer)
+{
+    const char *text = answer ? answer : "NULL";
+    size_t n = strlen(text);
+    if (g_goldenLen + n + 1 > g_goldenCap) {
+        g_goldenCap = (g_goldenLen + n + 1) * 2;
+        g_golden = realloc(g_golden, g_goldenCap);
+        if (! g_golden) { fprintf(stderr, "out of memory\n"); exit(2); }
+    }
+    memcpy(g_golden + g_goldenLen, text, n);
+    g_golden[g_goldenLen + n] = '\n';
+    g_goldenLen += n + 1;
+    g_goldenCount++;
+}
+
+/* Prints "SWEEP <label>: <count> answers, sha256 <hex>" for the answers added since the last line. */
+static void golden_line(const char *label)
+{
+    uint8_t md[32];
+    BRSHA256(md, g_golden ? g_golden : (const uint8_t *)"", g_goldenLen);
+    printf("SWEEP %s: %ld answers, sha256 ", label, g_goldenCount);
+    for (size_t i = 0; i < sizeof(md); i++) printf("%02x", md[i]);
+    printf("\n");
+    g_goldenLen = 0;
+    g_goldenCount = 0;
+}
+
+/* A printed answer: the text, or "NULL" for a refusal (never a null pointer handed to printf). */
+static const char *shown(jstring answer) { const char *t = answerText(answer); return t ? t : "NULL"; }
 
 /* ---- the header's side ---------------------------------------------------------------------------- */
 
@@ -387,8 +432,14 @@ static void sweep(void)
                           (int)fmt, (int)idx, hasUri, bs[k] ? bs[k] : "NULL", as[k] ? as[k] : "NULL");
                 if (bs[k]) answered++;
                 else refused++;
+                golden_add(bs[k]);
             }
             release_all();
+        }
+        {
+            char label[32];
+            snprintf(label, sizeof(label), "phrase %zu", p);
+            golden_line(label);
         }
     }
 
@@ -407,9 +458,12 @@ static void sweep(void)
             const char *a2 = header_site(big, lens[i], cb, sizeof(cb) / sizeof(*cb), 0, h2);
             check(b1 && same(b1, a1), "a %zu-byte message: the shared identity's answer is the bridge's", lens[i]);
             check(b2 && same(b2, a2), "a %zu-byte message: the per-site identity's answer is the bridge's", lens[i]);
+            golden_add(b1);
+            golden_add(b2);
             release_all();
         }
         free(big);
+        golden_line("long messages");
     }
 
     check(differ == 0, "%ld answers compared over four phrases: %ld agree, %ld differ", agree + differ, agree, differ);
@@ -463,36 +517,36 @@ static void print(void)
     JNI_OnLoad(&g_vmValue, NULL);
     boot_phrase(PHRASES[0]);
     for (size_t i = 0; i < sizeof(golden) / sizeof(*golden); i++) {
-        printf("ADDRESS %s %s\n", golden[i], answerText(NativeBridge_identityAddress(env, NULL, jascii(golden[i]), 0)));
+        printf("ADDRESS %s %s\n", golden[i], shown(NativeBridge_identityAddress(env, NULL, jascii(golden[i]), 0)));
         release_all();
     }
-    printf("ADDRESS shared %s\n", answerText(NativeBridge_identityAddress(env, NULL, NULL, 0)));
-    printf("ADDRESS example.com/callback index 1 %s\n", answerText(NativeBridge_identityAddress(env, NULL, jascii(golden[0]), 1)));
+    printf("ADDRESS shared %s\n", shown(NativeBridge_identityAddress(env, NULL, NULL, 0)));
+    printf("ADDRESS example.com/callback index 1 %s\n", shown(NativeBridge_identityAddress(env, NULL, jascii(golden[0]), 1)));
     printf("ADDRESS example.com/callback index 2147483647 %s\n",
-           answerText(NativeBridge_identityAddress(env, NULL, jascii(golden[0]), INT32_MAX)));
-    printf("ADDRESS empty uri %s\n", answerText(NativeBridge_identityAddress(env, NULL, jascii(""), 0)));
+           shown(NativeBridge_identityAddress(env, NULL, jascii(golden[0]), INT32_MAX)));
+    printf("ADDRESS empty uri %s\n", shown(NativeBridge_identityAddress(env, NULL, jascii(""), 0)));
     {
         static const jchar emojiUri[] = { 'h','t','t','p','s',':','/','/','e','x','a','m','p','l','e','.','c','o','m','/', 0xD83D, 0xDE00 };
         static const jchar nulUri[] = { 'h','t','t','p','s',':','/','/','e','x','a','m','p','l','e','.','c','o','m','/', 'a', 0x0000, 'b' };
         static const jchar loneUri[] = { 'h','t','t','p','s',':','/','/','e','x','a','m','p','l','e','.','c','o','m','/', 'a', 0xD800, 'b' };
-        printf("ADDRESS https://example.com/<U+1F600> %s\n", answerText(NativeBridge_identityAddress(env, NULL, hostString(emojiUri, 22), 0)));
-        printf("ADDRESS https://example.com/a<U+0000>b %s\n", answerText(NativeBridge_identityAddress(env, NULL, hostString(nulUri, 23), 0)));
-        printf("ADDRESS https://example.com/a<U+D800>b %s\n", answerText(NativeBridge_identityAddress(env, NULL, hostString(loneUri, 23), 0)));
-        printf("SIGN site emoji uri %s\n", answerText(NativeBridge_signIdentityMessage(env, NULL, jascii(request), hostString(emojiUri, 22), 0)));
+        printf("ADDRESS https://example.com/<U+1F600> %s\n", shown(NativeBridge_identityAddress(env, NULL, hostString(emojiUri, 22), 0)));
+        printf("ADDRESS https://example.com/a<U+0000>b %s\n", shown(NativeBridge_identityAddress(env, NULL, hostString(nulUri, 23), 0)));
+        printf("ADDRESS https://example.com/a<U+D800>b %s\n", shown(NativeBridge_identityAddress(env, NULL, hostString(loneUri, 23), 0)));
+        printf("SIGN site emoji uri %s\n", shown(NativeBridge_signIdentityMessage(env, NULL, jascii(request), hostString(emojiUri, 22), 0)));
         release_all();
     }
-    printf("SIGN shared login format 0 %s\n", answerText(NativeBridge_signMessage(env, NULL, jascii(login), 0)));
-    printf("SIGN shared login format 2 %s\n", answerText(NativeBridge_signMessage(env, NULL, jascii(login), 2)));
-    printf("SIGN shared empty format 0 %s\n", answerText(NativeBridge_signMessage(env, NULL, jascii(""), 0)));
-    printf("SIGN site request %s\n", answerText(NativeBridge_signIdentityMessage(env, NULL, jascii(request), jascii(golden[0]), 0)));
-    printf("SIGN site login %s\n", answerText(NativeBridge_signIdentityMessage(env, NULL, jascii(login), jascii(loginCallback), 0)));
-    printf("SIGN shared request %s\n", answerText(NativeBridge_signMessage(env, NULL, jascii(request), 0)));
-    printf("SIGN site emoji %s\n", answerText(NativeBridge_signIdentityMessage(env, NULL, hostString(emoji, 7),
-                                                                                jascii("https://site.example/login"), 0)));
+    printf("SIGN shared login format 0 %s\n", shown(NativeBridge_signMessage(env, NULL, jascii(login), 0)));
+    printf("SIGN shared login format 2 %s\n", shown(NativeBridge_signMessage(env, NULL, jascii(login), 2)));
+    printf("SIGN shared empty format 0 %s\n", shown(NativeBridge_signMessage(env, NULL, jascii(""), 0)));
+    printf("SIGN site request %s\n", shown(NativeBridge_signIdentityMessage(env, NULL, jascii(request), jascii(golden[0]), 0)));
+    printf("SIGN site login %s\n", shown(NativeBridge_signIdentityMessage(env, NULL, jascii(login), jascii(loginCallback), 0)));
+    printf("SIGN shared request %s\n", shown(NativeBridge_signMessage(env, NULL, jascii(request), 0)));
+    printf("SIGN site emoji %s\n", shown(NativeBridge_signIdentityMessage(env, NULL, hostString(emoji, 7),
+                                                                           jascii("https://site.example/login"), 0)));
     release_all();
     boot_phrase("inhale praise target steak garlic cricket paper better evil almost sadness crawl city banner amused fringe fox "
                 "insect roast aunt prefer hollow basic ladder");
-    printf("ADDRESS bitid inhale %s\n", answerText(NativeBridge_identityAddress(env, NULL, jascii("http://bitid.bitcoin.blue/callback"), 0)));
+    printf("ADDRESS bitid inhale %s\n", shown(NativeBridge_identityAddress(env, NULL, jascii("http://bitid.bitcoin.blue/callback"), 0)));
     release_all();
 }
 
@@ -504,6 +558,7 @@ int main(int argc, char **argv)
     else if (strcmp(argv[1], "sweep") == 0) sweep();
     else { fprintf(stderr, "unknown mode %s\n", argv[1]); return 2; }
     free(g_work);
+    free(g_golden);
     printf("RESULT bridge %s\n", g_fail ? "fail" : "pass");
     return g_fail ? 1 : 0;
 }

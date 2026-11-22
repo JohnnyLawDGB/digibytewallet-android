@@ -17,7 +17,7 @@ Full Kotlin rewrite of the DigiByte Android SPV wallet. Jetpack Compose UI, C na
 > into `develop` (core, Android, iOS). Releases, force-pushes, security decisions and private
 > advisories stay his. That file is the one copy of the rule; do not restate it here.
 **Version:** v4.1.5 (versionCode 40105)  _(source of truth: `app/build.gradle.kts` `versionName`/`versionCode` — bump there on release and mirror here)_
-**Test devices:** Samsung SM-N950U (Galaxy Note 8, Android 9, API 28); Galaxy S25 Ultra (Android 15, API 35) for 16 KB page-size / modern-API coverage
+**Test devices:** Samsung SM-N950U (Galaxy Note 8, Android 9, API 28) and Moto G 5G: both take debug builds and are driven over adb. Galaxy S25 Ultra (Android 15, API 35) for 16 KB page-size / modern-API coverage: **release-signed builds only, never a debug build, never driven by an agent**
 
 ## Module Structure
 
@@ -112,7 +112,7 @@ Any user-facing string ships in **every language in `AppLocale.SUPPORTED` in the
 - Certificate pinning enabled for api.digiscope.me
 - Response body and wallet address redacted from logs
 - **Which key signs (Q4 A, 2026-11-10; #268):** the shared `m/0'/0/0` identity only for `digiscope.me` and `api.digiscope.me`, matched exactly; every other host gets its per-site SLIP-0013 identity. This phone's login history decides nothing and there is no identity choice. One copy of the rule: `IdentityKeyPolicy`.
-- **Coinomi-compatible sign-in:** designed in `docs/superpowers/specs/2026-11-17-coinomi-digiid-design.md`. Step 1 is merged in the core (`BRDigiIdRoot`: the per-site master key is a per-call argument); the app does not use it yet, and the bridge still derives per-site keys with `"DigiByte seed"`.
+- **Coinomi-compatible sign-in:** designed in `docs/superpowers/specs/2026-11-17-coinomi-digiid-design.md`. Step 1 is merged in the core (`BRDigiIdRoot`: the per-site master key is a per-call argument); the app does not use it yet (4.1.5 shipped without it; the app steps are a 4.1.6 item), and the bridge still derives per-site keys with `"DigiByte seed"`.
 
 ### Market (DigiStamp, in a retained WebView)
 - **No JavaScript bridge, ever** (`scripts/check-no-js-bridge.sh`, CI). The only channel from a page to the wallet is a navigation, decided by `DigistampNavigationPolicy` and turned into a native screen.
@@ -330,7 +330,7 @@ C bodies are named `NativeBridge_<methodName>` and bound with `RegisterNatives` 
 - CRITICAL-1: Both halves CLOSED. PIN rate-limit: v3.10.35 (`PinManager`; see security/AUDIT-LOG.md). Keystore user-auth binding: v4.0.77 (`SeedKeyBinding`, 300 s window — see Seed Security above). RESIDUAL: a device with no secure lock screen keeps the unbound key (`SeedKeyBinding.NONE`), and inside the auth window a compromised app process can still decrypt the seed. Hardware backing is probed and logged (`KeyInfo.isInsideSecureHardware`) at key creation, not enforced.
 - CRITICAL-2: Resolved (g_seed static, accessor API)
 - CRITICAL-3: Resolved (ByteArray path, zeroed after use)
-- CRITICAL-4: Resolved (Digi-ID callback domain validation). RESIDUAL (ROADMAP Phase 2): the shared `m/0'/0/0` identity. **Corrected 2026-08-19 — the old text here was wrong twice.** The path is `m/0'/0/0` (the legacy bread-wallet tree), not `m/44'/20'/0'/0/0`: `signMessage`'s second arg is the address FORMAT, and the JNI hardcodes `seed_derive_key(&key, 0, 0)`. And the residual is **linkability, not key exposure** — signing emits a signature not a key, the `\x19DigiByte Signed Message:\n` prefix blocks sighash confusion, `m/0'` is hardened so it cannot be correlated to the BIP84/BIP86 trees, and `m/0'` is only watched for bread-wallet compat (`BRWalletReceiveAddress` hands out BIP84/86 only), so for an app-created wallet that address holds nothing. What remains (updated 2026-11-19): per-site identities shipped, and on `develop` since Q4 A (#268; not in 4.1.4) only `digiscope.me` and `api.digiscope.me` are signed with the shared address, so the linkability is limited to those two hosts, which one operator runs. A restored bread-wallet seed could still have funded that address.
+- CRITICAL-4: Resolved (Digi-ID callback domain validation). RESIDUAL (ROADMAP Phase 2): the shared `m/0'/0/0` identity. **Corrected 2026-08-19 — the old text here was wrong twice.** The path is `m/0'/0/0` (the legacy bread-wallet tree), not `m/44'/20'/0'/0/0`: `signMessage`'s second arg is the address FORMAT, and the JNI hardcodes `seed_derive_key(&key, 0, 0)`. And the residual is **linkability, not key exposure** — signing emits a signature not a key, the `\x19DigiByte Signed Message:\n` prefix blocks sighash confusion, `m/0'` is hardened so it cannot be correlated to the BIP84/BIP86 trees, and `m/0'` is only watched for bread-wallet compat (`BRWalletReceiveAddress` hands out BIP84/86 only), so for an app-created wallet that address holds nothing. What remains (updated 2026-11-22): per-site identities shipped, and since Q4 A (#268; shipped in 4.1.5) only `digiscope.me` and `api.digiscope.me` are signed with the shared address, so the linkability is limited to those two hosts, which one operator runs. A restored bread-wallet seed could still have funded that address.
 
 ## Pre-Publish Test Suite
 - `./scripts/pre-publish-test.sh [API] [--skip-build] [--test X]`: 8 scenarios (A to H) on emulators, API 28/33/34/35. The script header is the one description of what each scenario asserts; do not restate it here.
@@ -344,14 +344,14 @@ C bodies are named `NativeBridge_<methodName>` and bound with `RegisterNatives` 
 
 ## Testing Notes
 - `./gradlew :game:compileMainnetDebugKotlin` — fast check for game-only changes
-- Device tests need USB connected: `adb devices` should show SM-N950U
+- Device tests need USB connected: `adb devices` should show one of the debug test devices (the Note 8, SM-N950U, or the Moto G 5G)
 - After native C changes, must rebuild native module before app
 - Emulator AVDs: `dgb-test-api28`, `dgb-test-api33`, `dgb-test-api34`, `dgb-test-api35`
 
 ## Roadmap
 `ROADMAP.md` is authoritative and **sovereignty-first** (removing trusted third parties from the data path comes before feature breadth). Read its **top banner first** — it carries the dated true-up and the current "NEXT", which is the part that goes stale. The list below is a pointer only — do **not** maintain a second copy here:
 
-**Working next (per the 2026-08-19 true-up):** `cfcheckpt` active rejection → restore restructure (onboarding split, then asset-aware sweep) → Digi-ID key isolation → `assets.digistamp.co` (now unblocked). These are pre-existing roadmap items, not products of the 2026-08-16 handoff. The **duress PIN is cancelled** — do not resurrect it or build against it.
+**Working next (2026-11-22, 4.1.5 shipped):** 4.1.6; its public items are the table in ROADMAP.md's top banner, and multi-wallet step 2 follows as its own release. The private scope file (one per version, `RELEASE-<version>-SCOPE.md` in the private repo) is the full list. The **duress PIN is cancelled** — do not resurrect it or build against it.
 
 - Phase 0: Legibility (ARCHITECTURE / THREAT_MODEL / BIP-compliance docs)
 - Phase 1: Sovereign data layer — BIP157/158 (**client shipped & default since v3.5.39**; remaining: peer diversity beyond author infra + bloom-deprecation path)

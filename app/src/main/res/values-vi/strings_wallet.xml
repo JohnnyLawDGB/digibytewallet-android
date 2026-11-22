@@ -834,4 +834,44 @@
     <string name="quickstart_unverified_sub">Không thể chi tiêu và không tính vào số dư cho đến khi đồng bộ chứng minh.</string>
     <string name="quickstart_running_skip">Tiếp tục mà không chờ</string>
     <string name="quickstart_incomplete">Không thể hoàn tất tra cứu nên không hiển thị con số nào. Ví vẫn sẽ tìm thấy số dư khi đồng bộ.</string>
+    <!-- RECONCILE-SCREEN-I18N: the rest of the Scan for missing funds screen. A stuck-send result is one
+         sentence from up to four parts; each part after the first starts with its own separator. -->
+    <string name="reconcile_what_title">Thao tác này làm gì</string>
+    <string name="reconcile_trust_notice">Thao tác này truy vấn một nút bên ngoài. Điểm cuối mặc định là api.digiscope.me (đã ghim chứng chỉ). Để tự chủ hoàn toàn, hãy trỏ tới nút của riêng bạn bên dưới — không có khóa hay thông tin xác thực giao dịch nào rời khỏi thiết bị của bạn, chỉ các địa chỉ công khai được gửi đi.</string>
+    <string name="reconcile_endpoint_title">Điểm cuối của nút</string>
+    <string name="reconcile_endpoint_reset">Đặt lại về mặc định</string>
+    <string name="reconcile_scanning">Đang quét…</string>
+    <string name="reconcile_stuck_title">Giao dịch gửi chưa xác nhận bị kẹt</string>
+    <string name="reconcile_stuck_body">Nếu các giao dịch gửi không bao giờ được xác nhận, có thể chúng đang tiêu tiền thối từ một giao dịch gửi trước đó chưa từng lên chuỗi — nên chúng không bao giờ có thể được đào. Thao tác này loại bỏ các giao dịch không thể đào đó và trả lại số coin mà chúng đang giữ. Các giao dịch gửi đã xác nhận không bao giờ bị động đến.</string>
+    <string name="reconcile_stuck_none">Không có giao dịch gửi bị kẹt nào để xóa.</string>
+    <string name="reconcile_stuck_button">Xóa giao dịch gửi bị kẹt</string>
+    <string name="reconcile_rebuild_title">Dựng lại toàn bộ từ chuỗi</string>
+    <string name="reconcile_done_title">Quét hoàn tất</string>
+    <string name="reconcile_addresses_scanned">Địa chỉ đã quét</string>
+    <string name="reconcile_txs_imported">Giao dịch đã nhập</string>
+    <string name="reconcile_history_recovered">Khôi phục từ lịch sử</string>
+    <string name="reconcile_balance_updates">Số dư của bạn sẽ sớm được cập nhật.</string>
+    <string name="reconcile_failed_title">Quét thất bại</string>
+    <string name="reconcile_fail_no_addresses">Không có địa chỉ nào (ví chưa được tải?)</string>
+    <string name="reconcile_fail_node">Yêu cầu tới nút thất bại — hãy kiểm tra mạng hoặc điểm cuối</string>
+    <string name="reconcile_fail_error">Quá trình quét dừng do lỗi: %1$s</string>
+    <string name="reconcile_stage_pending">Đang kiểm tra giao dịch đang chờ…</string>
+    <string name="reconcile_stage_history">Đang quét lịch sử địa chỉ…</string>
+    <string name="reconcile_stage_reading_history">Đang đọc lịch sử địa chỉ…</string>
+    <string name="reconcile_stage_recovering">Đang khôi phục giao dịch %1$d/%2$d…</string>
+    <string name="reconcile_stage_addresses">Đang liệt kê địa chỉ của ví…</string>
+    <string name="reconcile_stage_assets">Đang dọn dẹp tài sản đang giữ…</string>
+    <string name="reconcile_stage_importing">Đang nhập giao dịch %1$d/%2$d</string>
+    <plurals name="reconcile_stuck_cleared">
+        <item quantity="other">Đã xóa %1$d giao dịch gửi bị kẹt</item>
+    </plurals>
+    <plurals name="reconcile_stuck_orphans">
+        <item quantity="other">, trong đó %1$d giao dịch mồ côi (tiêu một giao dịch cha mà ví này không còn giữ)</item>
+    </plurals>
+    <plurals name="reconcile_stuck_asset_rows">
+        <item quantity="other">; đã sửa %1$d dòng tài sản. Số dư sẽ sớm được cập nhật.</item>
+    </plurals>
+    <plurals name="reconcile_stage_querying">
+        <item quantity="other">Đang hỏi nút về UTXO trên %1$d địa chỉ…</item>
+    </plurals>
 </resources>

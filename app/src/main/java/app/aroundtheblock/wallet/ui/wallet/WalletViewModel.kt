@@ -161,10 +161,14 @@ class WalletViewModel @Inject constructor(
         }
     }
 
-    /** Live SPV peer count from the C core peer manager. Updated on the
-     *  same 5s cadence as balance/tx polling. SendScreen uses this to gate
-     *  the Review & Send button (broadcasting with zero peers silently
-     *  strands the tx locally) and ReceiveScreen shows a soft warning. */
+    /** The SHOWN peer count: peers that have completed the handshake
+     *  ([NativeBridge.getHandshakedPeerCount]), never ones still connecting
+     *  (PEER-COUNT-HANDSHAKED). Updated on the same 5s cadence as balance/tx
+     *  polling. SendScreen uses this to gate the Review & Send button
+     *  (broadcasting with no peer to carry it silently strands the tx locally)
+     *  and ReceiveScreen shows a soft warning. The recovery decisions in this
+     *  class read [NativeBridge.getPeerCount] instead: a dial in flight is not
+     *  a dead connection. */
     private val _peerCount = MutableStateFlow(0)
     val peerCount: StateFlow<Int> = _peerCount.asStateFlow()
 
@@ -696,10 +700,17 @@ class WalletViewModel @Inject constructor(
                     prefs.edit().putLong("last_dd_balance", ddCents).apply()
                 }
 
-                // Poll peer count — publish to the StateFlow so Send/Receive
-                // screens can gate their UI on live connectivity.
+                // Poll the shown peer count — publish to the StateFlow so the status
+                // line shows it and Send/Receive can gate their UI on live connectivity.
+                // Handshaken peers only: a peer that is still connecting is not shown as
+                // a peer and cannot carry a send.
+                val shownPeers = NativeBridge.getHandshakedPeerCount()
+                if (shownPeers != _peerCount.value) _peerCount.value = shownPeers
+
+                // The recovery decisions below ask a different question, "is any socket
+                // open or opening?", so they keep the count that includes connecting
+                // peers: while a dial is in flight there is nothing to wake or kick.
                 val peers = NativeBridge.getPeerCount()
-                if (peers != _peerCount.value) _peerCount.value = peers
 
                 // Process-death watchdog — see docs/bugs/peer-keepalive-proc-death.md.
                 // If peers has been 0 for a sustained window, SyncService may have

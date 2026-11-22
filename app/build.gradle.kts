@@ -84,6 +84,14 @@ android {
         targetSdk = 36
         versionCode = 40105 // x-release-please-version-code
         versionName = "4.1.5" // x-release-please-version
+
+        // Package only the ABIs the C core is built for (gradle.properties wallet.nativeAbis).
+        // Without this the APK also carried lib/x86/ from dependencies, with no libcore-lib.so in
+        // it: a 32-bit x86 device was offered the app, loaded that directory, and would have
+        // stopped at System.loadLibrary("core-lib") on first launch (PLAY-DEVICE-REACH, 4.1.6).
+        ndk {
+            abiFilters += providers.gradleProperty("wallet.nativeAbis").get().split(",")
+        }
     }
 
     // Match native module flavors

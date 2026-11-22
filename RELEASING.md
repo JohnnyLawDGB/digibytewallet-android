@@ -146,7 +146,11 @@ scripts/build-release.sh
 ```
 
 The script refuses a dirty tree, an artifact signed by anything but the release key, more than
-one signer, and the wrong package. Output, under `dist/vX.Y.Z/`:
+one signer, and the wrong package. It then runs `scripts/check-play-device-reach.sh` on the signed
+APK and on the AAB, and refuses either one if it requires a hardware feature or an OpenGL ES
+version outside that script's lists, restricts screens, or carries an ABI directory other than
+`wallet.nativeAbis` (or one without `libcore-lib.so`). Any refusal exits non-zero before `dist/`
+is written. Output, under `dist/vX.Y.Z/`:
 
 | File | Goes to |
 |---|---|
@@ -241,7 +245,7 @@ one signer, and the wrong package. Output, under `dist/vX.Y.Z/`:
 [ ] 2  release/digibyte-mobile-X.Y.Z cut; version + versionCode bumped; checkpoints refreshed
 [ ] 3  core landed by merge; check-submodule-pin.sh OK
 [ ] 4  KATs all green · unit tests ×3 · JNI registry · upgrade test PASS · pre-publish suite `Overall: PASS` (no SKIP; INCOMPLETE is not a pass) — at the release commit
-[ ] 5  build-release.sh in the owner's terminal
+[ ] 5  build-release.sh in the owner's terminal (it also runs check-play-device-reach.sh on the APK and the AAB)
 [ ] 6  signer = release cert on both artifacts · SHA256SUMS from disk
 [ ] 7  source commit tagged · releases repo (hashes in notes, re-hash the live APK) · Play · digiscope.me link (latest.json untouched)
 [ ] 8  credits · bounty target moved · advisories published or justified · reporters told
