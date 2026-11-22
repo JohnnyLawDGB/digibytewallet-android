@@ -61,17 +61,49 @@ class DigiScopeClient(
          * with its replies. A message is at most 2,000 characters and a thread 5,000.
          */
         internal const val LIST_BODY_BYTES = 4L * 1024 * 1024
+
+        /**
+         * [baseClient] with the pins of api.digiscope.me and redirects off: the one way a client that
+         * talks to the Hub is built, here and for the revoke that runs without this client
+         * ([StoredHubSessionRevoke]).
+         */
+        internal fun pinned(baseClient: OkHttpClient): OkHttpClient = baseClient.newBuilder()
+            .certificatePinner(app.aroundtheblock.wallet.core.network.DigiScopePins.certificatePinner())
+            // A pinned host's 3xx is never followed to a host the pins do not cover (4.1.2 row 30, C18).
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .build()
+
+        /**
+         * The one request that ends a Hub session on the server: [token] sent once to
+         * `POST /api/auth/logout` on [client], which is a [pinned] client. Queued, not awaited; the
+         * answer is only closed. Never throws.
+         */
+        internal fun sendLogout(client: OkHttpClient, token: String) {
+            try {
+                val request = Request.Builder()
+                    .url("$BASE_URL/auth/logout")
+                    .header("Authorization", "Bearer $token")
+                    .post("{}".toRequestBody("application/json".toMediaType()))
+                    .build()
+                client.newCall(request).enqueue(object : okhttp3.Callback {
+                    override fun onFailure(call: okhttp3.Call, e: java.io.IOException) {
+                        android.util.Log.w("DigiScope", "session revoke not delivered: ${e.javaClass.simpleName}")
+                    }
+                    override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+                        response.use { if (!it.isSuccessful) android.util.Log.w("DigiScope", "session revoke answered ${it.code}") }
+                    }
+                })
+            } catch (e: Exception) {
+                android.util.Log.w("DigiScope", "session revoke not sent: ${e.javaClass.simpleName}")
+            }
+        }
     }
 
     // Certificate pinning for api.digiscope.me — prevents MITM via rogue CA.
     // Shared pin set — see app.aroundtheblock.wallet.core.network.DigiScopePins (one place to
     // update on rotation, so a stale pin can't linger in one client).
-    private val client: OkHttpClient = baseClient.newBuilder()
-        .certificatePinner(app.aroundtheblock.wallet.core.network.DigiScopePins.certificatePinner())
-        // A pinned host's 3xx is never followed to a host the pins do not cover (4.1.2 row 30, C18).
-        .followRedirects(false)
-        .followSslRedirects(false)
-        .build()
+    private val client: OkHttpClient = pinned(baseClient)
 
     /**
      * The client for the Digi-ID exchange — quick login's challenge and every signed login: the
@@ -490,41 +522,7 @@ class DigiScopeClient(
         if (!token.isNullOrBlank()) revokeSession(token)
     }
 
-    /**
-     * [HubSessionRevoke] for any wallet on the device: the token [scope]'s store holds is sent once to
-     * `POST /api/auth/logout`, as [logout] sends the running one. Reads the store only — erasing it is
-     * the caller's next step — and reads it where it is ([HubTokenStore.stored]): the wipe calls this,
-     * and a wipe creates no file. Never throws; the request is queued, not awaited.
-     */
-    fun revokeStoredSession(scope: app.aroundtheblock.wallet.core.wallets.WalletScope) {
-        val token = try {
-            HubTokenStore(appContext, scope).stored()
-        } catch (e: Exception) {
-            android.util.Log.w("DigiScope", "stored session not read for revoke: ${e.javaClass.simpleName}")
-            null
-        }
-        if (!token.isNullOrBlank()) revokeSession(token)
-    }
-
-    private fun revokeSession(token: String) {
-        try {
-            val request = Request.Builder()
-                .url("$BASE_URL/auth/logout")
-                .header("Authorization", "Bearer $token")
-                .post("{}".toRequestBody("application/json".toMediaType()))
-                .build()
-            digiIdClient.newCall(request).enqueue(object : okhttp3.Callback {
-                override fun onFailure(call: okhttp3.Call, e: java.io.IOException) {
-                    android.util.Log.w("DigiScope", "session revoke not delivered: ${e.javaClass.simpleName}")
-                }
-                override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
-                    response.use { if (!it.isSuccessful) android.util.Log.w("DigiScope", "session revoke answered ${it.code}") }
-                }
-            })
-        } catch (e: Exception) {
-            android.util.Log.w("DigiScope", "session revoke not sent: ${e.javaClass.simpleName}")
-        }
-    }
+    private fun revokeSession(token: String) = sendLogout(digiIdClient, token)
 
     // ── JSON helpers ──────────────────────────────────────────────────────────
 

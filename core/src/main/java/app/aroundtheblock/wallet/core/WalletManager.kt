@@ -148,7 +148,7 @@ class WalletManager @Suppress("LongParameterList") constructor(
     // constructions keep compiling; the default has nothing to end and says so truthfully.
     private val identitySessions: IdentitySessionWipe = IdentitySessionWipe { true },
     // Every wallet's Hub session is revoked on the server, best effort, before the wipe erases the
-    // tokens (AppModule wires DigiScopeClient.revokeStoredSession). Nothing to revoke by default.
+    // tokens (AppModule wires StoredHubSessionRevoke). Nothing to revoke by default.
     private val hubRevoke: app.aroundtheblock.wallet.core.digiscope.HubSessionRevoke =
         app.aroundtheblock.wallet.core.digiscope.HubSessionRevoke.NONE,
     /**
@@ -254,11 +254,12 @@ class WalletManager @Suppress("LongParameterList") constructor(
 
     /**
      * Clear the registry `dgb_wallets`, by the rule of every other store of the wipe
-     * (WIPE-WRITES-NOTHING): true only when the write landed, or there was nothing to write, and no
-     * file of the registry is on the device that was not there before. A device that never had a
-     * second wallet has no registry file, and a commit to it would make one: it is not written. A
-     * file this clear did make is removed and read back gone here, inside the verdict, and not left
-     * to the delete after it ([deleteWalletNamedPrefsFiles]).
+     * (WIPE-WRITES-NOTHING, [creatingNoPrefsFile]): true only when the write landed, or there was
+     * nothing to write, and the emptied registry has no file on the device, read back. A device that
+     * never had a second wallet has no registry file, and a commit to it would make one: it is not
+     * written. The file goes here, inside the verdict, whether this clear made it, an earlier wipe
+     * did, or it was the device's; it is not left to the delete after the verdict
+     * ([deleteWalletNamedPrefsFiles]).
      */
     private fun clearWalletRegistry(): Boolean = creatingNoPrefsFile(context, "WalletManager", listOf(WalletRegistry.PREFS)) {
         clearHeldPrefs(context, "WalletManager", WalletRegistry.PREFS)
@@ -1173,8 +1174,9 @@ class WalletManager @Suppress("LongParameterList") constructor(
     /**
      * After a verified wipe: delete every preferences file whose name carries one of [listed]'s ids
      * (the emptied stores the per-wallet erase deleted and anything written back since), plus the
-     * registry `dgb_wallets` and legacy's seed record `dgb_wallet_seed`, which the wipe clears and
-     * leaves. Best effort, logged by count only: what they held is already gone.
+     * registry `dgb_wallets` and legacy's seed record `dgb_wallet_seed`. The wipe has deleted both of
+     * those inside its verdict already; this pass is for one a later step of the same run wrote back.
+     * Best effort, logged by count only: what they held is already gone.
      */
     private fun deleteWalletNamedPrefsFiles(listed: Set<String>) {
         val ids = listed.filter { it != WalletIds.LEGACY }

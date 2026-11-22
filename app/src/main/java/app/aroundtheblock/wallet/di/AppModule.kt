@@ -159,12 +159,11 @@ object AppModule {
         um: UtxoManager,
         am: AssetManager,
         identitySessions: app.aroundtheblock.wallet.IdentitySessionEraser,
-        digiScopeClient: dagger.Lazy<DigiScopeClient>,
+        httpClient: dagger.Lazy<OkHttpClient>,
     ): WalletManager =
         WalletManager(
             context, ksm, um, assetManager = am, identitySessions = identitySessions,
-            // Taken lazily: only a wipe needs the Hub client.
-            hubRevoke = hubSessionRevoke(digiScopeClient),
+            hubRevoke = hubSessionRevoke(context, httpClient),
             markErasureOwed = { app.aroundtheblock.wallet.FreshStartAfterWipe.markErasureOwed(context) },
             // The same wallet the KeyStoreManager above and every store resolve to.
             scope = ActiveWallet.scope(context),
@@ -181,18 +180,23 @@ object AppModule {
         eraser: WalletStoreEraser,
         walletManager: WalletManager,
         pinManager: PinManager,
-        digiScopeClient: dagger.Lazy<DigiScopeClient>,
+        httpClient: dagger.Lazy<OkHttpClient>,
     ): WalletRemoval = WalletRemoval(
         registry,
         eraser,
         activeScope = ActiveWallet.scope(context),
         wipeAll = { walletManager.wipeThenReleasePin(pinManager) },
-        revokeHub = hubSessionRevoke(digiScopeClient),
+        revokeHub = hubSessionRevoke(context, httpClient),
     )
 
-    /** A wallet's Hub session ended on the server before its token is erased (wipe and removal). */
-    private fun hubSessionRevoke(client: dagger.Lazy<DigiScopeClient>) =
-        app.aroundtheblock.wallet.core.digiscope.HubSessionRevoke { scope -> client.get().revokeStoredSession(scope) }
+    /**
+     * A wallet's Hub session ended on the server before its token is erased (wipe and removal).
+     * Never through the Hub client: building it loads its token, which can create a store's file,
+     * and a wipe creates no file (`HubRevokeWiringGateTest`). The shared HTTP client is taken
+     * lazily and only when a token is found.
+     */
+    private fun hubSessionRevoke(context: Context, httpClient: dagger.Lazy<OkHttpClient>) =
+        app.aroundtheblock.wallet.core.digiscope.StoredHubSessionRevoke(context) { httpClient.get() }
 
     /** Wallet switching: persist the active id, end the web session, restart (Task 9). */
     @Provides @Singleton

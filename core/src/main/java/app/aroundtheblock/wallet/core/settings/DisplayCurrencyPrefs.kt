@@ -25,7 +25,8 @@ import app.aroundtheblock.wallet.core.wallets.storageSuffix
  *
  * [read] moves a value it finds only in the old file. Each path that clears the old file calls
  * [moveFromLegacy] first, because on the first start after an update the crash-loop breaker can
- * run before anything has read the currency. The Room legacy value (`WalletConfig.fiatCurrency`)
+ * run before anything has read the currency. The full wipe calls [copyFromLegacy] instead: it
+ * writes this file only, and leaves the old one to the wipe's own clear. The Room legacy value (`WalletConfig.fiatCurrency`)
  * stays where it was: the wallet screen adopts it once when neither file has a value.
  */
 object DisplayCurrencyPrefs {
@@ -64,13 +65,27 @@ object DisplayCurrencyPrefs {
      * Move the value out of the old file, if it is there. The new file keeps a value it already has
      * (a choice made since the update wins), and the old key is removed only once the new file holds
      * a value. If that write does not land, the old value is still returned, so this session shows
-     * it, and outside a wipe path the old file keeps it for the next start to move again. On a wipe
-     * path the clear that follows removes the old file, so a refused write there loses the choice;
-     * that is logged. Never throws: this runs at start and before a wipe.
+     * it, and the old file keeps it for the next start to move again. On a path that clears the old
+     * file next (a new wallet, the crash-loop breaker), a refused write there loses the choice; that
+     * is logged. Never throws: this runs at start and before the old file is cleared.
      *
      * @return the value to show: the new file's, else the old file's, else null.
      */
-    fun moveFromLegacy(context: Context, netSuffix: String): String? = runCatching {
+    fun moveFromLegacy(context: Context, netSuffix: String): String? = carry(context, netSuffix, removeOld = true)
+
+    /**
+     * The wipe's half of the move (WIPE-WRITES-NOTHING): the value is copied to its own file and the
+     * old file is not written. The wipe clears the old file whole straight after, under its own rule
+     * for the files it may make, so removing the one key here would be a second write to a store the
+     * wipe is about to erase, and that write makes the old file when this process holds its values
+     * and the file is not on the device. If the copy does not land, the wipe's clear loses the
+     * choice; that is logged. Never throws.
+     *
+     * @return the value to show, as [moveFromLegacy].
+     */
+    fun copyFromLegacy(context: Context, netSuffix: String): String? = carry(context, netSuffix, removeOld = false)
+
+    private fun carry(context: Context, netSuffix: String, removeOld: Boolean): String? = runCatching {
         // The old home is legacy's `dgb_sync_data<net>`: no other wallet ever held the currency there.
         val legacy = context.getSharedPreferences(
             WalletStores.prefsName(LEGACY_PREFS_BASE, legacyScopeOf(netSuffix)), Context.MODE_PRIVATE,
@@ -80,7 +95,7 @@ object DisplayCurrencyPrefs {
             .getString(KEY, null)
         if (old == null) return@runCatching current
         if (current != null || writeNow(context, netSuffix, old)) {
-            legacy.edit().remove(KEY).commit()
+            if (removeOld) legacy.edit().remove(KEY).commit()
         } else {
             runCatching { android.util.Log.w("DisplayCurrencyPrefs", "display currency not moved: the write did not land") }
         }

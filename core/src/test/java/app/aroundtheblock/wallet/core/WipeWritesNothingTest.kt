@@ -3,6 +3,7 @@ package app.aroundtheblock.wallet.core
 import android.content.Context
 import android.util.Log
 import app.aroundtheblock.wallet.core.digiscope.HubTokenStore
+import app.aroundtheblock.wallet.core.digiscope.StoredHubSessionRevoke
 import app.aroundtheblock.wallet.core.security.PinManager
 import app.aroundtheblock.wallet.core.settings.AutoLockPrefs
 import app.aroundtheblock.wallet.core.settings.DisplayCurrencyPrefs
@@ -31,6 +32,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import kotlin.time.Duration.Companion.minutes
 
 /**
  * WIPE-WRITES-NOTHING: a verified wipe creates no file.
@@ -45,12 +47,15 @@ import java.io.File
  * erases is moved to its own file first; that file holds the setting and nothing of a wallet. And
  * `dgb_settings` holds device settings the wipe keeps: one key is taken out, the file stays.
  *
- * The last three tests build every starting state this model can (one wallet or two, either one
- * running; every store absent, on the device, held by the process with no file, or an empty file;
- * each store in turn held another way) and then refuse a delete, and a write, for every store in
- * turn. They are a JVM model: the app module's half of a wipe is stood in for by the Hub reads
- * and clears it makes ([Device.walletManagerWithHub]); its two marks, the PIN store's file, the
- * database and the WebView's data are not here.
+ * The matrix tests at the end build every starting state this model can (one wallet or two, on
+ * either network, either one running; every store absent, on the device, held by the process with
+ * no file, or an empty file; each store in turn held another way; the Hub client built before the
+ * wipe or by it) and then refuse a delete, and a write, for every store in turn, and wipe again.
+ * They are a JVM model. The Hub is wired as the app wires it: the revoke is the app's own
+ * ([StoredHubSessionRevoke], which does not build the client), and the client ([Device.HubClient])
+ * loads its token when it is built and is built by whoever asks first, as the app's lazily taken
+ * one is. The app module's two marks, the PIN store's file, the database and the WebView's data
+ * are not here.
  */
 class WipeWritesNothingTest {
 
@@ -90,14 +95,39 @@ class WipeWritesNothingTest {
         }
         val vault = FakeVault()
         val aliases = vault.asKeystoreAliases()
-        val pin = PinManager(RecordingPinStore().apply { map["pin_hash"] = "00"; map["pin_salt"] = "00"; map["pin_method"] = "pbkdf2" })
+        private fun aPin() = PinManager(RecordingPinStore().apply { map["pin_hash"] = "00"; map["pin_salt"] = "00"; map["pin_method"] = "pbkdf2" })
+        var pin = aPin()
+            private set
 
-        private val mocks = ArrayList<Any>()
+        // One of each mock for the life of this device, however many wipes it runs: the mock library
+        // keeps every mock it makes until the JVM ends.
+        private val utxo: UtxoManager by lazy { mockk<UtxoManager>(relaxed = true) }
+        private val keyManagers = HashMap<String, app.aroundtheblock.wallet.core.security.KeyStoreManager>()
+        private fun keyManager(scope: WalletScope) = WalletStores.keyAlias(scope).let { alias -> keyManagers.getOrPut(alias) { keyStoreManagerOver(vault, alias = alias) } }
 
-        /** Lets go of what the mocks of this device recorded: the tests over many devices would otherwise keep it all. */
-        fun dispose() {
-            clearMocks(ctx, *mocks.toTypedArray())
-            root.deleteRecursively()
+        /**
+         * This device as it left the factory: nothing in its data directory, no key, the PIN set, no
+         * process state. The tests over thousands of devices are one device, reset between runs: the
+         * mock library keeps every mock it has made (and the child mocks a relaxed one hands out) for
+         * the life of the JVM, so a mocked context per run left some hundreds of megabytes held in
+         * the JVM the rest of the suite runs in.
+         */
+        fun reset() {
+            root.listFiles()?.forEach { it.deleteRecursively() }
+            File(root, "files").mkdirs()
+            File(root, "databases").mkdirs()
+            prefs = FilePrefsFactory(File(root, "shared_prefs"))
+            vault.keys.clear()
+            vault.events.clear()
+            pin = aPin()
+            opened.clear()
+            deleteRefused.clear()
+            revoked.clear()
+            // What the mocks recorded of the run before; what they answer stays.
+            clearMocks(ctx, utxo, *keyManagers.values.toTypedArray(), answers = false)
+            ActiveWallet.resetForTest()
+            WipeOwedStores.resetForTest()
+            ChainTipStore.invalidateCache()
         }
 
         /** The next launch: a new process holds nothing of the one before, and reads what the files hold. */
@@ -123,10 +153,10 @@ class WipeWritesNothingTest {
         }
 
         /** A second wallet, made active, with its record, a store and its key. */
-        fun addWalletB(active: Boolean = true): WalletScope {
+        fun addWalletB(active: Boolean = true, testnet: Boolean = false): WalletScope {
             val registry = ActiveWallet.registry(ctx)
-            val entry = registry.reserve(false, WalletOrigin.CREATED, 1L)!!
-            val b = WalletScope(entry.id, false)
+            val entry = registry.reserve(testnet, WalletOrigin.CREATED, 1L)!!
+            val b = WalletScope(entry.id, testnet)
             prefs.prefsFor(WalletStores.seedRecordPrefs(b)).seed("encrypted_seed_v2", "c2")
             prefs.prefsFor(WalletStores.prefsName("dgb_sync_data", b)).seed("held", "x")
             vault.createUnboundKey(WalletStores.keyAliasV2(b))
@@ -142,19 +172,42 @@ class WipeWritesNothingTest {
         val opensWithAKeyset = { name: String -> ctx.getSharedPreferences(name, Context.MODE_PRIVATE).also { if (!prefsFile(name).exists()) prefs.prefsFor(name).seed("__keyset__", "k") } }
 
         /**
-         * The wipe with the Hub wired as the app wires it, modelled: each wallet's stored token is
-         * read for the revoke before anything is erased (`DigiScopeClient.revokeStoredSession`), and
-         * the identity step reads and clears the running wallet's (`DigiScopeClient`'s start, then
-         * `logout`). Every Hub store is the kind that writes its file when it is opened.
+         * The Hub client as the app holds it (`DigiScopeClient`): one for the running wallet, with
+         * that wallet's token store for as long as the process lives. It loads its token as it is
+         * built, which moves a token from before the encrypted store into it, and it is built by
+         * whoever asks for it first (`dagger.Lazy`): a screen before the wipe, or the wipe.
          */
-        fun walletManagerWithHub(scope: WalletScope = WalletScope.legacy(false)) = WalletManager(
+        inner class HubClient(scope: WalletScope) {
+            private val store = HubTokenStore(ctx, scope, opensWithAKeyset)
+            var built = false
+                private set
+            var token: String? = null
+                private set
+            fun build() { if (!built) { built = true; token = store.load() } }
+            /** `DigiScopeClient.logout`, as the identity step calls it. */
+            fun logout() { build(); token = null; store.clear() }
+        }
+
+        /** Every token the revoke sent to the server. */
+        val revoked = ArrayList<String>()
+
+        /** The revoke the app wires: the token read where it is and sent, the Hub client not asked. */
+        val revokeAsTheAppWiresIt = StoredHubSessionRevoke({ s -> HubTokenStore(ctx, s, opensWithAKeyset) }, { token -> revoked += token })
+
+        /**
+         * The wipe with the Hub wired as the app wires it: each wallet's stored token is sent for the
+         * revoke before anything is erased, by [revokeAsTheAppWiresIt], and the identity step logs
+         * [client] out, building it when nothing has yet. Every Hub store is the kind that writes its
+         * file when it is opened.
+         */
+        fun walletManagerWithHub(scope: WalletScope = WalletScope.legacy(false), client: HubClient = HubClient(scope)) = WalletManager(
             context = ctx,
-            keyStoreManager = keyStoreManagerOver(vault, alias = WalletStores.keyAlias(scope)).also { mocks += it },
-            utxoManager = mockk<UtxoManager>(relaxed = true).also { mocks += it },
+            keyStoreManager = keyManager(scope),
+            utxoManager = utxo,
             dataEraser = AndroidWalletDataEraser(ctx, aliases) { HubTokenStore(ctx, WalletScope.legacy(false), opensWithAKeyset) },
             quiesceNative = { },
-            identitySessions = { HubTokenStore(ctx, scope, opensWithAKeyset).run { load(); clear() }; true },
-            hubRevoke = { s -> HubTokenStore(ctx, s, opensWithAKeyset).stored() },
+            identitySessions = { client.logout(); true },
+            hubRevoke = revokeAsTheAppWiresIt,
             scope = scope,
             scopeEraser = WalletStoreEraser(ctx, aliases, { true }) { name -> prefsFile(name).exists() },
             keystoreAliases = aliases,
@@ -533,18 +586,256 @@ class WipeWritesNothingTest {
         assertEquals(mapOf("language" to "de"), d.ctx.getSharedPreferences("dgb_settings", Context.MODE_PRIVATE).all)
     }
 
+    // ── The display currency (re-review finding 1) ───────────────────────────
+
+    /**
+     * The sync data held by this process with the currency in it and no file on the device, on
+     * either network: the currency is kept, in its own file, and that file is the only one made.
+     */
+    @Test fun `a display currency in sync data held with no file is kept and no sync data file is made`() = runTest {
+        for (net in listOf("", "_testnet")) {
+            val d = Device().apply { populateLegacy() }
+            d.prefs.prefsFor("dgb_sync_data$net").apply { seed("has_synced", true); seed(DisplayCurrencyPrefs.KEY, "EUR") }
+            assertTrue(d.prefsFile("dgb_sync_data$net").delete())
+            val before = d.listing()
+
+            val report = d.walletManager().wipeThenReleasePin(d.pin)
+
+            assertTrue("'$net': $report", report.verified)
+            assertFalse("'$net': a verified wipe clears the PIN store", d.pin.hasPin())
+            assertEquals("'$net': files the wipe created", setOf("shared_prefs/dgb_price$net.xml"), d.listing() - before)
+            assertEquals("'$net'", mapOf(DisplayCurrencyPrefs.KEY to "EUR"), d.ctx.getSharedPreferences("dgb_price$net", Context.MODE_PRIVATE).all)
+            ActiveWallet.resetForTest()
+            WipeOwedStores.resetForTest()
+        }
+    }
+
+    /**
+     * The wipe copies the currency out and does not write the sync data for it: the clear that
+     * follows is the one write to that store. With that store refusing writes, this process goes on
+     * reading exactly what its file holds, the currency included, and the currency is kept.
+     */
+    @Test fun `keeping the display currency does not write the sync data the wipe is about to clear`() {
+        for (net in listOf("", "_testnet")) {
+            val d = Device().apply { populateLegacy() }
+            val onDevice = mapOf("has_synced" to true, DisplayCurrencyPrefs.KEY to "EUR")
+            d.prefs.prefsFor("dgb_sync_data$net").apply { onDevice.forEach { (k, v) -> seed(k, v) }; refuseWrites = true }
+            val eraser = AndroidWalletDataEraser(d.ctx, d.aliases) { HubTokenStore(d.ctx, WalletScope.legacy(false), d.opensWithAKeyset) }
+            val before = d.listing()
+
+            assertFalse("'$net': the clear did not land", eraser.eraseSyncData())
+
+            assertEquals("'$net': this process no longer reads what the file holds", onDevice, d.ctx.getSharedPreferences("dgb_sync_data$net", Context.MODE_PRIVATE).all)
+            assertEquals("'$net'", "EUR", d.ctx.getSharedPreferences("dgb_price$net", Context.MODE_PRIVATE).getString(DisplayCurrencyPrefs.KEY, null))
+            assertEquals("'$net': files the failed step created", setOf("shared_prefs/dgb_price$net.xml"), d.listing() - before)
+        }
+    }
+
+    // ── A file an earlier wipe made (re-review finding 2) ────────────────────
+
+    /** Every preferences file on the device now, by name. */
+    private fun Device.prefsOnDevice(): Set<String> = listing().filter { it.startsWith("shared_prefs/") }.toSet()
+
+    /**
+     * A wipe that made a file and could not remove it is unverified and keeps the PIN. The next wipe,
+     * in this process or after a restart, does not take that file for the device's: while the
+     * removal is still refused it does not verify, and once it is allowed it verifies with the file
+     * gone. The wipe keeps no list of what it made: a store that holds nothing has its file deleted.
+     */
+    @Test fun `a file a wipe made and could not remove is never there when a later wipe verifies`() = runTest {
+        for (name in listOf("dgb_watched_addrs", "dgb_cf_abandonment_testnet", "dgb_sync_data_testnet", "dgb_bloom_peers", WalletRegistry.PREFS)) {
+            for (restart in listOf(false, true)) {
+                val d = Device().apply { populateLegacy() }
+                val running = if (name == WalletRegistry.PREFS) d.addWalletB() else WalletScope.legacy(false)
+                if (name != WalletRegistry.PREFS) d.prefs.prefsFor(name).seed("held", "x")
+                assertTrue(d.prefsFile(name).delete())
+                d.deleteRefused += name
+                val before = d.listing()
+                val what = "$name, restart=$restart"
+
+                val first = d.walletManagerWithHub(running).wipeThenReleasePin(d.pin)
+
+                assertTrue("$what: precondition: the file the wipe made is on the device", d.prefsFile(name).exists())
+                assertFalse("$what: the first wipe verified", first.verified)
+                assertTrue("$what: the PIN store must be kept", d.pin.hasPin())
+
+                // Still refused: the retry cannot verify over it.
+                if (restart) d.restart() else ActiveWallet.resetForTest()
+                val refusedAgain = d.walletManagerWithHub(ActiveWallet.scope(d.ctx)).wipeThenReleasePin(d.pin)
+                assertTrue("$what: precondition: still on the device", d.prefsFile(name).exists())
+                assertFalse("$what: a wipe verified with a file an earlier wipe made", refusedAgain.verified)
+                assertTrue("$what: the PIN store must still be kept", d.pin.hasPin())
+
+                // Allowed again: the retry verifies, and the file is gone.
+                d.deleteRefused.clear()
+                if (restart) d.restart() else ActiveWallet.resetForTest()
+                val retry = d.walletManagerWithHub(ActiveWallet.scope(d.ctx)).wipeThenReleasePin(d.pin)
+                assertTrue("$what: $retry", retry.verified)
+                assertFalse("$what: a verified wipe clears the PIN store", d.pin.hasPin())
+                assertEquals("$what: files the wipes left that were not there before", emptySet<String>(), d.listing() - before)
+            }
+        }
+    }
+
+    /**
+     * The rule the retry rests on, stated for one wipe: a store the wipe emptied has no file
+     * afterwards, whoever made the one that was there. What is left holds something a wipe keeps:
+     * device settings, and an encrypted Hub store's keyset.
+     */
+    @Test fun `a verified wipe leaves no file of a store it emptied`() = runTest {
+        val d = Device().apply { populateLegacy() }
+        val nets = listOf("", "_testnet")
+        val emptied = listOf(
+            "dgb_sync_data", "dgb_cf_abandonment", "dgb_history_rebuild", "dgb_reconcile",
+            "dgb_bloom_peers", "dgb_filter_peers", "dgb_dandelion_peers",
+        ).flatMap { base -> nets.map { base + it } } + listOf(
+            "dgb_watched_addrs", "dgb_outgoing_tx", "dgb_asset_backfill", "dgb_asset_heal", "dgb_diag",
+            "dgb_quickstart", "dgb_db_key", "dgb_auto_lock", LogTag.PREFS,
+        )
+        emptied.forEach { d.prefs.prefsFor(it).seed("held", "x") }
+        d.prefs.prefsFor(HubTokenStore.LEGACY_PREFS_NAME).seed(HubTokenStore.KEY_JWT, "plain")
+        d.prefs.prefsFor(HubTokenStore.SECURE_PREFS_NAME).apply { seed("__keyset__", "k"); seed(HubTokenStore.KEY_JWT, "sealed") }
+        d.prefs.prefsFor("dgb_settings").seed("language", "de")
+
+        val report = d.walletManagerWithHub().wipeThenReleasePin(d.pin)
+
+        assertTrue("$report", report.verified)
+        assertEquals(
+            "preferences files left by a verified wipe",
+            setOf("shared_prefs/dgb_settings.xml", "shared_prefs/${HubTokenStore.SECURE_PREFS_NAME}.xml"),
+            d.prefsOnDevice(),
+        )
+        d.restart()
+        assertEquals(mapOf("language" to "de"), d.ctx.getSharedPreferences("dgb_settings", Context.MODE_PRIVATE).all)
+        assertEquals(setOf("__keyset__"), d.ctx.getSharedPreferences(HubTokenStore.SECURE_PREFS_NAME, Context.MODE_PRIVATE).all.keys)
+    }
+
+    /**
+     * Whether the seed is gone waits on no file's removal: an emptied seed record whose file will
+     * not go leaves the seed gone, by read-back, and the wipe unverified with the PIN kept.
+     */
+    @Test fun `an emptied seed record whose file will not go leaves the seed gone and the wipe unverified`() = runTest {
+        val d = Device().apply { populateLegacy() }
+        d.deleteRefused += "dgb_wallet_seed"
+
+        val first = d.walletManager().wipeThenReleasePin(d.pin)
+
+        assertTrue("the record's clear landed and its key is gone: $first", first.seedGone)
+        assertEquals(emptyMap<String, Any?>(), d.ctx.getSharedPreferences("dgb_wallet_seed", Context.MODE_PRIVATE).all)
+        assertTrue("precondition: the emptied file is on the device", d.prefsFile("dgb_wallet_seed").exists())
+        assertFalse("an emptied store's file is left, yet the wipe verified", first.verified)
+        assertTrue("the PIN store must be kept", d.pin.hasPin())
+
+        d.deleteRefused.clear()
+        ActiveWallet.resetForTest()
+        val retry = d.walletManager().wipeThenReleasePin(d.pin)
+        assertTrue("$retry", retry.verified)
+        assertFalse(d.prefsFile("dgb_wallet_seed").exists())
+    }
+
+    // ── The Hub client built by the wipe (re-review finding 3) ───────────────
+
+    /**
+     * The revoke the app wires does not build the Hub client. A token from before the encrypted
+     * store is read where it is and sent; nothing is moved and no file is made.
+     */
+    @Test fun `the revoke sends a token from before the encrypted store and makes no file`() {
+        val d = Device()
+        d.prefs.prefsFor(HubTokenStore.LEGACY_PREFS_NAME).seed(HubTokenStore.KEY_JWT, "plain")
+        val before = d.listing()
+
+        d.revokeAsTheAppWiresIt.revoke(WalletScope.legacy(false))
+
+        assertEquals(listOf("plain"), d.revoked)
+        assertEquals("files the revoke created", emptySet<String>(), d.listing() - before)
+        assertEquals("plain", d.prefs.prefsFor(HubTokenStore.LEGACY_PREFS_NAME).getString(HubTokenStore.KEY_JWT, null))
+
+        d.revokeAsTheAppWiresIt.revoke(WalletScope("0123456789abcdef", false))
+        assertEquals("a wallet with no stored session sends nothing", listOf("plain"), d.revoked)
+        assertEquals(emptySet<String>(), d.listing() - before)
+    }
+
+    /**
+     * A device that still holds a token from before the encrypted store, wiped before anything has
+     * built the Hub client (the launch backstop). The wipe is then what builds it, in its identity
+     * step, after the token is erased: its session is revoked, and no Hub store is made.
+     */
+    @Test fun `a wipe that is the first to build the Hub client makes no Hub file`() = runTest {
+        val d = Device().apply { populateLegacy() }
+        d.prefs.prefsFor(HubTokenStore.LEGACY_PREFS_NAME).seed(HubTokenStore.KEY_JWT, "plain")
+        val client = d.HubClient(WalletScope.legacy(false))
+        val before = d.listing()
+
+        val report = d.walletManagerWithHub(client = client).wipeThenReleasePin(d.pin)
+
+        assertTrue("$report", report.verified)
+        assertTrue("the identity step logs the client out, which builds it", client.built)
+        assertEquals(listOf("plain"), d.revoked)
+        assertEquals("files the wipe created", emptySet<String>(), d.listing() - before)
+        assertFalse(d.prefsFile(HubTokenStore.SECURE_PREFS_NAME).exists())
+    }
+
+    /** A client built before the wipe has moved the token already; the wipe erases it where it now is. */
+    @Test fun `a wipe after the Hub client was built erases the moved token and makes no file`() = runTest {
+        val d = Device().apply { populateLegacy() }
+        d.prefs.prefsFor(HubTokenStore.LEGACY_PREFS_NAME).seed(HubTokenStore.KEY_JWT, "plain")
+        val client = d.HubClient(WalletScope.legacy(false)).apply { build() }
+        assertEquals("plain", client.token)
+        val before = d.listing()
+
+        val report = d.walletManagerWithHub(client = client).wipeThenReleasePin(d.pin)
+
+        assertTrue("$report", report.verified)
+        assertEquals(listOf("plain"), d.revoked)
+        assertEquals("files the wipe created", emptySet<String>(), d.listing() - before)
+        assertEquals(setOf("__keyset__"), d.prefs.prefsFor(HubTokenStore.SECURE_PREFS_NAME).all.keys)
+        assertEquals(null, d.HubClient(WalletScope.legacy(false)).apply { build() }.token)
+    }
+
+    /**
+     * A token store this process opened, whose file has since gone from the device: logging out
+     * removes the token with a commit, which writes the file back. That file is the logout's own.
+     */
+    @Test fun `logging out of a Hub store whose file has gone leaves no file`() {
+        val d = Device()
+        val store = HubTokenStore(d.ctx, WalletScope.legacy(false), d.opensWithAKeyset)
+        store.save("jwt")
+        assertTrue(d.prefsFile(HubTokenStore.SECURE_PREFS_NAME).delete())
+
+        store.clear()
+
+        assertEquals(emptySet<String>(), d.listing())
+        assertEquals(null, HubTokenStore(d.ctx, WalletScope.legacy(false), d.opensWithAKeyset).load())
+    }
+
     // ── Every starting state, listed before and after ────────────────────────
 
     private enum class Held { ABSENT, ON_DISK, MEMORY_ONLY, EMPTY_FILE }
-    private enum class Wallets(val two: Boolean, val bActive: Boolean) { ONE(false, false), TWO_B_ACTIVE(true, true), TWO_LEGACY_ACTIVE(true, false) }
+
+    /** How many wallets, which one is running, and on which network. */
+    private enum class Wallets(val two: Boolean, val bActive: Boolean, val testnet: Boolean) {
+        ONE(false, false, false),
+        ONE_ON_TESTNET(false, false, true),
+        TWO_B_ACTIVE(true, true, false),
+        TWO_LEGACY_ACTIVE(true, false, false),
+        TWO_B_ON_TESTNET_ACTIVE(true, true, true),
+    }
+
+    /**
+     * Who builds the Hub client: a screen before the wipe, or the wipe (its identity step; the revoke
+     * does not build it). The build after the wipe is asked of every run.
+     */
+    private enum class HubBuilt { BEFORE_THE_WIPE, BY_THE_WIPE }
 
     /** One device before a wipe: how many wallets, how every optional store is held, and one store held another way. */
     private data class State(val wallets: Wallets, val base: Held, val one: Pair<String, Held>? = null) {
         override fun toString() = "$wallets, every store $base" + (one?.let { ", ${it.first} ${it.second}" } ?: "")
+        fun holds(name: String): Held = if (one?.first == name) one.second else base
     }
 
     private val legacyOnBoth = listOf(false, true).map(WalletScope::legacy)
     private val legacySeed = WalletStores.seedRecordPrefs(WalletScope.legacy(false))
+    private val networks = listOf("", "_testnet")
 
     /** Every store of legacy's and of the device that a wipe may open, and that a state here holds one way or another. */
     private val variedNames: List<String> = (
@@ -570,6 +861,14 @@ class WipeWritesNothingTest {
             name.startsWith("dgb_wallet_seed") -> store.seed("encrypted_seed_v2", "c1")
             name == "dgb_settings" -> { store.seed("cf_birth_height", 100L); store.seed("language", "de") }
             name.startsWith(HubTokenStore.LEGACY_PREFS_NAME) || name.startsWith(HubTokenStore.SECURE_PREFS_NAME) -> store.seed(HubTokenStore.KEY_JWT, "jwt")
+            // Legacy's sync data as a synced 4.1.4 wallet left it: the display currency and the keys
+            // the three file-backed stores once kept there.
+            networks.any { name == "dgb_sync_data$it" } -> {
+                store.seed("has_synced", true)
+                store.seed(DisplayCurrencyPrefs.KEY, "EUR")
+                store.seed("saved_blocks", "00"); store.seed("saved_filter_headers", "00")
+                store.seed("saved_transactions", "00"); store.seed("saved_transactions_count", 1)
+            }
             else -> store.seed("held", "x")
         }
         if (how == Held.MEMORY_ONLY) assertTrue(prefsFile(name).delete())
@@ -577,7 +876,7 @@ class WipeWritesNothingTest {
 
     /** Puts the device in [state]; answers the other wallet when there is one, and the wallet that is running. */
     private fun Device.arrange(state: State): Pair<WalletScope?, WalletScope> {
-        val b = if (state.wallets.two) addWalletB(active = state.wallets.bActive) else null
+        val b = if (state.wallets.two) addWalletB(active = state.wallets.bActive, testnet = state.wallets.testnet) else null
         val names = variedNames + b?.let(::namesOf).orEmpty()
         val held = names.associateWith { name ->
             // A wallet has its record unless the state says otherwise by name.
@@ -597,26 +896,45 @@ class WipeWritesNothingTest {
         }
         ActiveWallet.resetForTest()
         opened.clear()
-        return b to (if (b != null && state.wallets.bActive) b else WalletScope.legacy(false))
+        return b to (if (b != null && state.wallets.bActive) b else WalletScope.legacy(state.wallets.testnet && !state.wallets.two))
     }
 
     /** Every name a state may hold or the wipe may open on a device with [b]. */
     private fun knownNames(b: WalletScope?): List<String> = (variedNames + WalletRegistry.PREFS + b?.let(::namesOf).orEmpty()).distinct()
 
+    /** The networks on which [state] has a display currency in legacy's sync data for the wipe to keep. */
+    private fun currencyKeptOn(state: State): List<String> =
+        networks.filter { state.holds("dgb_sync_data$it") in setOf(Held.ON_DISK, Held.MEMORY_ONLY) }
+
     /**
-     * The files a wipe may make in [state], by name: `dgb_settings`, which is not the wipe's to
-     * delete (it holds device settings), when this process held it with no file and the wipe took
-     * the scan floor out of it.
+     * The files a wipe may make in [state], by name, and no others:
+     *  - `dgb_price<net>`, when the display currency was in that network's sync data and that file
+     *    was not on the device (owner decision, 2026-11-12);
+     *  - `dgb_settings`, which is not the wipe's to delete (it holds device settings), when this
+     *    process held it with no file and the wipe took the scan floor out of it.
      */
-    private fun allowed(state: State): Set<String> {
-        val settings = if (state.one?.first == "dgb_settings") state.one.second else state.base
-        return if (settings == Held.MEMORY_ONLY) setOf("shared_prefs/dgb_settings.xml") else emptySet()
-    }
+    private fun allowed(state: State): Set<String> =
+        currencyKeptOn(state).map { "shared_prefs/dgb_price$it.xml" }.toSet() +
+            (if (state.holds("dgb_settings") == Held.MEMORY_ONLY) setOf("shared_prefs/dgb_settings.xml") else emptySet())
+
+    /**
+     * Every preferences file core's half of a verified wipe may leave on the device, by name: the
+     * display currency's file on each network, the device settings, and legacy's encrypted Hub store
+     * when it was there before (its keyset). Every other store the wipe opens has no file.
+     */
+    private val keptByAVerifiedWipe: Set<String> =
+        (networks.map { "dgb_price$it" } + "dgb_settings" + HubTokenStore.SECURE_PREFS_NAME).map { "shared_prefs/$it.xml" }.toSet()
 
     /** The first few of [problems], one a line, and how many there are. */
     private fun summary(problems: List<String>): String = problems.distinct().let { all ->
         if (all.isEmpty()) "" else "${all.size} problems, the first:\n" + all.take(12).joinToString("\n")
     }
+
+    /**
+     * The three tests below run some thousands of wipes each, in tens of seconds on a quiet machine:
+     * `runTest`'s one minute is too near that when other builds share it.
+     */
+    private val MATRIX_TIMEOUT = 10.minutes
 
     private val bases = Wallets.values().flatMap { w -> Held.values().map { State(w, it) } }
 
@@ -627,74 +945,127 @@ class WipeWritesNothingTest {
         fromNothing + fromEverything + registry
     }
 
+    /** The wallet a launch would run now: what the registry on the device says. */
+    private fun Device.runningNow(): WalletScope { ActiveWallet.resetForTest(); return ActiveWallet.scope(ctx) }
+
     /**
-     * Every starting state this test can build, wiped with nothing refused: each wipe verifies,
-     * makes no file, and opens no store that the states here do not hold in every way.
+     * Every starting state this test can build, with the Hub client built before the wipe and by
+     * it, wiped with nothing refused: each wipe verifies, makes no file but the named ones, keeps
+     * the display currency, and opens no store that the states here do not hold in every way. And
+     * the next Hub client to be built, in this process and in the next, makes no file either.
      */
-    @Test fun `no starting state has a verified wipe leave a file it made`() = runTest {
+    @Test fun `no starting state has a verified wipe leave a file it made`() = runTest(timeout = MATRIX_TIMEOUT) {
         val problems = ArrayList<String>()
         val states = everyState()
-        for (state in states) {
-            val d = Device()
+        var wipes = 0
+        val d = Device()
+        for (state in states) for (hub in HubBuilt.values()) {
+            d.reset()
             val (b, running) = d.arrange(state)
+            val client = d.HubClient(running)
+            if (hub == HubBuilt.BEFORE_THE_WIPE) client.build()
             val before = d.listing()
+            val what = "$state, Hub client built $hub"
 
-            val report = d.walletManagerWithHub(running).wipeThenReleasePin(d.pin)
+            val report = d.walletManagerWithHub(running, client).wipeThenReleasePin(d.pin)
 
-            val made = d.listing() - before - allowed(state)
-            if (!report.verified) problems += "$state: not verified ($report)"
-            if (made.isNotEmpty()) problems += "$state: verified=${report.verified}, made $made"
+            wipes++
+            val afterWipe = d.listing()
+            val made = afterWipe - before - allowed(state)
+            if (!report.verified) problems += "$what: not verified ($report)"
+            if (made.isNotEmpty()) problems += "$what: verified=${report.verified}, made $made"
             val unknown = d.opened - knownNames(b).toSet()
-            if (unknown.isNotEmpty()) problems += "$state: opens $unknown, which no state here holds"
-            d.dispose()
+            if (unknown.isNotEmpty()) problems += "$what: opens $unknown, which no state here holds"
+            // The whole list of what a verified wipe leaves in the preferences directory, by name.
+            val left = d.prefsOnDevice() - keptByAVerifiedWipe
+            if (report.verified && left.isNotEmpty()) problems += "$what: verified with $left on the device"
+            val hubStore = "shared_prefs/${HubTokenStore.SECURE_PREFS_NAME}.xml"
+            if (hubStore in afterWipe && hubStore !in before) problems += "$what: the wipe made the encrypted Hub store"
+            currencyKeptOn(state).forEach { net ->
+                val kept = d.ctx.getSharedPreferences("dgb_price$net", Context.MODE_PRIVATE).getString(DisplayCurrencyPrefs.KEY, null)
+                if (kept != "EUR") problems += "$what: the display currency on '$net' is $kept after the wipe"
+            }
+            d.HubClient(d.runningNow()).build()
+            if (d.listing() != afterWipe) problems += "$what: a Hub client built after the wipe made ${d.listing() - afterWipe}"
+            d.restart()
+            d.HubClient(d.runningNow()).build()
+            if (d.listing() != afterWipe) problems += "$what: a Hub client built after a restart made ${d.listing() - afterWipe}"
         }
-        assertEquals("of ${states.size} states", "", summary(problems))
+        println("WIPE-MATRIX states=${states.size} wipes=$wipes problems=${problems.distinct().size}")
+        assertEquals("of ${states.size} states, $wipes wipes", "", summary(problems))
     }
 
     /**
-     * A delete refused for each store in turn: the wipe either verifies with no file of its own on
-     * the device, or it does not verify and the PIN stays.
+     * A delete refused for each store in turn, and then the next two wipes, in the same process and
+     * after a restart: the first with the delete still refused, the second with it allowed again. A
+     * wipe either verifies with no file on the device that a wipe made, or it does not verify and
+     * the PIN stays; and once nothing is refused, the wipe verifies.
      */
-    @Test fun `a delete refused for any one store never has a wipe verify with a file it made`() = runTest {
+    @Test fun `a delete refused for any one store never has that wipe or the next verify with a file a wipe made`() = runTest(timeout = MATRIX_TIMEOUT) {
         val problems = ArrayList<String>()
         var unverified = 0
+        var retriesVerified = 0
+        var retriesUnverified = 0
         var runs = 0
+        val d = Device()
         for (state in bases) {
-            val count = Device().let { probe -> knownNames(probe.arrange(state).first).size.also { probe.dispose() } }
-            for (i in 0 until count) {
-                val d = Device()
+            d.reset()
+            val count = knownNames(d.arrange(state).first).size
+            for (i in 0 until count) for (restart in listOf(false, true)) {
+                d.reset()
                 val (b, running) = d.arrange(state)
                 val name = knownNames(b)[i]
                 d.deleteRefused += name
                 val before = d.listing()
+                val what = "$state, delete of ${name.replace(b?.walletId ?: "\u0000", "<b>")} refused"
 
-                val report = d.walletManagerWithHub(running).wipeThenReleasePin(d.pin)
+                val first = d.walletManagerWithHub(running).wipeThenReleasePin(d.pin)
 
                 runs++
-                val made = d.listing() - before - allowed(state)
-                val what = "$state, delete of ${name.replace(b?.walletId ?: "\u0000", "<b>")} refused"
-                if (report.verified && made.isNotEmpty()) problems += "$what: verified with $made"
-                if (report.verified == d.pin.hasPin()) problems += "$what: verified=${report.verified} with PIN kept=${d.pin.hasPin()}"
-                if (!report.verified) unverified++
-                d.dispose()
+                val madeFirst = d.listing() - before - allowed(state)
+                if (first.verified && madeFirst.isNotEmpty()) problems += "$what: verified with $madeFirst"
+                if (first.verified == d.pin.hasPin()) problems += "$what: verified=${first.verified} with PIN kept=${d.pin.hasPin()}"
+                if (!first.verified) unverified++
+
+                for (lifted in listOf(false, true)) {
+                    val pinBefore = d.pin.hasPin()
+                    if (lifted) d.deleteRefused.clear()
+                    if (restart) d.restart()
+                    val next = d.walletManagerWithHub(d.runningNow()).wipeThenReleasePin(d.pin)
+
+                    runs++
+                    val how = (if (restart) "after a restart" else "in the same process") + (if (lifted) ", the delete allowed again" else ", the delete still refused")
+                    val made = d.listing() - before - allowed(state)
+                    if (next.verified && made.isNotEmpty()) problems += "$what: the next wipe $how verified with $made"
+                    if (next.verified && d.pin.hasPin()) problems += "$what: the next wipe $how verified with the PIN kept"
+                    if (!next.verified && pinBefore && !d.pin.hasPin()) problems += "$what: the next wipe $how released the PIN unverified"
+                    if (lifted && !next.verified) problems += "$what: the next wipe $how did not verify ($next)"
+                    if (next.verified) retriesVerified++ else retriesUnverified++
+                }
             }
         }
+        println("WIPE-MATRIX refused-delete wipes=$runs firstUnverified=$unverified laterVerified=$retriesVerified laterUnverified=$retriesUnverified problems=${problems.distinct().size}")
         assertEquals("of $runs wipes", "", summary(problems))
         assertTrue("no refused delete ever kept a wipe unverified: the refusals reach nothing", unverified > 0)
+        assertTrue("no retry ever verified: the later wipes show nothing", retriesVerified > 0)
+        assertTrue("no retry was ever kept unverified by a delete still refused", retriesUnverified > 0)
     }
 
     /**
      * A write refused for each store in turn, then allowed again: neither that wipe nor the next one
      * (in the same process, and after a restart) verifies with a file on the device that a wipe made.
      */
-    @Test fun `a write refused for any one store never has that wipe or the next verify with a file a wipe made`() = runTest {
+    @Test fun `a write refused for any one store never has that wipe or the next verify with a file a wipe made`() = runTest(timeout = MATRIX_TIMEOUT) {
         val problems = ArrayList<String>()
         var unverified = 0
         var retriesVerified = 0
+        var pairs = 0
+        val d = Device()
         for (state in bases) {
-            val count = Device().let { probe -> knownNames(probe.arrange(state).first).size.also { probe.dispose() } }
+            d.reset()
+            val count = knownNames(d.arrange(state).first).size
             for (i in 0 until count) for (restart in listOf(false, true)) {
-                val d = Device()
+                d.reset()
                 val (b, running) = d.arrange(state)
                 val name = knownNames(b)[i]
                 d.prefs.prefsFor(name).refuseWrites = true
@@ -710,14 +1081,15 @@ class WipeWritesNothingTest {
                 if (restart) d.restart() else { d.prefs.prefsFor(name).refuseWrites = false; ActiveWallet.resetForTest() }
                 val second = d.walletManagerWithHub(running).wipeThenReleasePin(d.pin)
 
+                pairs++
                 val madeSecond = d.listing() - before - allowed(state)
                 val how = if (restart) "after a restart" else "in the same process"
                 if (second.verified && madeSecond.isNotEmpty()) problems += "$what: the next wipe $how verified with $madeSecond"
                 if (second.verified) retriesVerified++
-                d.dispose()
             }
         }
-        assertEquals("", summary(problems))
+        println("WIPE-MATRIX refused-write wipes=${2 * pairs} firstUnverified=$unverified laterVerified=$retriesVerified problems=${problems.distinct().size}")
+        assertEquals("of $pairs pairs of wipes", "", summary(problems))
         assertTrue("no refused write ever kept a wipe unverified: the refusals reach nothing", unverified > 0)
         assertTrue("no retry ever verified: the second wipes show nothing", retriesVerified > 0)
     }
