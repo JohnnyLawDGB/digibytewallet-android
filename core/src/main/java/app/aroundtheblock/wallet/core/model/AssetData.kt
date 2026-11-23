@@ -82,4 +82,8 @@ data class AssetMetadata(
     /** IPFS CID of the metadata document. Carried into the display model so the wallet can spot
      *  the same document published under more than one assetId — see [AssetDuplicateDetector]. */
     val metadataCid: String? = null,
+    /** Every file the metadata declares, the picture included, in the document's order. Kept so the
+     *  detail screen can say an asset carries a video or a song, and for a later player. Listing
+     *  them fetches nothing. Empty for a row whose document has not been read for them yet. */
+    val media: List<AssetMediaEntry> = emptyList(),
 )

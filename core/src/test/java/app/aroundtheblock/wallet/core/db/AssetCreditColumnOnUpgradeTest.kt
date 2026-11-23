@@ -46,7 +46,8 @@ class AssetCreditColumnOnUpgradeTest {
             ),
             issued,
         )
-        assertEquals(12, WALLET_DB_VERSION)
+        // The version this build opens is pinned by the newest step's own test (MediaColumnOnUpgradeTest).
+        assertTrue(WALLET_DB_VERSION >= 12)
         assertTrue(MIGRATION_11_12 in WALLET_DB_MIGRATIONS)
     }
 

@@ -27,6 +27,13 @@ class CidVerifier {
          * base16, is 137 characters; the rest is headroom for a two-byte codec.
          */
         const val MAX_CID_CHARS = 160
+
+        /** Multicodec `raw`: the CID's hash is the hash of the file's own bytes, all of them. */
+        const val CODEC_RAW = 0x55L
+
+        /** Multicodec `dag-pb`: the CID's hash is the hash of a UnixFS node (for a file of more
+         *  than one block, a list of links), never of the file's bytes. */
+        const val CODEC_DAG_PB = 0x70L
     }
 
     // -------------------------------------------------------------------------
@@ -54,6 +61,17 @@ class CidVerifier {
         val multihash = cidToMultihash(cid) ?: return false
         return parseMultihashDigest(multihash) != null
     }
+
+    /**
+     * The multicodec of what [cid] addresses, read from the CID itself: [CODEC_DAG_PB] for every
+     * CIDv0 (the form has no codec field and is dag-pb by definition), the codec field of a CIDv1
+     * in whichever multibase and with whichever hash it is written, null when [cid] is not a CID.
+     *
+     * This, and not how the text begins, says what a verified answer is. `bafybe…` is only the
+     * base32 spelling of "CIDv1, dag-pb, sha2-256": the same codec in base58 (`zdj7W…`), in base16
+     * or with another hash begins differently, and is just as much a wrapper and not the file.
+     */
+    fun codec(cid: String): Long? = parse(cid)?.takeIf { parseMultihashDigest(it.multihash) != null }?.codec
 
     // -------------------------------------------------------------------------
     // Internal helpers (internal so tests can reach them directly)
@@ -86,14 +104,20 @@ class CidVerifier {
     // CID → multihash bytes
     // -------------------------------------------------------------------------
 
-    private fun cidToMultihash(cid: String): ByteArray? {
+    private fun cidToMultihash(cid: String): ByteArray? = parse(cid)?.multihash
+
+    /** What a CID decodes to: the multicodec of what it addresses, and the multihash. */
+    private class Parsed(val codec: Long, val multihash: ByteArray)
+
+    private fun parse(cid: String): Parsed? {
         if (cid.isBlank()) return null
         // Bounded before any decoding: the decoders' work grows with the input, and no CID is long.
         if (cid.length > MAX_CID_CHARS) return null
 
-        // CIDv0: starts with "Qm", always Base58-encoded multihash directly
+        // CIDv0: starts with "Qm", always Base58-encoded multihash directly. It has no codec field:
+        // a CIDv0 is dag-pb by definition.
         if (cid.startsWith("Qm")) {
-            return decodeBase58(cid)
+            return decodeBase58(cid)?.let { Parsed(CODEC_DAG_PB, it) }
         }
 
         // CIDv1: multibase prefix + CBOR-variant binary
@@ -108,13 +132,11 @@ class CidVerifier {
         }
 
         // raw = version(varint) + codec(varint) + multihash
-        // Skip version varint
         val (version, afterVersion) = readVarint(raw, 0) ?: return null
         if (version != 1L) return null
-        // Skip codec varint
-        val (_, afterCodec) = readVarint(raw, afterVersion) ?: return null
+        val (codec, afterCodec) = readVarint(raw, afterVersion) ?: return null
         // Remainder is the multihash
-        return raw.copyOfRange(afterCodec, raw.size)
+        return Parsed(codec, raw.copyOfRange(afterCodec, raw.size))
     }
 
     // -------------------------------------------------------------------------

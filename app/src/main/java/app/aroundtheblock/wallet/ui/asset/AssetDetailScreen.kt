@@ -44,6 +44,7 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
 import androidx.compose.ui.res.stringResource
+import app.aroundtheblock.wallet.core.model.AssetMediaKind
 import app.aroundtheblock.wallet.R
 
 // MARKETPLACE_URL ("https://diginexum.trade/") was REMOVED. It was a stale hardcoded host that
@@ -73,6 +74,10 @@ fun AssetDetailScreen(
     val ruleCheck by viewModel.ruleCheck.collectAsStateWithLifecycle()
 
     var showMediaViewer by remember { mutableStateOf(false) }
+    // True only while the header's picture is actually on screen (ASSET-MEDIA-FIXES).
+    var pictureShown by remember(assetId) { mutableStateOf(false) }
+    // The viewer is for a picture that is there: when there stops being one, it is closed, not left pending.
+    LaunchedEffect(pictureShown) { if (!pictureShown) showMediaViewer = false }
 
     LazyColumn(
         modifier = Modifier
@@ -148,22 +153,22 @@ fun AssetDetailScreen(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     // Large icon. Tapping it opens the artwork full screen — but only when
-                    // there IS artwork: the fallback is a generated letter tile, and making
-                    // that tappable would promise a view that has nothing to show.
+                    // there IS artwork ON SCREEN: the fallback is a generated letter tile, and
+                    // making that tappable would promise a view that has nothing to show. That
+                    // the stored string names a file says nothing: the file may be a song, too
+                    // large, or gone, and the tile then opened an empty black viewer.
                     val iconColor = assetIconColors[colorIndex]
-                    val hasArtwork = remember(meta?.imageUrl) {
-                        AssetImageResolver.resolve(meta?.imageUrl) != null
-                    }
                     AssetIcon(
                         imageUrl = meta?.imageUrl,
                         firstLetter = displayName.firstOrNull()?.uppercaseChar() ?: 'A',
                         iconColor = iconColor,
                         size = 72.dp,
-                        modifier = if (hasArtwork) {
+                        modifier = if (pictureShown) {
                             Modifier.clickable { showMediaViewer = true }
                         } else {
                             Modifier
-                        }
+                        },
+                        onPictureShown = { pictureShown = it },
                     )
 
                     Spacer(modifier = Modifier.height(12.dp))
@@ -246,6 +251,28 @@ fun AssetDetailScreen(
 
                     if (!meta?.description.isNullOrBlank()) {
                         AssetInfoRow(label = stringResource(R.string.ad_description), value = meta!!.description!!)
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                    }
+
+                    // The audio or video this asset declares, named and nothing more: no play
+                    // control, and no request to learn a size (it is shown when an answer the
+                    // wallet already has gave it). The files are the issuer's and are not opened.
+                    val mediaLines = remember(meta?.media) {
+                        AssetMediaSummary.lines(meta?.media.orEmpty(), viewModel::knownMediaSize)
+                    }
+                    if (mediaLines.isNotEmpty()) {
+                        val mediaText = mediaLines.map { line ->
+                            val kind = stringResource(
+                                if (line.kind == AssetMediaKind.VIDEO) R.string.ad_media_video else R.string.ad_media_audio
+                            )
+                            val size = line.sizeBytes
+                            if (size == null) kind
+                            else stringResource(
+                                R.string.ad_media_kind_size, kind,
+                                android.text.format.Formatter.formatShortFileSize(context, size),
+                            )
+                        }.joinToString(AssetMediaSummary.LINE_BREAK)
+                        AssetInfoRow(label = stringResource(R.string.ad_media), value = mediaText)
                         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                     }
 
@@ -409,7 +436,7 @@ fun AssetDetailScreen(
     // Rendered OUTSIDE the LazyColumn: a Dialog is its own window, and placing it in a
     // lazily-composed item would tie the open viewer to that item staying composed — it
     // would vanish if the user scrolled the header off screen.
-    if (showMediaViewer) {
+    if (showMediaViewer && pictureShown) {
         AssetMediaViewer(
             imageUrl = asset?.metadata?.imageUrl,
             onDismiss = { showMediaViewer = false },

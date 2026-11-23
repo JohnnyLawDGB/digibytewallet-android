@@ -37,8 +37,13 @@ import coil.compose.AsyncImage
  * viewing artwork should never be something the user has to work out how to leave.
  *
  * **Scope:** static images only (PNG/JPEG/WebP, and the first frame of a GIF). The project
- * depends on `coil-compose` alone — no `coil-gif`, no `coil-video`, no media3 — so animation
- * and video would each need a new dependency rather than a change here.
+ * depends on `coil-compose` alone, so animation and video would each need a new dependency
+ * rather than a change here. An asset's audio or video is named on the detail screen
+ * ([AssetMediaSummary]); it is not shown or played here.
+ *
+ * **Never an empty black screen.** The caller opens this only once the picture is on screen in
+ * the header. Should the picture then fail here (it is fetched again when it has left the memory
+ * cache), the viewer closes itself instead of staying open with nothing in it.
  */
 @Composable
 fun AssetMediaViewer(
@@ -70,6 +75,7 @@ fun AssetMediaViewer(
                 contentDescription = "Asset artwork, full screen",
                 contentScale = ContentScale.Fit,
                 modifier = Modifier.fillMaxSize(),
+                onError = { onDismiss() },
             )
 
             IconButton(

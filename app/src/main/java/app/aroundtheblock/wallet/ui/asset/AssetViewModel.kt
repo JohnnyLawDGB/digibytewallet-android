@@ -134,8 +134,13 @@ class PlannedAssetCost(val approval: ApprovedSend.Asset, val cost: AssetSendCost
 @HiltViewModel
 class AssetViewModel @Inject constructor(
     private val assetManager: AssetManager,
-    private val assetMetadataDao: AssetMetadataDao
+    private val assetMetadataDao: AssetMetadataDao,
+    private val ipfsClient: app.aroundtheblock.wallet.core.ipfs.IpfsClient,
 ) : ViewModel() {
+
+    /** The size of a file an asset declares, when an answer the wallet already has gave it; else
+     *  null. Asks nothing of the network ([app.aroundtheblock.wallet.core.ipfs.IpfsClient.knownSize]). */
+    fun knownMediaSize(url: String): Long? = ipfsClient.knownSize(url)
 
     val ownedAssets: StateFlow<List<OwnedAsset>> = assetManager.getOwnedAssets()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())

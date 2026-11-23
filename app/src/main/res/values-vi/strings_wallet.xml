@@ -316,6 +316,12 @@
     <string name="ad_balance">Số dư</string>
     <string name="ad_info">Thông tin tài sản</string>
     <string name="ad_description">Mô tả</string>
+    <!-- Asset detail: the audio or video an asset declares. Named only; nothing is played. -->
+    <string name="ad_media">Phương tiện</string>
+    <string name="ad_media_audio">Âm thanh</string>
+    <string name="ad_media_video">Video</string>
+    <!-- %1$s: "Audio" or "Video"; %2$s: a file size, already formatted, e.g. "4.1 MB". -->
+    <string name="ad_media_kind_size">%1$s · %2$s</string>
     <string name="ad_total_supply">Tổng cung</string>
     <string name="ad_unknown">Không rõ</string>
     <string name="ad_identical_metadata">Siêu dữ liệu trùng khớp</string>

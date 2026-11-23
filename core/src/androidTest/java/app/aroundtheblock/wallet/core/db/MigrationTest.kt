@@ -281,6 +281,105 @@ class MigrationTest {
         v12Db.close()
     }
 
+    // -------------------------------------------------------------------------
+    // Migration path: v12 → v13 (the files an asset's metadata declares are kept)
+    // -------------------------------------------------------------------------
+
+    @Test
+    @Throws(IOException::class)
+    fun migrate12To13_keepsEveryMetadataRowAndAddsTheMediaColumn() {
+        val mp3 = "ipfs://bafybeictgnjgm4gm3lweojytk3fvkcvuqyruwex5viklo4upsxxj5jcdx4"
+        val cid = "bafkreicrmqxoxgm423z4nxbpcecc2kbixm4nnpyzfuz5kjkjmsbmgkpkae"
+        val tx = "8".repeat(64)
+        val v12Db = helper.createDatabase(TEST_DB_NAME, 12)
+        // What 4.1.5 stored for an audio-only asset: named, with its song as the image.
+        v12Db.execSQL(
+            """INSERT INTO asset_metadata (assetId, name, symbol, description, decimals, totalSupply,
+               issuerAddress, metadataCid, imageUrl, rulesJson, cachedAt)
+               VALUES ('LaAudio', 'DigiKid', NULL, 'Indie DGB', 0, 100, NULL, '$cid', '$mp3', '{}', 1700000000000)"""
+        )
+        // A chain-facts row with nothing from IPFS yet.
+        v12Db.execSQL(
+            """INSERT INTO asset_metadata (assetId, name, symbol, description, decimals, totalSupply,
+               issuerAddress, metadataCid, imageUrl, rulesJson, cachedAt)
+               VALUES ('LaBare', NULL, NULL, NULL, 2, 5, NULL, NULL, NULL, NULL, 0)"""
+        )
+        // A held asset row and its transaction: the step must not come near them.
+        v12Db.execSQL(
+            """INSERT INTO utxos (txid, vout, scriptPubKey, satoshis, blockHeight, is_asset, asset_id,
+               asset_quantity, spent, asset_source, asset_credit)
+               VALUES ('$tx', 0, X'0014', 600, 100, 1, 'LaAudio', 7, 0, 'NATIVE', 'BACKED')"""
+        )
+        v12Db.execSQL(
+            """INSERT INTO transactions (txid, blockHeight, timestamp, amount, fee, toAddress, fromAddress,
+               confirmations, sent, received, isAssetTx, rawBytes, assetId)
+               VALUES ('$tx', 100, 1, 600, 0, '', '', 1, 0, 600, 1, NULL, 'LaAudio')"""
+        )
+        v12Db.close()
+
+        // validateDroppedTables = true: the result must be exactly version 13's schema.
+        val v13Db = helper.runMigrationsAndValidate(TEST_DB_NAME, 13, true, MIGRATION_12_13)
+        v13Db.query(
+            "SELECT name, description, decimals, totalSupply, metadataCid, imageUrl, rulesJson, cachedAt, mediaJson " +
+                "FROM asset_metadata WHERE assetId = 'LaAudio'"
+        ).use { c ->
+            assertTrue("the row is kept", c.moveToFirst())
+            assertEquals("DigiKid", c.getString(0))
+            assertEquals("Indie DGB", c.getString(1))
+            assertEquals(0, c.getInt(2))
+            assertEquals(100L, c.getLong(3))
+            assertEquals(cid, c.getString(4))
+            assertEquals("the step rewrites nothing: the re-read replaces the image, with the document in hand", mp3, c.getString(5))
+            assertEquals("the transfer-rule answer is untouched", "{}", c.getString(6))
+            assertEquals(1_700_000_000_000L, c.getLong(7))
+            assertTrue("an existing row starts as 'not read for media'", c.isNull(8))
+        }
+        v13Db.query("SELECT decimals, totalSupply, mediaJson FROM asset_metadata WHERE assetId = 'LaBare'").use { c ->
+            assertTrue(c.moveToFirst())
+            assertEquals(2, c.getInt(0)); assertEquals(5L, c.getLong(1)); assertTrue(c.isNull(2))
+        }
+        v13Db.query("SELECT COUNT(*) FROM asset_metadata").use { c -> assertTrue(c.moveToFirst()); assertEquals(2, c.getInt(0)) }
+        v13Db.query("SELECT asset_id, asset_quantity, asset_credit, spent FROM utxos WHERE txid = '$tx'").use { c ->
+            assertTrue(c.moveToFirst())
+            assertEquals("LaAudio", c.getString(0)); assertEquals(7L, c.getLong(1))
+            assertEquals("BACKED", c.getString(2)); assertEquals(0, c.getInt(3))
+        }
+        v13Db.query("SELECT assetId FROM transactions WHERE txid = '$tx'").use { c ->
+            assertTrue(c.moveToFirst()); assertEquals("LaAudio", c.getString(0))
+        }
+        v13Db.close()
+    }
+
+    /** The whole registered chain from the oldest schema, as an upgrading install runs it. */
+    @Test
+    @Throws(IOException::class)
+    fun migrateAllRegisteredSteps_from12_withTheShippedList() {
+        val v12Db = helper.createDatabase(TEST_DB_NAME, 12)
+        v12Db.execSQL(
+            """INSERT INTO asset_metadata (assetId, name, decimals, totalSupply, cachedAt)
+               VALUES ('LaKept', 'Kept', 0, 1, 1)"""
+        )
+        v12Db.close()
+        val db = helper.runMigrationsAndValidate(TEST_DB_NAME, WALLET_DB_VERSION, true, *WALLET_DB_MIGRATIONS)
+        db.query("SELECT name FROM asset_metadata WHERE assetId = 'LaKept'").use { c ->
+            assertTrue("a 4.1.5 row survives the registered migrations (no destructive fallback)", c.moveToFirst())
+            assertEquals("Kept", c.getString(0))
+        }
+        db.close()
+    }
+
+    @Test
+    fun assetMetadataDao_updateMedia_writesOnlyTheMediaColumn() = runTest {
+        val dao = db.assetMetadataDao()
+        dao.insertChainFacts(AssetMetadataEntity(assetId = "LaM", name = "N", totalSupply = 9, imageUrl = "ipfs://x", rulesJson = "{}"))
+        assertNull(dao.getMetadata("LaM")!!.mediaJson)
+        dao.updateMedia("LaM", "[]")
+        val row = dao.getMetadata("LaM")!!
+        assertEquals("[]", row.mediaJson)
+        assertEquals("N", row.name); assertEquals(9L, row.totalSupply)
+        assertEquals("ipfs://x", row.imageUrl); assertEquals("{}", row.rulesJson)
+    }
+
     @Test
     fun history_lists_a_transaction_only_under_an_asset_a_backed_row_names() = runTest {
         val utxos = db.utxoDao()

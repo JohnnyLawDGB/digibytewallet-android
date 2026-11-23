@@ -2,7 +2,7 @@ package app.aroundtheblock.wallet.ui.asset
 
 import android.net.Uri
 import app.aroundtheblock.wallet.core.LogSafe
-import app.aroundtheblock.wallet.core.ipfs.IpfsClient
+import app.aroundtheblock.wallet.core.ipfs.IpfsLocation
 
 /**
  * Normalises the `AssetMetadata.imageUrl` field — which IPFS-hosted asset
@@ -33,61 +33,29 @@ import app.aroundtheblock.wallet.core.ipfs.IpfsClient
  */
 object AssetImageResolver {
 
-    private val CID_V0_REGEX = Regex("^Qm[1-9A-HJ-NP-Za-km-z]{44}$")
-
-    // CIDv1: one of several multibase prefixes followed by at least ~48 chars.
-    // Loose bound is intentional — strict decoding lives in CidVerifier.
-    private val CID_V1_REGEX = Regex("^(b[a-z2-7]{58,}|z[1-9A-HJ-NP-Za-km-z]{48,}|f[0-9a-fA-F]{60,})$")
-
+    /**
+     * Which IPFS object [raw] names is decided by [IpfsLocation], the one copy of that rule, which
+     * the stored media entries read through as well; this adds only the Coil model and the log lines.
+     */
     fun resolve(raw: String?): Any? {
         if (raw.isNullOrBlank()) return null
         val trimmed = raw.trim()
-        return when {
-            trimmed.startsWith("https://", ignoreCase = true) || trimmed.startsWith("http://", ignoreCase = true) ->
-                gatewayCid(trimmed)?.let { Uri.parse("ipfs://$it") }
-            // Inline data: URIs are not loaded (see the class doc): no fetcher reads them.
-            trimmed.startsWith("data:", ignoreCase = true) -> null
+        IpfsLocation.parse(trimmed)?.let { return Uri.parse(it.uri) }
+        when {
+            // A web URL that is no IPFS gateway URL, and an inline data: URI, are not loaded (see the class doc).
+            trimmed.startsWith("https://", ignoreCase = true) || trimmed.startsWith("http://", ignoreCase = true) -> Unit
+            trimmed.startsWith("data:", ignoreCase = true) -> Unit
             // Only a real CID becomes a model (IPFS-NO-NULL): `ipfs://null`, or any other word after
             // the scheme, used to reach the loader and be asked of every gateway on every draw.
-            trimmed.startsWith("ipfs://") -> ipfsUri(trimmed.removePrefix("ipfs://"))
-            trimmed.startsWith("/ipfs/") -> ipfsUri(trimmed.removePrefix("/ipfs/"))
-            isCid(trimmed) -> Uri.parse("ipfs://$trimmed")
-            else -> {
-                // ASSET-LOG-CRLF: the value is the issuer's; it reaches the log only escaped and cut short.
+            trimmed.startsWith("ipfs://") || trimmed.startsWith("/ipfs/") -> {
+                val rest = if (trimmed.startsWith("ipfs://")) trimmed.removePrefix("ipfs://") else trimmed.removePrefix("/ipfs/")
                 android.util.Log.w("AssetImageResolver",
-                    "Unrecognised imageUrl format (${trimmed.length} chars): ${LogSafe.text(trimmed, 48)}")
-                null
+                    "imageUrl names no IPFS CID (${rest.length} chars): ${LogSafe.text(rest, 48)}")
             }
+            // ASSET-LOG-CRLF: the value is the issuer's; it reaches the log only escaped and cut short.
+            else -> android.util.Log.w("AssetImageResolver",
+                "Unrecognised imageUrl format (${trimmed.length} chars): ${LogSafe.text(trimmed, 48)}")
         }
+        return null
     }
-
-    /** `ipfs://<cid>[/path]` for [rest] = `<cid>[/path]`, or null (the placeholder) when it names no CID. */
-    private fun ipfsUri(rest: String): Uri? {
-        // The CID ends where android.net.Uri ends the host: at a path, a query or a fragment.
-        val cid = rest.substringBefore('/').substringBefore('?').substringBefore('#')
-        if (IpfsClient.normalizeCid(cid) == null) {
-            android.util.Log.w("AssetImageResolver",
-                "imageUrl names no IPFS CID (${rest.length} chars): ${LogSafe.text(rest, 48)}")
-            return null
-        }
-        return Uri.parse("ipfs://$rest")
-    }
-
-    /** The `<cid>[/path]` an IPFS gateway URL names, or null when the URL is not one. */
-    private fun gatewayCid(url: String): String? {
-        val afterScheme = url.substringAfter("://")
-        val host = afterScheme.substringBefore('/').substringBefore('?').lowercase()
-        val path = afterScheme.substringAfter('/', missingDelimiterValue = "").substringBefore('?').substringBefore('#')
-        // https://<cid>.ipfs.<gateway>/<path>
-        val sub = host.substringBefore(".ipfs.", missingDelimiterValue = "")
-        if (sub.isNotEmpty() && isCid(sub)) return if (path.isEmpty()) sub else "$sub/$path"
-        // https://<gateway>/ipfs/<cid>/<path>
-        if (!path.startsWith("ipfs/")) return null
-        val rest = path.removePrefix("ipfs/")
-        val cid = rest.substringBefore('/')
-        return if (isCid(cid)) rest else null
-    }
-
-    private fun isCid(s: String): Boolean =
-        CID_V0_REGEX.matches(s) || CID_V1_REGEX.matches(s)
 }

@@ -319,6 +319,12 @@
     <string name="ad_balance">Balanse</string>
     <string name="ad_info">Impormasyon ng Asset</string>
     <string name="ad_description">Paglalarawan</string>
+    <!-- Asset detail: the audio or video an asset declares. Named only; nothing is played. -->
+    <string name="ad_media">Media</string>
+    <string name="ad_media_audio">Audio</string>
+    <string name="ad_media_video">Video</string>
+    <!-- %1$s: "Audio" or "Video"; %2$s: a file size, already formatted, e.g. "4.1 MB". -->
+    <string name="ad_media_kind_size">%1$s · %2$s</string>
     <string name="ad_total_supply">Kabuuang Supply</string>
     <string name="ad_unknown">Hindi alam</string>
     <string name="ad_identical_metadata">Magkaparehong metadata</string>

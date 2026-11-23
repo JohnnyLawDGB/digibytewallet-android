@@ -319,6 +319,12 @@
     <string name="ad_balance">बैलेंस</string>
     <string name="ad_info">एसेट जानकारी</string>
     <string name="ad_description">विवरण</string>
+    <!-- Asset detail: the audio or video an asset declares. Named only; nothing is played. -->
+    <string name="ad_media">मीडिया</string>
+    <string name="ad_media_audio">ऑडियो</string>
+    <string name="ad_media_video">वीडियो</string>
+    <!-- %1$s: "Audio" or "Video"; %2$s: a file size, already formatted, e.g. "4.1 MB". -->
+    <string name="ad_media_kind_size">%1$s · %2$s</string>
     <string name="ad_total_supply">कुल आपूर्ति</string>
     <string name="ad_unknown">अज्ञात</string>
     <string name="ad_identical_metadata">समान मेटाडेटा</string>
