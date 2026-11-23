@@ -19,9 +19,9 @@
 // The Android caller passes 100,000 sat/kB and amounts of proven coins, so it never reaches it
 // (android_default_rate).
 //
-// WHAT IS COMPARED (FOREIGN-ASSET-DISTINCT). The two sides are compared on sweeps of distinct outpoints: every
-// scenario lists each outpoint once and the fuzz draws every txid afresh. signer_distinct_inputs_kat holds the
-// bridge's refusal of a sweep that lists one twice.
+// A SWEEP THAT LISTS ONE OUTPOINT TWICE (FOREIGN-ASSET-DISTINCT, CORE-SWEEP-DISTINCT) is refused by both sides, the
+// core as DUPLICATE_INPUT: refuse_duplicate_input. Every other scenario lists each outpoint once and the fuzz draws
+// every txid afresh. signer_distinct_inputs_kat holds the bridge's refusal on its own, with its comparison arm.
 //
 // SCENARIOS
 //   pinned_*      the Android device tests, case for case: LegacySweepSignedTxKatTest (P2PKH, its pinned hex),
@@ -34,7 +34,11 @@
 //                 above, and at the top rate) and for a lone input (408,000 refused, 408,001 signs; 40,800 and the
 //                 old dust line fee+545..547 refused by it, since the ratio now implies the dust bound).
 //   refuse_*      every typed refusal: no inputs, seed length, script length (0, 128 accepted, 129), destination,
-//                 a script no derived key matches, an amount of 0; the two values that could wrap (the sum totalIn:
+//                 a script no derived key matches, an amount of 0, one outpoint listed twice (every pair of
+//                 places in sweeps of 2, 3 and 12 inputs, the later input named; a repeat that differs in script
+//                 and key path; inputs sharing a txid or an index and no more sign; and its place in the order,
+//                 after a per-input refusal and before the destination and the fee rule); the two values that
+//                 could wrap (the sum totalIn:
 //                 refuse_amount_*, the product estSize * feePerKb: refuse_fee_overflow) and a fee rate far above
 //                 the cap (refuse_fee_rate_cap).
 //   boundary_amount_max_money, boundary_fee_overflow: the core's own lines (an amount and a total of MAX_MONEY
@@ -828,6 +832,97 @@ int main(int argc, char **argv)
         in1.amount = 1;   // positive: not BAD_AMOUNT (the fee rule refuses it; which of its refusals is not this case's)
         { Both b = run_both(&t, 0); check(! b.bridgeHex && ! b.coreHex && b.r != BR_LEGACY_SWEEP_BAD_AMOUNT,
                                           "a lone coin of 1: both refuse, and not as BAD_AMOUNT"); both_free(&b); }
+    }
+    end();
+    begin("refuse_duplicate_input");   // CORE-SWEEP-DISTINCT: every input names a different outpoint
+    {
+        // Twelve coins of 10,000,000 at m/0'/0/i, in every script format, each its own txid and index.
+        Inputs d = { .n = 0 };
+        for (uint32_t i = 0; i < 12; i++) {
+            UInt256 t = fill256((uint8_t)(0xa0 + i));
+            t.u8[31] = (uint8_t)i;
+            add_input(&d, g_seed, 64, "DigiByte seed", m0, 1, i & 1, i, (int)(i % BR_DERIVATION_FORMAT_COUNT), t,
+                      i % 3, 10000000);
+        }
+        char what[96];
+        for (size_t n = 1; n <= 12; n++) {
+            Sweep s = { g_seed, 64, "DigiByte seed", m0, 1, d.in, n, kDest, 100000 };
+            snprintf(what, sizeof(what), "%zu distinct outpoints sign", n);
+            agree(&s, BR_LEGACY_SWEEP_SIGNED, what);
+        }
+        // Every pair of places (i, j) in sweeps of 2, 3 and 12 inputs: input j repeats input i's outpoint and
+        // nothing else of it (its own script and key path). Refused by both sides; the core names input j.
+        for (size_t n = 2; n <= 12; n = (n == 3 ? 12 : n + 1)) {
+            for (size_t j = 1; j < n; j++) {
+                for (size_t i = 0; i < j; i++) {
+                    BRLegacySweepInput in[12];
+                    memcpy(in, d.in, sizeof(in));
+                    in[j].txHash = in[i].txHash; in[j].vout = in[i].vout;
+                    Sweep s = { g_seed, 64, "DigiByte seed", m0, 1, in, n, kDest, 100000 };
+                    snprintf(what, sizeof(what), "%zu inputs, input %zu repeats input %zu's outpoint", n, j, i);
+                    agree(&s, BR_LEGACY_SWEEP_DUPLICATE_INPUT, what);
+                    if (n == 12 || j + 1 == n) {
+                        BRLegacySweepFee f;
+                        int sg;
+                        BRLegacySweepResult r = core_r(&s, &f, &sg);
+                        check(r == BR_LEGACY_SWEEP_DUPLICATE_INPUT && ! sg && f.input == j &&
+                              f.totalIn == 10000000ull * n && f.fee == 0 && f.outAmount == 0,
+                              "the later input is named; every amount summed; no fee computed, nothing signed");
+                    }
+                }
+            }
+        }
+        {   // the same row twice, and three times
+            BRLegacySweepInput in[3] = { d.in[0], d.in[0], d.in[0] };
+            Sweep s = { g_seed, 64, "DigiByte seed", m0, 1, in, 2, kDest, 100000 };
+            BRLegacySweepFee f;
+            agree(&s, BR_LEGACY_SWEEP_DUPLICATE_INPUT, "one row listed twice");
+            s.n = 3;
+            agree(&s, BR_LEGACY_SWEEP_DUPLICATE_INPUT, "one row listed three times");
+            check(core_r(&s, &f, NULL) == BR_LEGACY_SWEEP_DUPLICATE_INPUT && f.input == 1, "three times: input 1 named");
+        }
+        {   // two repeated pairs: the lowest later place is named
+            BRLegacySweepInput in[12];
+            BRLegacySweepFee f;
+            memcpy(in, d.in, sizeof(in));
+            in[7].txHash = in[1].txHash; in[7].vout = in[1].vout;
+            in[4].txHash = in[3].txHash; in[4].vout = in[3].vout;
+            Sweep s = { g_seed, 64, "DigiByte seed", m0, 1, in, 12, kDest, 100000 };
+            agree(&s, BR_LEGACY_SWEEP_DUPLICATE_INPUT, "two repeated pairs");
+            check(core_r(&s, &f, NULL) == BR_LEGACY_SWEEP_DUPLICATE_INPUT && f.input == 4, "two pairs: input 4 named");
+        }
+        {   // NOT a repeat: the same txid at another index, and the same index of another txid
+            BRLegacySweepInput in[3] = { d.in[0], d.in[1], d.in[2] };
+            Sweep s = { g_seed, 64, "DigiByte seed", m0, 1, in, 3, kDest, 100000 };
+            in[1].txHash = in[0].txHash; in[1].vout = in[0].vout + 1;
+            in[2].txHash = in[0].txHash; in[2].vout = UINT32_MAX;
+            agree(&s, BR_LEGACY_SWEEP_SIGNED, "one txid at three indexes signs");
+            in[1] = d.in[1]; in[2] = d.in[2];
+            in[1].vout = in[0].vout; in[2].vout = in[0].vout;
+            agree(&s, BR_LEGACY_SWEEP_SIGNED, "one index of three txids signs");
+            in[2].txHash = in[0].txHash; in[2].txHash.u8[31] ^= 1;   // one bit of the txid apart
+            agree(&s, BR_LEGACY_SWEEP_SIGNED, "txids one bit apart sign");
+        }
+        {   // ITS PLACE IN THE ORDER: after every per-input refusal, before the destination and the fee rule
+            BRLegacySweepInput in[3] = { d.in[0], d.in[1], d.in[2] };
+            Sweep s = { g_seed, 64, "DigiByte seed", m0, 1, in, 3, kDest, 100000 };
+            in[1].txHash = in[0].txHash; in[1].vout = in[0].vout;
+            in[2].scriptLen = 0;
+            agree(&s, BR_LEGACY_SWEEP_BAD_INPUT, "a repeat, then an empty script: the script is named");
+            in[2] = d.in[2];
+            s.dest = "notanaddress";
+            agree(&s, BR_LEGACY_SWEEP_DUPLICATE_INPUT, "a repeat and no destination");
+            s.dest = kDest; s.feePerKb = 0;
+            agree(&s, BR_LEGACY_SWEEP_DUPLICATE_INPUT, "a repeat at a rate of 0");
+            s.feePerKb = UINT64_MAX;
+            agree(&s, BR_LEGACY_SWEEP_DUPLICATE_INPUT, "a repeat at a rate that wraps");
+            s.feePerKb = 100000;
+            in[0].amount = 1; in[1].amount = 1; in[2].amount = 1;
+            agree(&s, BR_LEGACY_SWEEP_DUPLICATE_INPUT, "a repeat the fee rule would refuse");
+            in[0].amount = in[1].amount = in[2].amount = 10000000;
+            in[1].index ^= 1;   // a script no derived key matches
+            agree(&s, BR_LEGACY_SWEEP_DUPLICATE_INPUT, "a repeat whose script no key matches");
+        }
     }
     end();
     // The two values that could wrap: the core refuses both. The bridge refuses a wrapped rate as out of range, and
