@@ -56,6 +56,8 @@
 
     <string name="recover_title">Wallet wiederherstellen</string>
     <string name="recover_body">Geben Sie Ihre Wiederherstellungsphrase ein, um Ihre Wallet wiederherzustellen.</string>
+    <string name="recover_sigma_warning_title">Phrase aus „DigiByte Wallet“ von Sigma Systems? Nicht wiederherstellen.</string>
+    <string name="recover_sigma_warning_body">Wir gehen davon aus, dass Wiederherstellungsphrasen und Schlüssel aus dieser App anderen bekannt sein könnten. Ein daraus wiederhergestelltes Wallet bleibt in jeder App gefährdet. Erstellen Sie hier stattdessen ein neues Wallet und übertragen Sie Ihre Coins dann mit „%1$s“ in den Einstellungen.</string>
     <string name="recover_continue">Weiter</string>
 
     <string name="seed_retry">Erneut versuchen</string>

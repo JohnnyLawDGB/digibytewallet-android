@@ -93,6 +93,8 @@ fun MnemonicInputScreen(
                 style = MaterialTheme.typography.bodyMedium,
                 color = Color(0xFFB0BEC5)
             )
+            Spacer(Modifier.height(14.dp))
+            CompromisedSourceWarning()
             Spacer(Modifier.height(20.dp))
 
             // Word count selector
@@ -301,6 +303,40 @@ fun MnemonicInputScreen(
 
 /** Space kept between the focused word (with its suggestions) and the top of the keyboard. */
 private val KEYBOARD_GAP = 16.dp
+
+/**
+ * RESTORE-WARN-SIGMA (owner 2026-11-23): shown on every phrase entry, onboarding and "add a wallet"
+ * alike, before any word is typed. The wallet cannot tell which app a phrase came from, so the
+ * warning is unconditional. It names the safe path: a new wallet, then "Recover funds from another
+ * wallet", which moves the coins off the old phrase instead of adopting it.
+ */
+@Composable
+private fun CompromisedSourceWarning() {
+    Surface(
+        color = DigiByteRed.copy(alpha = 0.12f),
+        shape = RoundedCornerShape(12.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, DigiByteRed.copy(alpha = 0.6f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(Modifier.padding(14.dp)) {
+            Text(
+                text = stringResource(R.string.recover_sigma_warning_title),
+                style = MaterialTheme.typography.titleSmall,
+                color = Color.White,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = stringResource(
+                    R.string.recover_sigma_warning_body,
+                    stringResource(R.string.rf_title)
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFFE0E0E0)
+            )
+        }
+    }
+}
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable

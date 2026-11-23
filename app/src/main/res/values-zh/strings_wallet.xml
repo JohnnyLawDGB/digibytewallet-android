@@ -48,6 +48,8 @@
     <string name="unlock_biometrics_cd">使用生物识别解锁</string>
     <string name="recover_title">恢复钱包</string>
     <string name="recover_body">输入您的助记词以恢复钱包。</string>
+    <string name="recover_sigma_warning_title">来自 Sigma Systems 的“DigiByte Wallet”的助记词？请勿恢复。</string>
+    <string name="recover_sigma_warning_body">我们认为该应用的助记词和密钥可能已被他人知晓。用它恢复的钱包在任何应用中都仍有风险。请改为在此创建新钱包，然后使用“设置”中的“%1$s”把您的币转入新钱包。</string>
     <string name="recover_continue">继续</string>
 
     <string name="seed_retry">重试</string>

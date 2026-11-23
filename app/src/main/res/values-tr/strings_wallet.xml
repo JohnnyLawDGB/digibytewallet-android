@@ -48,6 +48,8 @@
     <string name="unlock_biometrics_cd">Biyometri ile aç</string>
     <string name="recover_title">Cüzdanı Kurtar</string>
     <string name="recover_body">Cüzdanınızı geri yüklemek için kurtarma ifadenizi girin.</string>
+    <string name="recover_sigma_warning_title">Sigma Systems’in “DigiByte Wallet” uygulamasından bir ifade mi? Geri yüklemeyin.</string>
+    <string name="recover_sigma_warning_body">Bu uygulamadaki kurtarma ifadelerinin ve anahtarların başkalarınca biliniyor olabileceğini düşünüyoruz. Böyle bir ifadeden geri yüklenen cüzdan her uygulamada risk altında kalır. Bunun yerine burada yeni bir cüzdan oluşturun, ardından coinlerinizi Ayarlar’daki “%1$s” ile ona taşıyın.</string>
     <string name="recover_continue">Devam</string>
 
     <string name="seed_retry">Yeniden dene</string>

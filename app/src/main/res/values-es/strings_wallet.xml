@@ -50,6 +50,8 @@
 
     <string name="recover_title">Recuperar billetera</string>
     <string name="recover_body">Introduce tu frase de recuperación para restaurar tu billetera.</string>
+    <string name="recover_sigma_warning_title">¿Frase de «DigiByte Wallet» de Sigma Systems? No la restaures.</string>
+    <string name="recover_sigma_warning_body">Creemos que las frases de recuperación y las claves de esa aplicación pueden ser conocidas por otras personas. Un monedero restaurado con una de ellas sigue en riesgo en cualquier aplicación. Crea aquí un monedero nuevo y después mueve tus monedas a él con «%1$s» en Ajustes.</string>
     <string name="recover_continue">Continuar</string>
 
     <string name="seed_retry">Reintentar</string>

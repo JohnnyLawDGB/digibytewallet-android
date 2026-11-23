@@ -48,6 +48,8 @@
     <string name="unlock_biometrics_cd">Desbloquear com biometria</string>
     <string name="recover_title">Recuperar carteira</string>
     <string name="recover_body">Digite sua frase de recuperação para restaurar sua carteira.</string>
+    <string name="recover_sigma_warning_title">Frase do “DigiByte Wallet” da Sigma Systems? Não restaure.</string>
+    <string name="recover_sigma_warning_body">Acreditamos que as frases de recuperação e as chaves desse aplicativo podem ser conhecidas por outras pessoas. Uma carteira restaurada a partir de uma delas continua em risco em qualquer aplicativo. Crie uma carteira nova aqui e depois mova suas moedas para ela com “%1$s” em Configurações.</string>
     <string name="recover_continue">Continuar</string>
 
     <string name="seed_retry">Tentar novamente</string>

@@ -47,6 +47,8 @@
     <string name="unlock_biometrics_cd">Déverrouiller par biométrie</string>
     <string name="recover_title">Récupérer le portefeuille</string>
     <string name="recover_body">Saisissez votre phrase de récupération pour restaurer votre portefeuille.</string>
+    <string name="recover_sigma_warning_title">Phrase provenant de « DigiByte Wallet » de Sigma Systems ? Ne la restaurez pas.</string>
+    <string name="recover_sigma_warning_body">Nous pensons que les phrases de récupération et les clés de cette application peuvent être connues de tiers. Un portefeuille restauré à partir de l’une d’elles reste exposé dans n’importe quelle application. Créez plutôt un nouveau portefeuille ici, puis transférez-y vos pièces avec « %1$s » dans les Paramètres.</string>
     <string name="recover_continue">Continuer</string>
     <string name="seed_retry">Réessayer</string>
     <string name="verify_next">Suivant</string>

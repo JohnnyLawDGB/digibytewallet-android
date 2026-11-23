@@ -48,6 +48,8 @@
     <string name="unlock_biometrics_cd">बायोमेट्रिक्स से अनलॉक करें</string>
     <string name="recover_title">वॉलेट पुनर्प्राप्त करें</string>
     <string name="recover_body">अपना वॉलेट पुनर्स्थापित करने के लिए अपना रिकवरी वाक्यांश दर्ज करें।</string>
+    <string name="recover_sigma_warning_title">Sigma Systems के “DigiByte Wallet” का वाक्यांश? इसे रिस्टोर न करें।</string>
+    <string name="recover_sigma_warning_body">हमारा मानना है कि उस ऐप के रिकवरी वाक्यांश और कुंजियाँ दूसरों को पता हो सकती हैं। ऐसे वाक्यांश से रिस्टोर किया गया वॉलेट किसी भी ऐप में जोखिम में रहता है। इसके बजाय यहाँ नया वॉलेट बनाएँ, फिर सेटिंग्स में “%1$s” से अपने कॉइन उसमें भेजें।</string>
     <string name="recover_continue">जारी रखें</string>
 
     <string name="seed_retry">फिर से कोशिश करें</string>

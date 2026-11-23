@@ -48,6 +48,8 @@
     <string name="unlock_biometrics_cd">Разблокировать по биометрии</string>
     <string name="recover_title">Восстановить кошелёк</string>
     <string name="recover_body">Введите фразу восстановления, чтобы восстановить кошелёк.</string>
+    <string name="recover_sigma_warning_title">Фраза из «DigiByte Wallet» от Sigma Systems? Не восстанавливайте её.</string>
+    <string name="recover_sigma_warning_body">Мы полагаем, что фразы восстановления и ключи из этого приложения могут быть известны посторонним. Кошелёк, восстановленный по такой фразе, остаётся под угрозой в любом приложении. Вместо этого создайте здесь новый кошелёк, а затем переведите в него монеты через «%1$s» в Настройках.</string>
     <string name="recover_continue">Продолжить</string>
 
     <string name="seed_retry">Повторить</string>

@@ -48,6 +48,8 @@
     <string name="unlock_biometrics_cd">生体認証でロック解除</string>
     <string name="recover_title">ウォレットを復元</string>
     <string name="recover_body">ウォレットを復元するにはリカバリーフレーズを入力してください。</string>
+    <string name="recover_sigma_warning_title">Sigma Systems の「DigiByte Wallet」のフレーズですか？復元しないでください。</string>
+    <string name="recover_sigma_warning_body">そのアプリのリカバリーフレーズと鍵は、第三者に知られている可能性があると当社は考えています。そのフレーズから復元したウォレットは、どのアプリでも危険なままです。代わりにここで新しいウォレットを作成し、設定の「%1$s」でコインを移してください。</string>
     <string name="recover_continue">続ける</string>
 
     <string name="seed_retry">再試行</string>

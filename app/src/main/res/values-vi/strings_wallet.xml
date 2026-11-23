@@ -48,6 +48,8 @@
     <string name="unlock_biometrics_cd">Mở khóa bằng sinh trắc học</string>
     <string name="recover_title">Khôi phục ví</string>
     <string name="recover_body">Nhập cụm từ khôi phục để khôi phục ví của bạn.</string>
+    <string name="recover_sigma_warning_title">Cụm từ từ “DigiByte Wallet” của Sigma Systems? Đừng khôi phục.</string>
+    <string name="recover_sigma_warning_body">Chúng tôi cho rằng cụm từ khôi phục và khóa từ ứng dụng đó có thể đã bị người khác biết. Ví được khôi phục từ cụm từ như vậy vẫn gặp rủi ro trong bất kỳ ứng dụng nào. Hãy tạo ví mới tại đây, rồi chuyển tiền của bạn sang ví đó bằng “%1$s” trong Cài đặt.</string>
     <string name="recover_continue">Tiếp tục</string>
 
     <string name="seed_retry">Thử lại</string>
