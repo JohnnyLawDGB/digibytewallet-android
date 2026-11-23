@@ -48,6 +48,8 @@
     <string name="unlock_biometrics_cd">Buka dengan biometrik</string>
     <string name="recover_title">Pulihkan Dompet</string>
     <string name="recover_body">Masukkan frasa pemulihan Anda untuk memulihkan dompet.</string>
+    <string name="recover_sigma_warning_title">Frasa dari “DigiByte Wallet” buatan Sigma Systems? Jangan dipulihkan.</string>
+    <string name="recover_sigma_warning_body">Kami meyakini frasa pemulihan dan kunci dari aplikasi itu mungkin diketahui orang lain. Dompet yang dipulihkan dari frasa tersebut tetap berisiko di aplikasi mana pun. Buat dompet baru di sini, lalu pindahkan koin Anda ke dompet itu dengan “%1$s” di Pengaturan.</string>
     <string name="recover_continue">Lanjutkan</string>
 
     <string name="seed_retry">Coba lagi</string>

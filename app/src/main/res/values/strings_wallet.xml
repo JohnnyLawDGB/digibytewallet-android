@@ -61,6 +61,9 @@
     <!-- ── Recover ──────────────────────────────────────────────────────────────── -->
     <string name="recover_title">Recover Wallet</string>
     <string name="recover_body">Enter your seed phrase to restore your wallet.</string>
+    <!-- RESTORE-WARN-SIGMA (owner 2026-11-23). A safety warning: a native speaker should review each translation. -->
+    <string name="recover_sigma_warning_title">Phrase from “DigiByte Wallet” by Sigma Systems? Do not restore it.</string>
+    <string name="recover_sigma_warning_body">We believe recovery phrases and keys from that app may be known to others. A wallet restored from one stays at risk in any app. Create a new wallet here instead, then move your coins into it with “%1$s” in Settings.</string>
     <string name="recover_continue">Continue</string>
 
     <!-- ── Seed display / verification ──────────────────────────────────────────── -->
