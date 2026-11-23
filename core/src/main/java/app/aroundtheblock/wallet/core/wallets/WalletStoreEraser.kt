@@ -302,7 +302,10 @@ class WalletStoreEraser internal constructor(
 }
 
 /** The platform's file for prefs [name], or its backup, is on disk. The one on-disk check a read-back uses. */
-internal fun prefsFileOnDisk(context: Context, name: String): Boolean {
+internal fun prefsFileOnDisk(context: Context, name: String): Boolean = prefsFilesOf(context, name).any { it.exists() }
+
+/** Where the platform keeps prefs [name]: its file and the backup of it. The one list of the two. */
+internal fun prefsFilesOf(context: Context, name: String): List<File> {
     val dir = File(context.dataDir, "shared_prefs")
-    return File(dir, "$name.xml").exists() || File(dir, "$name.xml.bak").exists()
+    return listOf(File(dir, "$name.xml"), File(dir, "$name.xml.bak"))
 }

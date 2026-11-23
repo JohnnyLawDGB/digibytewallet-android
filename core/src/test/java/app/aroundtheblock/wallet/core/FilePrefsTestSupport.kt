@@ -59,6 +59,15 @@ internal class FilePrefs(private val file: File) : SharedPreferences {
         file.writeText(json.toString())
     }
 
+    /**
+     * While set, a `commit()` does what the platform's does when the file write fails: this
+     * process's view takes the edit, the file is left as it was (or absent), and the answer is false.
+     */
+    var refuseWrites = false
+
+    /** As [refuseWrites], for this many commits from now and then no more. */
+    var refuseNextWrites = 0
+
     /** Puts a value in memory and on disk, as an earlier session would have left it. */
     fun seed(key: String, value: Any?) { memory[key] = value; write() }
 
@@ -92,6 +101,8 @@ internal class FilePrefs(private val file: File) : SharedPreferences {
             if (clearAll) memory.clear()
             removes.forEach(memory::remove)
             memory.putAll(puts)
+            if (refuseWrites) return false
+            if (refuseNextWrites > 0) { refuseNextWrites--; return false }
             // The platform writes when the file is missing, changed or not.
             if (!file.exists() || memory != before) write()
             return true

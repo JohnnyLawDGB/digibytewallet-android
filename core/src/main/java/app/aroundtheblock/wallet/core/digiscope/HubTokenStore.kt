@@ -8,6 +8,7 @@ import androidx.security.crypto.MasterKey
 import app.aroundtheblock.wallet.core.wallets.ActiveWallet
 import app.aroundtheblock.wallet.core.wallets.WalletScope
 import app.aroundtheblock.wallet.core.wallets.WalletStores
+import app.aroundtheblock.wallet.core.wallets.prefsFileOnDisk
 
 /**
  * Persistence for the Hub session JWT.
@@ -28,11 +29,21 @@ import app.aroundtheblock.wallet.core.wallets.WalletStores
  * at that point is a crash before `onCreate` that no wiper clears — a permanent crash loop for
  * a wallet holder over the least valuable secret in the app. A broken store reads as
  * logged-out and is deleted so the next launch starts clean.
+ *
+ * Opening the encrypted store writes its file (the keyset), so it is opened only when it can hold
+ * something or is about to: a store that was never written is not created by a [load], a [stored],
+ * a [clear] or a [clearConfirmed], only by a [save] or by the one-time move of a plaintext token.
+ * A wipe asks [stored] for the revoke, [clearConfirmed] for the erase and [clear] at logout, and a
+ * wipe creates no file (WIPE-WRITES-NOTHING). It does not ask [load] while there is a plaintext
+ * token to move: the revoke does not build the Hub client (`StoredHubSessionRevoke`), and the
+ * logout that may build it runs after the token is erased.
  */
 class HubTokenStore internal constructor(
     private val legacy: SharedPreferences,
     secureProvider: () -> SharedPreferences,
     private val resetSecure: () -> Unit = {},
+    /** Whether the encrypted store's file is on the device. What cannot be looked for counts as there. */
+    private val secureOnDisk: () -> Boolean = { true },
 ) {
     /** One wallet's Hub session: its own plain and encrypted stores, never another wallet's. */
     constructor(context: Context, scope: WalletScope) : this(
@@ -51,14 +62,24 @@ class HubTokenStore internal constructor(
         ),
         { secureFactory(WalletStores.prefsName(SECURE_PREFS_NAME, scope)) },
         { context.applicationContext.deleteSharedPreferences(WalletStores.prefsName(SECURE_PREFS_NAME, scope)) },
+        { prefsFileOnDisk(context.applicationContext, WalletStores.prefsName(SECURE_PREFS_NAME, scope)) },
     )
 
     constructor(context: Context) : this(context, ActiveWallet.scope(context))
 
-    private val secure: SharedPreferences by lazy(secureProvider)
+    private val secureOpened = lazy(secureProvider)
+    private val secure: SharedPreferences by secureOpened
+
+    /**
+     * The encrypted store holds nothing and need not be asked: this object has not opened it and its
+     * file is not on the device. Asking it would open it, and opening it writes its file.
+     */
+    private fun secureNeverWritten(): Boolean =
+        !secureOpened.isInitialized() && !runCatching(secureOnDisk).getOrDefault(true)
 
     fun load(): String? = guarded("load") {
         val plaintext = legacy.getString(KEY_JWT, null)
+        if (plaintext == null && secureNeverWritten()) return@guarded null
         if (plaintext != null) {
             // An encrypted copy already present is the newer session and is never overwritten
             // by the leftover. The plaintext copy is dropped only once the encrypted store
@@ -67,6 +88,22 @@ class HubTokenStore internal constructor(
             if (migrated) legacy.edit().remove(KEY_JWT).commit()
         }
         secure.getString(KEY_JWT, null)
+    }
+
+    /**
+     * The token this wallet's stores hold, read where it is: nothing is moved, written or reset.
+     * For the wipe's revoke, which only needs the token and must not make a file on its way
+     * ([load] moves a plaintext token into the encrypted store, which creates that store's file).
+     * The encrypted copy is the newer session, as in [load]. Never throws.
+     */
+    fun stored(): String? {
+        val sealed = try {
+            if (secureNeverWritten()) null else secure.getString(KEY_JWT, null)
+        } catch (e: Exception) {
+            Log.w(TAG, "stored: encrypted Hub session store unusable (${e.javaClass.simpleName})")
+            null
+        }
+        return sealed ?: runCatching { legacy.getString(KEY_JWT, null) }.getOrNull()
     }
 
     fun save(token: String) {
@@ -78,7 +115,16 @@ class HubTokenStore internal constructor(
      * deleted it) writes an empty file back under that wallet's name.
      */
     fun clear() {
-        guarded("clear") { if (secure.contains(KEY_JWT)) secure.edit().remove(KEY_JWT).commit() }
+        guarded("clear") {
+            if (!secureNeverWritten() && secure.contains(KEY_JWT)) {
+                // Opened by this object while its file has since gone from the device: the removal's
+                // commit writes the file back, with a keyset and no token. That file is this clear's,
+                // so it goes again.
+                val fileWasThere = runCatching(secureOnDisk).getOrDefault(true)
+                secure.edit().remove(KEY_JWT).commit()
+                if (!fileWasThere) resetSecure()
+            }
+        }
         if (legacy.contains(KEY_JWT)) legacy.edit().remove(KEY_JWT).commit()
     }
 
@@ -94,9 +140,9 @@ class HubTokenStore internal constructor(
      * removal did not land.
      */
     fun clearConfirmed(): Boolean {
-        // As [clear]: a store without the token is not written.
+        // As [clear]: a store without the token is not written, and one never written is not opened.
         val secureCleared = guarded("clear") {
-            (!secure.contains(KEY_JWT) || secure.edit().remove(KEY_JWT).commit()) && !secure.contains(KEY_JWT)
+            secureNeverWritten() || ((!secure.contains(KEY_JWT) || secure.edit().remove(KEY_JWT).commit()) && !secure.contains(KEY_JWT))
         } ?: runCatching { !secure.contains(KEY_JWT) }.getOrDefault(true)
         val legacyCleared = runCatching {
             (!legacy.contains(KEY_JWT) || legacy.edit().remove(KEY_JWT).commit()) && !legacy.contains(KEY_JWT)

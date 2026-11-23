@@ -136,8 +136,9 @@ object SavedBlockStore {
             val bin = file(ctx, scope)
             val tmp = tmpFile(ctx, scope)
             DurableFile.delete(bin, tmp)
+            // Only a key that is there is removed: a commit to a store with no file creates one.
             val legacyGone = runCatching {
-                legacyPrefs(ctx, scope).edit().remove(LEGACY_KEY).commit()
+                removeHeldKeys("SavedBlockStore", legacyPrefs(ctx, scope), LEGACY_KEY)
             }.getOrDefault(false)
             !bin.exists() && !tmp.exists() && legacyGone
         }.all { it }
