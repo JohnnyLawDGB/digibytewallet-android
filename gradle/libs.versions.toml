@@ -47,7 +47,7 @@ detekt = "1.23.8"
 # --- Lockstep families -------------------------------------------------------
 # Compose BOM pins every androidx.compose.* artifact; those libraries are
 # declared below WITHOUT a version on purpose.
-composeBom = "2024.12.01"
+composeBom = "2026.09.00"
 # com.google.dagger — Gradle plugin, runtime and KSP compiler all share this.
 # 2.56.2 SHADES kotlin-metadata-jvm 2.1 and so cannot read Kotlin 2.4 class
 # metadata; 2.57+ unshades it (raised to the Kotlin version in the root
