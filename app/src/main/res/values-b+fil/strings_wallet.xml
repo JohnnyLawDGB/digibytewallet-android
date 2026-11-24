@@ -435,6 +435,7 @@
     <string name="ab_licenses">Mga Lisensya</string>
     <string name="ab_licenses_sub">MIT License: open source</string>
     <string name="ab_community">Impormasyon tungkol sa DigiByte network</string>
+    <string name="ab_privacy">Patakaran sa Privacy</string>
     <string name="ab_report_bug">Mag-ulat ng Bug</string>
 
     <string name="sec_pin_auth">PIN at Authentication</string>

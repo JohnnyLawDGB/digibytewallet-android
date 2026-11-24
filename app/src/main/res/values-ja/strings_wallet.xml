@@ -432,6 +432,7 @@
     <string name="ab_licenses">ライセンス</string>
     <string name="ab_licenses_sub">MIT ライセンス：オープンソース</string>
     <string name="ab_community">DigiByte ネットワーク情報</string>
+    <string name="ab_privacy">プライバシーポリシー</string>
     <string name="ab_report_bug">バグを報告</string>
 
     <string name="sec_pin_auth">PIN と認証</string>

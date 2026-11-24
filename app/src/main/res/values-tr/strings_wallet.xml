@@ -435,6 +435,7 @@
     <string name="ab_licenses">Lisanslar</string>
     <string name="ab_licenses_sub">MIT Lisansı: açık kaynak</string>
     <string name="ab_community">DigiByte ağı hakkında bilgi</string>
+    <string name="ab_privacy">Gizlilik Politikası</string>
     <string name="ab_report_bug">Hata bildir</string>
 
     <string name="sec_pin_auth">PIN ve kimlik doğrulama</string>

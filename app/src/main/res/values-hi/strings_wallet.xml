@@ -435,6 +435,7 @@
     <string name="ab_licenses">लाइसेंस</string>
     <string name="ab_licenses_sub">MIT लाइसेंस: ओपन सोर्स</string>
     <string name="ab_community">DigiByte नेटवर्क की जानकारी</string>
+    <string name="ab_privacy">गोपनीयता नीति</string>
     <string name="ab_report_bug">बग रिपोर्ट करें</string>
 
     <string name="sec_pin_auth">PIN और प्रमाणीकरण</string>

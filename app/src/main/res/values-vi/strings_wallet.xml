@@ -432,6 +432,7 @@
     <string name="ab_licenses">Giấy phép</string>
     <string name="ab_licenses_sub">Giấy phép MIT: mã nguồn mở</string>
     <string name="ab_community">Thông tin về mạng DigiByte</string>
+    <string name="ab_privacy">Chính sách quyền riêng tư</string>
     <string name="ab_report_bug">Báo lỗi</string>
 
     <string name="sec_pin_auth">PIN &amp; Xác thực</string>

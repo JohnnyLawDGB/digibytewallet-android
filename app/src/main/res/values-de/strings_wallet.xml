@@ -443,6 +443,7 @@
     <string name="ab_licenses">Lizenzen</string>
     <string name="ab_licenses_sub">MIT-Lizenz: Open Source</string>
     <string name="ab_community">Infos zum DigiByte-Netzwerk</string>
+    <string name="ab_privacy">Datenschutzerklärung</string>
     <string name="ab_report_bug">Fehler melden</string>
 
     <string name="sec_pin_auth">PIN &amp; Authentifizierung</string>

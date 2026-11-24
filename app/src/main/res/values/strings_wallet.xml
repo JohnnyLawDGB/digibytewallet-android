@@ -528,6 +528,7 @@
     <string name="ab_licenses">Licenses</string>
     <string name="ab_licenses_sub">MIT License: open source</string>
     <string name="ab_community">DigiByte network info</string>
+    <string name="ab_privacy">Privacy Policy</string>
     <string name="ab_report_bug">Report a Bug</string>
 
     <!-- ── Security settings ────────────────────────────────────────────────────── -->
