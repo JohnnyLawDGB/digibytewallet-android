@@ -441,6 +441,7 @@
     <string name="ab_licenses">Лицензии</string>
     <string name="ab_licenses_sub">Лицензия MIT: открытый код</string>
     <string name="ab_community">О сети DigiByte</string>
+    <string name="ab_privacy">Политика конфиденциальности</string>
     <string name="ab_report_bug">Сообщить об ошибке</string>
 
     <string name="sec_pin_auth">PIN-код и аутентификация</string>

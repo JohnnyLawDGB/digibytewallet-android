@@ -432,6 +432,7 @@
     <string name="ab_licenses">Lisensi</string>
     <string name="ab_licenses_sub">Lisensi MIT: sumber terbuka</string>
     <string name="ab_community">Info jaringan DigiByte</string>
+    <string name="ab_privacy">Kebijakan Privasi</string>
     <string name="ab_report_bug">Laporkan Bug</string>
 
     <string name="sec_pin_auth">PIN &amp; Autentikasi</string>

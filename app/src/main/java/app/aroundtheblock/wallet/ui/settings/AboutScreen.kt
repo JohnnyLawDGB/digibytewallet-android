@@ -228,6 +228,16 @@ fun AboutScreen(navController: NavController) {
                         onClick = { openUrl("https://digibyte.org") }
                     )
                     SettingsRowDivider()
+                    // The privacy policy, in the app as well as on the store listing (App Review
+                    // Guideline 5.1.1(i) asks it of iOS; the two Abouts keep the same rows).
+                    AboutLinkRow(
+                        icon = Icons.Default.PrivacyTip,
+                        iconTint = Color(0xFFF06A1D),
+                        label = stringResource(R.string.ab_privacy),
+                        subtitle = "aroundtheblock.us",
+                        onClick = { openUrl("https://www.aroundtheblock.us/privacy-policy") }
+                    )
+                    SettingsRowDivider()
                     AboutLinkRow(
                         icon = Icons.Default.BugReport,
                         iconTint = Color(0xFFFF9800),

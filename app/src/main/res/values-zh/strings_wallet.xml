@@ -432,6 +432,7 @@
     <string name="ab_licenses">许可证</string>
     <string name="ab_licenses_sub">MIT 许可证：开源</string>
     <string name="ab_community">DigiByte 网络信息</string>
+    <string name="ab_privacy">隐私政策</string>
     <string name="ab_report_bug">报告问题</string>
 
     <string name="sec_pin_auth">PIN 与认证</string>

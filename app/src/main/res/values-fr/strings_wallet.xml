@@ -426,6 +426,7 @@
     <string name="ab_licenses">Licences</string>
     <string name="ab_licenses_sub">Licence MIT : code ouvert</string>
     <string name="ab_community">Infos sur le réseau DigiByte</string>
+    <string name="ab_privacy">Politique de confidentialité</string>
     <string name="ab_report_bug">Signaler un bug</string>
     <string name="sec_pin_auth">Code PIN et authentification</string>
     <string name="sec_change_pin">Modifier le code PIN</string>

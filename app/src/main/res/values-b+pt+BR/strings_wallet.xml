@@ -438,6 +438,7 @@
     <string name="ab_licenses">Licenças</string>
     <string name="ab_licenses_sub">Licença MIT: código aberto</string>
     <string name="ab_community">Informações sobre a rede DigiByte</string>
+    <string name="ab_privacy">Política de Privacidade</string>
     <string name="ab_report_bug">Relatar um problema</string>
 
     <string name="sec_pin_auth">PIN e autenticação</string>
