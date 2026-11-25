@@ -485,7 +485,16 @@ class DgbNodeClient internal constructor(
     }
 
     private fun parseReconcileResponse(body: String): ReconcileResult? {
-        val root = runCatching { JSONObject(body) }.getOrNull() ?: return null
+        // An answer of the largest accepted size can fail to parse for want of memory. That is
+        // not a malformed answer, so it is said apart in the log (the size only, never the text).
+        val root = try {
+            JSONObject(body)
+        } catch (e: OutOfMemoryError) {
+            android.util.Log.w("DgbNodeClient", "reconcile: out of memory parsing an answer of ${body.length} chars")
+            return null
+        } catch (e: Exception) {
+            return null
+        }
         val utxosJson = root.optJSONArray("utxos") ?: return null
         val rawTxsJson = root.optJSONObject("rawTxs") ?: JSONObject()
         val height = root.optLong("height", 0L)
