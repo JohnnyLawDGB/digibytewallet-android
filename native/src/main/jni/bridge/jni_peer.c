@@ -687,34 +687,10 @@ static int _resolveHostToAddr(const char *hostname, UInt128 *out) {
  * existing entry so a previously handshake-upgraded / filter-tagged peer is
  * never downgraded by a later injection that happens to lack the bit. */
 static void _prependSavedPeerAddr(UInt128 addr, uint16_t port, uint64_t services) {
-    /* Check if already present in saved peers */
-    for (size_t i = 0; i < g_savedPeersCount; i++) {
-        if (UInt128Eq(g_savedPeers[i].address, addr)) {
-            /* Already there — just bump its timestamp to the top */
-            g_savedPeers[i].timestamp = (uint64_t)time(NULL);
-            g_savedPeers[i].services |= services;   /* union — never downgrade */
-            return;
-        }
-    }
-
-    /* Prepend: allocate new array with +1 slot */
-    size_t newCount = g_savedPeersCount + 1;
-    BRPeer *newPeers = malloc(newCount * sizeof(BRPeer));
-    if (!newPeers) return;
-
-    /* Priority peer at index 0 */
-    newPeers[0] = (BRPeer){ addr, port,
-        services,
-        (uint64_t)time(NULL), 0 };
-
-    /* Copy existing peers after it */
-    if (g_savedPeers && g_savedPeersCount > 0) {
-        memcpy(newPeers + 1, g_savedPeers, g_savedPeersCount * sizeof(BRPeer));
-    }
-
-    free(g_savedPeers);
-    g_savedPeers = newPeers;
-    g_savedPeersCount = newCount;
+    /* The rule (dedup, services union, newest first, never more than SAVED_PEERS_MAX_COUNT) is
+     * saved_peers_prepend_bounded in saved_peers_deserialize.h, where seeder_peers_kat drives it. */
+    saved_peers_prepend_bounded(&g_savedPeers, &g_savedPeersCount, addr, port, services,
+                                (uint64_t)time(NULL));
 }
 
 /* ---------- injectPeerByIp ---------- */

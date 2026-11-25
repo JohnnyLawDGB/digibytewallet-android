@@ -22,6 +22,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../../.." && pwd)"
 CORE_DIR="${CORE_DIR:-$REPO_ROOT/native/src/main/jni/digibytewallet-core}"
+BRIDGE_DIR="${BRIDGE_DIR:-$REPO_ROOT/native/src/main/jni/bridge}"
 BUILD_DIR="$(mktemp -d)"
 trap 'rm -rf "$BUILD_DIR"' EXIT
 
@@ -33,19 +34,22 @@ PEERS_CASES="services_hex_parsed bloom_only_peer_has_no_filter_bit unknown_servi
              untagged_peer_added_filter_capable tagged_peer_keeps_its_services"
 SERVICES_CASES="signed_services_are_unknown leading_zeros_past_16_digits_are_unknown second_prefix_is_unknown"
 REFRESH_CASES="empty_cache_refreshes one_hour_old_is_kept"
+CAP_CASES="a_long_answer_is_bounded a_full_pool_drops_its_oldest the_saved_peer_array_is_bounded"
 GUARD_CASES="odd_length_and_either_case_read unreadable_services_are_unknown non_ascii_forms_are_unknown
              only_ipv4_literals_added refresh_interval_is_one_hour
-             over_the_hour_refreshes never_fetched_refreshes fresh_list_kept differences_wrap_as_kotlin_long"
-ALL_CASES="$PEERS_CASES $SERVICES_CASES $REFRESH_CASES $GUARD_CASES"
+             over_the_hour_refreshes never_fetched_refreshes fresh_list_kept differences_wrap_as_kotlin_long
+             cap_values an_ordinary_answer_is_taken_whole a_pool_with_room_drops_nothing
+             a_known_address_is_not_added_twice"
+ALL_CASES="$PEERS_CASES $SERVICES_CASES $REFRESH_CASES $CAP_CASES $GUARD_CASES"
 
 build() {
     local out="$1"; shift
     "$CC" -w -std=c99 -include stdint.h -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer "$@" \
-        -I "$CORE_DIR" -I "$CORE_DIR/secp256k1/include" \
+        -I "$CORE_DIR" -I "$CORE_DIR/secp256k1/include" -I "$BRIDGE_DIR" \
         "$SCRIPT_DIR/seeder_peers_kat_main.c" -o "$out"
 }
 
-for seam in SEEDER_PEERS_RED SEEDER_SERVICES_RED SEEDER_REFRESH_RED; do
+for seam in SEEDER_PEERS_RED SEEDER_SERVICES_RED SEEDER_REFRESH_RED SEEDER_CAP_RED; do
     if ! grep -q "$seam" "$CORE_DIR/BRSeederPeers.h" 2>/dev/null; then
         echo "GATE FAILURE: $CORE_DIR/BRSeederPeers.h missing or has no $seam seam; -D would be inert."
         exit 1
@@ -56,6 +60,7 @@ FAIL=0
 build "$BUILD_DIR/red_peers" -DSEEDER_PEERS_RED || { echo "GATE FAILURE: SEEDER_PEERS_RED arm did not compile."; exit 1; }
 build "$BUILD_DIR/red_services" -DSEEDER_SERVICES_RED || { echo "GATE FAILURE: SEEDER_SERVICES_RED arm did not compile."; exit 1; }
 build "$BUILD_DIR/red_refresh" -DSEEDER_REFRESH_RED || { echo "GATE FAILURE: SEEDER_REFRESH_RED arm did not compile."; exit 1; }
+build "$BUILD_DIR/red_cap" -DSEEDER_CAP_RED -DSEEDER_CAP_UNFIXED || { echo "GATE FAILURE: SEEDER_CAP_RED arm did not compile."; exit 1; }
 build "$BUILD_DIR/green" || { echo "GATE FAILURE: shipped arm did not compile."; exit 1; }
 
 # comparison_arm <binary> <label> <cases that must fail>: every other case must pass.
@@ -80,6 +85,7 @@ comparison_arm() {
 comparison_arm "$BUILD_DIR/red_peers" SEEDER_PEERS_RED "$PEERS_CASES"
 comparison_arm "$BUILD_DIR/red_services" SEEDER_SERVICES_RED "$SERVICES_CASES"
 comparison_arm "$BUILD_DIR/red_refresh" SEEDER_REFRESH_RED "$REFRESH_CASES"
+comparison_arm "$BUILD_DIR/red_cap" SEEDER_CAP_RED "$CAP_CASES"
 
 echo "--- SHIPPED ARM: every case MUST pass, ALL PASS, exit 0, no sanitizer report ---"
 out="$("$BUILD_DIR/green" 2>&1)"; rc=$?

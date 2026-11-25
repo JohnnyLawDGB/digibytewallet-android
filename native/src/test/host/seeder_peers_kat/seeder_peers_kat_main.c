@@ -15,9 +15,14 @@
 //                         digits, "0x" then "0X" removed); the three cases for those forms fail
 //   -DSEEDER_REFRESH_RED  an empty cache waits out the hour and an hour-old list is refetched;
 //                         those two refresh cases fail, every other case holds
+//   -DSEEDER_CAP_RED -DSEEDER_CAP_UNFIXED
+//                         no bound on an answer, on a cached pool or on the bridge's saved-peer
+//                         array (BRSeederPeersAccepted, BRSeederPoolDrop,
+//                         saved_peers_prepend_bounded); the four "bounded" cases fail
 //   (default)             the shipped rule; every case passes
 
 #include "BRSeederPeers.h"
+#include "saved_peers_deserialize.h"   // the bridge's saved-peer array (SEEDER-PEER-CAP)
 #include <stdio.h>
 
 static int g_failed = 0;
@@ -154,6 +159,68 @@ int main(void)
         // Kotlin's nowMs - lastFetchMs wraps: MIN - 1 is MAX (stale), MIN - MAX is 1 (kept).
         ok = BRSeederShouldRefresh(1, INT64_MIN, 5) && ! BRSeederShouldRefresh(INT64_MAX, INT64_MIN, 5);
         result("differences_wrap_as_kotlin_long", ok, NULL);
+    }
+
+    // SEEDER-PEER-CAP: how much of an answer is taken, how a pool makes room, and the bridge's
+    // saved-peer array. The seeder serves a few dozen peers; these are the limits when it does not.
+    {
+        const size_t max = BR_SEEDER_MAX_PEERS, poolMax = BR_SEEDER_POOL_MAX_PEERS;
+
+        ok = max == 1024 && poolMax == 4096 && max <= poolMax && poolMax > (size_t)SAVED_PEERS_MAX_COUNT;
+        result("cap_values", ok, NULL);
+
+        ok = BRSeederPeersAccepted(0) == 0 && BRSeederPeersAccepted(1) == 1 && BRSeederPeersAccepted(37) == 37 &&
+             BRSeederPeersAccepted(max) == max;
+        result("an_ordinary_answer_is_taken_whole", ok, NULL);
+
+        ok = BRSeederPeersAccepted(max + 1) == max && BRSeederPeersAccepted(14000) == max &&
+             BRSeederPeersAccepted(SIZE_MAX) == max;
+        snprintf(why, sizeof(why), "14000 listed -> %zu taken", BRSeederPeersAccepted(14000));
+        result("a_long_answer_is_bounded", ok, why);
+
+        ok = BRSeederPoolDrop(0, 0) == 0 && BRSeederPoolDrop(0, max) == 0 && BRSeederPoolDrop(100, 37) == 0 &&
+             BRSeederPoolDrop(poolMax - max, max) == 0;
+        result("a_pool_with_room_drops_nothing", ok, NULL);
+
+        // Whatever the pool held, what is kept plus what is added fits the limit, and never
+        // more is dropped than the pool holds.
+        ok = BRSeederPoolDrop(poolMax, 1) == 1 && BRSeederPoolDrop(poolMax, max) == max &&
+             BRSeederPoolDrop(4000, 200) == 104 && BRSeederPoolDrop(poolMax + 5000, max) == 5000 + max &&
+             BRSeederPoolDrop(10, poolMax + 7) == 10 && BRSeederPoolDrop(SIZE_MAX, max) == SIZE_MAX - (poolMax - max) &&
+             BRSeederPoolDrop(SIZE_MAX, SIZE_MAX) == SIZE_MAX;
+        snprintf(why, sizeof(why), "4000 pooled + 200 -> drop %zu", BRSeederPoolDrop(4000, 200));
+        result("a_full_pool_drops_its_oldest", ok, why);
+    }
+    {
+        BRPeer *arr = NULL;
+        size_t n = 0, i;
+        UInt128 a = UINT128_ZERO;
+        int added;
+
+        // A new address goes to the front; the same address again changes nothing but its time
+        // and its services, which are OR-ed.
+        a.u16[5] = 0xffff; a.u32[3] = 1;
+        added = saved_peers_prepend_bounded(&arr, &n, a, 12024, 0x09, 100);
+        ok = added == 1 && n == 1 && arr && arr[0].port == 12024 && arr[0].services == 0x09 && arr[0].timestamp == 100;
+        a.u32[3] = 2;
+        added = saved_peers_prepend_bounded(&arr, &n, a, 12025, 0x40, 101);
+        ok = ok && added == 1 && n == 2 && arr[0].port == 12025 && arr[1].port == 12024;
+        a.u32[3] = 1;
+        added = saved_peers_prepend_bounded(&arr, &n, a, 12024, 0x40, 102);
+        ok = ok && added == 0 && n == 2 && arr[1].services == 0x49 && arr[1].timestamp == 102 && arr[0].port == 12025;
+        result("a_known_address_is_not_added_twice", ok, NULL);
+
+        // 14,000 distinct addresses, as one long answer could carry: the array stops at its
+        // limit, the newest is at the front, and the first ones added are the ones that went.
+        for (i = 0; i < 14000; i++) {
+            a.u32[3] = (uint32_t)(1000 + i);
+            saved_peers_prepend_bounded(&arr, &n, a, (uint16_t)(i & 0x7fff), 0x40, 200 + i);
+        }
+        ok = n == (size_t)SAVED_PEERS_MAX_COUNT && arr[0].address.u32[3] == 1000 + 13999 &&
+             arr[n - 1].address.u32[3] == 1000 + 14000 - (uint32_t)SAVED_PEERS_MAX_COUNT;
+        snprintf(why, sizeof(why), "array holds %zu after 14002 distinct addresses (limit %d)", n, SAVED_PEERS_MAX_COUNT);
+        result("the_saved_peer_array_is_bounded", ok, why);
+        free(arr);
     }
 
     if (! g_failed) printf("ALL PASS\n");

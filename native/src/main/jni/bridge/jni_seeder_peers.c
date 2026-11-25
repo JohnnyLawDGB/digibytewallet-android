@@ -8,6 +8,8 @@
  *                        bits, 0 ("unknown") when it is absent or cannot be read. It replaced the
  *                        Kotlin parseSeederServicesHex (PeerServicesPolicy.kt). injectPeerByIp
  *                        (jni_peer.c) tags a 0 as the canon (BRSeederPeerServices).
+ *   seederPeersAccepted  BRSeederPeersAccepted: how many of an answer's peers are taken.
+ *   seederPoolDrop       BRSeederPoolDrop: how many oldest entries a cached pool drops to fit more.
  *   seederShouldRefresh  BRSeederShouldRefresh: whether a cached seeder list, fetched at
  *                        lastFetchMs (0: never) and holding cachedCount peers, is fetched again
  *                        at nowMs -- it is empty, or more than BR_SEEDER_REFRESH_MS (one hour)
@@ -42,4 +44,20 @@ NativeBridge_seederShouldRefresh(JNIEnv *env, jobject thiz, jlong lastFetchMs, j
     (void)env; (void)thiz;
     return BRSeederShouldRefresh((int64_t)lastFetchMs, (int64_t)nowMs,
                                  cachedCount > 0 ? (size_t)cachedCount : 0) ? JNI_TRUE : JNI_FALSE;
+}
+
+/* BRSeederPeersAccepted: how many of an answer's `listed` peers are read, stored and added. A
+ * count below zero is not a size and reads as none. */
+jint JNICALL
+NativeBridge_seederPeersAccepted(JNIEnv *env, jobject thiz, jint listed) {
+    (void)env; (void)thiz;
+    return (jint)BRSeederPeersAccepted(listed > 0 ? (size_t)listed : 0);
+}
+
+/* BRSeederPoolDrop: how many of its oldest entries a cached pool of `pooled` peers drops so that
+ * `adding` new ones fit. Counts below zero read as none. The result is at most `pooled`. */
+jint JNICALL
+NativeBridge_seederPoolDrop(JNIEnv *env, jobject thiz, jint pooled, jint adding) {
+    (void)env; (void)thiz;
+    return (jint)BRSeederPoolDrop(pooled > 0 ? (size_t)pooled : 0, adding > 0 ? (size_t)adding : 0);
 }

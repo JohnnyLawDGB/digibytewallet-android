@@ -67,4 +67,43 @@ static inline size_t deserialize_saved_peers_guarded(const uint8_t *b, size_t le
     return loaded;
 }
 
+/* Puts one priority peer at the front of a saved-peers array (the bridge's g_savedPeers), the
+ * pure half of jni_peer.c's _prependSavedPeerAddr so a host KAT can drive it.
+ *
+ * A peer already in the array (same address) is not added again: its timestamp is set to `now`
+ * and `services` is OR-ed in, so a later injection never takes a capability bit away.
+ * A new peer goes to index 0. The array never holds more than SAVED_PEERS_MAX_COUNT: at the
+ * limit the LAST entry is dropped to make room. Until 2026-11 the array grew by one for every
+ * new address with no limit, each time scanned and copied whole under the peer lock, so a list
+ * of n new addresses cost about n*n/2 record copies (SEEDER-PEER-CAP).
+ *
+ * *arr is owned by the caller and may be reallocated; on a failed allocation nothing changes.
+ * Returns 1 if a new entry was added, 0 if it was already there or could not be added. */
+static inline int saved_peers_prepend_bounded(BRPeer **arr, size_t *count, UInt128 addr, uint16_t port,
+                                              uint64_t services, uint64_t now) {
+    size_t i, keep, n = *count;
+    BRPeer *fresh;
+
+    for (i = 0; i < n; i++) {
+        if (UInt128Eq((*arr)[i].address, addr)) {
+            (*arr)[i].timestamp = now;
+            (*arr)[i].services |= services;
+            return 0;
+        }
+    }
+#ifdef SEEDER_CAP_UNFIXED
+    keep = n;                                   /* RED ARM SEAM (seeder_peers_kat): grows without limit */
+#else
+    keep = (n < SAVED_PEERS_MAX_COUNT) ? n : SAVED_PEERS_MAX_COUNT - 1;
+#endif
+    fresh = malloc((keep + 1) * sizeof(BRPeer));
+    if (!fresh) return 0;
+    fresh[0] = (BRPeer){ addr, port, services, now, 0 };
+    if (*arr && keep > 0) memcpy(fresh + 1, *arr, keep * sizeof(BRPeer));
+    free(*arr);
+    *arr = fresh;
+    *count = keep + 1;
+    return 1;
+}
+
 #endif /* SAVED_PEERS_DESERIALIZE_H */

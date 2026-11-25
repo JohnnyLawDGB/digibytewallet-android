@@ -164,7 +164,8 @@ class SyncWorker @AssistedInject constructor(
     private fun injectPeersJson(json: String) {
         try {
             val peers = org.json.JSONObject(json).getJSONArray("peers")
-            for (i in 0 until peers.length()) {
+            // SEEDER-PEER-CAP: the first BR_SEEDER_MAX_PEERS entries only, as SyncService takes.
+            for (i in 0 until NativeBridge.seederPeersAccepted(peers.length())) {
                 val p = peers.getJSONObject(i)
                 // services_hex (e.g. "0x44d") carries the compact-filter bit
                 // (0x40) so filter peers are tagged. The core reads it

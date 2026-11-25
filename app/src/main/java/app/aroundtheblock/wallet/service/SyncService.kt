@@ -3590,9 +3590,15 @@ class SyncService : Service() {
                 .apply()
             // The general pool merges: add any peer not seen before (dedup on ip:port, ignoring
             // services so a re-fetch doesn't duplicate an entry whose capability bits changed).
-            val pool = generalPrefs.getString("peer_pool", null)?.let { parsePool(it) } ?: mutableListOf()
-            val seen = pool.mapTo(HashSet()) { it.first to it.second }
-            for (p in fresh) if (seen.add(p.first to p.second)) pool.add(p)
+            // The pool is bounded (SEEDER-PEER-CAP): its oldest entries make room for new ones, by
+            // the core's rule (BRSeederPoolDrop). It used to grow for ever.
+            val pool = SeederPools.merged(
+                pool = generalPrefs.getString("peer_pool", null)?.let { parsePool(it) } ?: mutableListOf(),
+                fresh = fresh,
+                maxAdd = NativeBridge.seederPeersAccepted(fresh.size),
+                key = { it.first to it.second },
+                poolDrop = NativeBridge::seederPoolDrop,
+            )
             generalPrefs.edit()
                 .putString("peer_pool", serializePool(pool))
                 .putLong("last_fetch", now)
@@ -3641,10 +3647,14 @@ class SyncService : Service() {
             val root = org.json.JSONObject(json)
             val capability = root.optString("capability", "unknown")
             val arr = root.getJSONArray("peers")
+            // SEEDER-PEER-CAP: only the first BR_SEEDER_MAX_PEERS entries of an answer are read,
+            // stored and added (the core's BRSeederPeersAccepted; iOS takes the same number). The
+            // answer's byte size was the only bound before, room for some 14,000 minimal entries.
+            val taken = NativeBridge.seederPeersAccepted(arr.length())
             android.util.Log.i("SyncService",
-                "Seeder response: capability=${LogSafe.text(capability, 32)}, ${arr.length()} peer(s)")
-            val out = ArrayList<Triple<String, Int, Long>>(arr.length())
-            for (i in 0 until arr.length()) {
+                "Seeder response: capability=${LogSafe.text(capability, 32)}, ${arr.length()} peer(s) listed, $taken taken")
+            val out = ArrayList<Triple<String, Int, Long>>(taken)
+            for (i in 0 until taken) {
                 val peer = arr.getJSONObject(i)
                 val services = NativeBridge.seederServicesParse(peer.optString("services_hex", ""))
                 out.add(Triple(peer.getString("ip"), peer.optInt("port", 12024), services))

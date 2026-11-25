@@ -152,6 +152,8 @@ jint JNICALL NativeBridge_rerequestHeadersFromTip(JNIEnv *env, jobject thiz);  /
 void JNICALL NativeBridge_rescan(JNIEnv *env, jobject thiz);  /* jni_peer.c */
 jboolean JNICALL NativeBridge_restoreCfScanLedger(JNIEnv *env, jobject thiz, jbyteArray data);  /* jni_peer.c */
 jboolean JNICALL NativeBridge_restoreWalletFromBytes(JNIEnv *env, jobject thiz, jbyteArray phraseBytes, jlong creationTimestamp, jbyteArray passphrase);  /* jni_wallet.c */
+jint JNICALL NativeBridge_seederPeersAccepted(JNIEnv *env, jobject thiz, jint listed);  /* jni_seeder_peers.c */
+jint JNICALL NativeBridge_seederPoolDrop(JNIEnv *env, jobject thiz, jint pooled, jint adding);  /* jni_seeder_peers.c */
 jlong JNICALL NativeBridge_seederServicesParse(JNIEnv *env, jobject thiz, jstring servicesHex);  /* jni_seeder_peers.c */
 jboolean JNICALL NativeBridge_seederShouldRefresh(JNIEnv *env, jobject thiz, jlong lastFetchMs, jlong nowMs, jint cachedCount);  /* jni_seeder_peers.c */
 jstring JNICALL NativeBridge_sendApprovedDigiDollar(JNIEnv *env, jobject thiz, jstring tdAddress, jlong cents, jlong approvedFeeSats, jboolean stem, jintArray stemmedOut);  /* jni_transaction.c */
@@ -329,6 +331,8 @@ jboolean JNICALL NativeBridge_walletContainsAddress(JNIEnv *env, jobject thiz, j
     { "rescan", "()V", (void *) NativeBridge_rescan }, \
     { "restoreCfScanLedger", "([B)Z", (void *) NativeBridge_restoreCfScanLedger }, \
     { "restoreWalletFromBytes", "([BJ[B)Z", (void *) NativeBridge_restoreWalletFromBytes }, \
+    { "seederPeersAccepted", "(I)I", (void *) NativeBridge_seederPeersAccepted }, \
+    { "seederPoolDrop", "(II)I", (void *) NativeBridge_seederPoolDrop }, \
     { "seederServicesParse", "(Ljava/lang/String;)J", (void *) NativeBridge_seederServicesParse }, \
     { "seederShouldRefresh", "(JJI)Z", (void *) NativeBridge_seederShouldRefresh }, \
     { "sendApprovedDigiDollar", "(Ljava/lang/String;JJZ[I)Ljava/lang/String;", (void *) NativeBridge_sendApprovedDigiDollar }, \
@@ -360,6 +364,6 @@ jboolean JNICALL NativeBridge_walletContainsAddress(JNIEnv *env, jobject thiz, j
     { "takeUnprovableServerHeight", "()J", (void *) NativeBridge_takeUnprovableServerHeight }, \
     { "walletContainsAddress", "(Ljava/lang/String;)Z", (void *) NativeBridge_walletContainsAddress }, \
 
-#define DGB_JNI_NATIVEBRIDGE_METHOD_COUNT 175
+#define DGB_JNI_NATIVEBRIDGE_METHOD_COUNT 177
 
 #endif

@@ -260,6 +260,15 @@ object NativeBridge {
      *  of the rule; iOS calls the same function. Pass the result to [injectPeerByIp]. */
     external fun seederServicesParse(servicesHex: String?): Long
 
+    /** BRSeederPeersAccepted: how many of a seeder answer's [listed] peers are read, stored and
+     *  added: the first BR_SEEDER_MAX_PEERS (1024) at most. The one copy of the rule; iOS calls
+     *  the same function. Read no more than this many entries of an answer. */
+    external fun seederPeersAccepted(listed: Int): Int
+
+    /** BRSeederPoolDrop: how many of its OLDEST entries a cached pool of [pooled] peers drops so
+     *  that [adding] new ones fit within BR_SEEDER_POOL_MAX_PEERS (4096). At most [pooled]. */
+    external fun seederPoolDrop(pooled: Int, adding: Int): Int
+
     /** BRStaleSendOldEnough: a send with [timestampS] (seconds; 0: none) is old enough at [nowS] to
      *  ask the node whether it ever relayed -- above 0 and one day (BR_STALE_SEND_MIN_AGE_S) old or
      *  more, the difference wrapping as a Long does. The one copy of the rule (4.1.3, R8); iOS calls
