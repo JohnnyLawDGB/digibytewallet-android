@@ -35,6 +35,17 @@ android {
         // Expose Room schema JSON files to MigrationTestHelper via test assets
         getByName("androidTest").assets.srcDir("$projectDir/schemas")
     }
+
+    // The unit tests read answers of exactly the largest size the wallet accepts
+    // (BoundedEndpointsTest: a 32 MiB reconcile batch). Holding one as bytes, as text and as a
+    // parsed tree takes a few hundred megabytes for a moment. On Gradle's default 512 MB worker
+    // heap that fit or did not fit depending on what earlier tests had left behind, so the case
+    // failed about one full run in three with no code cause (TEST-FLAKE-RECONCILE-CAP: measured
+    // 2026-11-25, the parse threw OutOfMemoryError with 140 MB free of 512). The heap is set, not
+    // left to the default.
+    testOptions {
+        unitTests.all { it.maxHeapSize = "1536m" }
+    }
 }
 
 // KGP 2.3 made the `android { kotlinOptions { } }` properties a compile error; this is the
